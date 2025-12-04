@@ -1,0 +1,1093 @@
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from django.utils.timezone import make_aware
+from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
+from accounts.models import Business as Organization
+from bookings.models import Service
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import json
+from django.utils.dateparse import parse_datetime
+from django.conf import settings
+from django.core.mail import send_mail
+from datetime import timedelta
+from bookings.models import Booking
+from bookings.models import WeeklyAvailability, OrgSettings
+from calendar_app.utils import user_has_role  # <-- single source of truth
+from calendar_app.permissions import require_roles
+from billing.utils import get_subscription
+
+
+def booking_to_event(bk: Booking):
+    # Distinguish per-date override bookings (service NULL) from real service bookings
+    event = {
+        'id': bk.id,
+        'title': bk.title or ('Unavailable' if bk.is_blocking else 'Booking'),
+        'start': bk.start.isoformat(),
+        'end': bk.end.isoformat(),
+        'extendedProps': {
+            'client_name': bk.client_name,
+            'client_email': bk.client_email,
+            'is_blocking': bk.is_blocking,
+            # Flag all overrides (service NULL) so frontend can reliably detect them after hard refresh
+            'is_per_date': bk.service is None,
+        }
+    }
+
+    if bk.service is None:
+        # Per-date override
+        if bk.is_blocking:
+            # Blocking override: show grey background
+            event['display'] = 'background'
+            event['color'] = '#e0e0e0'
+            event['backgroundColor'] = '#e0e0e0'
+            event['extendedProps']['override_type'] = 'blocked'
+        else:
+            # Availability override: show green background range
+            event['display'] = 'background'
+            event['color'] = '#d0f0d0'
+            event['backgroundColor'] = '#d0f0d0'
+            event['extendedProps']['override_type'] = 'available'
+
+    return event
+
+
+def _require_org_and_role(request, roles=("owner", "admin", "manager", "staff")):
+    """
+    Enforces:
+    - request.organization exists
+    - user has active Membership in that org
+    - user has one of allowed roles
+    Returns: (org, error_response_or_None)
+    """
+    org = getattr(request, "organization", None)
+    if not org:
+        return None, HttpResponseForbidden("No organization on request.")
+
+    if not user_has_role(request.user, org, roles):
+        return None, HttpResponseForbidden("You don’t have access to this organization.")
+
+    return org, None
+
+
+def _has_overlap(org, start_dt, end_dt):
+    """
+    Prevent overlapping bookings inside the same organization.
+    Overlap rule:
+      existing.start < new_end AND existing.end > new_start
+    """
+    return Booking.objects.filter(
+        organization=org,
+        start__lt=end_dt,
+        end__gt=start_dt,
+        is_blocking=False,   # allow blocking to overlap if you want; remove if not
+    ).exists()
+
+
+def is_within_weekly_availability(org, start_dt, end_dt):
+    """Weekly window only (legacy helper)."""
+    any_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    if not any_rows:
+        return True
+    windows = WeeklyAvailability.objects.filter(
+        organization=org,
+        is_active=True,
+        weekday=start_dt.weekday(),
+    )
+    if not windows.exists():
+        return False
+    start_t = start_dt.time()
+    end_t = end_dt.time()
+    for w in windows:
+        if w.start_time <= start_t and end_t <= w.end_time:
+            return True
+    return False
+
+
+def cancel_booking(request, booking_id):
+    """Cancel a booking using a signed token provided in the email.
+
+    Expects query param `token` which is a signed value of the booking_id.
+    Tokens are time-limited to 7 days.
+    """
+    token = request.GET.get("token")
+    if not token:
+        return render(request, "bookings/booking_cancel_invalid.html", status=400)
+
+    signer = TimestampSigner()
+    try:
+        unsigned = signer.unsign(token, max_age=60*60*24*7)  # 7 days
+        if str(unsigned) != str(booking_id):
+            return render(request, "bookings/booking_cancel_invalid.html", status=400)
+    except SignatureExpired:
+        return render(request, "bookings/booking_cancel_token_expired.html", status=400)
+    except BadSignature:
+        return render(request, "bookings/booking_cancel_invalid.html", status=400)
+
+    booking = get_object_or_404(Booking, id=booking_id)
+    # Prevent cancelling blocking events
+    if booking.is_blocking:
+        return render(request, "bookings/booking_cancel_invalid.html", status=400)
+
+    org_slug = booking.organization.slug
+    service_slug = booking.service.slug if booking.service else None
+    # Decide refund eligibility based on the service's policy
+    refund_info = None
+    if booking.service:
+        svc = booking.service
+        if svc.refunds_allowed:
+            # If within cutoff window, no refund
+            try:
+                org_tz = ZoneInfo(getattr(booking.organization, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+            except Exception:
+                org_tz = timezone.get_current_timezone()
+            now_local = timezone.now().astimezone(org_tz)
+            start_local = booking.start.astimezone(org_tz)
+            hours_until = (start_local - now_local).total_seconds() / 3600.0
+            if hours_until >= svc.refund_cutoff_hours:
+                # Placeholder: integrate with Stripe to issue refund if payment exists
+                refund_info = "Refund eligible"
+            else:
+                refund_info = f"No refund (within {svc.refund_cutoff_hours}h cutoff)"
+        else:
+            refund_info = "No refund (service policy)"
+
+    booking.delete()
+
+    return render(request, "bookings/booking_cancelled.html", {
+        "org_slug": org_slug,
+        "service_slug": service_slug,
+        "refund_info": refund_info,
+    })
+
+
+def is_within_availability(org, start_dt, end_dt, service=None):
+    """Composite availability check including per-date overrides.
+
+    Precedence:
+    1. Per-date blocking override (is_blocking & service is NULL) covering slot => unavailable.
+    2. Per-date availability override (non-blocking & service NULL) containing slot => available.
+    3. Fallback to weekly availability windows.
+    4. If no weekly rows at all => available (legacy behavior).
+    """
+    # Normalize incoming datetimes to the organization's timezone when naive
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+    if timezone.is_naive(start_dt):
+        start_dt = make_aware(start_dt, org_tz)
+    if timezone.is_naive(end_dt):
+        end_dt = make_aware(end_dt, org_tz)
+
+    # Query all per-date overrides for that calendar day (service NULL so they are not actual client bookings)
+    override_qs = Booking.objects.filter(
+        organization=org,
+        start__date=start_dt.date(),
+        service__isnull=True
+    )
+
+    # Partition overrides
+    blocking_windows = []
+    avail_windows = []
+    for bk in override_qs:
+        if bk.is_blocking:
+            blocking_windows.append((bk.start, bk.end))
+        else:
+            avail_windows.append((bk.start, bk.end))
+
+    # 1. Blocking override wins immediately
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+
+    for bs, be in blocking_windows:
+        if timezone.is_naive(bs):
+            bs = make_aware(bs, org_tz)
+        if timezone.is_naive(be):
+            be = make_aware(be, org_tz)
+        if bs <= start_dt and end_dt <= be:
+            return False
+
+    # 2. Availability override allows slot
+    for avs, ave in avail_windows:
+        if timezone.is_naive(avs):
+            avs = make_aware(avs, org_tz)
+        if timezone.is_naive(ave):
+            ave = make_aware(ave, org_tz)
+        if avs <= start_dt and end_dt <= ave:
+            return True
+
+    # 3. Fall back to weekly windows logic
+    # If a service-specific weekly availability exists, prefer that.
+    if service is not None:
+        try:
+            svc_rows = service.weekly_availability.filter(is_active=True, weekday=start_dt.weekday())
+        except Exception:
+            svc_rows = None
+
+        if svc_rows and svc_rows.exists():
+            # Check if any service window fully contains the slot
+            start_t = start_dt.time()
+            end_t = end_dt.time()
+            for w in svc_rows:
+                if w.start_time <= start_t and end_t <= w.end_time:
+                    return True
+            return False
+
+    return is_within_weekly_availability(org, start_dt, end_dt)
+
+@csrf_exempt
+@require_http_methods(['GET'])
+@require_roles(['owner', 'admin', 'manager', 'staff'])
+def events(request, org_slug):
+    """Return org-scoped bookings as FullCalendar events (JSON)."""
+    org, err = _require_org_and_role(request)
+    if err:
+        return err
+
+    qs = Booking.objects.filter(organization=org)
+    
+    # Helper to parse incoming range params into the organization's timezone
+    def _parse_to_org_tz(param: str, org_tz: ZoneInfo):
+        if not param:
+            return None
+        s = param.replace('Z', '+00:00')  # allow simple Z format
+        try:
+            dt = datetime.fromisoformat(s)
+        except Exception:
+            return None
+        if dt.tzinfo is None:
+            # Interpret naive value as an org-local time
+            dt = make_aware(dt, org_tz)
+        else:
+            dt = dt.astimezone(org_tz)
+        return dt
+
+    # Filter by date range if provided (interpreted in the organization's timezone)
+    start_param = request.GET.get('start')
+    end_param = request.GET.get('end')
+    if start_param and end_param:
+        try:
+            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        except Exception:
+            org_tz = ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
+
+        range_start = _parse_to_org_tz(start_param, org_tz)
+        range_end = _parse_to_org_tz(end_param, org_tz)
+        if range_start and range_end:
+            qs = qs.filter(start__lt=range_end, end__gt=range_start)
+    
+    events = [booking_to_event(b) for b in qs]
+    return JsonResponse(events, safe=False)
+
+@csrf_exempt
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager', 'staff'])
+def create_booking(request, org_slug):
+    """Create a booking with service-based rules (duration, buffers, notice limits)."""
+    org, err = _require_org_and_role(request)
+    if err:
+        return err
+
+    # -----------------------------
+    # 1. Parse JSON
+    # -----------------------------
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    service_id = data.get("service_id")
+    if not service_id:
+        return HttpResponseBadRequest("`service_id` is required")
+
+    # Load service & validate org ownership
+    try:
+        service = Service.objects.get(id=service_id, organization=org)
+    except Service.DoesNotExist:
+        return HttpResponseBadRequest("Invalid service_id")
+
+    start_raw = data.get('start')
+    if not start_raw:
+        return HttpResponseBadRequest('`start` is required')
+
+    # -----------------------------
+    # 2. Parse start datetime
+    # -----------------------------
+    try:
+        start_dt = datetime.fromisoformat(start_raw)
+    except Exception:
+        try:
+            start_dt = datetime.fromisoformat(start_raw + 'T00:00:00')
+        except Exception:
+            return HttpResponseBadRequest('Invalid start datetime')
+
+    # Make timezone-aware using organization's timezone for public bookings
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+    if timezone.is_naive(start_dt):
+        start_dt = make_aware(start_dt, org_tz)
+
+    # -----------------------------
+    # 3. Apply service rules
+    # -----------------------------
+    # Calculate end time using service duration + buffer_after
+    end_dt = start_dt + timedelta(
+        minutes=service.duration + service.buffer_after
+    )
+
+    now = timezone.now()
+
+    # Min notice (Calendly-style)
+    if start_dt < now + timedelta(hours=service.min_notice_hours):
+        return HttpResponseBadRequest("Booking violates min notice time.")
+
+    # Max booking window
+    if start_dt > now + timedelta(days=service.max_booking_days):
+        return HttpResponseBadRequest("Booking too far in the future.")
+
+    # -----------------------------
+    # 4. Overlap prevention
+    # -----------------------------
+    # Use your existing overlap logic
+    if _has_overlap(org, start_dt, end_dt):
+        return HttpResponseBadRequest("Time slot overlaps an existing booking.")
+
+    # -----------------------------
+    # -----------------------------
+    # 4b. Weekly availability enforcement (if windows defined)
+    # -----------------------------
+    # Availability enforcement (weekly + per-date overrides)
+    if not is_within_availability(org, start_dt, end_dt, service):
+        return HttpResponseBadRequest("Outside available hours.")
+
+    # -----------------------------
+    # 5. Create booking
+    # -----------------------------
+    bk = Booking.objects.create(
+        organization=org,
+        service=service,
+        title=service.name,  # title = service name
+        start=start_dt,
+        end=end_dt,
+        client_name=data.get('client_name', ''),
+        client_email=data.get('client_email', ''),
+        is_blocking=False,   # service bookings are never "blocking" events
+    )
+
+    return JsonResponse({
+        'status': 'ok',
+        'id': bk.id,
+        'event': booking_to_event(bk)
+    })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def batch_create(request, org_slug):
+    """Create many bookings for an array of dates (org-scoped, role-protected)."""
+    org, err = _require_org_and_role(request)
+    if err:
+        return err
+
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    dates = data.get('dates') or []
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+    if not dates or not start_time or not end_time:
+        return HttpResponseBadRequest('`dates`, `start_time`, and `end_time` are required')
+
+    created = []
+    # Use organization's configured timezone for per-date overrides so public calendar matches
+    try:
+        tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        tz = timezone.get_current_timezone()
+
+    for d in dates:
+        dobj = parse_date(d)
+        if not dobj:
+            continue
+
+        try:
+            s = datetime.combine(dobj, datetime.strptime(start_time, '%H:%M').time())
+            e = datetime.combine(dobj, datetime.strptime(end_time, '%H:%M').time())
+        except Exception:
+            continue
+
+        s = make_aware(s, tz) if timezone.is_naive(s) else s
+        e = make_aware(e, tz) if timezone.is_naive(e) else e
+
+        if e <= s:
+            continue
+
+        # DON'T delete all existing overrides - allow multiple time ranges per date
+        # Only check for exact duplicate (same start/end on same date)
+        existing_duplicate = Booking.objects.filter(
+            organization=org,
+            start=s,
+            end=e,
+            service__isnull=True
+        ).exists()
+        
+        if existing_duplicate:
+            # Skip creating duplicate
+            continue
+
+        # Optional overlap prevention for real service bookings only
+        if not bool(data.get("is_blocking", False)) and _has_overlap(org, s, e):
+            continue
+
+        bk = Booking.objects.create(
+            organization=org,
+            title=data.get('title', ''),
+            start=s,
+            end=e,
+            client_name=data.get('client_name', ''),
+            client_email=data.get('client_email', ''),
+            is_blocking=bool(data.get('is_blocking', False)),
+            service=None  # ensure overrides are stored as service NULL
+        )
+        created.append(booking_to_event(bk))
+
+    return JsonResponse({'status': 'ok', 'created': created})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def batch_delete(request, org_slug):
+    """Delete bookings that fall on provided dates (org-scoped, role-protected)."""
+    org, err = _require_org_and_role(request)
+    if err:
+        return err
+
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    dates = data.get('dates') or []
+    if not dates:
+        return HttpResponseBadRequest('`dates` required')
+
+    deleted = 0
+    # Delete only per-date overrides (service is NULL) that overlap the given day in org timezone
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
+
+    for d in dates:
+        dobj = parse_date(d)
+        if not dobj:
+            continue
+
+        day_start = datetime(dobj.year, dobj.month, dobj.day, 0, 0, 0, tzinfo=org_tz)
+        day_end = datetime(dobj.year, dobj.month, dobj.day, 23, 59, 59, tzinfo=org_tz)
+
+        qs = Booking.objects.filter(
+            organization=org,
+            service__isnull=True,
+            start__lt=day_end,
+            end__gt=day_start,
+        )
+        deleted += qs.count()
+        qs.delete()
+
+    return JsonResponse({'status': 'ok', 'deleted': deleted})
+
+
+
+
+def public_org_page(request, org_slug):
+    org = get_object_or_404(Organization, slug=org_slug)
+    services = org.services.filter(is_active=True)
+    return render(request, "public/public_org_page.html", {"org": org, "services": services})
+
+
+
+
+
+@require_http_methods(['GET', 'POST'])
+def public_service_page(request, org_slug, service_slug):
+    """
+    Public booking page for a single service.
+    GET  -> show calendar + booking modal
+    POST -> create a Booking for the selected time
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    services = Service.objects.filter(organization=org).order_by("name")
+    service = get_object_or_404(Service, slug=service_slug, organization=org)
+
+    if request.method == "POST":
+        client_name = request.POST.get("client_name")
+        client_email = request.POST.get("client_email")
+        start_str = request.POST.get("start")
+        end_str = request.POST.get("end")
+        # Allow selecting a different service from the modal
+        posted_service_slug = request.POST.get("service_slug")
+        if posted_service_slug and posted_service_slug != service_slug:
+            service = get_object_or_404(Service, slug=posted_service_slug, organization=org)
+
+        if not all([client_name, client_email, start_str, end_str]):
+            return HttpResponseBadRequest("Missing required fields")
+
+        start = parse_datetime(start_str)
+        end = parse_datetime(end_str)
+        # Interpret naive datetimes in the organization's timezone
+        try:
+            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        except Exception:
+            org_tz = timezone.get_current_timezone()
+        if timezone.is_naive(start):
+            start = make_aware(start, org_tz)
+        else:
+            start = start.astimezone(org_tz)
+        if timezone.is_naive(end):
+            end = make_aware(end, org_tz)
+        else:
+            end = end.astimezone(org_tz)
+
+        # Double-check there's still no conflict (exclude per-date overrides)
+        conflict = Booking.objects.filter(
+            organization=org,
+            start__lt=end,
+            end__gt=start,
+            service__isnull=False  # only check real service bookings
+        ).exists()
+        if conflict:
+            return render(request, "public/public_service_page.html", {
+                "org": org,
+                "service": service,
+                "error": "Sorry, that time was just booked. Please choose another slot.",
+            })
+
+        booking = Booking.objects.create(
+            organization=org,
+            service=service,
+            title=getattr(service, "name", "Booking"),
+            client_name=client_name,
+            client_email=client_email,
+            start=start,
+            end=end,
+            is_blocking=False,
+        )
+
+        # Email notifications: send a single HTML confirmation to client
+        try:
+            from .emails import send_booking_confirmation
+            if client_email:
+                send_booking_confirmation(booking)
+            # Optional: notify owner (plain text)
+            if getattr(org, "owner", None) and org.owner.email:
+                # Styled HTML owner notification
+                try:
+                    from .emails import send_owner_booking_notification
+                    send_owner_booking_notification(booking)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
+
+    # GET - add trial context for banner
+    subscription = get_subscription(org)
+    trialing_active = False
+    trial_end_date = None
+    if subscription and subscription.status == 'trialing' and subscription.trial_end:
+        now = timezone.now()
+        if subscription.trial_end > now:
+            trialing_active = True
+            trial_end_date = subscription.trial_end
+    
+    return render(request, "public/public_service_page.html", {
+        "org": org,
+        "services": services,
+        "service": service,
+        "trialing_active": trialing_active,
+        "trial_end_date": trial_end_date,
+        # provide per-service weekly availability (UI index 0=Sun..6=Sat) as JSON
+        "service_weekly_map_json": json.dumps({
+            s.slug: [
+                [f"{r.start_time.strftime('%H:%M')}-{r.end_time.strftime('%H:%M')}" for r in s.weekly_availability.filter(is_active=True, weekday=((ui-1)%7)).order_by('start_time')]
+                for ui in range(7)
+            ]
+            for s in services
+        })
+    })
+
+
+
+def booking_success(request, org_slug, service_slug, booking_id):
+    org = get_object_or_404(Organization, slug=org_slug)
+    service = get_object_or_404(Service, slug=service_slug, organization=org)
+    booking = get_object_or_404(Booking, id=booking_id, organization=org, service=service)
+    return render(request, "public/booking_success.html", {
+        "org": org,
+        "service": service,
+        "booking": booking,
+    })
+
+
+@require_http_methods(['GET', 'POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def create_service(request, org_slug):
+    org, err = _require_org_and_role(request)
+    if err:
+        return err
+
+    if request.method == "POST":
+        name = request.POST.get("name")
+        slug = request.POST.get("slug")
+
+        Service.objects.create(
+            organization=org,
+            name=name,
+            slug=slug,
+            description=request.POST.get("description", ""),
+            duration=int(request.POST.get("duration", 30)),
+            price=float(request.POST.get("price", 0)),
+            buffer_before=int(request.POST.get("buffer_before", 0)),
+            buffer_after=int(request.POST.get("buffer_after", 0)),
+            min_notice_hours=int(request.POST.get("min_notice_hours", 1)),
+            max_booking_days=int(request.POST.get("max_booking_days", 30)),
+        )
+
+        return redirect("services_page", org_slug=org.slug)
+
+    return render(request, "calendar/create_service.html", { "org": org })
+
+
+
+
+
+
+
+
+@require_http_methods(["GET"])
+def service_availability(request, org_slug, service_slug):
+    """
+    Returns a list of *AVAILABLE* time slots for a specific service.
+    This powers the public booking calendar.
+    """
+
+    org = get_object_or_404(Organization, slug=org_slug)
+    service = get_object_or_404(Service, slug=service_slug, organization=org)
+
+    # Parse date range from FullCalendar
+    start_param = request.GET.get("start")
+    end_param = request.GET.get("end")
+
+    if not start_param or not end_param:
+        return HttpResponseBadRequest("start & end are required")
+
+    # Parse the provided window into the organization's timezone
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
+
+    def _parse_to_org_tz(param: str, org_tz: ZoneInfo):
+        s = (param or '').replace('Z', '+00:00')
+        try:
+            dt = datetime.fromisoformat(s)
+        except Exception:
+            return None
+        if dt.tzinfo is None:
+            dt = make_aware(dt, org_tz)
+        else:
+            dt = dt.astimezone(org_tz)
+        return dt
+
+    range_start = _parse_to_org_tz(start_param, org_tz)
+    range_end = _parse_to_org_tz(end_param, org_tz)
+
+    if not range_start or not range_end:
+        return HttpResponseBadRequest("Invalid datetime format")
+
+    # ---------------------------------------------
+    # STEP 1: Filter out time too soon or too far
+    # ---------------------------------------------
+    # Use org timezone consistently for windowing logic
+    now_org = timezone.now().astimezone(org_tz)
+    earliest_allowed = now_org + timedelta(hours=service.min_notice_hours)
+    latest_allowed = now_org + timedelta(days=service.max_booking_days)
+    
+    # Trial limit: cap calendar to trial_end date if org is on active trial
+    subscription = get_subscription(org)
+    if subscription and subscription.status == 'trialing' and subscription.trial_end:
+        trial_end_dt = subscription.trial_end
+        if timezone.is_naive(trial_end_dt):
+            trial_end_dt = make_aware(trial_end_dt, org_tz)
+        else:
+            trial_end_dt = trial_end_dt.astimezone(org_tz)
+        # Cap latest_allowed to trial end date (end of day)
+        trial_end_eod = trial_end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        if trial_end_eod < latest_allowed:
+            latest_allowed = trial_end_eod
+
+    # Preserve original requested start for anchoring window starts (before min-notice clamp)
+    original_range_start = range_start
+    # For filtering extremely early requested ranges we still use a clamped value where needed, but we do NOT
+    # shift the slot anchor; we only skip early slots.
+    effective_range_start = max(range_start, earliest_allowed)
+
+    # Normalize seconds/micros ONLY (do not round to 15-min boundary; keep irregular starts like 08:20)
+    range_start = range_start.replace(second=0, microsecond=0)
+
+    if range_end > latest_allowed:
+        range_end = latest_allowed
+
+    if range_end > latest_allowed:
+        range_end = latest_allowed
+    # ---------------------------------------------
+    # Per-date overrides live as bookings with service NULL
+    # Fetch per-date overrides that overlap the requested day in org timezone
+    day_start_candidate = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end_candidate = day_start_candidate.replace(hour=23, minute=59, second=59)
+    override_qs = Booking.objects.filter(
+        organization=org,
+        service__isnull=True,
+        start__lt=day_end_candidate,
+        end__gt=day_start_candidate,
+    )
+    blocking_full_day = False
+    availability_override_windows = []  # list of (start,end) datetimes in org timezone
+    for bk in override_qs:
+        # Normalize booking times to org timezone for consistent comparisons
+        bk_start_org = bk.start.astimezone(org_tz)
+        bk_end_org = bk.end.astimezone(org_tz)
+        # Detect a full-day blocking override (covers the entire requested day)
+        if bk.is_blocking:
+            # Treat any blocking override that spans from <= day start to >= day end as full-day block
+            day_start_candidate = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end_candidate = day_start_candidate.replace(hour=23, minute=59, second=59)
+            if bk_start_org <= day_start_candidate and bk_end_org >= day_end_candidate:
+                blocking_full_day = True
+        else:
+            availability_override_windows.append((bk_start_org, bk_end_org))
+
+    if blocking_full_day:
+        return JsonResponse([], safe=False)
+
+    # Existing busy bookings: ALWAYS include real service bookings (exclude all per-date overrides)
+    # Use the full local day window to ensure we catch bookings even if range_start
+    # is clamped by min_notice hours.
+    day_start = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start.replace(hour=23, minute=59, second=59)
+    existing = Booking.objects.filter(
+        organization=org,
+        start__lt=day_end,
+        end__gt=day_start
+    ).exclude(service__isnull=True)
+
+    # Normalize busy windows into org timezone for consistent overlap checks
+    busy = [(bk.start.astimezone(org_tz), bk.end.astimezone(org_tz)) for bk in existing]
+    # DEBUG: Temporarily log busy windows for troubleshooting
+    if settings.DEBUG:
+        try:
+            print(f"[availability] org={org.slug} day={day_start.date()} busy:")
+            for bs, be in busy:
+                print(f"  - {bs.isoformat()} -> {be.isoformat()}")
+        except Exception:
+            pass
+
+    # ---------------------------------------------
+    # STEP 3: Walk through each minute block and
+    # find valid start times based on:
+    # - service duration
+    # - buffer_before / buffer_after
+    # - overlaps
+    # - weekly availability (your logic)
+    # ---------------------------------------------
+
+    duration = timedelta(minutes=service.duration)
+    buffer_before = timedelta(minutes=service.buffer_before)
+    buffer_after = timedelta(minutes=service.buffer_after)
+    total_length = duration
+
+    available_slots = []
+
+    # Build base windows (override windows supersede weekly windows)
+    if availability_override_windows:
+        base_windows = [(ov_start.astimezone(org_tz), ov_end.astimezone(org_tz)) for ov_start, ov_end in availability_override_windows]
+    else:
+        weekday = original_range_start.weekday()
+        # Prefer service-specific weekly windows if defined
+        svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+        if svc_rows.exists():
+            base_windows = []
+            for w in svc_rows.order_by('start_time'):
+                w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                base_windows.append((w_start, w_end))
+        else:
+            weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
+            base_windows = []
+            for w in weekly_rows:
+                w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                base_windows.append((w_start, w_end))
+
+    # Determine slot increment from organization settings (client view preference)
+    # Fallback order: OrgSettings.block_size -> service.duration -> 15
+    # Allow front-end override via ?inc= minutes (display increment)
+    inc_param = request.GET.get('inc')
+    slot_inc_minutes = None
+    if inc_param:
+        try:
+            val = int(inc_param)
+            if 1 <= val <= 240:  # sanity bounds
+                slot_inc_minutes = val
+        except Exception:
+            slot_inc_minutes = None
+    if slot_inc_minutes is None:
+        try:
+            slot_inc_minutes = getattr(org.settings, 'block_size', None)
+        except Exception:
+            slot_inc_minutes = None
+    if not slot_inc_minutes or slot_inc_minutes <= 0:
+        slot_inc_minutes = service.duration if service.duration > 0 else 15
+    slot_increment = timedelta(minutes=slot_inc_minutes)
+
+    for win_start, win_end in base_windows:
+        # Keep windows even if their early portion violates min notice; we'll just skip early slots.
+        if win_end <= original_range_start or win_start >= range_end:
+            continue
+        window_end = min(win_end, range_end, latest_allowed)
+        if window_end - win_start < total_length:
+            continue
+
+        # Anchor first slot exactly at defined window start (allow irregular minutes like 08:20)
+        slot_start = win_start.replace(second=0, microsecond=0)
+
+        while slot_start + total_length <= window_end:
+            slot_end = slot_start + total_length
+
+            # Weekly availability check (skip if not inside) unless override windows active
+            if not availability_override_windows and not is_within_availability(org, slot_start, slot_end, service):
+                slot_start += slot_increment
+                continue
+
+            # Min notice: only hide slots on the SAME calendar day as 'now' if too soon.
+            # Future days should display all raw window starts regardless of notice.
+            try:
+                is_same_day = slot_start.date() == now_org.date()
+            except Exception:
+                is_same_day = False
+            if is_same_day and slot_start < earliest_allowed:
+                slot_start += slot_increment
+                continue
+
+            # Conflict detection (buffers)
+            conflict = False
+            proposed_start = (slot_start - buffer_before).astimezone(org_tz)
+            proposed_end = (slot_end + buffer_after).astimezone(org_tz)
+            for booked_start, booked_end in busy:
+                if proposed_start < booked_end and proposed_end > booked_start:
+                    conflict = True
+                    break
+            if not conflict:
+                for booked_start, booked_end in busy:
+                    if slot_start < booked_end and slot_end > booked_start:
+                        conflict = True
+                        break
+
+            if not conflict:
+                available_slots.append({
+                    "start": slot_start.isoformat(),
+                    "end": slot_end.isoformat(),
+                })
+            elif settings.DEBUG:
+                try:
+                    print(f"[availability] exclude slot {slot_start.isoformat()} -> {slot_end.isoformat()} (conflict)")
+                except Exception:
+                    pass
+            slot_start += slot_increment
+
+    return JsonResponse(available_slots, safe=False)
+
+
+@require_http_methods(["GET"])
+def batch_availability_summary(request, org_slug, service_slug):
+    """Returns a daily availability summary for a date range.
+    Query params: start, end (ISO 8601 date strings).
+    Returns: {"YYYY-MM-DD": boolean, ...} where true = has available slots.
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    service = get_object_or_404(Service, slug=service_slug, organization=org)
+
+    start_param = request.GET.get("start")
+    end_param = request.GET.get("end")
+    if not start_param or not end_param:
+        return HttpResponseBadRequest("start & end are required")
+
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
+
+    def _parse_to_org_tz(param: str, org_tz: ZoneInfo):
+        s = (param or '').replace('Z', '+00:00')
+        try:
+            dt = datetime.fromisoformat(s)
+        except Exception:
+            return None
+        if dt.tzinfo is None:
+            dt = make_aware(dt, org_tz)
+        else:
+            dt = dt.astimezone(org_tz)
+        return dt
+
+    range_start = _parse_to_org_tz(start_param, org_tz)
+    range_end = _parse_to_org_tz(end_param, org_tz)
+    if not range_start or not range_end:
+        return HttpResponseBadRequest("Invalid datetime format")
+
+    # Iterate each day and check if it has slots
+    summary = {}
+    current = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Calculate the max booking date (max_booking_days from today)
+    now_org = timezone.now().astimezone(org_tz)
+    today_midnight = now_org.replace(hour=0, minute=0, second=0, microsecond=0)
+    max_booking_date = today_midnight + timedelta(days=service.max_booking_days)
+    earliest_allowed = now_org + timedelta(hours=service.min_notice_hours)
+    
+    # Trial limit: cap max_booking_date to trial_end if org is on active trial
+    subscription = get_subscription(org)
+    if subscription and subscription.status == 'trialing' and subscription.trial_end:
+        trial_end_dt = subscription.trial_end
+        if timezone.is_naive(trial_end_dt):
+            trial_end_dt = make_aware(trial_end_dt, org_tz)
+        else:
+            trial_end_dt = trial_end_dt.astimezone(org_tz)
+        # Cap max_booking_date to trial end date (midnight next day)
+        trial_end_midnight = trial_end_dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if trial_end_midnight < max_booking_date:
+            max_booking_date = trial_end_midnight
+    
+    while current < range_end:
+        day_start = current
+        day_end = current.replace(hour=23, minute=59, second=59)
+        
+        # If entire day is in the past or before min notice, no slots
+        if day_end < earliest_allowed:
+            summary[current.strftime('%Y-%m-%d')] = False
+            current += timedelta(days=1)
+            continue
+        
+        # If day is beyond max_booking_days, no slots
+        if day_start >= max_booking_date:
+            summary[current.strftime('%Y-%m-%d')] = False
+            current += timedelta(days=1)
+            continue
+
+        # Per-date overrides (service NULL bookings)
+        # Consider any overrides that overlap the day window (org timezone)
+        override_qs = Booking.objects.filter(
+            organization=org,
+            service__isnull=True,
+            start__lt=day_end,
+            end__gt=day_start,
+        )
+        if override_qs.exists():
+            # If there is any availability override (non-blocking), the day should be considered available.
+            # Only mark unavailable if there are blocking overrides that span the full day AND no availability overrides.
+            has_avail = False
+            full_block = False
+            for bk in override_qs:
+                # Normalize booking times to org timezone for comparison
+                bk_start_org = bk.start.astimezone(org_tz) if bk.start.tzinfo else bk.start
+                bk_end_org = bk.end.astimezone(org_tz) if bk.end.tzinfo else bk.end
+                
+                if bk.is_blocking:
+                    # Treat a blocking override as full-day block if it covers the entire day
+                    # Allow for small time differences (< 2 minutes) to account for 23:59 vs 23:59:59
+                    covers_start = bk_start_org <= day_start + timedelta(minutes=1)
+                    covers_end = bk_end_org >= day_end - timedelta(minutes=1)
+                    if covers_start and covers_end:
+                        full_block = True
+                else:
+                    has_avail = True
+            if has_avail:
+                summary[current.strftime('%Y-%m-%d')] = True
+                current += timedelta(days=1)
+                continue
+            if full_block:
+                summary[current.strftime('%Y-%m-%d')] = False
+                current += timedelta(days=1)
+                continue
+
+        # Check if this weekday has ANY availability windows
+        windows = WeeklyAvailability.objects.filter(
+            organization=org,
+            is_active=True,
+            weekday=day_start.weekday()
+        )
+        
+        if not windows.exists():
+            # No weekly availability defined for this weekday
+            summary[current.strftime('%Y-%m-%d')] = False
+            current += timedelta(days=1)
+            continue
+        
+        # Day has weekly availability windows, so assume it has slots
+        # (We're optimizing for speed here; the detailed slot check happens when the modal opens)
+        summary[current.strftime('%Y-%m-%d')] = True
+
+        current += timedelta(days=1)
+
+    return JsonResponse(summary, safe=False)
+
+
+@require_http_methods(["GET"])
+def public_busy(request, org_slug):
+    """
+    Public endpoint returning busy intervals (booked events) for an org over a date range.
+    Query params: start, end (ISO 8601). Returns [{start, end}, ...]
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    start_param = request.GET.get("start")
+    end_param = request.GET.get("end")
+    if not start_param or not end_param:
+        return HttpResponseBadRequest("start & end are required")
+
+    try:
+        range_start = datetime.fromisoformat(start_param.replace("Z", ""))
+        range_end = datetime.fromisoformat(end_param.replace("Z", ""))
+    except Exception:
+        return HttpResponseBadRequest("Invalid datetime format")
+
+    # Make timezone-aware
+    if timezone.is_naive(range_start):
+        range_start = make_aware(range_start, timezone.get_current_timezone())
+    if timezone.is_naive(range_end):
+        range_end = make_aware(range_end, timezone.get_current_timezone())
+
+    busy_qs = Booking.objects.filter(
+        organization=org,
+        start__lt=range_end,
+        end__gt=range_start,
+    )
+
+    payload = [{"start": b.start.isoformat(), "end": b.end.isoformat()} for b in busy_qs]
+    return JsonResponse(payload, safe=False)
+
