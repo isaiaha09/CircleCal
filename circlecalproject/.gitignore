@@ -1,0 +1,51 @@
+#environment variable
+.env
+env/
+.env/
+
+
+# django local database
+db.sqlite3
+db.sqlite3-journal
+db.sqlite.back
+
+# Python bytecode and caches
+*.pyc
+__pycache__/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Media and uploads (don't commit user uploads)
+media/
+media/avatars/
+staticfiles/
+static/
+
+# Logs and local settings
+*.log
+local_settings.py
+
+# Packaging/build
+dist/
+build/
+*.egg-info/
+
+# Editor/IDE
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Test cache
+.pytest_cache/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+*.tar.gz
+
