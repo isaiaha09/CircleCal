@@ -712,7 +712,30 @@ def signup(request):
         form = SignupForm(request.POST)
         if form.is_valid():
             user = form.save()
-            login(request, user)
+            # When multiple authentication backends are configured Django
+            # requires the backend to be supplied when calling `login()`
+            # (or the user object must have a `backend` attribute). The
+            # project uses Axes plus the default ModelBackend, so pick a
+            # sensible backend to attach here.
+            try:
+                from django.conf import settings
+                backend = None
+                for b in getattr(settings, 'AUTHENTICATION_BACKENDS', []):
+                    if 'ModelBackend' in b:
+                        backend = b
+                        break
+                if not backend:
+                    # fallback to the first configured backend
+                    backend = settings.AUTHENTICATION_BACKENDS[0]
+            except Exception:
+                backend = None
+
+            if backend:
+                login(request, user, backend=backend)
+            else:
+                # As a last resort, try to login without specifying backend
+                # (this will raise the same ValueError if Django requires it).
+                login(request, user)
             return redirect("calendar_app:choose_business")
     else:
         form = SignupForm()
