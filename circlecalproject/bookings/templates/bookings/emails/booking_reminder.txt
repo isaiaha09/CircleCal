@@ -1,0 +1,23 @@
+Hi {{ booking.client_name|default:"there" }},
+
+This is a friendly reminder about your upcoming booking.
+
+>>> {{ booking.start|date:"l, F j, Y" }} at {{ booking.start|time:"g:i A" }} <<<
+
+BOOKING DETAILS
+===============
+Service: {{ booking.service.name|default:booking.title }}
+Duration: {{ booking.service.duration|default:"--" }} minutes
+Business: {{ booking.organization.name }}
+
+Please arrive on time.
+
+{% if cancel_url %}Cancel: {{ cancel_url }}{% endif %}
+{% if reschedule_url %}Reschedule: {{ reschedule_url }}{% endif %}
+
+We look forward to seeing you!
+{{ booking.organization.name }} Team
+
+---
+This is an automated reminder from CircleCal.
+Visit CircleCal: {{ site_url }}

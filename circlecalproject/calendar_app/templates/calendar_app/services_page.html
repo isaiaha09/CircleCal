@@ -1,0 +1,240 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ service.name }} • {{ org.name }} — Book Now</title>
+
+    <!-- FullCalendar -->
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/main.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #fafafa;
+            margin: 0;
+            padding: 0;
+        }
+
+        .header {
+            padding: 20px;
+            background: white;
+            border-bottom: 1px solid #ddd;
+            text-align: center;
+        }
+
+        .service-box {
+            max-width: 600px;
+            margin: 30px auto;
+            padding: 25px;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+        }
+
+        .service-box h1 {
+            margin: 0 0 10px;
+        }
+
+        .service-info {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        #calendar {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            padding: 15px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+        }
+
+        /* Booking Modal */
+        #bookingModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.55);
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .modal-box {
+            background: white;
+            padding: 25px;
+            width: 90%;
+            max-width: 400px;
+            border-radius: 12px;
+        }
+
+        .modal-box h2 {
+            margin-top: 0;
+        }
+
+        .modal-box input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+        }
+
+        .modal-box button {
+            width: 100%;
+            padding: 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .modal-box button:hover {
+            opacity: 0.9;
+        }
+
+        .close-btn {
+            background: #ccc !important;
+            margin-top: 10px;
+        }
+    </style>
+
+</head>
+<body>
+
+<div class="header">
+    <h2>{{ org.name }}</h2>
+</div>
+
+<div class="max-w-7xl mx-auto px-4 py-6">
+    <a href="{% url 'calendar_app:dashboard' org.slug %}"
+       class="text-sm text-blue-600 hover:underline">← Back to Dashboard
+    </a>
+</div>
+
+<div class="service-box">
+    <h1>{{ service.name }}</h1>
+    <div class="service-info">
+        <p>{{ service.description }}</p>
+        <p><strong>Duration:</strong> {{ service.duration }} minutes</p>
+        <p><strong>Price:</strong> ${{ service.price }}</p>
+    </div>
+</div>
+
+<div id="calendar"></div>
+
+<!-- BOOKING MODAL -->
+<div id="bookingModal">
+    <div class="modal-box">
+        <h2>Confirm Booking</h2>
+
+        <p id="selectedTime"></p>
+
+        <input type="text" id="clientName" placeholder="Your Name">
+        <input type="email" id="clientEmail" placeholder="Your Email">
+
+        <button id="confirmBookingBtn">Confirm Booking</button>
+        <button class="close-btn" onclick="closeModal()">Cancel</button>
+    </div>
+</div>
+
+
+
+<script>
+const orgSlug = "{{ org.slug }}";
+const serviceSlug = "{{ service.slug }}";
+let chosenStart = null;
+
+// ---------------------------
+// Initialize Calendar
+// ---------------------------
+document.addEventListener("DOMContentLoaded", function () {
+    const calendarEl = document.getElementById("calendar");
+
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: "timeGridWeek",
+        selectable: true,
+        nowIndicator: true,
+        slotMinTime: "06:00:00",
+        slotMaxTime: "22:00:00",
+
+        events: function (info, successCallback, failureCallback) {
+            fetch(`/api/${orgSlug}/${serviceSlug}/availability/?start=${info.startStr}&end=${info.endStr}`)
+                .then(res => res.json())
+                .then(data => {
+                    const events = data.map(slot => ({
+                        start: slot.start,
+                        end: slot.end,
+                        display: "background",
+                        color: "#b0e8c6"
+                    }));
+                    successCallback(events);
+                })
+                .catch(failureCallback);
+        },
+
+        dateClick: function (info) {
+            // Only allow clicking into green background events
+            chosenStart = info.dateStr;
+            openModal(info.date);
+        }
+    });
+
+    calendar.render();
+});
+
+// ---------------------------
+// Modal Controls
+// ---------------------------
+function openModal(dateObj) {
+    const local = dateObj.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    document.getElementById("selectedTime").textContent = `Selected time: ${local}`;
+    document.getElementById("bookingModal").style.display = "flex";
+}
+
+function closeModal() {
+    document.getElementById("bookingModal").style.display = "none";
+}
+
+// ---------------------------
+// Create Booking
+// ---------------------------
+document.getElementById("confirmBookingBtn").addEventListener("click", function () {
+    const name = document.getElementById("clientName").value;
+    const email = document.getElementById("clientEmail").value;
+
+    if (!name || !email) {
+        alert("Please enter your name and email.");
+        return;
+    }
+
+    fetch(`/api/${orgSlug}/${serviceSlug}/book/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            service_id: {{ service.id }},
+            start: chosenStart,
+            client_name: name,
+            client_email: email
+        })
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "ok") {
+                alert("Booking confirmed!");
+                closeModal();
+                location.reload();
+            } else {
+                alert("Error: " + JSON.stringify(data));
+            }
+        });
+});
+</script>
+
+</body>
+</html>

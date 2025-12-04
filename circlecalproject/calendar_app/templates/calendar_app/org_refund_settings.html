@@ -1,0 +1,32 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Refund Settings • {{ org.name }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto py-8 px-4">
+  <h1 class="text-2xl font-semibold mb-2">Refund Policy (Organization)</h1>
+  <p class="text-sm text-gray-600 mb-6">Defaults applied to all services unless a service overrides.</p>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    <div class="flex items-center">
+      <input type="checkbox" name="org_refunds_allowed" id="org_refunds_allowed" {% if settings.org_refunds_allowed %}checked{% endif %}
+             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+      <label for="org_refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds by default</label>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Cutoff (hours)</label>
+      <input type="number" name="org_refund_cutoff_hours" min="0" value="{{ settings.org_refund_cutoff_hours }}"
+             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+      <p class="mt-1 text-xs text-gray-500">Inside this window, refunds are not permitted.</p>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Custom Policy Text</label>
+      <textarea name="org_refund_policy_text" rows="4"
+                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ settings.org_refund_policy_text }}</textarea>
+      <p class="mt-1 text-xs text-gray-500">Shown to clients on pages and emails when no per-service text is provided.</p>
+    </div>
+    <div class="flex items-center justify-between pt-2">
+      <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
+      <button type="submit" class="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Save</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "calendar_app/base.html" %}
+
+{% block title %}Create Business — CircleCal{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="mb-10 text-center">
+        <h1 class="text-4xl font-bold mb-2">Create Your Business</h1>
+        <p class="text-gray-600">We'll set up a workspace and start your free 14‑day trial — no card required.</p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8">
+        <!-- Form Card -->
+        <div class="md:col-span-2 bg-white rounded-xl shadow-sm border p-8">
+            <h2 class="text-xl font-semibold mb-4">Business Details</h2>
+
+            {% if form.non_field_errors %}
+                <div class="mb-4 space-y-1">
+                    {% for err in form.non_field_errors %}
+                        <div class="px-3 py-2 bg-red-100 text-red-700 rounded text-sm">{{ err }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <form method="POST" novalidate class="space-y-6">
+                {% csrf_token %}
+                <div>
+                    <label for="name" class="block text-sm font-medium text-gray-700">Business Name</label>
+                    <input type="text" id="name" name="name" placeholder="Ex: JP Training Co." required
+                                     class="mt-1 w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 shadow-sm"/>
+                    {% if form.errors.name %}
+                        <p class="mt-2 text-sm text-red-600">{{ form.errors.name.0 }}</p>
+                    {% else %}
+                        <p class="mt-2 text-xs text-gray-500">Use your brand name. You can edit branding later.</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Workspace URL</label>
+                    <div class="mt-1 flex items-center space-x-2">
+                        <span class="text-sm text-gray-500 select-none">/bus/</span>
+                            <span id="slugPreview" class="text-sm font-mono bg-gray-100 px-2 py-1 rounded border text-gray-700">preview</span>
+                    </div>
+                    <p class="mt-2 text-xs text-gray-500">Generated automatically from the name for a clean URL.</p>
+                </div>
+
+                <button type="submit"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition flex items-center justify-center gap-2">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m7-7H5"/></svg>
+                    Create Business & Start Trial
+                </button>
+            </form>
+
+            <div class="mt-6 text-center">
+                <a href="{% url 'calendar_app:choose_business' %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to businesses</a>
+            </div>
+        </div>
+
+        <!-- Info / Benefits Card -->
+        <div class="bg-white rounded-xl shadow-sm border p-8 space-y-6">
+            <h2 class="text-xl font-semibold">What You Get</h2>
+            <ul class="space-y-3 text-sm">
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Immediate access to scheduling dashboard</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Basic plan features during trial</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Invite team members</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Upgrade anytime — no card required now</li>
+            </ul>
+            <div class="p-4 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+                Your 14‑day free trial ends on <span id="trialEnd" class="font-medium">(calculating…)</span>. We'll remind you before it expires.
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function slugify(str) {
+        return str
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-');
+    }
+    const nameInput = document.getElementById('name');
+    const slugPreview = document.getElementById('slugPreview');
+    nameInput.addEventListener('input', () => {
+        const v = nameInput.value;
+        slugPreview.textContent = v ? slugify(v) : 'preview';
+    });
+    // Trial end (14 days from now)
+    const trialEndSpan = document.getElementById('trialEnd');
+    const trialDate = new Date(Date.now() + 14*24*60*60*1000);
+    trialEndSpan.textContent = trialDate.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'});
+</script>
+{% endblock %}

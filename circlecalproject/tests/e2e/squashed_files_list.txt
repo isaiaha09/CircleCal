@@ -1,0 +1,18 @@
+﻿
+
+Name     : 0001_initial_squashed_0002_alter_business_owner_alter_busines
+           s_timezone_and_more.py
+FullName : D:\CircleCal\circlecalproject\accounts\migrations\0001_initia
+           l_squashed_0002_alter_business_owner_alter_business_timezone_
+           and_more.py
+
+
+
+
+
+Name     : 0001_initial_squashed_0001_initial.py
+FullName : D:\CircleCal\circlecalproject\bookings\migrations\0001_initia
+           l_squashed_0001_initial.py
+
+
+

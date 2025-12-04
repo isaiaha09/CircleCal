@@ -1,0 +1,68 @@
+{% extends "calendar_app/base.html" %}
+
+{% block title %}Pricing — CircleCal{% endblock %}
+
+{% block content %}
+<div class="container mx-auto py-6 md:py-10 px-4 max-w-6xl">
+    <h1 class="text-3xl md:text-4xl font-bold text-center mb-3 md:mb-4">Choose Your Plan</h1>
+    <p class="text-center text-gray-600 mb-8 md:mb-12 text-sm md:text-base">Scale with CircleCal as your business grows</p>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {% for plan in plans %}
+        <div class="border rounded-xl p-8 shadow-lg hover:shadow-xl transition {% if plan.slug == 'pro' %}border-blue-500 ring-2 ring-blue-500{% endif %}">
+            {% if plan.slug == 'pro' %}
+            <div class="bg-blue-500 text-white text-xs font-bold uppercase px-3 py-1 rounded-full inline-block mb-4">Most Popular</div>
+            {% endif %}
+            
+            <h2 class="text-2xl font-semibold mb-2">{{ plan.name }}</h2>
+            <p class="text-5xl font-bold mb-2">${{ plan.price|floatformat:2 }}</p>
+            <p class="text-gray-500 text-sm mb-6">per month</p>
+            <p class="text-gray-600 mb-6 h-12">{{ plan.description }}</p>
+
+            <ul class="text-left space-y-3 mb-8">
+                {% if plan.slug == 'basic' %}
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> 1 active service</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Up to 100 bookings/month</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Basic calendar</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Email support</li>
+                {% elif plan.slug == 'pro' %}
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Unlimited services</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Unlimited bookings</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Custom weekly availability</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Custom branding</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Payment processing</li>
+                {% elif plan.slug == 'team' %}
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Everything in Pro</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Multiple staff accounts</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Team management</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Priority support</li>
+                {% endif %}
+            </ul>
+
+                        <div>
+                            <a href="{% url 'billing:embedded_checkout_page' org.slug plan.id %}"
+                                 class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
+                                    {% if current_plan and current_plan.slug == plan.slug %}Current Plan{% else %}Stripe Checkout{% endif %}
+                            </a>
+                        </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if current_plan %}
+    <div class="mt-12 text-center">
+        <p class="text-gray-600 mb-4">Current plan: <strong>{{ current_plan.name }}</strong></p>
+        <div class="flex justify-center gap-6">
+            <a href="{% url 'billing:manage_billing' org.slug %}" class="text-green-600 hover:underline">In-app billing manager →</a>
+            {% if not subscription %}
+            <a href="{% url 'billing:billing_portal' org.slug %}" class="text-blue-600 hover:underline">Stripe portal →</a>
+            {% elif subscription.status != 'trialing' %}
+            <a href="{% url 'billing:billing_portal' org.slug %}" class="text-blue-600 hover:underline">Stripe portal →</a>
+            {% elif subscription.trial_end and subscription.trial_end <= now %}
+            <a href="{% url 'billing:billing_portal' org.slug %}" class="text-blue-600 hover:underline">Stripe portal →</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

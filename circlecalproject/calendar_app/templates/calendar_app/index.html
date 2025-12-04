@@ -1,0 +1,26 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+{% block title %}Welcome to CircleCal{% endblock %}
+
+{% block content %}
+<div class="text-center py-14">
+
+    <h1 class="text-4xl font-extrabold text-blue-600 mb-4">
+        The Simplest Scheduling Calendar for Coaches & Businesses
+    </h1>
+
+    <p class="text-lg text-gray-700 mb-10 max-w-2xl mx-auto">
+        CircleCal helps you manage bookings, availability, and clients — all in one place.
+        Perfect for solo coaches, teams, and enterprises.
+    </p>
+
+    <a href="{% url 'calendar_app:signup' %}"
+       class="px-6 py-3 text-lg bg-blue-600 text-white rounded shadow hover:bg-blue-700">
+       Get Started
+    </a>
+    <a href="{% url 'calendar_app:demo_calendar' %}"
+       class="ml-4 px-6 py-3 text-lg bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300">
+       View Demo Calendar
+    </a>
+</div>
+{% endblock %}

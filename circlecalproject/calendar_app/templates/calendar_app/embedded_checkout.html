@@ -1,0 +1,77 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Subscribe — {{ plan.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto py-10">
+  <h1 class="text-3xl font-bold mb-2">Subscribe to {{ plan.name }}</h1>
+  <p class="text-gray-600 mb-6">{{ plan.description }}</p>
+
+  <div class="border rounded-lg p-6 shadow">
+    <div id="loading" class="flex items-center gap-2 text-gray-600 mb-4">
+      <svg class="animate-spin h-5 w-5 text-gray-500" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      <span>Loading payment form…</span>
+    </div>
+    <div id="payment-element"></div>
+    <button id="submit" class="mt-6 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" disabled>Confirm and Subscribe</button>
+    <div id="message" class="mt-4 text-sm text-gray-600"></div>
+  </div>
+
+  <p class="mt-6 text-xs text-gray-500">Secured by Stripe. You will stay on this page to complete payment.</p>
+</div>
+
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+  const orgSlug = "{{ organization.slug }}";
+  const planId = {{ plan.id }};
+  const publishableKey = "{{ stripe_publishable_key }}";
+
+  const stripe = Stripe(publishableKey);
+  let elements;
+
+  async function init() {
+    const res = await fetch("{% url 'billing:create_embedded_subscription' organization.slug plan.id %}", {
+      method: "POST",
+      headers: {"X-CSRFToken": "{{ csrf_token }}"}
+    });
+    if (!res.ok) {
+      document.getElementById('message').textContent = 'Failed to create subscription.';
+      return;
+    }
+    const data = await res.json();
+    const clientSecret = data.client_secret;
+
+    elements = stripe.elements({clientSecret});
+    const paymentElement = elements.create("payment");
+    paymentElement.mount("#payment-element");
+
+    // Hide loading once mounted and enable submit
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('submit').disabled = false;
+
+    document.getElementById('submit').addEventListener('click', async () => {
+      document.getElementById('submit').disabled = true;
+      const {error} = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: window.location.origin + "/bus/" + orgSlug + "/dashboard/?checkout=success",
+        }
+      });
+      if (error) {
+        document.getElementById('message').textContent = error.message || 'Payment failed. Please try again.';
+        document.getElementById('submit').disabled = false;
+      }
+    });
+  }
+
+  init();
+</script>
+<style>
+  #payment-element { min-height: 160px; }
+  #submit[disabled] { opacity: 0.6; cursor: not-allowed; }
+  .animate-spin { animation: spin 1s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+{% endblock %}

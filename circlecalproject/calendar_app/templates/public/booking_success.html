@@ -1,0 +1,25 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+{% load tz %}
+
+{% block title %}Booking Confirmed – {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white rounded-lg shadow p-6 mt-8">
+  <h1 class="text-2xl font-semibold text-green-700 mb-2">Booking Confirmed</h1>
+  <p class="text-gray-700 mb-4">Thank you, {{ booking.client_name }}. Your booking has been confirmed.</p>
+
+  <div class="space-y-2 text-gray-800">
+    <div><strong>Business:</strong> {{ org.name }}</div>
+    <div><strong>Service:</strong> {{ service.name }}</div>
+    <div><strong>Date:</strong> {{ booking.start|timezone:org.timezone|date:"D, M j, Y" }}</div>
+    <div><strong>Time:</strong> {{ booking.start|timezone:org.timezone|time:"g:i A" }} – {{ booking.end|timezone:org.timezone|time:"g:i A" }}</div>
+    <div><strong>Email:</strong> {{ booking.client_email }}</div>
+  </div>
+
+  <div class="mt-6 flex gap-3">
+    <a href="{% url 'bookings:public_service_page' org.slug service.slug %}" class="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">Book another</a>
+    <a href="{% url 'bookings:public_org_page' org.slug %}" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">Back to services</a>
+  </div>
+</div>
+{% endblock %}

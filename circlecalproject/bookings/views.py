@@ -1047,10 +1047,20 @@ def batch_availability_summary(request, org_slug, service_slug):
             summary[current.strftime('%Y-%m-%d')] = False
             current += timedelta(days=1)
             continue
-        
-        # Day has weekly availability windows, so assume it has slots
-        # (We're optimizing for speed here; the detailed slot check happens when the modal opens)
-        summary[current.strftime('%Y-%m-%d')] = True
+
+        # For today's date, ensure windows actually contain future times after min-notice.
+        # Otherwise, reporting this day as "available" is misleading (the modal will later show no slots).
+        has_future_window = False
+        for w in windows:
+            # Construct window start/end in org timezone for this day
+            w_start = day_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+            w_end = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+            # If any portion of the window is after earliest_allowed and before max booking, consider it potentially available
+            if w_end > earliest_allowed and w_start < max_booking_date:
+                has_future_window = True
+                break
+
+        summary[current.strftime('%Y-%m-%d')] = bool(has_future_window)
 
         current += timedelta(days=1)
 

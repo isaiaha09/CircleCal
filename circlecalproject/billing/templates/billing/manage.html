@@ -1,0 +1,365 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+
+{% block title %}Manage Billing – {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto mt-6 md:mt-10 bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-sm p-4 md:p-6">
+  <h1 class="text-xl md:text-2xl font-semibold mb-3 md:mb-4">Billing Management</h1>
+  <p class="text-xs md:text-sm text-gray-600 mb-4 md:mb-6">Manage subscription, payment methods, and invoices for <strong>{{ org.name }}</strong>.</p>
+
+  {# Current Plan Section #}
+  <section class="mb-8" id="current-plan-section">
+    <h2 class="text-xl font-semibold mb-2">Current Plan</h2>
+    {% if subscription and subscription.plan %}
+      <div class="border rounded-lg p-4 bg-gradient-to-br from-indigo-50 to-blue-50">
+        <div class="flex items-start justify-between">
+          <div>
+            <h3 class="text-lg font-bold text-indigo-900">{{ subscription.plan.name }}</h3>
+            <p class="text-2xl font-bold text-indigo-600 mt-1">${{ subscription.plan.price }}<span class="text-sm font-normal text-gray-600">/{{ subscription.plan.billing_period }}</span></p>
+            {% if subscription.plan.description %}
+              <p class="text-sm text-gray-600 mt-2">{{ subscription.plan.description }}</p>
+            {% endif %}
+          </div>
+          {% if subscription.status == "active" %}
+            <span class="px-3 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">Active</span>
+          {% elif subscription.status == "trialing" %}
+            <span class="px-3 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">Trial</span>
+          {% else %}
+            <span class="px-3 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">{{ subscription.status|title }}</span>
+          {% endif %}
+        </div>
+      </div>
+    {% elif subscription %}
+      <div class="text-sm text-gray-600 border rounded-lg p-4 bg-gray-50">No plan selected yet.</div>
+    {% else %}
+      <div class="text-sm text-gray-600 border rounded-lg p-4 bg-gray-50">No active subscription. Choose a plan on the pricing page.</div>
+    {% endif %}
+  </section>
+
+  {# Subscription Details Section #}
+  <section class="mb-8" id="subscription-section">
+    <h2 class="text-xl font-semibold mb-2">Subscription Details</h2>
+    {% if subscription %}
+      <div class="text-sm space-y-1">
+        <div><strong>Status:</strong> {{ subscription.status }}{% if subscription.cancel_at_period_end %} (cancels at period end){% endif %}</div>
+        {% if subscription.current_period_end %}
+          <div><strong>Period Ends:</strong> {{ subscription.current_period_end|date:"M j, Y g:i A" }}</div>
+        {% endif %}
+        {% if trial_remaining_seconds %}
+          <div class="text-sm mt-1"><strong>Trial:</strong> <span id="trialCountdown"></span> remaining (ends {{ subscription.trial_end|date:"M j, Y g:i A" }})</div>
+        {% elif subscription.trial_end %}
+          <div><strong>Trial Ends:</strong> {{ subscription.trial_end|date:"M j, Y g:i A" }}</div>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="text-sm text-gray-600">No active subscription. Choose a plan on the pricing page.</div>
+    {% endif %}
+  </section>
+
+  {# Payment Methods Section #}
+  <section class="mb-8" id="payment-method-section">
+    <h2 class="text-xl font-semibold mb-2">Payment Methods</h2>
+    {% if org.stripe_customer_id %}
+      <div id="paymentMethodsList" class="space-y-2 mb-4">
+        {% for pm in payment_methods %}
+          <div class="flex items-center justify-between border rounded px-3 py-2 text-sm" data-pm-id="{{ pm.id }}">
+            <div>
+              **** {{ pm.card.last4 }} — {{ pm.card.brand|title }} exp {{ pm.card.exp_month }}/{{ pm.card.exp_year }}
+              {% if pm.id == default_payment_method_id %}<span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Default</span>{% endif %}
+            </div>
+            <div class="flex gap-2">
+              {% if pm.id != default_payment_method_id %}
+                <button class="set-default-btn text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" data-id="{{ pm.id }}">Set Default</button>
+              {% endif %}
+              <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200" data-id="{{ pm.id }}">Remove</button>
+            </div>
+          </div>
+        {% empty %}
+          <div class="text-sm text-gray-600">No payment methods yet.</div>
+        {% endfor %}
+      </div>
+      <div class="border rounded p-4 bg-gray-50">
+        <h3 class="text-sm font-medium mb-2">Add / Update Card</h3>
+        <div id="payment-element" class="mb-3"></div>
+        <button id="saveCardBtn" class="px-3 py-2 text-sm rounded bg-blue-600 text-white">Save Card</button>
+        <div id="pmStatus" class="text-xs mt-2 text-gray-600"></div>
+      </div>
+    {% else %}
+      <div class="text-sm text-gray-600">Stripe customer not created yet. Start a subscription first.</div>
+    {% endif %}
+  </section>
+
+  {# Change Plan Section #}
+  {% if subscription %}
+  <section class="mb-8" id="change-plan-section">
+    <h2 class="text-xl font-semibold mb-2">Change Plan</h2>
+    <div class="flex flex-col sm:flex-row gap-2">
+      <select id="changePlanSelect" class="border rounded px-2 py-1 text-xs md:text-sm flex-1">
+        <option value="">-- Select Plan --</option>
+        {% for p in plans %}
+          <option value="{{ p.id }}">{{ p.name }} ({{ p.price }} / {{ p.billing_period }})</option>
+        {% endfor %}
+      </select>
+      <button id="changePlanBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap">Update Plan</button>
+    </div>
+  </section>
+  {% endif %}
+
+  {# Invoices Section #}
+  <section class="mb-8" id="invoices-section">
+    <h2 class="text-xl font-semibold mb-2">Invoices</h2>
+    {% if trial_remaining_seconds %}
+      <div class="text-sm text-gray-600">On trial – invoices will appear after trial ends.</div>
+    {% elif invoices %}
+      <table class="w-full text-sm border">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="p-2 text-left">Date</th>
+            <th class="p-2 text-left">Amount</th>
+            <th class="p-2 text-left">Status</th>
+            <th class="p-2 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for inv in invoices %}
+          <tr class="border-t">
+            <td class="p-2">{{ inv.created|date:"M j, Y" }}</td>
+            <td class="p-2">${{ inv.amount_due_dollars|floatformat:2 }}</td>
+            <td class="p-2">{{ inv.status }}</td>
+            <td class="p-2"><a href="{{ inv.hosted_invoice_url }}" class="text-indigo-600" target="_blank">View</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="text-sm text-gray-600">No invoices yet.</div>
+    {% endif %}
+  </section>
+
+  {# Upcoming Invoice Section #}
+  <section class="mb-4" id="upcoming-invoice-section">
+    <h2 class="text-xl font-semibold mb-2">Upcoming Invoice</h2>
+    {% if trial_remaining_seconds %}
+      <div class="text-sm text-gray-600">No charges during trial.</div>
+    {% elif upcoming_invoice %}
+      <div class="text-sm">Next charge: <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong> on <strong>{{ upcoming_invoice.billing_date|date:"F j, Y" }}</strong></div>
+    {% else %}
+      <div class="text-sm text-gray-600">No upcoming invoice.</div>
+    {% endif %}
+  </section>
+
+  {# Cancel buttons at the bottom #}
+  {% if subscription %}
+    <div class="mt-8 flex justify-end gap-2">
+      {% if subscription.cancel_at_period_end %}
+        <button id="reactivateBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-green-600 text-white hover:bg-green-700">Reactivate</button>
+      {% else %}
+        <button id="cancelBtn" class="px-4 py-2 rounded bg-yellow-500 text-white hover:bg-yellow-600 text-sm">Cancel at Period End</button>
+      {% endif %}
+      {% if trial_remaining_seconds %}
+        <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="true">Immediate Cancel</button>
+      {% else %}
+        <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="false">Immediate Cancel</button>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+(function(){
+  const publishableKey = "{{ stripe_publishable_key }}";
+  const orgSlug = "{{ org.slug }}";
+  const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || getCookie('csrftoken');
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  // Payment Element setup
+  const paymentSection = document.getElementById('payment-element');
+  if (paymentSection) {
+    fetch(`/billing/api/bus/${orgSlug}/payment_method/setup_intent/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrftoken }
+    }).then(r => r.json()).then(data => {
+      const stripe = Stripe(publishableKey);
+      const elements = stripe.elements({ clientSecret: data.client_secret });
+      const paymentElement = elements.create('payment');
+      paymentElement.mount('#payment-element');
+
+      document.getElementById('saveCardBtn').addEventListener('click', async () => {
+        document.getElementById('pmStatus').textContent = 'Saving card...';
+        const {error} = await stripe.confirmSetup({ elements, confirmParams: { return_url: window.location.href }});
+        if (error) {
+          document.getElementById('pmStatus').textContent = error.message;
+        } else {
+          document.getElementById('pmStatus').textContent = 'Card saved. Refreshing...';
+          window.location.reload();
+        }
+      });
+    });
+  }
+
+  // Set default payment method
+  document.querySelectorAll('.set-default-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pmId = btn.getAttribute('data-id');
+      fetch(`/billing/api/bus/${orgSlug}/payment_method/default/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+        body: JSON.stringify({ payment_method_id: pmId })
+      }).then(r => r.json()).then(() => window.location.reload());
+    });
+  });
+
+  // Delete payment method
+  document.querySelectorAll('.delete-pm-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pmId = btn.getAttribute('data-id');
+      if (!confirm('Remove this payment method?')) return;
+      fetch(`/billing/api/bus/${orgSlug}/payment_method/delete/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+        body: JSON.stringify({ payment_method_id: pmId })
+      })
+        .then(r => {
+          if (!r.ok) {
+            return r.text().then(t => { throw new Error(t); });
+          }
+          return r.json();
+        })
+        .then(() => window.location.reload())
+        .catch(err => alert('Delete failed: ' + err.message));
+    });
+  });
+
+  // Cancel/reactivate subscription
+  const cancelBtn = document.getElementById('cancelBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => {
+    fetch(`/billing/api/bus/${orgSlug}/subscription/cancel/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken }})
+      .then(() => window.location.reload());
+  });
+  const reactivateBtn = document.getElementById('reactivateBtn');
+  if (reactivateBtn) reactivateBtn.addEventListener('click', () => {
+    fetch(`/billing/api/bus/${orgSlug}/subscription/reactivate/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken }})
+      .then(() => window.location.reload());
+  });
+  const immediateCancelBtn = document.getElementById('immediateCancelBtn');
+  if (immediateCancelBtn) immediateCancelBtn.addEventListener('click', () => {
+    const isTrial = immediateCancelBtn.getAttribute('data-is-trial') === 'true';
+    
+    if (isTrial) {
+      // Trial user wants to end trial - must convert to paid first
+      const planSelect = document.getElementById('changePlanSelect');
+      const selectedPlan = planSelect ? planSelect.value : null;
+      
+      if (!selectedPlan) {
+        alert('To end your trial and continue with a paid subscription, please:\n\n1. Select a plan below in the "Change Plan" section\n2. Add a payment method if you haven\'t already\n3. Click "Update Plan" to convert to paid\n\nIf you want to simply cancel without converting, just let the trial expire naturally.');
+        // Scroll to change plan section
+        const changePlanSection = document.getElementById('change-plan-section');
+        if (changePlanSection) {
+          changePlanSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          changePlanSection.style.border = '2px solid #ef4444';
+          setTimeout(() => { changePlanSection.style.border = ''; }, 3000);
+        }
+        return;
+      }
+      
+      // Has plan selected - check if payment method exists
+      const hasPaymentMethod = document.querySelector('#paymentMethodsList [data-pm-id]');
+      if (!hasPaymentMethod) {
+        alert('Please add a payment method first before converting your trial to a paid subscription.\n\nScroll down to the "Add / Update Card" section.');
+        const pmSection = document.getElementById('payment-method-section');
+        if (pmSection) {
+          pmSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        return;
+      }
+      
+      // All set - convert trial to paid plan
+      if(!confirm(`Convert your trial to the selected paid plan now?`)) return;
+      fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${selectedPlan}/`, { 
+        method: 'POST', 
+        headers: { 'X-CSRFToken': csrftoken }
+      })
+        .then(r => {
+          if (!r.ok) {
+            return r.text().then(t => { throw new Error(t); });
+          }
+          return r.json();
+        })
+        .then(() => window.location.reload())
+        .catch(err => alert('Conversion failed: ' + err.message));
+    } else {
+      // Regular immediate cancel for active subscription
+      if(!confirm('Immediate cancel will terminate access now. Continue?')) return;
+      fetch(`/billing/api/bus/${orgSlug}/subscription/cancel/`, { 
+        method: 'POST', 
+        headers: { 
+          'X-CSRFToken': csrftoken,
+          'Content-Type': 'application/json'
+        }, 
+        body: JSON.stringify({ immediate: true })
+      })
+        .then(r => {
+          if (!r.ok) {
+            return r.text().then(t => { throw new Error(t); });
+          }
+          return r.json();
+        })
+        .then(() => window.location.reload())
+        .catch(err => alert('Cancel failed: ' + err.message));
+    }
+  });
+
+
+  // Change plan
+  const changePlanBtn = document.getElementById('changePlanBtn');
+  if (changePlanBtn) changePlanBtn.addEventListener('click', () => {
+    const planId = document.getElementById('changePlanSelect').value;
+    if(!planId) return;
+    fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken }})
+      .then(() => window.location.reload());
+  });
+
+  // Trial countdown
+  const trialSeconds = {{ trial_remaining_seconds|default:"null" }};
+  const trialEndIso = "{{ trial_end_iso|default:"" }}";
+  if (trialSeconds && document.getElementById('trialCountdown')) {
+    const el = document.getElementById('trialCountdown');
+    function fmt(seconds) {
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400)/3600);
+      const m = Math.floor((seconds % 3600)/60);
+      const s = seconds % 60;
+      let parts = [];
+      if (d>0) parts.push(d + 'd');
+      parts.push(String(h).padStart(2,'0') + 'h');
+      parts.push(String(m).padStart(2,'0') + 'm');
+      parts.push(String(s).padStart(2,'0') + 's');
+      return parts.join(' ');
+    }
+    let remain = trialSeconds;
+    el.textContent = fmt(remain);
+    const timer = setInterval(()=>{
+      remain -= 1;
+      if (remain <= 0) { clearInterval(timer); el.textContent = 'ending...'; window.location.reload(); }
+      else { el.textContent = fmt(remain); }
+    },1000);
+  }
+})();
+</script>
+{% endblock %}

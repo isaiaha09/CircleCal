@@ -1,0 +1,1012 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+
+{% block title %}Book {{ service.name }} – {{ org.name }}{% endblock %}
+
+{% block content %}
+<style>
+  .calendar-container { position: relative; max-width: 900px; margin: 20px auto; background: #fafafa; border-radius: 12px; padding: 8px; }
+  @media (min-width: 768px) {
+    .calendar-container { margin: 40px auto; padding: 12px; }
+  }
+  .month-header { text-align: center; font-size: 1.3rem; font-weight: bold; margin-bottom: 6px; color: #111; }
+  @media (min-width: 768px) {
+    .month-header { font-size: 1.7rem; margin-bottom: 10px; }
+  }
+  /* Smooth fade-out/in for month header */
+  #monthHeader { opacity: 1; transition: opacity 180ms ease; }
+  #monthHeader.is-fading { opacity: 0; }
+  .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 12px 0; min-height: 200px; }
+  @media (min-width: 768px) {
+    .calendar-grid { gap: 12px; padding: 20px 0; min-height: 240px; }
+  }
+  /* Smooth fade-in for calendar grid on month change */
+  .calendar-grid {
+    opacity: 1;
+    transition: opacity 180ms ease;
+    will-change: opacity;
+  }
+  .calendar-grid.is-fading {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .day-circle { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; background: #1f1f29; color: white; cursor: pointer; transition: transform .15s ease, background .15s ease; border: 1px solid rgba(255,255,255,0.15); margin: 0 auto; font-size: 0.9rem; z-index: 1; position: relative; }
+  @media (min-width: 768px) {
+    .day-circle { width: 52px; height: 52px; font-size: 1rem; }
+  }
+  .day-circle:hover { transform: scale(1.07); background: #4b59f0; }
+  /* Disabled days: greyed out like past-day or unavailable, not clickable */
+  .day-circle.disabled {
+    opacity: 0.65;
+    pointer-events: none !important;
+    background: #69696990 !important;
+    color: #393535ff !important;
+    border: 2px solid #454545ff !important;
+    font-weight: 600;
+    transform: none !important;
+    transition: none !important;
+    z-index: 1;
+  }
+  .day-circle.disabled:hover { 
+    transform: none !important; 
+    background: #69696990 !important; 
+    color: #393535ff !important; 
+    cursor: not-allowed !important; 
+  }
+
+  /* Weekday header aligned with grid */
+  .weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 4px 0 0 0; }
+  @media (min-width: 768px) {
+    .weekday-row { gap: 12px; }
+  }
+  .weekday-cell { text-align: center; font-size: 0.75rem; color: #555; text-transform: lowercase; }
+  @media (min-width: 768px) {
+    .weekday-cell { font-size: 0.9rem; }
+  }
+
+  #timeModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); justify-content: center; align-items: center; padding: 8px; z-index: 50; }
+  @media (min-width: 768px) {
+    #timeModal { padding: 16px; }
+  }
+  .modal-box { 
+    background: #ffffff; 
+    padding: 32px 12px 12px 12px; /* extra top padding for close button */ 
+    border-radius: 12px; 
+    width: 100%; 
+    max-width: 95vw; 
+    max-height: 85vh; 
+    overflow-y: auto; 
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
+    position: relative; 
+    z-index: 100; 
+  }
+  @media (min-width: 768px) {
+    .modal-box { padding: 32px 16px 16px 16px; width: 640px; max-height: 80vh; }
+  }
+  .time-block { padding: 8px; background: #f3f4f6; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: background .15s ease; border: 1px solid #e5e7eb; font-size: 0.9rem; }
+  @media (min-width: 768px) {
+    .time-block { padding: 10px; margin-bottom: 10px; font-size: 1rem; }
+  }
+  .time-block:hover { background: #4b59f0; color: white; }
+  .modal-title { font-weight: 600; margin-bottom: 8px; font-size: 1rem; }
+  @media (min-width: 768px) {
+    .modal-title { font-size: 1.125rem; }
+  }
+  .modal-actions { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap: wrap; }
+  .modal-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: transparent;
+    border: none;
+    font-size: 24px;
+    cursor: pointer !important;
+    color: #666;
+    z-index: 101;
+  }
+
+  /* Hard guard: when fading, hide from layout to avoid flash */
+  .calendar-grid.is-fading { visibility: hidden; }
+  #monthHeader.is-fading { visibility: hidden; }
+
+  /* Centered service selector styles */
+  #mainServiceSelect {
+    flex: 1;
+    min-width: 120px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    background-color: #fff;
+    color: #111;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  #mainServiceSelect:focus {
+    outline: none;
+    ring: 2px solid #2563eb;
+    ring-offset: 2px;
+  }
+  #serviceInfoIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #e0e7ff;
+    color: #374151;
+    font-size: 18px;
+    border: 1px solid #c7d2fe;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+  }
+  #serviceInfoIcon:hover {
+    background: #d1e7ff;
+    transform: scale(1.05);
+  }
+  #mainServiceDetails {
+    position: absolute;
+    top: 24px;
+    left: 500px;
+    padding: 1rem;
+    z-index: 9999;
+    width: 340px;
+    border: 2px solid #2563eb;
+    border-radius: 0.375rem;
+    background-color: #f9fafb;
+    color: #111;
+    font-size: 1rem;
+    line-height: 1.5rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  }
+  #mainServiceDetails strong {
+    font-weight: 600;
+    color: #111;
+  }
+  #mainServiceDetails span {
+    color: #374151;
+  }
+
+  .service-details-fade {
+    opacity: 0;
+    transition: opacity 250ms ease;
+    display: none; /* hidden by default via class, not ID */
+  }
+  .service-details-fade.visible {
+    opacity: 1;
+    display: block !important; /* show when visible class applied */
+  }
+
+  /* Add this to style spacers in the calendar grid */
+  .calendar-grid .spacer {
+     pointer-events: none;
+     background: transparent;
+     /* keep spacer height set by JS so layout stays correct, but don't block pointer events */
+     min-height: 0 !important; /* Ensure minimum height is preserved */
+     height: auto !important; /* Allow height to be set by JS */
+  }
+</style>
+
+<div class="calendar-container" style="position:relative;">
+  <div class="month-nav" style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:8px;">
+    <button id="prevMonthBtn" class="px-2 md:px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm md:text-base">Prev</button>
+    <h1 class="month-header flex-1" id="monthHeader" style="font-size: clamp(1rem, 4vw, 1.7rem);"></h1>
+    <button id="nextMonthBtn" class="px-2 md:px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm md:text-base">Next</button>
+  </div>
+
+  {% if services or service %}
+    <div class="service-dropdown-row" style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:18px; position:relative; z-index:20;">
+      <label for="mainServiceSelect" class="font-medium text-gray-700">Service:</label>
+      <select id="mainServiceSelect" class="px-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        {% if services %}
+          {% for s in services %}
+            <option value="{{ s.slug }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        {% else %}
+          <option value="{{ service.slug }}" selected>{{ service.name }}</option>
+        {% endif %}
+      </select>
+      <span id="serviceInfoIcon" class="ml-2 cursor-pointer" style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#e0e7ff; color:#374151; font-size:18px; border:1px solid #c7d2fe;" title="View service details">&#9432;</span>
+    </div>
+  {% endif %}
+
+  <div class="weekday-row" id="weekdayRow">
+    <div class="weekday-cell">sun</div>
+    <div class="weekday-cell">mon</div>
+    <div class="weekday-cell">tue</div>
+    <div class="weekday-cell">wed</div>
+    <div class="weekday-cell">thu</div>
+    <div class="weekday-cell">fri</div>
+    <div class="weekday-cell">sat</div>
+  </div>
+  <div class="calendar-grid" id="dayGrid"></div>
+
+  <div id="mainServiceDetails" class="service-details-fade">
+    <div style="color:red; font-weight:bold;">TEST INFO BOX: If you see this, the box is rendering.</div>
+    <div><strong>Name:</strong> <span id="mainSvcName"></span></div>
+    <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
+    <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
+    <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
+    <div><strong>Refunds:</strong>
+      <span id="mainSvcRefundLine"></span>
+      <div id="mainSvcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TIME MODAL -->
+  <script>
+  // Build SERVICE_MAP for info box (outside DOMContentLoaded for global access)
+  const SERVICE_MAP = {};
+  {% for s in services %}
+    SERVICE_MAP["{{ s.slug }}"] = {
+      name: "{{ s.name|escapejs }}",
+      description: "{{ s.description|default:""|escapejs }}",
+      duration: {{ s.duration|default:0 }},
+      price: {{ s.price|default:0 }},
+      refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
+      refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
+      refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+    };
+  {% endfor %}
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // Info box elements
+    const mainServiceSelect = document.getElementById("mainServiceSelect");
+    const mainServiceDetails = document.getElementById("mainServiceDetails");
+    const mainSvcName = document.getElementById("mainSvcName");
+    const mainSvcDesc = document.getElementById("mainSvcDesc");
+    const mainSvcDuration = document.getElementById("mainSvcDuration");
+    const mainSvcPrice = document.getElementById("mainSvcPrice");
+    const mainSvcRefundLine = document.getElementById("mainSvcRefundLine");
+    const mainSvcRefundText = document.getElementById("mainSvcRefundText");
+    const serviceInfoIcon = document.getElementById("serviceInfoIcon");
+
+    function updateMainServiceDetails(slug) {
+      const d = SERVICE_MAP[slug];
+      if (!d) return;
+      mainSvcName.textContent = d.name;
+      mainSvcDesc.textContent = d.description || "—";
+      mainSvcDuration.textContent = d.duration || 0;
+      mainSvcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+      if (d.refunds_allowed) {
+        mainSvcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
+        if (d.refund_policy_text) {
+          mainSvcRefundText.style.display = '';
+          mainSvcRefundText.textContent = d.refund_policy_text;
+        } else {
+          mainSvcRefundText.style.display = 'none';
+          mainSvcRefundText.textContent = '';
+        }
+      } else {
+        mainSvcRefundLine.textContent = 'Refunds are not permitted for this service.';
+        mainSvcRefundText.style.display = 'none';
+        mainSvcRefundText.textContent = '';
+      }
+    }
+
+    // Show/hide info box on icon hover or click
+    let infoVisible = false;
+    function showInfoBox() {
+      updateMainServiceDetails(mainServiceSelect.value);
+      mainServiceDetails.style.display = '';
+      mainServiceDetails.classList.add('visible');
+      infoVisible = true;
+    }
+    function hideInfoBox() {
+      mainServiceDetails.style.display = 'none';
+      mainServiceDetails.classList.remove('visible');
+      infoVisible = false;
+    }
+    serviceInfoIcon.addEventListener('mouseenter', showInfoBox);
+    serviceInfoIcon.addEventListener('mouseleave', hideInfoBox);
+    serviceInfoIcon.addEventListener('click', function () {
+      if (infoVisible) {
+        hideInfoBox();
+      } else {
+        showInfoBox();
+      }
+    });
+
+    // Update info box when dropdown changes
+    if (mainServiceSelect) {
+      mainServiceSelect.addEventListener('change', function (e) {
+        updateMainServiceDetails(e.target.value);
+        if (infoVisible) {
+          mainServiceDetails.style.display = '';
+          mainServiceDetails.classList.add('visible');
+        } else {
+          mainServiceDetails.style.display = 'none';
+          mainServiceDetails.classList.remove('visible');
+        }
+        // Also update calendar to use new service
+        window.selectedServiceSlug = e.target.value;
+        if (typeof generateCalendar === 'function') {
+          generateCalendar(currentMonth, currentYear);
+        }
+      });
+      // Initial details
+      updateMainServiceDetails(mainServiceSelect.value);
+      window.selectedServiceSlug = mainServiceSelect.value;
+      mainServiceDetails.style.display = 'none';
+      mainServiceDetails.classList.remove('visible');
+      infoVisible = false;
+    }
+  });
+  </script>
+<div id="timeModal">
+  <!-- Modal View 1: Time Slots -->
+  <div class="modal-box" id="timeModalViewSlots">
+    <button class="modal-close" type="button" onclick="closeTimeModal()">×</button>
+    <h3 id="selectedDateLabel" class="modal-title text-gray-900"></h3>
+    <div id="timeSlots"></div>
+  </div>
+
+  <!-- Modal View 2: Service + Details -->
+  <div class="modal-box" id="timeModalViewDetails" style="display:none;">
+    <button class="modal-close" type="button" onclick="closeTimeModal()">×</button>
+    <h3 id="selectedDateTimeLabel" class="modal-title text-gray-900"></h3>
+
+    <form method="POST" action="">
+      {% csrf_token %}
+      <input type="hidden" name="start" id="startInput">
+      <input type="hidden" name="end" id="endInput">
+
+      <label class="block text-sm text-gray-700 mb-1">Select service</label>
+      <select id="serviceSelect" name="service_slug" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        {% if services %}
+          {% for s in services %}
+            <option value="{{ s.slug }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        {% else %}
+          <option value="{{ service.slug }}" selected>{{ service.name }}</option>
+        {% endif %}
+      </select>
+
+      <!-- Service details preview -->
+      <div id="serviceDetails" class="mb-4 p-3 rounded border border-gray-200 bg-gray-50 text-sm">
+        <div><strong>Name:</strong> <span id="svcName">{{ service.name }}</span></div>
+        <div><strong>Description:</strong> <span id="svcDesc">{{ service.description|default:"—" }}</span></div>
+        <div><strong>Duration:</strong> <span id="svcDuration">{{ service.duration }}</span> minutes</div>
+        <div><strong>Price:</strong> $<span id="svcPrice">{{ service.price }}</span></div>
+        <div><strong>Refunds:</strong>
+          <span id="svcRefundLine">
+            {% if service.refunds_allowed %}
+              Refunds permitted except within {{ service.refund_cutoff_hours }} hours of the appointment.
+            {% else %}
+              Refunds are not permitted for this service.
+            {% endif %}
+          </span>
+          {% if service.refunds_allowed and service.refund_policy_text %}
+            <div id="svcRefundText" class="mt-1 text-gray-600">{{ service.refund_policy_text }}</div>
+          {% else %}
+            <div id="svcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
+          {% endif %}
+        </div>
+      </div>
+
+      <label class="block text-sm text-gray-700 mb-1">Your name</label>
+      <input type="text" name="client_name" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="John Doe">
+
+      <label class="block text-sm text-gray-700 mb-1">Email</label>
+      <input type="email" name="client_email" required class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
+
+      <div class="modal-actions">
+        <button type="button" id="backToSlotsBtn" class="px-4 py-2 text-sm md:text-base rounded border border-gray-300 text-gray-700 hover:bg-gray-100 flex-1 md:flex-none">Back</button>
+        <button type="submit" id="bookNowBtn" class="bg-blue-600 text-white px-4 py-2 text-sm md:text-base rounded hover:bg-blue-700 flex-1 md:flex-none">Book now</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Global variable to track booked slots during this session
+window.bookedSlotsThisSession = window.bookedSlotsThisSession || [];
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", async function () {
+  try { console.log('public service calendar init'); } catch (e) {}
+  const dayGrid = document.getElementById("dayGrid");
+  const monthHeader = document.getElementById("monthHeader");
+  const timeModal = document.getElementById("timeModal");
+  const timeModalViewSlots = document.getElementById("timeModalViewSlots");
+  const timeModalViewDetails = document.getElementById("timeModalViewDetails");
+  const selectedDateLabel = document.getElementById("selectedDateLabel");
+  const selectedDateTimeLabel = document.getElementById("selectedDateTimeLabel");
+  const timeSlots = document.getElementById("timeSlots");
+  const startInput = document.getElementById("startInput");
+  const endInput = document.getElementById("endInput");
+  const serviceSelect = document.getElementById("serviceSelect");
+  const detailsBox = document.getElementById("serviceDetails");
+  const svcName = document.getElementById("svcName");
+  const svcDesc = document.getElementById("svcDesc");
+  const svcDuration = document.getElementById("svcDuration");
+  const svcPrice = document.getElementById("svcPrice");
+  const svcRefundLine = document.getElementById("svcRefundLine");
+  const svcRefundText = document.getElementById("svcRefundText");
+
+  const now = new Date();
+  let currentMonth = now.getMonth();
+  let currentYear = now.getFullYear();
+  // Render synchronization guards
+  let renderToken = 0;
+  let isRendering = false;
+
+  // Render month header and circles
+  // Store day summary globally for guards
+  let dayHasSlots = {};
+
+  async function generateCalendar(month, year) {
+    // Advance render token so only latest render will apply
+    const myToken = ++renderToken;
+    isRendering = true;
+    // Build all elements off-DOM to avoid partial/incremental rendering
+    const fragment = document.createDocumentFragment();
+    // Trigger fade-out before rebuild and hide from layout
+    dayGrid.classList.add('is-fading');
+    dayGrid.style.visibility = 'hidden';
+    dayGrid.innerHTML = "";
+    // Fade out header before changing text (no crossfade)
+    monthHeader.classList.add('is-fading');
+    const newHeaderText = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
+
+    const firstDay = new Date(year, month, 1).getDay();
+    const numDays = new Date(year, month + 1, 0).getDate();
+
+    for (let i = 0; i < firstDay; i++) {
+      const spacer = document.createElement("div");
+      spacer.style.minHeight = "52px";
+      spacer.className = "spacer"; /* Add spacer class */
+      fragment.appendChild(spacer);
+    }
+
+    // Fetch batch availability summary for the entire month in one call
+    const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+    const pad = n => String(n).padStart(2, '0');
+    function toIsoLocal(d) {
+      const yyyy = d.getFullYear();
+      const mm = pad(d.getMonth() + 1);
+      const dd = pad(d.getDate());
+      const HH = pad(d.getHours());
+      const MM = pad(d.getMinutes());
+      return `${yyyy}-${mm}-${dd}T${HH}:${MM}:00`;
+    }
+
+    const monthStart = new Date(year, month, 1, 0, 0, 0);
+    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
+    const cacheBuster = `&_t=${Date.now()}`;
+    const batchUrl = "{% url 'bookings:batch_availability_summary' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(monthStart))}&end=${encodeURIComponent(toIsoLocal(monthEnd))}${cacheBuster}`;
+    
+    dayHasSlots = {};
+    try {
+      const resp = await fetch(batchUrl);
+      if (resp.ok) {
+        dayHasSlots = await resp.json();
+        console.log('Availability summary loaded:', dayHasSlots);
+      }
+    } catch(e) {
+      console.error('Batch availability fetch failed', e);
+    }
+
+    // Strict availability checker: only treat clearly positive values as available
+    function hasAvailability(val) {
+      if (val === undefined || val === null) return false;
+      // Normalize strings
+      if (typeof val === 'string') {
+        const s = val.trim();
+        if (s === '' || s === 'false' || s === '0') return false;
+        if (s.startsWith('[') || s.startsWith('{')) {
+          try { val = JSON.parse(s); } catch (_) { return false; }
+        } else {
+          // Any other string is treated as no availability
+          return false;
+        }
+      }
+      // Arrays: must have length > 0
+      if (Array.isArray(val)) return val.length > 0;
+      // Numbers: must be > 0
+      if (typeof val === 'number') return val > 0;
+      // Booleans: only true means available
+      if (typeof val === 'boolean') return val === true;
+      // Objects: check common shapes
+      if (typeof val === 'object') {
+        if ('count' in val) return Number(val.count) > 0;
+        if ('slots' in val && Array.isArray(val.slots)) return val.slots.length > 0;
+        // Unknown object shapes are treated as unavailable
+        return false;
+      }
+      return false;
+    }
+
+    // Prefetch detailed availability in parallel for candidate days, then render in one batch
+    const detailedDayHasSlots = {};
+    const fetches = [];
+    for (let day = 1; day <= numDays; day++) {
+      const date = new Date(year, month, day);
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth()+1).padStart(2,'0');
+      const dd = String(date.getDate()).padStart(2,'0');
+      const dateKey = `${yyyy}-${mm}-${dd}`;
+      const summaryVal = dayHasSlots[dateKey];
+      const isAvailable = hasAvailability(summaryVal);
+      if (date >= todayMidnight && isAvailable) {
+        const start = new Date(year, month, day, 0, 0, 0);
+        const end = new Date(year, month, day, 23, 59, 59);
+        const pad = n => String(n).padStart(2,'0');
+        const toIsoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+        const cacheBuster = `&_t=${Date.now()}`;
+        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}&inc=30${cacheBuster}`;
+        fetches.push(
+          fetch(availUrl)
+            .then(r => r.ok ? r.json() : [])
+            .then(slots => { detailedDayHasSlots[dateKey] = Array.isArray(slots) && slots.length > 0; })
+            .catch(() => { detailedDayHasSlots[dateKey] = false; })
+        );
+      } else {
+        detailedDayHasSlots[dateKey] = false; // past or summary says no
+      }
+    }
+
+    // Wait for all detailed availability calls to resolve
+    try { await Promise.all(fetches); } catch (_) {}
+    // Debug: log detailed availability for this month
+    console.log('Detailed day availability:', detailedDayHasSlots);
+
+    // If a newer render started, abort applying this one
+    if (myToken !== renderToken) {
+      return;
+    }
+
+    // Now render circles in one batch with accurate disabled states
+    const circles = [];
+    for (let day = 1; day <= numDays; day++) {
+      const date = new Date(year, month, day);
+      const circle = document.createElement("div");
+      circle.className = "day-circle";
+      circle.innerText = day;
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth()+1).padStart(2,'0');
+      const dd = String(date.getDate()).padStart(2,'0');
+      const dateKey = `${yyyy}-${mm}-${dd}`;
+      circle.dataset.date = dateKey;
+
+      const enabled = date >= todayMidnight && !!detailedDayHasSlots[dateKey];
+      if (enabled) {
+        circle.style.cursor = 'pointer';
+        circle.tabIndex = 0;
+        circle.addEventListener("click", () => openTimeModal(year, month, day, dateKey));
+      } else {
+        circle.classList.add("disabled");
+        circle.style.pointerEvents = 'none';
+        circle.style.cursor = 'not-allowed';
+        circle.setAttribute('aria-disabled', 'true');
+        circle.tabIndex = -1;
+      }
+      fragment.appendChild(circle);
+      circles.push(circle);
+    }
+
+    // Append all circles in one batch to prevent partial paints
+    dayGrid.appendChild(fragment);
+    // Mark render complete
+    isRendering = false;
+    // Orchestrate fade: header fades out, then updates text, then both fade in
+    setTimeout(() => {
+      if (myToken !== renderToken) return;
+      // Update header text after fade-out completes
+      monthHeader.innerText = newHeaderText;
+      // Next frame, remove fading classes to fade in
+      requestAnimationFrame(() => {
+        if (myToken !== renderToken) return;
+        dayGrid.classList.remove('is-fading');
+        dayGrid.style.visibility = 'visible';
+        monthHeader.classList.remove('is-fading');
+      });
+    }, 180);
+  }
+
+  // Fetch availability from server and show time circles for selected day
+  async function openTimeModal(year, month, day, dateKey) {
+    const date = new Date(year, month, day);
+    selectedDateLabel.innerText = date.toDateString();
+    timeSlots.innerHTML = "";
+
+    // Guard: if summary indicates no slots, do not open
+    const summary = dayHasSlots[dateKey];
+    // Robust guard: treat ambiguous or empty shapes as no slots
+    let summaryNoSlots = (
+      summary === undefined || summary === null || summary === false || summary === 0 || summary === "0" ||
+      (Array.isArray(summary) && summary.length === 0)
+    );
+    if (!summaryNoSlots && typeof summary === 'object' && summary !== null) {
+      const hasCount = ('count' in summary) && Number(summary.count) === 0;
+      const hasEmptySlots = ('slots' in summary) && Array.isArray(summary.slots) && summary.slots.length === 0;
+      summaryNoSlots = hasCount || hasEmptySlots;
+    }
+    if (!summaryNoSlots && typeof summary === 'string') {
+      const s = summary.trim();
+      if (s === '' || s === 'false' || s === '0') {
+        summaryNoSlots = true;
+      } else if (s.startsWith('[') || s.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(s);
+          if (Array.isArray(parsed)) summaryNoSlots = parsed.length === 0;
+          else if (parsed && typeof parsed === 'object') {
+            const c0 = ('count' in parsed) && Number(parsed.count) === 0;
+            const e0 = ('slots' in parsed) && Array.isArray(parsed.slots) && parsed.slots.length === 0;
+            summaryNoSlots = c0 || e0;
+          }
+        } catch (_) {
+          summaryNoSlots = true;
+        }
+      } else {
+        summaryNoSlots = true;
+      }
+    }
+    if (summaryNoSlots) {
+      return; // prevent opening modal for fully booked day
+    }
+
+    // Build local ISO (avoid timezone drift like 1am)
+    const rangeStartDate = new Date(year, month, day, 0, 0, 0);
+    const rangeEndDate = new Date(year, month, day, 23, 59, 59);
+    function toIsoLocal(d) {
+      const pad = n => String(n).padStart(2,'0');
+      const yyyy = d.getFullYear();
+      const mm = pad(d.getMonth() + 1);
+      const dd = pad(d.getDate());
+      const HH = pad(d.getHours());
+      const MM = pad(d.getMinutes());
+      return `${yyyy}-${mm}-${dd}T${HH}:${MM}:00`;
+    }
+
+    try {
+      // Add cache-busting timestamp to always fetch fresh data
+      const cacheBuster = `&_t=${Date.now()}`;
+      // Fetch ONLY availability - include increment override so backend can adjust slot stepping
+      // Read prospective client view settings early (may be stored from internal calendar)
+      let previewIncrement = 30;
+      try {
+        const rawPreview = localStorage.getItem('client_view_settings');
+        if (rawPreview) {
+          const parsed = JSON.parse(rawPreview);
+          if (typeof parsed.increment === 'number') previewIncrement = parsed.increment;
+        }
+      } catch (e) {}
+
+      // Service data map for quick client-side updates
+      const SERVICE_MAP = {
+        {% if services %}
+          {% for s in services %}
+            "{{ s.slug }}": {
+              name: "{{ s.name|escapejs }}",
+              description: "{{ s.description|default:""|escapejs }}",
+              duration: {{ s.duration|default:0 }},
+              price: {{ s.price|default:0 }},
+              refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
+              refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
+              refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+            },
+          {% endfor %}
+        {% else %}
+          "{{ service.slug }}": {
+            name: "{{ service.name|escapejs }}",
+            description: "{{ service.description|default:""|escapejs }}",
+            duration: {{ service.duration|default:0 }},
+            price: {{ service.price|default:0 }},
+            refunds_allowed: {{ service.refunds_allowed|yesno:"true,false" }},
+            refund_cutoff_hours: {{ service.refund_cutoff_hours|default:0 }},
+            refund_policy_text: "{{ service.refund_policy_text|default:""|escapejs }}",
+          },
+        {% endif %}
+      };
+
+      function updateServiceDetails(slug) {
+        const d = SERVICE_MAP[slug];
+        if (!d) return;
+        svcName.textContent = d.name;
+        svcDesc.textContent = d.description || "—";
+        svcDuration.textContent = d.duration || 0;
+        svcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+        if (d.refunds_allowed) {
+          svcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
+          if (d.refund_policy_text) {
+            svcRefundText.style.display = '';
+            svcRefundText.textContent = d.refund_policy_text;
+          } else {
+            svcRefundText.style.display = 'none';
+            svcRefundText.textContent = '';
+          }
+        } else {
+          svcRefundLine.textContent = 'Refunds are not permitted for this service.';
+          svcRefundText.style.display = 'none';
+          svcRefundText.textContent = '';
+        }
+      }
+
+      // Initialize details
+      updateServiceDetails(serviceSelect.value);
+      serviceSelect.addEventListener('change', (e) => {
+        updateServiceDetails(e.target.value);
+      });
+      const availUrl = "{% url 'bookings:service_availability' org.slug service.slug %}" + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}&inc=${previewIncrement}${cacheBuster}`;
+      const availResp = await fetch(availUrl);
+      if (!availResp.ok) throw new Error("Failed to load availability");
+      const slots = await availResp.json();
+
+      // If detailed fetch yields no slots, do not mutate the day circle state.
+      // Simply avoid opening the modal or show a lightweight notice.
+      if (!Array.isArray(slots) || slots.length === 0) {
+        // Avoid turning the circle grey on click; just return quietly
+        return;
+      }
+
+      // Read client view settings (saved from internal calendar)
+      let clientSettings = { block: 1, increment: 30, startHour: 9 };
+      try {
+        const raw = localStorage.getItem('client_view_settings');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed.block === 'number') clientSettings.block = parsed.block;
+          if (typeof parsed.increment === 'number') clientSettings.increment = parsed.increment;
+          if (typeof parsed.startHour === 'number') clientSettings.startHour = parsed.startHour;
+        }
+      } catch (e) {}
+
+      const blockMinutes = Math.max(1, clientSettings.block) * 60;
+      const inc = Math.max(5, clientSettings.increment);
+
+      // Styles for circles
+      const styleId = 'publicTimeCirclesStyle';
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.innerHTML = `
+          .time-circle { width: 80px; height: 80px; border-radius: 50%; display:flex; justify-content:center; align-items:center; cursor:pointer; font-size:13px; color:white; transition:transform .1s ease; }
+          .time-circle.open { background:#28a745; }
+          .time-circle.booked { background:#9ca3af; cursor:not-allowed; }
+          .time-circle:hover { transform: scale(1.08); }
+          .circles-row { display:flex; align-items:center; justify-content:space-between; gap:8px; border-bottom:1px solid #e5e7eb; padding:8px 0; }
+          .circles-hour { width:70px; font-weight:bold; }
+          .circles-container { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
+          @media (max-width: 768px) {
+            .modal-box { width: 95vw; }
+            .time-circle { width: 68px; height: 68px; font-size:12px; }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      // If no slots, show message
+      if (!Array.isArray(slots) || slots.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-gray-600';
+        empty.innerText = 'No available times on this day.';
+        timeSlots.appendChild(empty);
+        timeModal.style.display = 'flex';
+        return;
+      }
+
+      // Convert slots to minute ranges (treat server times as local to avoid TZ drift)
+      function isoToLocalMinutes(isoStr) {
+        // Expect formats like YYYY-MM-DDTHH:MM or with seconds, possibly with 'Z'.
+        // Parse HH and MM directly to avoid timezone shifts.
+        const m = isoStr.match(/T(\d{2}):(\d{2})/);
+        if (!m) return null;
+        const h = parseInt(m[1], 10);
+        const mm = parseInt(m[2], 10);
+        return h * 60 + mm;
+      }
+      const slotRanges = slots.map(s => {
+        const startMin = isoToLocalMinutes(s.start);
+        const endMin = isoToLocalMinutes(s.end);
+        return { startMin, endMin };
+      }).filter(r => r.startMin != null && r.endMin != null && r.endMin > r.startMin);
+
+      // Group slots by hour for exact rendering; labels derive from slot starts
+      const slotsByHour = new Map(); // hourStartMin -> [{startMin, endMin, label}]
+      for (const s of slots) {
+        const sm = isoToLocalMinutes(s.start);
+        const em = isoToLocalMinutes(s.end);
+        if (sm == null || em == null || em <= sm) continue;
+        const hourKey = Math.floor(sm/60)*60;
+        const h = Math.floor(sm/60);
+        const m = sm % 60;
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        let dispH = h % 12; if (dispH === 0) dispH = 12;
+        const label = `${dispH}:${String(m).padStart(2,'0')} ${ampm}`;
+        const arr = slotsByHour.get(hourKey) || [];
+        arr.push({ startMin: sm, endMin: em, label });
+        slotsByHour.set(hourKey, arr);
+      }
+
+      // Render rows using saved Client View settings (block size + increment),
+      // but only at valid server-provided start times.
+      if (slotRanges.length > 0) {
+        // Do NOT clamp to clientSettings.startHour when earlier valid slots exist;
+        // honor the earliest server-provided availability.
+        const minStart = Math.min(...slotRanges.map(r => r.startMin));
+        const maxEnd = Math.max(...slotRanges.map(r => r.endMin));
+
+        // Map of valid start -> end (from server slots)
+        const startToEnd = new Map();
+        for (const s of slots) {
+          const sm = isoToLocalMinutes(s.start);
+          const em = isoToLocalMinutes(s.end);
+          if (sm != null && em != null && em > sm) startToEnd.set(sm, em);
+        }
+
+        // Helper: format label from minute-of-day
+        function labelFromMin(totalMin) {
+          const h24 = Math.floor(totalMin/60);
+          const m = totalMin % 60;
+          const ampm = h24 >= 12 ? 'PM' : 'AM';
+          let h = h24 % 12; if (h === 0) h = 12;
+          return `${h}:${String(m).padStart(2,'0')} ${ampm}`;
+        }
+
+        // NEW: Iterate from earliest start minute directly, stepping by client increment, preserving irregular offsets.
+        // Group rows by the hour of each slot's start for readability.
+        const validStarts = Array.from(startToEnd.keys()).sort((a,b)=>a-b);
+        const hours = [];
+        const hourMap = new Map();
+        for (const sm of validStarts) {
+          const hourStart = Math.floor(sm/60)*60; // minute-of-day of the hour
+          if (!hourMap.has(hourStart)) {
+            hourMap.set(hourStart, []);
+            hours.push(hourStart);
+          }
+          hourMap.get(hourStart).push(sm);
+        }
+
+        for (const hourStart of hours) {
+          const row = document.createElement('div');
+          row.className = 'circles-row';
+          const hourLabel = document.createElement('div');
+          hourLabel.className = 'circles-hour';
+          const labelDate = new Date(year, month, day);
+          labelDate.setHours(Math.floor(hourStart/60), hourStart%60, 0, 0);
+          // Show minutes if not on the hour, e.g., 8:20 AM
+          const labelOpts = { hour: 'numeric', minute: (hourStart%60!==0?'2-digit':undefined), hour12: true };
+          hourLabel.textContent = labelDate.toLocaleString(undefined, labelOpts);
+          row.appendChild(hourLabel);
+
+          const circlesContainer = document.createElement('div');
+          circlesContainer.className = 'circles-container';
+
+          // Render circles for all server-provided starts (each window may have its own baseline).
+          for (const sm of hourMap.get(hourStart)) {
+            const endMin = startToEnd.get(sm);
+            const slotKey = `${year}-${month}-${day}-${sm}`;
+            const wasBookedThisSession = window.bookedSlotsThisSession.includes(slotKey);
+            const circle = document.createElement('div');
+            circle.className = wasBookedThisSession ? 'time-circle booked' : 'time-circle open';
+            circle.textContent = labelFromMin(sm);
+            circle.dataset.startMin = String(sm);
+            circle.dataset.endMin = String(endMin);
+
+            if (!wasBookedThisSession) {
+              circle.addEventListener('click', () => {
+                const start = new Date(year, month, day);
+                const h = Math.floor(sm/60), m = sm % 60;
+                start.setHours(h, m, 0, 0);
+                const endDate = new Date(start);
+                endDate.setMinutes(endDate.getMinutes() + (endMin - sm));
+                function toLocalISOString(d) {
+                  const pad = n => String(n).padStart(2,'0');
+                  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+                }
+                startInput.value = toLocalISOString(start);
+                endInput.value = toLocalISOString(endDate);
+                const headerText = `${date.toDateString()} • ${labelFromMin(sm)}`;
+                selectedDateLabel.innerText = headerText;
+                selectedDateTimeLabel.innerText = headerText;
+                circle.dataset.slotKey = slotKey;
+                timeModalViewSlots.style.display = 'none';
+                timeModalViewDetails.style.display = 'block';
+              });
+            }
+            circlesContainer.appendChild(circle);
+          }
+          if (circlesContainer.children.length > 0) {
+            row.appendChild(circlesContainer);
+            timeSlots.appendChild(row);
+          }
+        }
+      }
+
+      if (timeSlots.lastElementChild) {
+        timeSlots.lastElementChild.style.borderBottom = 'none';
+      }
+      timeModal.style.display = 'flex';
+    } catch (e) {
+      console.error(e);
+      alert("Could not load availability. Please try another day.");
+    }
+  }
+
+  function closeTimeModal() { 
+    timeModal.style.display = "none"; 
+    // Reset to slots view when closing
+    timeModalViewDetails.style.display = 'none';
+    timeModalViewSlots.style.display = 'block';
+  }
+  window.closeTimeModal = closeTimeModal;
+
+  // Back button to return to time slots view
+  const backBtn = document.getElementById('backToSlotsBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      timeModalViewDetails.style.display = 'none';
+      timeModalViewSlots.style.display = 'block';
+    });
+  }
+
+  // Handle booking form submission - mark slot as booked immediately
+  const bookingForm = document.querySelector('#timeModalViewDetails form');
+  if (bookingForm) {
+    bookingForm.addEventListener('submit', (e) => {
+      // Get the slot key from the start input
+      const startVal = startInput.value;
+      const endVal = endInput.value;
+      if (startVal) {
+        try {
+          const startDate = new Date(startVal);
+          const endDate = endVal ? new Date(endVal) : null;
+          const slotKey = `${startDate.getFullYear()}-${startDate.getMonth()}-${startDate.getDate()}-${startDate.getHours() * 60 + startDate.getMinutes()}`;
+          // Mark this slot as booked for this session
+          if (!window.bookedSlotsThisSession.includes(slotKey)) {
+            window.bookedSlotsThisSession.push(slotKey);
+          }
+          // Remove circles that overlap the booked range (including the booked one)
+          const bookedStartMin = startDate.getHours() * 60 + startDate.getMinutes();
+          const bookedEndMin = endDate ? (endDate.getHours() * 60 + endDate.getMinutes()) : (bookedStartMin);
+          document.querySelectorAll('#timeSlots .time-circle').forEach(c => {
+            const sm = parseInt(c.dataset.startMin || '-1', 10);
+            const em = parseInt(c.dataset.endMin || '-1', 10);
+            if (sm >= 0 && em >= 0) {
+              const overlaps = !(em <= bookedStartMin || sm >= bookedEndMin);
+              if (overlaps) {
+                c.remove();
+              }
+            }
+          });
+        } catch (err) {
+          console.error('Failed to track booked slot:', err);
+        }
+      }
+      // Form will submit normally and redirect
+    });
+  }
+
+  // Ensure header and grid start transparent, preventing any crossfade flash
+  dayGrid.classList.add('is-fading');
+  monthHeader.classList.add('is-fading');
+
+  // Initial render
+  try { generateCalendar(currentMonth, currentYear); } catch (e) { console.error('generateCalendar failed', e); }
+
+  const prevBtn = document.getElementById('prevMonthBtn');
+  const nextBtn = document.getElementById('nextMonthBtn');
+  if (prevBtn) {
+    prevBtn.onclick = function () {
+      // Prevent overlapping renders; queue the latest intent
+      if (isRendering) return;
+      if (currentMonth === 0) { currentMonth = 11; currentYear--; } else { currentMonth--; }
+      generateCalendar(currentMonth, currentYear);
+    };
+  }
+  if (nextBtn) {
+    nextBtn.onclick = function () {
+      if (isRendering) return;
+      if (currentMonth === 11) { currentMonth = 0; currentYear++; } else { currentMonth++; }
+      generateCalendar(currentMonth, currentYear);
+    };
+  }
+
+  // No service selection impacts availability at this stage; service is chosen in the booking form
+});
+</script>
+{% endblock %}

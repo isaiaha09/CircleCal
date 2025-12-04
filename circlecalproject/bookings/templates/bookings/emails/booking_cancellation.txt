@@ -1,0 +1,18 @@
+Hi {{ booking.client_name|default:"there" }},
+
+This email confirms that your booking has been cancelled.
+
+CANCELLED BOOKING
+=================
+Service: {{ booking.service.name|default:booking.title }}
+Date & Time: {{ booking.start|date:"l, F j, Y" }} at {{ booking.start|time:"g:i A" }}
+Organization: {{ booking.organization.name }}
+
+If this cancellation was made in error or if you have any questions, please contact us as soon as possible.
+
+Thank you,
+{{ booking.organization.name }} Team
+
+---
+This is an automated notification from CircleCal.
+Visit CircleCal: {{ site_url }}

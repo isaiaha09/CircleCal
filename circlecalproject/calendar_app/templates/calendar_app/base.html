@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}CircleCal{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Tailwind CDN (optional, remove if you prefer custom CSS) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body class="bg-gray-100 text-gray-900">
+
+    <header class="bg-white border-b shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <!-- Left: Logo -->
+                <a href="{% url 'calendar_app:home' %}" class="font-bold text-xl text-blue-600">
+                    CircleCal
+                </a>
+
+                <!-- Mobile Menu Button -->
+                <button id="mobileMenuBtn" class="md:hidden text-gray-700 focus:outline-none">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+
+                <!-- Desktop Navigation -->
+                {% if request.user.is_authenticated %}
+                {% if request.organization %}
+                    <nav class="hidden md:flex items-center space-x-6">
+                        <a href="{% url 'calendar_app:dashboard' request.organization.slug %}"
+                            class="text-gray-700 hover:text-blue-600">Dashboard</a>
+                        <a href="{% url 'calendar_app:calendar' request.organization.slug %}"
+                            class="text-gray-700 hover:text-blue-600">Calendar</a>
+                        <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}"
+                            class="text-gray-700 hover:text-blue-600">Team</a>
+                        <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}"
+                            class="text-gray-700 hover:text-blue-600">Pricing</a>
+                        <a href="{% url 'calendar_app:choose_business' %}"
+                            class="text-gray-700 hover:text-blue-600">Switch</a>
+                            <form action="{% url 'accounts:logout' %}" method="post" class="inline">
+                            {% csrf_token %}
+                            <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
+                        </form>
+                    </nav>
+                {% else %}
+                    <nav class="hidden md:block">
+                        <a href="{% url 'calendar_app:choose_business' %}"
+                            class="text-blue-600 font-medium">Choose Business</a>
+                    </nav>
+                {% endif %}
+                {% else %}
+                <nav class="hidden md:flex items-center space-x-4">
+                    <a href="{% url 'accounts:login' %}" class="text-gray-700 hover:text-blue-600">Login</a>
+                    <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 font-semibold">Sign Up</a>
+                </nav>
+                {% endif %}
+            </div>
+
+            <!-- Mobile Navigation Dropdown -->
+            <div id="mobileMenu" class="hidden md:hidden mt-4 pb-4 border-t pt-4 space-y-3">
+                {% if request.user.is_authenticated %}
+                {% if request.organization %}
+                    <a href="{% url 'calendar_app:dashboard' request.organization.slug %}"
+                        class="block text-gray-700 hover:text-blue-600 py-2">Dashboard</a>
+                    <a href="{% url 'calendar_app:calendar' request.organization.slug %}"
+                        class="block text-gray-700 hover:text-blue-600 py-2">Calendar</a>
+                    <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}"
+                        class="block text-gray-700 hover:text-blue-600 py-2">Team</a>
+                    <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}"
+                        class="block text-gray-700 hover:text-blue-600 py-2">Pricing</a>
+                    <a href="{% url 'calendar_app:choose_business' %}"
+                        class="block text-gray-700 hover:text-blue-600 py-2">Switch Business</a>
+                    <form action="{% url 'accounts:logout' %}" method="post" class="mt-2">
+                        {% csrf_token %}
+                        <button type="submit" class="w-full text-left px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600">Logout</button>
+                    </form>
+                {% else %}
+                    <a href="{% url 'calendar_app:choose_business' %}"
+                        class="block text-blue-600 font-medium py-2">Choose Business</a>
+                {% endif %}
+                {% else %}
+                    <a href="{% url 'accounts:login' %}" class="block text-gray-700 hover:text-blue-600 py-2">Login</a>
+                    <a href="{% url 'calendar_app:signup' %}" class="block text-blue-600 font-semibold py-2">Sign Up</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <main class="max-w-6xl mx-auto px-4 py-6 md:p-6">
+        {% if messages %}
+        <div class="mb-4 space-y-2">
+            {% for message in messages %}
+                {% if message.tags == 'success' %}
+                    <div class="px-4 py-3 rounded bg-green-100 text-green-800">{{ message }}</div>
+                {% elif message.tags == 'error' %}
+                    <div class="px-4 py-3 rounded bg-red-100 text-red-800">{{ message }}</div>
+                {% else %}
+                    <div class="px-4 py-3 rounded bg-blue-100 text-blue-800">{{ message }}</div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block extra_scripts %}{% endblock %}
+ 
+    <!-- Mobile Menu Toggle -->
+    <script>
+        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+        const mobileMenu = document.getElementById('mobileMenu');
+        if (mobileMenuBtn && mobileMenu) {
+            mobileMenuBtn.addEventListener('click', () => {
+                mobileMenu.classList.toggle('hidden');
+            });
+        }
+    </script>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12 py-8">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- About -->
+                <div>
+                    <h3 class="font-bold text-lg mb-3">CircleCal</h3>
+                    <p class="text-gray-600 text-sm">Your all-in-one scheduling and booking platform. Manage appointments, availability, and teams effortlessly.</p>
+                </div>
+
+                <!-- Quick Links -->
+                <div>
+                    <h3 class="font-bold text-lg mb-3">Quick Links</h3>
+                    <ul class="space-y-2 text-sm">
+                        {% if request.user.is_authenticated and request.organization %}
+                            <li><a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Dashboard</a></li>
+                            <li><a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Calendar</a></li>
+                            <li><a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Team</a></li>
+                            <li><a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Pricing</a></li>
+                        {% else %}
+                            <li><a href="{% url 'accounts:login' %}" class="text-gray-600 hover:text-blue-600">Login</a></li>
+                            <li><a href="{% url 'calendar_app:signup' %}" class="text-gray-600 hover:text-blue-600">Sign Up</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+
+                <!-- Contact -->
+                <div>
+                    <h3 class="font-bold text-lg mb-3">Contact</h3>
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li>Email: support@circlecal.com</li>
+                        <li>Phone: +1 (555) 123-4567</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Copyright -->
+            <div class="mt-8 pt-6 border-t text-center text-sm text-gray-500 space-y-2">
+                <div>
+                    Copyright &copy; 2025 CircleCal - All rights reserved.
+                </div>
+                <div class="text-xs text-gray-500">
+                    <strong>Refund Policy (CircleCal)</strong>: Bookings and payments processed through CircleCal are subject to the platform Terms of Service. Merchants may define their own refund policy per service.
+                </div>
+                {% if request.organization and request.organization.settings %}
+                <div class="text-xs text-gray-500">
+                    <strong>{{ request.organization.name }} Refund Policy</strong>:
+                    {% if request.organization.settings.org_refunds_allowed %}
+                        Refunds permitted except within {{ request.organization.settings.org_refund_cutoff_hours }} hours of the appointment.
+                        {% if request.organization.settings.org_refund_policy_text %}
+                            <br>{{ request.organization.settings.org_refund_policy_text }}
+                        {% endif %}
+                    {% else %}
+                        Refunds are not permitted.
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

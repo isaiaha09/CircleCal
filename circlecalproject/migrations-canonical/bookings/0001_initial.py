@@ -1,0 +1,111 @@
+import django.db.models.deletion
+import django.utils.timezone
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+        ('accounts', '__first__'),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='OrgSettings',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('work_start', models.IntegerField(default=9)),
+                ('work_end', models.IntegerField(default=17)),
+                ('block_size', models.IntegerField(default=30)),
+                ('org_refunds_allowed', models.BooleanField(default=True)),
+                ('org_refund_cutoff_hours', models.PositiveIntegerField(default=24)),
+                ('org_refund_policy_text', models.TextField(blank=True)),
+                ('organization', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='settings', to='accounts.business')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Service',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('name', models.CharField(max_length=120)),
+                ('slug', models.SlugField(unique=True)),
+                ('description', models.TextField(blank=True)),
+                ('duration', models.PositiveIntegerField(help_text='Duration in minutes')),
+                ('price', models.DecimalField(decimal_places=2, default=0, max_digits=8)),
+                ('buffer_before', models.PositiveIntegerField(default=0)),
+                ('buffer_after', models.PositiveIntegerField(default=0)),
+                ('min_notice_hours', models.PositiveIntegerField(default=1)),
+                ('max_booking_days', models.PositiveIntegerField(default=60)),
+                ('is_active', models.BooleanField(default=True)),
+                ('refunds_allowed', models.BooleanField(default=True, help_text='Whether clients can receive refunds on cancellation.')),
+                ('refund_cutoff_hours', models.PositiveIntegerField(default=24, help_text='Hours before start time within which refunds are NOT permitted.')),
+                ('refund_policy_text', models.TextField(blank=True, help_text='Optional custom refund policy text shown to clients.')),
+                ('organization', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='services', to='accounts.business')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Booking',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('title', models.CharField(blank=True, max_length=200)),
+                ('start', models.DateTimeField()),
+                ('end', models.DateTimeField()),
+                ('client_name', models.CharField(blank=True, max_length=200)),
+                ('client_email', models.EmailField(blank=True, max_length=254)),
+                ('is_blocking', models.BooleanField(default=False)),
+                ('created_at', models.DateTimeField(default=django.utils.timezone.now)),
+                ('organization', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='bookings', to='accounts.business')),
+                ('service', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='bookings', to='bookings.service')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='ServiceWeeklyAvailability',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('weekday', models.PositiveSmallIntegerField()),
+                ('start_time', models.TimeField()),
+                ('end_time', models.TimeField()),
+                ('is_active', models.BooleanField(default=True)),
+                ('service', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='weekly_availability', to='bookings.service')),
+            ],
+            options={
+                'ordering': ['service', 'weekday', 'start_time'],
+            },
+        ),
+        migrations.CreateModel(
+            name='WeeklyAvailability',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('weekday', models.PositiveSmallIntegerField()),
+                ('start_time', models.TimeField()),
+                ('end_time', models.TimeField()),
+                ('is_active', models.BooleanField(default=True)),
+                ('organization', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='weekly_availability', to='accounts.business')),
+            ],
+            options={
+                'ordering': ['organization', 'weekday', 'start_time'],
+            },
+        ),
+        migrations.AddIndex(
+            model_name='service',
+            index=models.Index(fields=['organization', 'is_active'], name='bookings_se_organiz_2d7afc_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='booking',
+            index=models.Index(fields=['organization', 'start'], name='bookings_bo_organiz_677e6a_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='booking',
+            index=models.Index(fields=['service', 'start'], name='bookings_bo_service_79af9d_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='serviceweeklyavailability',
+            index=models.Index(fields=['service', 'weekday'], name='bookings_se_service_d8998b_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='weeklyavailability',
+            index=models.Index(fields=['organization', 'weekday'], name='bookings_we_organiz_629d6f_idx'),
+        ),
+    ]

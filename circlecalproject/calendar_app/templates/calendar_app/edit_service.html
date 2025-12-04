@@ -1,0 +1,135 @@
+{% extends "calendar_app/base.html" %}
+
+{% block title %}Edit Service • {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto py-8 px-4">
+  <h1 class="text-2xl font-semibold mb-2">Edit Service</h1>
+  <p class="text-sm text-gray-500 mb-6">
+    Update your service details.
+  </p>
+
+
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Name</label>
+      <input name="name" type="text" required value="{{ service.name }}"
+             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Slug (URL-friendly)</label>
+      <input type="text" value="{{ service.slug }}" disabled
+             class="mt-1 block w-full rounded-md border-gray-300 bg-gray-100 shadow-sm text-sm">
+      <p class="mt-1 text-xs text-gray-500">Slug cannot be changed to avoid breaking booking links</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700">Description</label>
+      <textarea name="description" rows="3"
+                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ service.description }}</textarea>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Duration (minutes)</label>
+        <input name="duration" type="number" value="{{ service.duration }}" min="1"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
+        <input name="price" type="number" step="0.01" value="{{ service.price }}"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Prep time before (minutes)</label>
+        <input name="buffer_before" type="number" value="{{ service.buffer_before }}" min="0"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        <p class="mt-1 text-xs text-gray-500">Time blocked before each appointment starts</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Cleanup time after (minutes)</label>
+        <input name="buffer_after" type="number" value="{{ service.buffer_after }}" min="0"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        <p class="mt-1 text-xs text-gray-500">Time blocked after each appointment ends</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">How soon can clients book? (hours)</label>
+        <input name="min_notice_hours" type="number" value="{{ service.min_notice_hours }}" min="0"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        <p class="mt-1 text-xs text-gray-500">Prevent last-minute bookings (e.g., 24 = 1 day notice)</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">How far ahead can clients book? (days)</label>
+        <input name="max_booking_days" type="number" value="{{ service.max_booking_days }}" min="1"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        <p class="mt-1 text-xs text-gray-500">Limit how far into the future slots are visible</p>
+      </div>
+    </div>
+
+    <div class="flex items-center">
+      <input type="checkbox" name="is_active" id="is_active" {% if service.is_active %}checked{% endif %}
+             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+      <label for="is_active" class="ml-2 text-sm text-gray-700">
+        Service is active (visible on public booking page)
+      </label>
+    </div>
+
+    <!-- Refund Policy -->
+    <div class="border-t pt-4 space-y-3">
+      <h2 class="text-base font-semibold">Refund Policy</h2>
+      <div class="flex items-center">
+        <input type="checkbox" name="refunds_allowed" id="refunds_allowed" {% if service.refunds_allowed %}checked{% endif %}
+               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+        <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
+        <input name="refund_cutoff_hours" type="number" value="{{ service.refund_cutoff_hours }}" min="0"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        <p class="mt-1 text-xs text-gray-500">Minimum 1 hour when refunds are enabled. Set to 0 by unchecking "Allow refunds".</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Custom refund policy text</label>
+        <textarea name="refund_policy_text" rows="3"
+                  class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ service.refund_policy_text }}</textarea>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between pt-4">
+      <a href="{% url 'calendar_app:dashboard' org.slug %}"
+         class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
+    <!-- Service availability editor -->
+    <div class="border-t pt-4 space-y-3">
+      <h2 class="text-base font-semibold">Service availability</h2>
+      <p class="text-sm text-gray-500">Specify which days/times this service is offered. These must be within your organization's default weekly availability shown below. Use comma-separated ranges like <code>09:00-12:00,13:00-17:00</code>.</p>
+      <div class="grid grid-cols-1 gap-2 mt-2">
+        {% for row in weekly_edit_rows %}
+          <div class="flex items-center gap-3">
+            <div style="width:64px; font-weight:600">{{ row.label }}</div>
+            <div class="text-xs text-gray-600">Default: {{ row.org_ranges|default:'—' }}</div>
+          </div>
+          <div>
+            <input type="text" name="svc_avail_{{ row.ui }}" value="{{ row.svc_ranges }}"
+                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="e.g. 09:00-12:00,13:00-17:00">
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+      <button type="submit"
+              class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+        Save Changes
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

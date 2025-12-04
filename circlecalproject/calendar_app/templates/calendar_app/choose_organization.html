@@ -1,0 +1,140 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+
+{% block title %}Choose Your Business{% endblock %}
+
+{% block content %}
+<style>
+    .org-page {
+        max-width: 900px;
+        margin: 60px auto;
+        text-align: center;
+        padding: 0 20px;
+    }
+
+    .org-title {
+        font-size: 2.2rem;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #000000ff;
+    }
+
+    .org-subtitle {
+        color: rgba(0, 0, 0, 0.7);
+        margin-bottom: 40px;
+    }
+
+    .org-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 25px;
+        padding: 10px;
+    }
+
+    .org-card {
+        background: #1f1f29;
+        padding: 25px;
+        border-radius: 14px;
+        cursor: pointer;
+        text-align: left;
+        border: 1px solid rgba(255,255,255,0.1);
+        transition: all 0.25s ease;
+    }
+
+    .org-card:hover {
+        transform: translateY(-4px);
+        border-color: #6b7bff;
+        box-shadow: 0 8px 18px rgba(0,0,0,0.2);
+    }
+
+    .org-logo {
+        width: 55px;
+        height: 55px;
+        border-radius: 12px;
+        background: #6b7bff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        font-weight: bold;
+        color: white;
+        margin-bottom: 14px;
+    }
+
+    .org-name {
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: white;
+        margin-bottom: 6px;
+    }
+
+    .org-role {
+        display: inline-block;
+        padding: 4px 8px;
+        font-size: 0.8rem;
+        color: white;
+        background: #4b59f0;
+        border-radius: 6px;
+    }
+
+    .create-org {
+        margin-top: 40px;
+    }
+
+    .create-btn {
+        background: #4b59f0;
+        padding: 12px 22px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 600;
+        transition: background 0.2s ease;
+        text-decoration: none;
+    }
+
+    .create-btn:hover {
+        background: #3743c4;
+    }
+</style>
+
+<div class="org-page">
+
+    <h1 class="org-title">Select a Business</h1>
+    <p class="org-subtitle">Choose which workspace you want to access.</p>
+
+    {% if organizations %}
+        <div class="org-list">
+            {% for org in organizations %}
+                <a href="{% url 'calendar_app:dashboard' org.slug %}" style="text-decoration:none;">
+                    <div class="org-card">
+                        <div class="org-logo">
+                            {{ org.name|slice:":1"|upper }}
+                        </div>
+
+                        <div class="org-name">{{ org.name }}</div>
+
+                        {% if org.memberships.all %}
+                            {% for m in org.memberships.all %}
+                                {% if m.user == request.user %}
+                                    <span class="org-role">{{ m.role|title }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p style="color:rgba(255,255,255,0.6); margin-top:20px;">
+            You are not a member of any businesses yet.
+        </p>
+    {% endif %}
+
+    <div class="create-org">
+        <a href="{% url 'calendar_app:create_organization' %}" class="create-btn">
+            + Create New Business
+        </a>
+    </div>
+
+</div>
+
+{% endblock %}

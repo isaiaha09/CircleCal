@@ -1,0 +1,268 @@
+{% extends "calendar_app/base.html" %}
+{% load tz %}
+{% block title %}Bookings - {{ organization.name }}{% endblock %}
+
+{% block content %}
+<style>
+  .bookings-container { max-width: 1200px; margin: 40px auto; padding: 20px; }
+  .bookings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+  .filter-controls { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .filter-btn { padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .filter-btn.active { background: #007bff; color: white; border-color: #007bff; }
+  .filter-btn:hover { border-color: #007bff; }
+  .bookings-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .bookings-table th { background: #f8f9fa; padding: 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #dee2e6; }
+  .bookings-table td { padding: 12px; border-bottom: 1px solid #dee2e6; }
+  .bookings-table tr:hover { background: #f8f9fa; }
+  .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .status-upcoming { background: #d1ecf1; color: #0c5460; }
+  .status-past { background: #d6d8db; color: #383d41; }
+  .status-today { background: #d4edda; color: #155724; }
+  .booking-actions { display: flex; gap: 8px; }
+  .btn-sm { padding: 4px 12px; font-size: 13px; border: none; border-radius: 4px; cursor: pointer; transition: all .2s; }
+  .btn-view { background: #007bff; color: white; }
+  .btn-view:hover { background: #0056b3; }
+  .btn-delete { background: #dc3545; color: white; }
+  .btn-delete:hover { background: #c82333; }
+  .no-bookings { text-align: center; padding: 60px 20px; color: #6c757d; }
+  .search-box { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; width: 250px; }
+</style>
+
+<div class="bookings-container">
+  <div class="bookings-header">
+    <h1 style="font-size: 2rem; font-weight: bold; margin: 0;">Bookings</h1>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="{% url 'calendar_app:calendar' organization.slug %}" class="btn-sm btn-view">View Calendar</a>
+      <a href="{% url 'calendar_app:dashboard' organization.slug %}" class="btn-sm btn-view">Back to Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-controls">
+    <input type="text" id="searchBox" class="search-box" placeholder="Search by name or email...">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="upcoming">Upcoming</button>
+    <button class="filter-btn" data-filter="today">Today</button>
+    <button class="filter-btn" data-filter="past">Past</button>
+    <select id="serviceFilter" class="filter-btn" style="padding: 8px 12px;">
+      <option value="">All Services</option>
+      {% for service in services %}
+        <option value="{{ service.id }}">{{ service.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Bookings Table -->
+  <table class="bookings-table">
+    <thead>
+      <tr>
+        <th>Date & Time</th>
+        <th>Client</th>
+        <th>Service</th>
+        <th>Duration</th>
+        <th>Status</th>
+        <th>Booked At</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="bookingsTableBody">
+      {% if bookings %}
+        {% for booking in bookings %}
+        <tr data-booking-id="{{ booking.id }}" 
+            data-status="{% if booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
+            data-service-id="{{ booking.service.id|default:'' }}"
+            data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }}">
+          <td>
+            <div style="font-weight: 600;">{{ booking.start|timezone:organization.timezone|date:"M d, Y" }}</div>
+            <div style="font-size: 13px; color: #6c757d;">{{ booking.start|timezone:organization.timezone|time:"g:i A" }} - {{ booking.end|timezone:organization.timezone|time:"g:i A" }}</div>
+          </td>
+          <td>
+            <div style="font-weight: 600;">{{ booking.client_name|default:"No name" }}</div>
+            <div style="font-size: 13px; color: #6c757d;">{{ booking.client_email|default:"No email" }}</div>
+          </td>
+          <td>{{ booking.service.name|default:"N/A" }}</td>
+          <td>{{ booking.service.duration|default:"-" }} min</td>
+          <td>
+            {% if booking.start|timezone:organization.timezone|date == today %}
+              <span class="status-badge status-today">Today</span>
+            {% elif booking.start|timezone:organization.timezone < now %}
+              <span class="status-badge status-past">Past</span>
+            {% else %}
+              <span class="status-badge status-upcoming">Upcoming</span>
+            {% endif %}
+          </td>
+          <td>
+            <div style="font-weight: 600;">{{ booking.created_at|timezone:organization.timezone|date:"M d, Y" }}</div>
+            <div style="font-size: 13px; color: #6c757d;">{{ booking.created_at|timezone:organization.timezone|time:"g:i A" }}</div>
+          </td>
+          <td>
+            <div class="booking-actions">
+              <button class="btn-sm btn-view" onclick="viewBooking({{ booking.id }})">View</button>
+              <button class="btn-sm btn-delete" onclick="deleteBooking({{ booking.id }}, '{{ booking.start|date:"M d, Y" }}', '{{ booking.client_name }}')">Delete</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="7" class="no-bookings">
+            <div style="font-size: 18px; margin-bottom: 10px;">📅</div>
+            No bookings found
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Booking Detail Modal -->
+<div id="bookingModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000; padding: 20px;">
+  <div style="background: white; padding: 30px; border-radius: 12px; max-width: 500px; width: 100%; position: relative;">
+    <button onclick="closeModal()" style="position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">×</button>
+    
+    <h2 style="margin-bottom: 20px; font-size: 24px;">Booking Details</h2>
+    
+    <div style="display: grid; gap: 15px;">
+      <div>
+        <strong>Date:</strong>
+        <div id="modalDate" style="color: #666; margin-top: 4px;"></div>
+      </div>
+      <div>
+        <strong>Time:</strong>
+        <div id="modalTime" style="color: #666; margin-top: 4px;"></div>
+      </div>
+      <div>
+        <strong>Booked At:</strong>
+        <div id="modalBookedAt" style="color: #666; margin-top: 4px;"></div>
+      </div>
+      <div>
+        <strong>Client Name:</strong>
+        <div id="modalClientName" style="color: #666; margin-top: 4px;"></div>
+      </div>
+      <div>
+        <strong>Client Email:</strong>
+        <div id="modalClientEmail" style="color: #666; margin-top: 4px;"></div>
+      </div>
+      <div>
+        <strong>Service:</strong>
+        <div id="modalService" style="color: #666; margin-top: 4px;"></div>
+      </div>
+      <div>
+        <strong>Duration:</strong>
+        <div id="modalDuration" style="color: #666; margin-top: 4px;"></div>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px;">
+      <button onclick="closeModal()" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const orgSlug = "{{ organization.slug }}";
+const csrftoken = '{{ csrf_token }}';
+
+// Filter functionality
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    if (this.dataset.filter) {
+      document.querySelectorAll('.filter-btn[data-filter]').forEach(b => b.classList.remove('active'));
+      this.classList.add('active');
+      filterBookings();
+    }
+  });
+});
+
+document.getElementById('searchBox').addEventListener('input', filterBookings);
+document.getElementById('serviceFilter').addEventListener('change', filterBookings);
+
+function filterBookings() {
+  const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+  const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+  const serviceId = document.getElementById('serviceFilter').value;
+
+  document.querySelectorAll('#bookingsTableBody tr').forEach(row => {
+    const status = row.dataset.status;
+    const search = row.dataset.search;
+    const rowServiceId = row.dataset.serviceId;
+
+    let show = true;
+
+    // Status filter
+    if (activeFilter !== 'all' && status !== activeFilter) show = false;
+
+    // Search filter
+    if (searchTerm && !search.includes(searchTerm)) show = false;
+
+    // Service filter
+    if (serviceId && rowServiceId !== serviceId) show = false;
+
+    row.style.display = show ? '' : 'none';
+  });
+}
+
+function viewBooking(id) {
+  const row = document.querySelector(`tr[data-booking-id="${id}"]`);
+  if (!row) return;
+
+  const cells = row.querySelectorAll('td');
+  document.getElementById('modalDate').textContent = cells[0].querySelector('div').textContent;
+  document.getElementById('modalTime').textContent = cells[0].querySelectorAll('div')[1].textContent;
+  // Booked At is the 6th column (index 5): two divs like the Date & Time column
+  const bookedAtDivs = cells[5].querySelectorAll('div');
+  if (bookedAtDivs.length >= 2) {
+    document.getElementById('modalBookedAt').textContent = `${bookedAtDivs[0].textContent} ${bookedAtDivs[1].textContent}`;
+  } else {
+    document.getElementById('modalBookedAt').textContent = '';
+  }
+  document.getElementById('modalClientName').textContent = cells[1].querySelector('div').textContent;
+  document.getElementById('modalClientEmail').textContent = cells[1].querySelectorAll('div')[1].textContent;
+  document.getElementById('modalService').textContent = cells[2].textContent;
+  document.getElementById('modalDuration').textContent = cells[3].textContent;
+
+  document.getElementById('bookingModal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('bookingModal').style.display = 'none';
+}
+
+async function deleteBooking(id, date, clientName) {
+  if (!confirm(`Delete booking for ${clientName} on ${date}?`)) return;
+
+  try {
+    // You'll need to add a delete endpoint
+    const response = await fetch(`/bus/${orgSlug}/bookings/${id}/delete/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrftoken
+      }
+    });
+
+    if (response.ok) {
+      document.querySelector(`tr[data-booking-id="${id}"]`).remove();
+      
+      // Check if table is empty
+      const remaining = document.querySelectorAll('#bookingsTableBody tr:not([style*="display: none"])').length;
+      if (remaining === 0) {
+        document.getElementById('bookingsTableBody').innerHTML = `
+          <tr>
+            <td colspan="6" class="no-bookings">
+              <div style="font-size: 18px; margin-bottom: 10px;">📅</div>
+              No bookings found
+            </td>
+          </tr>
+        `;
+      }
+    } else {
+      alert('Failed to delete booking');
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('Error deleting booking');
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="text-center py-6 md:py-10">
+
+    <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-4 md:mb-6">
+        Welcome, {{ request.user.username }} 👋
+    </h1>
+
+    <p class="text-gray-700 mb-6 md:mb-10 text-base md:text-lg">
+        What would you like to do today?
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        <!-- Organizations -->
+        <a href="{% url 'calendar_app:choose_business' %}"
+           class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+            <h2 class="text-2xl font-semibold text-blue-600">Businesses</h2>
+            <p class="text-gray-600 mt-2">View and manage your businesses.</p>
+        </a>
+
+        <!-- Billing Portal -->
+        {% if org %}
+            <a href="{% url 'billing:manage_billing' org.slug %}"
+               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Billing</h2>
+                <p class="text-gray-600 mt-2">In-app billing: trial countdown, plan, payment methods.</p>
+            </a>
+
+            <!-- Pricing -->
+            <a href="{% url 'calendar_app:pricing_page' org.slug %}"
+               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Pricing</h2>
+                <p class="text-gray-600 mt-2">View available plans.</p>
+            </a>
+
+            <!-- Calendar -->
+            <a href="{% url 'calendar_app:calendar' org.slug %}"
+               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Calendar</h2>
+                <p class="text-gray-600 mt-2">Open your scheduling calendar.</p>
+            </a>
+
+            <!-- Services -->
+            <a href="{% url 'calendar_app:services_page' org.slug %}"
+               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Services</h2>
+                <p class="text-gray-600 mt-2">Manage your service offerings.</p>
+            </a>
+
+            <!-- Bookings -->
+            <a href="{% url 'calendar_app:bookings_list' org.slug %}"
+               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Bookings</h2>
+                <p class="text-gray-600 mt-2">View all client bookings.</p>
+            </a>
+
+            <!-- Team -->
+            <a href="{% url 'calendar_app:team_dashboard' org.slug %}"
+               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Team</h2>
+                <p class="text-gray-600 mt-2">Manage team roles & invitations.</p>
+            </a>
+        {% endif %}
+
+        <!-- Profile -->
+        <a href="{% url 'accounts:profile' %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+            <h2 class="text-2xl font-semibold text-blue-600">Profile</h2>
+            <p class="text-gray-600 mt-2">Update your personal info.</p>
+        </a>
+    </div>
+
+</div>
+{% endblock %}

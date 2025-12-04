@@ -1,0 +1,206 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+
+{% block title %}Booking with {{ org.name }}{% endblock %}
+
+{% block content %}
+<style>
+    .calendar-container {
+        max-width: 900px;
+        margin: 40px auto;
+        color: white;
+    }
+
+    .month-header {
+        text-align: center;
+        font-size: 1.7rem;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+
+    .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 12px;
+        padding: 20px 0;
+    }
+
+    .day-circle {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #1f1f29;
+        color: white;
+        cursor: pointer;
+        transition: transform .15s ease, background .15s ease;
+        border: 1px solid rgba(255,255,255,0.15);
+        margin: 0 auto;
+    }
+
+    .day-circle:hover {
+        transform: scale(1.07);
+        background: #4b59f0;
+    }
+
+    .day-circle.disabled {
+        opacity: 0.3;
+        pointer-events: none;
+    }
+
+    /* MODAL */
+    #timeModal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.65);
+        justify-content: center;
+        align-items: center;
+    }
+
+    .modal-box {
+        background: #1f1f29;
+        padding: 20px;
+        border-radius: 12px;
+        width: 360px;
+    }
+
+    .time-block {
+        padding: 10px;
+        background: #2b2b36;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: background .15s ease;
+    }
+
+    .time-block:hover {
+        background: #4b59f0;
+        color: white;
+    }
+</style>
+
+<div class="calendar-container">
+
+    <h1 class="month-header" id="monthHeader"></h1>
+
+    <div class="calendar-grid" id="dayGrid"></div>
+
+</div>
+
+<!-- TIME MODAL -->
+<div id="timeModal">
+    <div class="modal-box">
+        <h3 id="selectedDateLabel" style="color:white;margin-bottom:10px;"></h3>
+
+        <div id="timeSlots"></div>
+
+        <button onclick="closeTimeModal()"
+                style="width:100%;margin-top:10px;padding:10px;border-radius:8px;background:#444;color:white;">
+            Close
+        </button>
+    </div>
+</div>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const dayGrid = document.getElementById("dayGrid");
+    const monthHeader = document.getElementById("monthHeader");
+
+    const now = new Date();
+    let currentMonth = now.getMonth();
+    let currentYear = now.getFullYear();
+
+    const timeModal = document.getElementById("timeModal");
+    const selectedDateLabel = document.getElementById("selectedDateLabel");
+    const timeSlots = document.getElementById("timeSlots");
+
+    // Default schedule settings (can be changed to org settings)
+    let WORK_START = 9;      // 9am
+    let WORK_END = 17;       // 5pm
+    let BLOCK_SIZE = 30;     // 30 minutes
+
+    function generateCalendar(month, year) {
+        dayGrid.innerHTML = "";
+
+        monthHeader.innerText = new Date(year, month).toLocaleString("default", {
+            month: "long",
+            year: "numeric"
+        });
+
+        const firstDay = new Date(year, month, 1).getDay();
+        const numDays = new Date(year, month + 1, 0).getDate();
+
+        // Empty placeholders for first row alignment
+        for (let i = 0; i < firstDay; i++) {
+            const empty = document.createElement("div");
+            dayGrid.appendChild(empty);
+        }
+
+        for (let day = 1; day <= numDays; day++) {
+            const date = new Date(year, month, day);
+
+            const circle = document.createElement("div");
+            circle.className = "day-circle";
+            circle.innerText = day;
+
+            // disable past dates
+            if (date < new Date().setHours(0,0,0,0)) {
+                circle.classList.add("disabled");
+            } else {
+                circle.addEventListener("click", () => openTimeModal(year, month, day));
+            }
+
+            dayGrid.appendChild(circle);
+        }
+    }
+
+    function openTimeModal(year, month, day) {
+        const date = new Date(year, month, day);
+        selectedDateLabel.innerText = date.toDateString();
+
+        timeSlots.innerHTML = "";
+
+        let start = new Date(year, month, day, WORK_START, 0, 0);
+        let end = new Date(year, month, day, WORK_END, 0, 0);
+
+        while (start < end) {
+            let blockStart = new Date(start);
+            let blockEnd = new Date(start.getTime() + BLOCK_SIZE * 60000);
+
+            const block = document.createElement("div");
+            block.className = "time-block";
+            block.innerText = 
+                blockStart.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) + 
+                " - " + 
+                blockEnd.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+
+            block.addEventListener("click", () => {
+                alert("BOOKING: " + block.innerText); 
+                // Here you will POST booking to Django
+            });
+
+            timeSlots.appendChild(block);
+
+            start = blockEnd;
+        }
+
+        timeModal.style.display = "flex";
+    }
+
+    function closeTimeModal() {
+        timeModal.style.display = "none";
+    }
+
+    window.closeTimeModal = closeTimeModal;
+
+    // INITIAL RENDER
+    generateCalendar(currentMonth, currentYear);
+});
+</script>
+
+{% endblock %}

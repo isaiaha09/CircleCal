@@ -1,0 +1,23 @@
+Hi {{ booking.client_name|default:"there" }},
+
+Your booking has been confirmed! We're looking forward to seeing you.
+
+BOOKING DETAILS
+===============
+Service: {{ booking.service.name|default:booking.title }}
+Date & Time: {{ booking.start|date:"l, F j, Y" }} at {{ booking.start|time:"g:i A" }}
+Duration: {{ booking.service.duration|default:"--" }} minutes
+Business: {{ booking.organization.name }}
+{% if booking.service.price %}Price: ${{ booking.service.price }}{% endif %}
+
+If you need to make any changes or have questions, please contact us directly.
+
+{% if cancel_url %}Cancel: {{ cancel_url }}{% endif %}
+{% if reschedule_url %}Reschedule: {{ reschedule_url }}{% endif %}
+
+See you soon!
+{{ booking.organization.name }} Team
+
+---
+This is an automated confirmation email from CircleCal.
+Visit CircleCal: {{ site_url }}

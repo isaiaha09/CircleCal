@@ -1,0 +1,68 @@
+{% extends "calendar_app/base.html" %}
+{% load static %}
+
+{% block title %}Edit Business - {{ org.name }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 600px; margin: 50px auto; padding: 40px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    <h2 style="margin-bottom: 30px; color: #333; font-size: 28px; font-weight: 600;">Edit Business</h2>
+    
+    <form method="post" style="display: flex; flex-direction: column; gap: 20px;">
+        {% csrf_token %}
+        
+        <div>
+            <label for="name" style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Business Name</label>
+            <input 
+                type="text" 
+                id="name" 
+                name="name" 
+                value="{{ org.name }}"
+                required
+                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;"
+                onfocus="this.style.borderColor='#007bff'"
+                onblur="this.style.borderColor='#e0e0e0'"
+            >
+        </div>
+        
+        <div>
+            <label for="timezone" style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Timezone</label>
+            <select 
+                id="timezone" 
+                name="timezone" 
+                required
+                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;"
+                onfocus="this.style.borderColor='#007bff'"
+                onblur="this.style.borderColor='#e0e0e0'"
+            >
+                {% for tz in timezones %}
+                    <option value="{{ tz }}" {% if tz == org.timezone %}selected{% endif %}>{{ tz }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div style="margin-top: 10px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">
+            <strong>⚠️ Note:</strong> Changing the business name or timezone may affect existing bookings and availability settings.
+        </div>
+        
+        <div style="display: flex; gap: 12px; margin-top: 10px;">
+            <button 
+                type="submit"
+                style="flex: 1; padding: 14px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s;"
+                onmouseover="this.style.background='#0056b3'"
+                onmouseout="this.style.background='#007bff'"
+            >
+                Save Changes
+            </button>
+            
+            <a 
+                href="{% url 'calendar_app:choose_business' %}"
+                style="flex: 1; padding: 14px; background: #6c757d; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; text-align: center; text-decoration: none; display: block;"
+                onmouseover="this.style.background='#545b62'"
+                onmouseout="this.style.background='#6c757d'"
+            >
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

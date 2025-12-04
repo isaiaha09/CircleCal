@@ -1,0 +1,203 @@
+{% extends "calendar_app/base.html" %}
+
+{% block extra_head %}
+<style>
+  /* Page-specific enhanced field styling */
+  .cc-field {
+    border: 2px solid #cbd5e1; /* slate-300 */
+    background: linear-gradient(#ffffff,#f1f5f9);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 2px 4px rgba(0,0,0,0.06);
+    border-radius: 0.5rem;
+    transition: border-color .18s ease, box-shadow .18s ease;
+    padding: 0.65rem 0.85rem; /* slightly larger height */
+    font-size: 0.95rem; /* subtle size bump */
+    width: 100%; /* ensure full available width */
+  }
+  textarea.cc-field { min-height: 5.25rem; } /* gently taller textarea */
+  }
+  .cc-field:focus {
+    outline: none;
+    border-color: #2563eb; /* blue-600 */
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.25), inset 0 1px 0 rgba(255,255,255,0.7);
+  }
+  .cc-field[disabled] { background:#f1f5f9; opacity:.65; cursor:not-allowed; }
+  .cc-field.error { border-color:#dc2626; box-shadow:0 0 0 3px rgba(220,38,38,0.2); }
+  /* Compact slug preview styling */
+  .slug-preview {
+    display:inline-block;
+    max-width:70px; /* keep it short */
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    padding:0.35rem 0.55rem; /* smaller than inputs */
+    font-size:0.75rem;
+    font-weight:500;
+  }
+</style>
+{% endblock %}
+
+{% block title %}New Service • {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4">
+  <div class="mb-6 md:mb-10 text-center">
+    <h1 class="text-3xl md:text-4xl font-bold mb-2">Add a Service</h1>
+    <p class="text-sm md:text-base text-gray-600">Define what clients can book. Clear naming improves conversion.</p>
+  </div>
+
+  <div class="grid md:grid-cols-3 gap-8">
+    <!-- Form -->
+    <div class="md:col-span-2 bg-white border rounded-xl shadow-sm p-8">
+      {% if messages %}
+        <div class="mb-6 space-y-2">
+          {% for message in messages %}
+            <div class="px-3 py-2 rounded text-sm {% if message.tags == 'error' %}bg-red-100 text-red-700{% elif message.tags == 'success' %}bg-green-100 text-green-700{% else %}bg-blue-50 text-blue-700{% endif %}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <form method="post" class="space-y-8" novalidate>
+        {% csrf_token %}
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Service Name</label>
+            <input name="name" id="svcName" type="text" required placeholder="e.g. 60-Minute Private Session"
+              class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Be specific (length + format). Helps clients pick faster.</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Public URL Slug <span class="text-gray-400">(auto)</span></label>
+            <div class="mt-1 flex items-center space-x-2 text-sm">
+              <span class="text-gray-500 select-none">/service/</span>
+              <span id="slugPreview" class="font-mono bg-gray-100 border rounded text-gray-700 cc-field slug-preview" style="border-width:1px">preview</span>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">We generate this from the name. You can edit later.</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Description</label>
+          <textarea name="description" rows="4" placeholder="Outline goals, structure, who it's for."
+            class="cc-field mt-1 w-full"></textarea>
+          <p class="mt-2 text-xs text-gray-500">Mention outcomes and any prerequisites.</p>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Duration (minutes)</label>
+            <input name="duration" type="number" min="1" value="60"
+              class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Total time blocked per booking.</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
+            <div class="relative mt-1">
+              <span class="absolute left-3 top-2.5 text-gray-500 text-sm">$</span>
+              <input name="price" type="number" step="0.01" value="0" min="0"
+                class="cc-field pl-7 w-full" />
+            </div>
+            <p class="mt-2 text-xs text-gray-500">Set to 0 for free / included services.</p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Prep Buffer (minutes)</label>
+            <input name="buffer_before" type="number" value="0" min="0"
+              class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Blocks time before each booking.</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Cleanup Buffer (minutes)</label>
+            <input name="buffer_after" type="number" value="0" min="0"
+              class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Blocks time after each booking.</p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Min Notice (hours)</label>
+            <input name="min_notice_hours" type="number" value="1" min="0"
+              class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Prevent last‑minute bookings (e.g. 24 = one day).</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Max Advance (days)</label>
+            <input name="max_booking_days" type="number" value="30" min="1"
+              class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Limit how far out clients can book.</p>
+          </div>
+        </div>
+
+        <!-- Refund Policy -->
+        <div class="border-t pt-6 space-y-4">
+          <h2 class="text-base font-semibold">Refund Policy (Service)</h2>
+          <div class="flex items-center">
+            <input type="checkbox" name="refunds_allowed" id="refunds_allowed" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
+            <input name="refund_cutoff_hours" type="number" value="24" min="0" class="cc-field mt-1 w-full" />
+            <p class="mt-2 text-xs text-gray-500">Inside this window, refunds are not permitted.</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Custom refund policy text</label>
+            <textarea name="refund_policy_text" rows="3" class="cc-field mt-1 w-full" placeholder="Optional. Shown to clients in emails and pages."></textarea>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
+          <button type="submit" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 shadow-sm">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m7-7H5"/></svg>
+            Create Service
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Guidance Sidebar -->
+    <div class="space-y-6">
+      <div class="bg-white border rounded-xl shadow-sm p-6">
+        <h2 class="text-sm font-semibold mb-3">Best Practices</h2>
+        <ul class="space-y-3 text-sm text-gray-600">
+          <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Include length in the name.</li>
+          <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Keep description outcome‑focused.</li>
+          <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Use buffers to avoid burnout.</li>
+          <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Limit advance window to manage demand.</li>
+        </ul>
+      </div>
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-6 text-sm text-blue-700">
+        Need recurring packages or group sessions? Upgrade to Pro for advanced booking logic.
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-8 text-center">
+    <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Dashboard</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function slugify(str){
+    return str.toString().trim().toLowerCase()
+      .replace(/[^a-z0-9\s-]/g,'')
+      .replace(/\s+/g,'-')
+      .replace(/-+/g,'-');
+  }
+  const nameInput = document.getElementById('svcName');
+  const slugPreview = document.getElementById('slugPreview');
+  nameInput && nameInput.addEventListener('input', () => {
+    const v = nameInput.value.trim();
+    const full = v ? slugify(v) : 'preview';
+    // Shorten visually to ~18 chars; underlying generation still full server-side
+    slugPreview.textContent = full.length > 18 ? full.slice(0,18) + '…' : full;
+    slugPreview.setAttribute('title', full); // hover shows full slug
+  });
+</script>
+{% endblock %}

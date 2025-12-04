@@ -1,0 +1,6 @@
+{% load i18n %}
+
+{# Replace Cancel/Back with a single Back to Profile action #}
+<a href="{% url 'accounts:profile' %}" class="btn btn-secondary">{% trans "Back to Profile" %}</a>
+
+<button type="submit" class="btn btn-primary">{% trans "Next" %}</button>
