@@ -11,7 +11,7 @@
     {% block extra_head %}{% endblock %}
 </head>
 
-<body class="bg-gray-100 text-gray-900">
+<body class="bg-blue-50  text-gray-900">
 
     <header class="bg-white border-b shadow-sm">
         <div class="max-w-7xl mx-auto px-4 py-4">
@@ -166,19 +166,7 @@
                 <div class="text-xs text-gray-500">
                     <strong>Refund Policy (CircleCal)</strong>: Bookings and payments processed through CircleCal are subject to the platform Terms of Service. Merchants may define their own refund policy per service.
                 </div>
-                {% if request.organization and request.organization.settings %}
-                <div class="text-xs text-gray-500">
-                    <strong>{{ request.organization.name }} Refund Policy</strong>:
-                    {% if request.organization.settings.org_refunds_allowed %}
-                        Refunds permitted except within {{ request.organization.settings.org_refund_cutoff_hours }} hours of the appointment.
-                        {% if request.organization.settings.org_refund_policy_text %}
-                            <br>{{ request.organization.settings.org_refund_policy_text }}
-                        {% endif %}
-                    {% else %}
-                        Refunds are not permitted.
-                    {% endif %}
-                </div>
-                {% endif %}
+                
             </div>
         </div>
     </footer>

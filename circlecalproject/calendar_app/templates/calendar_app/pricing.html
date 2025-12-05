@@ -9,7 +9,13 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
         {% for plan in plans %}
-        <div class="border rounded-xl p-8 shadow-lg hover:shadow-xl transition {% if plan.slug == 'pro' %}border-blue-500 ring-2 ring-blue-500{% endif %}">
+        <div class="relative border rounded-xl p-8 shadow-lg hover:shadow-xl transition {% if plan.slug == 'pro' %}border-blue-500 ring-2 ring-blue-500{% endif %}">
+            {# Trial badge for Basic when organization is currently in trial #}
+            {% if subscription and subscription.status == 'trialing' and plan.slug == 'basic' and current_plan and current_plan.slug == 'basic' %}
+            <div class="absolute right-4 -top-3">
+                <div class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200">Trial</div>
+            </div>
+            {% endif %}
             {% if plan.slug == 'pro' %}
             <div class="bg-blue-500 text-white text-xs font-bold uppercase px-3 py-1 rounded-full inline-block mb-4">Most Popular</div>
             {% endif %}
@@ -48,19 +54,12 @@
         </div>
         {% endfor %}
     </div>
-
-    {% if current_plan %}
+    {% if subscription %}
     <div class="mt-12 text-center">
-        <p class="text-gray-600 mb-4">Current plan: <strong>{{ current_plan.name }}</strong></p>
+        <p class="text-gray-600 mb-2">Current plan: <strong>{{ display_plan.name }}</strong></p>
         <div class="flex justify-center gap-6">
             <a href="{% url 'billing:manage_billing' org.slug %}" class="text-green-600 hover:underline">In-app billing manager →</a>
-            {% if not subscription %}
             <a href="{% url 'billing:billing_portal' org.slug %}" class="text-blue-600 hover:underline">Stripe portal →</a>
-            {% elif subscription.status != 'trialing' %}
-            <a href="{% url 'billing:billing_portal' org.slug %}" class="text-blue-600 hover:underline">Stripe portal →</a>
-            {% elif subscription.trial_end and subscription.trial_end <= now %}
-            <a href="{% url 'billing:billing_portal' org.slug %}" class="text-blue-600 hover:underline">Stripe portal →</a>
-            {% endif %}
         </div>
     </div>
     {% endif %}

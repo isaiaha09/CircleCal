@@ -330,6 +330,8 @@ def create_business(request):
             org = form.save(commit=False)
             org.owner = request.user
             org.slug = form.cleaned_data["slug"]
+            # Save timezone chosen during business creation
+            org.timezone = form.cleaned_data.get('timezone', org.timezone)
             org.save()
 
             # Create membership for the creator
@@ -695,14 +697,36 @@ def pricing_page(request, org_slug):
     if not org:
         return redirect("calendar_app:choose_business")
     
-    plans = Plan.objects.all().order_by('price')
+    # Only show active plans and order by price (low -> high)
+    plans = Plan.objects.filter(is_active=True).order_by('price')
+
+    # Provide subscription context to template so it can show trial status
     subscription = get_subscription(org)
-    current_plan = subscription.plan if subscription else None
-    
+    # Determine current_plan object for template: prefer explicit subscription.plan,
+    # but if the org has a subscription without a linked plan (e.g., trial created
+    # without setting plan), fall back to the plan slug derived from billing.utils
+    current_plan = None
+    if subscription:
+        if subscription.plan:
+            current_plan = subscription.plan
+        else:
+            from billing.utils import get_plan_slug
+            from billing.models import Plan
+            current_plan = Plan.objects.filter(slug=get_plan_slug(org)).first()
+
+    # Also expose a display_plan variable (same as current_plan) for templates
+    display_plan = current_plan
+
+    # Provide 'now' for template comparisons (trial end etc.)
+    now = timezone.now()
+
     return render(request, "calendar_app/pricing.html", {
         "org": org,
         "plans": plans,
-        "current_plan": current_plan
+        "current_plan": current_plan,
+        "display_plan": display_plan,
+        "subscription": subscription,
+        "now": now,
     })
 
 

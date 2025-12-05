@@ -68,3 +68,28 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f"{self.organization.name} — {self.plan.name if self.plan else 'No plan'}"
+
+
+class PaymentMethod(models.Model):
+    """Cached non-sensitive payment method metadata for faster UI and invoice rendering.
+
+    Stores only metadata (brand, last4, exp_month, exp_year) and the Stripe payment_method id.
+    Keep this in sync via webhooks and update operations.
+    """
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='payment_methods')
+    stripe_pm_id = models.CharField(max_length=255, unique=True)
+    brand = models.CharField(max_length=50, blank=True, null=True)
+    last4 = models.CharField(max_length=8, blank=True, null=True)
+    exp_month = models.IntegerField(null=True, blank=True)
+    exp_year = models.IntegerField(null=True, blank=True)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "is_default"]),
+        ]
+
+    def __str__(self):
+        return f"PM {self.stripe_pm_id} @ {self.organization}" 

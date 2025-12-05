@@ -36,6 +36,20 @@
                 </div>
 
                 <div>
+                    <label for="timezone" class="block text-sm font-medium text-gray-700">Timezone</label>
+                    <select id="timezone" name="timezone" class="mt-1 w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 shadow-sm" required>
+                        {% for val,label in form.timezone.field.choices %}
+                            <option value="{{ val }}" {% if form.timezone.value == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if form.errors.timezone %}
+                        <p class="mt-2 text-sm text-red-600">{{ form.errors.timezone.0 }}</p>
+                    {% else %}
+                        <p class="mt-2 text-xs text-gray-500">Select the business timezone — used for booking times.</p>
+                    {% endif %}
+                </div>
+
+                <div>
                     <label class="block text-sm font-medium text-gray-700">Workspace URL</label>
                     <div class="mt-1 flex items-center space-x-2">
                         <span class="text-sm text-gray-500 select-none">/bus/</span>
