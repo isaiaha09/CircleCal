@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import Business as Organization
-from billing.models import Plan, Subscription
+from billing.models import Plan, Subscription, PaymentMethod
 from calendar_app.utils import user_has_role
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -152,6 +152,51 @@ def stripe_webhook(request):
         except Subscription.DoesNotExist:
             pass
 
+    # 5) PaymentMethod attached/detached -> update cache
+    if event_type == 'payment_method.attached':
+        pm = data
+        cust_id = pm.get('customer')
+        if cust_id:
+            try:
+                org = Organization.objects.filter(stripe_customer_id=cust_id).first()
+                if org:
+                    card = pm.get('card', {}) or pm.get('card', {})
+                    PaymentMethod.objects.update_or_create(
+                        organization=org,
+                        stripe_pm_id=pm.get('id'),
+                        defaults={
+                            'brand': card.get('brand'),
+                            'last4': card.get('last4'),
+                            'exp_month': card.get('exp_month'),
+                            'exp_year': card.get('exp_year'),
+                        }
+                    )
+            except Exception:
+                pass
+
+    if event_type == 'payment_method.detached':
+        pm = data
+        pm_id = pm.get('id')
+        try:
+            PaymentMethod.objects.filter(stripe_pm_id=pm_id).delete()
+        except Exception:
+            pass
+
+    # 6) Customer updated (e.g., invoice_settings.default_payment_method)
+    if event_type == 'customer.updated':
+        cust = data
+        cust_id = cust.get('id')
+        try:
+            org = Organization.objects.filter(stripe_customer_id=cust_id).first()
+            if org:
+                default_pm = cust.get('invoice_settings', {}).get('default_payment_method')
+                # Clear existing defaults
+                PaymentMethod.objects.filter(organization=org).update(is_default=False)
+                if default_pm:
+                    PaymentMethod.objects.filter(stripe_pm_id=default_pm).update(is_default=True)
+        except Exception:
+            pass
+
     # 3) Invoice payment succeeded -> ensure active
     if event_type == "invoice.paid":
         subscription_id = data.get("subscription")
@@ -270,12 +315,41 @@ def manage_billing(request, org_slug):
         show_invoices = False
         show_upcoming_invoice = False
 
-    if org.stripe_customer_id:
+    # Prefer reading cached payment methods from DB to avoid extra Stripe calls
+    try:
+        cached = list(PaymentMethod.objects.filter(organization=org).order_by('-is_default', '-updated_at'))
+        if cached:
+            payment_methods = []
+            for pm in cached:
+                payment_methods.append({
+                    'id': pm.stripe_pm_id,
+                    'card': {
+                        'last4': pm.last4,
+                        'brand': pm.brand,
+                        'exp_month': pm.exp_month,
+                        'exp_year': pm.exp_year,
+                    }
+                })
+            default = next((p for p in cached if p.is_default), None)
+            default_payment_method_id = default.stripe_pm_id if default else None
+        else:
+            # Fallback to Stripe live API
+            if org.stripe_customer_id:
+                try:
+                    pms = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type="card")
+                    payment_methods = pms.get("data", [])
+                    cust = stripe.Customer.retrieve(org.stripe_customer_id)
+                    default_payment_method_id = cust.get("invoice_settings", {}).get("default_payment_method")
+                except Exception:
+                    payment_methods = []
+    except Exception:
+        # If cache lookup fails for any reason, fall back to Stripe
         try:
-            pms = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type="card")
-            payment_methods = pms.get("data", [])
-            cust = stripe.Customer.retrieve(org.stripe_customer_id)
-            default_payment_method_id = cust.get("invoice_settings", {}).get("default_payment_method")
+            if org.stripe_customer_id:
+                pms = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type="card")
+                payment_methods = pms.get("data", [])
+                cust = stripe.Customer.retrieve(org.stripe_customer_id)
+                default_payment_method_id = cust.get("invoice_settings", {}).get("default_payment_method")
         except Exception:
             payment_methods = []
 
@@ -289,11 +363,51 @@ def manage_billing(request, org_slug):
                         {
                             "created": i.get("created"),
                             "amount_due_dollars": (i.get("amount_due", 0) / 100.0),
-                            "status": i.get("status"),
-                            "hosted_invoice_url": i.get("hosted_invoice_url"),
+                                           "status": i.get("status"),
+                                           "hosted_invoice_url": i.get("hosted_invoice_url"),
+                                           # Card info may be available via the invoice.payment_intent -> charges
+                                           "card_brand": None,
+                                           "card_last4": None,
                         }
                         for i in raw_invoices
                     ]
+                    # Try to enrich invoices with card details where available
+                    for idx, raw in enumerate(raw_invoices):
+                        try:
+                            card_brand = None
+                            card_last4 = None
+                            # Prefer payment_intent -> charges
+                            pi = raw.get('payment_intent')
+                            if pi:
+                                try:
+                                    pi_obj = stripe.PaymentIntent.retrieve(pi)
+                                    charges = pi_obj.get('charges', {}).get('data', [])
+                                    if charges:
+                                        ch = charges[0]
+                                        pm_card = ch.get('payment_method_details', {}).get('card', {})
+                                        card_brand = pm_card.get('brand')
+                                        card_last4 = pm_card.get('last4')
+                                except Exception:
+                                    # ignore retrieval issues
+                                    pass
+                            # Fallback: invoice.charge (older API) -> Charge.retrieve
+                            if not card_last4:
+                                charge_id = raw.get('charge')
+                                if charge_id:
+                                    try:
+                                        ch = stripe.Charge.retrieve(charge_id)
+                                        pm_card = ch.get('payment_method_details', {}).get('card', {})
+                                        card_brand = pm_card.get('brand')
+                                        card_last4 = pm_card.get('last4')
+                                    except Exception:
+                                        pass
+                            if card_brand:
+                                invoices[idx]['card_brand'] = card_brand
+                            if card_last4:
+                                invoices[idx]['card_last4'] = card_last4
+                        except Exception:
+                            # never fail invoice listing because of enrichment
+                            continue
             except Exception:
                 invoices = []
             try:
@@ -317,9 +431,13 @@ def manage_billing(request, org_slug):
         "org": org,
         "subscription": subscription,
         "plans": plans,
+        # Expose a display_plan that falls back to a sensible default when
+        # subscription.plan is missing (e.g., trial created without plan).
+        "display_plan": (subscription.plan if subscription and subscription.plan else Plan.objects.filter(slug='basic').first()),
         "stripe_publishable_key": publishable_key,
         "payment_methods": payment_methods,
         "default_payment_method_id": default_payment_method_id,
+        "has_payment_methods": bool(payment_methods),
         "invoices": invoices,
         "upcoming_invoice": upcoming_invoice,
         "trial_remaining_seconds": trial_remaining_seconds,
@@ -358,7 +476,60 @@ def set_default_payment_method(request, org_slug):
         stripe.Customer.modify(org.stripe_customer_id, invoice_settings={"default_payment_method": pm_id})
     except Exception as e:
         return HttpResponseBadRequest(str(e))
+    # Update cache: mark pm as default and attempt to store card metadata
+    try:
+        # Attempt to retrieve payment method details from Stripe
+        pm_obj = None
+        try:
+            pm_obj = stripe.PaymentMethod.retrieve(pm_id)
+        except Exception:
+            pm_obj = None
+
+        card = {}
+        if pm_obj:
+            card = pm_obj.get('card', pm_obj.get('card', {})) or {}
+
+        PaymentMethod.objects.filter(organization=org).update(is_default=False)
+        defaults = {
+            'brand': card.get('brand'),
+            'last4': card.get('last4'),
+            'exp_month': card.get('exp_month'),
+            'exp_year': card.get('exp_year'),
+            'is_default': True,
+        }
+        PaymentMethod.objects.update_or_create(organization=org, stripe_pm_id=pm_id, defaults=defaults)
+    except Exception:
+        # Don't block user action if cache update fails
+        pass
     return JsonResponse({"status": "ok"})
+
+
+@require_http_methods(["GET"])
+def list_payment_methods(request, org_slug):
+    """Return JSON list of card payment methods for the organization (used by client to refresh UI)."""
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    if not org.stripe_customer_id:
+        return JsonResponse({"data": []})
+
+    try:
+        pms = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type="card")
+        data = []
+        for pm in pms.get('data', []):
+            card = pm.card if hasattr(pm, 'card') else pm.get('card', {})
+            data.append({
+                'id': pm.id,
+                'brand': (card.brand if card else pm.get('card', {}).get('brand')),
+                'last4': (card.last4 if card else pm.get('card', {}).get('last4')),
+                'exp_month': (card.exp_month if card else pm.get('card', {}).get('exp_month')),
+                'exp_year': (card.exp_year if card else pm.get('card', {}).get('exp_year')),
+            })
+        return JsonResponse({"data": data})
+    except Exception:
+        return JsonResponse({"data": []})
 
 
 @require_http_methods(["POST"])
@@ -377,9 +548,30 @@ def delete_payment_method(request, org_slug):
         return HttpResponseBadRequest("Missing payment method ID.")
     
     try:
+        # Prevent deleting the invoice default payment method while an active
+        # subscription exists. Require the user to add/set a different default first.
+        cust = None
+        default_pm = None
+        try:
+            if org.stripe_customer_id:
+                cust = stripe.Customer.retrieve(org.stripe_customer_id)
+                default_pm = cust.get('invoice_settings', {}).get('default_payment_method')
+        except Exception:
+            # If customer retrieval fails, log and continue to attempt detach below
+            logger.exception('Failed to retrieve Stripe customer when checking default PM')
+
+        sub = getattr(org, 'subscription', None)
+        if default_pm and pm_id == default_pm and sub and getattr(sub, 'active', False):
+            return HttpResponseBadRequest('This payment method is currently set as the default for invoices while you have an active subscription. Please add a new card and set it as the default before removing this one.')
+
         # Detach payment method from customer
         stripe.PaymentMethod.detach(pm_id)
         logger.info(f"Payment method {pm_id} detached from org {org_slug}")
+        # Remove from cache if present
+        try:
+            PaymentMethod.objects.filter(stripe_pm_id=pm_id).delete()
+        except Exception:
+            logger.exception('Failed to remove cached payment method')
     except Exception as e:
         logger.error(f"Failed to detach payment method: {e}")
         return HttpResponseBadRequest(str(e))
@@ -452,29 +644,44 @@ def change_subscription_plan(request, org_slug, plan_id):
     new_plan = get_object_or_404(Plan, id=plan_id)
     if not new_plan.stripe_price_id:
         return HttpResponseBadRequest("Plan missing price id.")
-    
+    import json
     sub = getattr(org, "subscription", None)
-    
-    # Case 1: Trial without Stripe subscription - create new subscription
+
+    # Accept JSON body with optional `start_immediately` (bool).
+    try:
+        body = json.loads(request.body.decode('utf-8') or "{}")
+    except Exception:
+        body = {}
+    start_immediately = bool(body.get("start_immediately", True))
+
+    # Case 1: Trial without Stripe subscription - either schedule plan change
+    # to take effect after trial, or create a Stripe subscription immediately.
     if sub and not sub.stripe_subscription_id:
         if not org.stripe_customer_id:
             return HttpResponseBadRequest("No Stripe customer. Add payment method first.")
-        
+
+        # If user chose to wait until trial ends, only update the local plan
+        # pointer and don't create a Stripe subscription yet.
+        if not start_immediately:
+            sub.plan = new_plan
+            sub.save()
+            return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
+
         try:
             # Check if customer has payment methods
             payment_methods = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type="card")
             if not payment_methods.data:
                 return HttpResponseBadRequest("No payment method found. Please add a card first.")
-            
+
             # Get the first payment method (most recently added)
             pm_id = payment_methods.data[0].id
-            
+
             # Set as default payment method
             stripe.Customer.modify(
                 org.stripe_customer_id,
                 invoice_settings={"default_payment_method": pm_id}
             )
-            
+
             # Create new Stripe subscription
             stripe_sub = stripe.Subscription.create(
                 customer=org.stripe_customer_id,
@@ -498,12 +705,20 @@ def change_subscription_plan(request, org_slug, plan_id):
             logger.error(f"Failed to create subscription: {e}")
             return HttpResponseBadRequest(str(e))
         return JsonResponse({"status": "ok"})
-    
+
     # Case 2: Existing Stripe subscription - modify it
     if not sub or not sub.stripe_subscription_id:
         return HttpResponseBadRequest("No subscription.")
-    
+
     try:
+        # If user requested to wait and the subscription is currently trialing,
+        # don't hit Stripe — just record the desired plan locally to take effect
+        # after trial ends.
+        if not start_immediately and getattr(sub, 'status', '') == 'trialing':
+            sub.plan = new_plan
+            sub.save()
+            return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
+
         stripe.Subscription.modify(sub.stripe_subscription_id, items=[{"price": new_plan.stripe_price_id}])
         sub.plan = new_plan
         sub.save()

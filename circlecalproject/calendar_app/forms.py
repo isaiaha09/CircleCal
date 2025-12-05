@@ -13,9 +13,20 @@ class OrganizationCreateForm(forms.ModelForm):
     - slug auto-generated from name
     - ensures slug uniqueness
     """
+    # Common curated timezone choices for the organization form
+    COMMON_TIMEZONES = [
+        'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+        'America/Phoenix', 'America/Anchorage', 'Pacific/Honolulu',
+        'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+        'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Dubai',
+        'Australia/Sydney', 'UTC'
+    ]
+
+    timezone = forms.ChoiceField(choices=[(t, t) for t in COMMON_TIMEZONES], required=True, initial='UTC', label='Timezone')
+
     class Meta:
         model = Organization
-        fields = ["name"]
+        fields = ["name", "timezone"]
 
     def clean_name(self):
         name = self.cleaned_data["name"].strip()
@@ -44,6 +55,7 @@ class OrganizationCreateForm(forms.ModelForm):
 
 
 User = get_user_model()
+
 
 class SignupForm(UserCreationForm):
     email = forms.EmailField(required=True)

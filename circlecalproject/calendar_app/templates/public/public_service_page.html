@@ -189,6 +189,13 @@
 </style>
 
 <div class="calendar-container" style="position:relative;">
+  {% if trialing_active %}
+    <div class="mb-4 p-3 rounded-md bg-amber-50 border-l-4 border-amber-400 text-amber-800" role="status" aria-live="polite">
+      <span style="font-size:1.2rem; margin-right:8px;">⚠️</span>
+      <span style="font-weight:600;">Trial:</span>
+      <span style="margin-left:8px;">The current owner of this business is on a trial run which is why there is only a limited amount of days available to book. Once the trial is over or when the user subscribes, the availability will open up for future days/months.</span>
+    </div>
+  {% endif %}
   <div class="month-nav" style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:8px;">
     <button id="prevMonthBtn" class="px-2 md:px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm md:text-base">Prev</button>
     <h1 class="month-header flex-1" id="monthHeader" style="font-size: clamp(1rem, 4vw, 1.7rem);"></h1>

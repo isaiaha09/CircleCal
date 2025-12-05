@@ -15,6 +15,7 @@ urlpatterns = [
     path("api/bus/<slug:org_slug>/payment_method/setup_intent/", views.create_setup_intent, name="create_setup_intent"),
     path("api/bus/<slug:org_slug>/payment_method/default/", views.set_default_payment_method, name="set_default_payment_method"),
     path("api/bus/<slug:org_slug>/payment_method/delete/", views.delete_payment_method, name="delete_payment_method"),
+    path("api/bus/<slug:org_slug>/payment_method/list/", views.list_payment_methods, name="list_payment_methods"),
     path("api/bus/<slug:org_slug>/subscription/cancel/", views.cancel_subscription, name="cancel_subscription"),
     path("api/bus/<slug:org_slug>/subscription/reactivate/", views.reactivate_subscription, name="reactivate_subscription"),
     path("api/bus/<slug:org_slug>/subscription/change_plan/<int:plan_id>/", views.change_subscription_plan, name="change_subscription_plan"),

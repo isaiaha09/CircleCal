@@ -11,32 +11,37 @@
   {# Current Plan Section #}
   <section class="mb-8" id="current-plan-section">
     <h2 class="text-xl font-semibold mb-2">Current Plan</h2>
-    {% if subscription and subscription.plan %}
-      <div class="border rounded-lg p-4 bg-gradient-to-br from-indigo-50 to-blue-50">
+    {% if subscription %}
+      <div class="border rounded-lg p-4 bg-gradient-to-br from-indigo-50 to-blue-50 relative">
         <div class="flex items-start justify-between">
-          <div>
-            <h3 class="text-lg font-bold text-indigo-900">{{ subscription.plan.name }}</h3>
-            <p class="text-2xl font-bold text-indigo-600 mt-1">${{ subscription.plan.price }}<span class="text-sm font-normal text-gray-600">/{{ subscription.plan.billing_period }}</span></p>
-            {% if subscription.plan.description %}
-              <p class="text-sm text-gray-600 mt-2">{{ subscription.plan.description }}</p>
+          <div class="pr-4">
+            <div class="flex items-center gap-3">
+              <h3 class="text-lg font-bold text-indigo-900">{{ display_plan.name }}</h3>
+              {% if trial_remaining_seconds %}
+                <span class="inline-flex items-center px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 text-sm font-semibold">On Trial</span>
+              {% elif subscription.status|lower == 'trialing' %}
+                <span class="inline-flex items-center px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 text-sm font-semibold">On Trial</span>
+              {% endif %}
+            </div>
+            <p class="text-2xl font-bold text-indigo-600 mt-1">${{ display_plan.price|floatformat:2 }}<span class="text-sm font-normal text-gray-600">/{{ display_plan.billing_period }}</span></p>
+            {% if display_plan.description %}
+              <p class="text-sm text-gray-600 mt-2">{{ display_plan.description }}</p>
             {% endif %}
           </div>
-          {% if subscription.status == "active" %}
-            <span class="px-3 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">Active</span>
-          {% elif subscription.status == "trialing" %}
-            <span class="px-3 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">Trial</span>
-          {% else %}
-            <span class="px-3 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">{{ subscription.status|title }}</span>
-          {% endif %}
+          
         </div>
+
       </div>
-    {% elif subscription %}
-      <div class="text-sm text-gray-600 border rounded-lg p-4 bg-gray-50">No plan selected yet.</div>
-    {% else %}
-      <div class="text-sm text-gray-600 border rounded-lg p-4 bg-gray-50">No active subscription. Choose a plan on the pricing page.</div>
+      {% if trial_remaining_seconds %}
+        <div class="mt-3 p-3 rounded border-l-4 border-yellow-300 bg-yellow-50 text-sm text-yellow-800">
+          You are currently on a free trial — <strong id="trialSummary">{{ trial_remaining_days }} day(s) left</strong>. You can add a card below and convert to a paid plan at any time.
+        </div>
+      {% endif %}
     {% endif %}
   </section>
-
+  
+  
+  
   {# Subscription Details Section #}
   <section class="mb-8" id="subscription-section">
     <h2 class="text-xl font-semibold mb-2">Subscription Details</h2>
@@ -56,39 +61,21 @@
       <div class="text-sm text-gray-600">No active subscription. Choose a plan on the pricing page.</div>
     {% endif %}
   </section>
-
-  {# Payment Methods Section #}
-  <section class="mb-8" id="payment-method-section">
-    <h2 class="text-xl font-semibold mb-2">Payment Methods</h2>
-    {% if org.stripe_customer_id %}
-      <div id="paymentMethodsList" class="space-y-2 mb-4">
-        {% for pm in payment_methods %}
-          <div class="flex items-center justify-between border rounded px-3 py-2 text-sm" data-pm-id="{{ pm.id }}">
-            <div>
-              **** {{ pm.card.last4 }} — {{ pm.card.brand|title }} exp {{ pm.card.exp_month }}/{{ pm.card.exp_year }}
-              {% if pm.id == default_payment_method_id %}<span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Default</span>{% endif %}
-            </div>
-            <div class="flex gap-2">
-              {% if pm.id != default_payment_method_id %}
-                <button class="set-default-btn text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" data-id="{{ pm.id }}">Set Default</button>
-              {% endif %}
-              <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200" data-id="{{ pm.id }}">Remove</button>
-            </div>
-          </div>
-        {% empty %}
-          <div class="text-sm text-gray-600">No payment methods yet.</div>
-        {% endfor %}
-      </div>
-      <div class="border rounded p-4 bg-gray-50">
-        <h3 class="text-sm font-medium mb-2">Add / Update Card</h3>
-        <div id="payment-element" class="mb-3"></div>
-        <button id="saveCardBtn" class="px-3 py-2 text-sm rounded bg-blue-600 text-white">Save Card</button>
-        <div id="pmStatus" class="text-xs mt-2 text-gray-600"></div>
-      </div>
-    {% else %}
-      <div class="text-sm text-gray-600">Stripe customer not created yet. Start a subscription first.</div>
-    {% endif %}
-  </section>
+  {# Cancel buttons (placed under Subscription Details) #}
+  {% if subscription %}
+    <div class="mt-4 flex justify-end gap-2" id="subscription-cancel-actions">
+      {% if subscription.cancel_at_period_end %}
+        <button id="reactivateBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-green-600 text-white hover:bg-green-700">Reactivate</button>
+      {% else %}
+        <button id="cancelBtn" class="px-4 py-2 rounded bg-yellow-500 text-white hover:bg-yellow-600 text-sm">Cancel at Period End</button>
+      {% endif %}
+      {% if trial_remaining_seconds %}
+        <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="true">Immediate Cancel</button>
+      {% else %}
+        <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="false">Immediate Cancel</button>
+      {% endif %}
+    </div>
+  {% endif %}
 
   {# Change Plan Section #}
   {% if subscription %}
@@ -106,6 +93,46 @@
   </section>
   {% endif %}
 
+  {# Payment Methods Section #}
+  <section class="mb-8" id="payment-method-section">
+    <h2 class="text-xl font-semibold mb-2">Payment Methods</h2>
+    <div id="paymentMethodsList" class="space-y-2 mb-4">
+      {% if org.stripe_customer_id %}
+        {% for pm in payment_methods %}
+          <div class="flex items-center justify-between border rounded px-3 py-2 text-sm" data-pm-id="{{ pm.id }}">
+            <div>
+              **** {{ pm.card.last4 }} — {{ pm.card.brand|title }} exp {{ pm.card.exp_month }}/{{ pm.card.exp_year }}
+                {% if pm.id == default_payment_method_id %}
+                  <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Default</span>
+                {% endif %}
+            </div>
+            <div class="flex gap-2">
+                {% if pm.id != default_payment_method_id %}
+                  <button class="set-default-btn text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" data-id="{{ pm.id }}">Set Default</button>
+                {% endif %}
+                {% if pm.id == default_payment_method_id and subscription and subscription.active %}
+                  <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 opacity-50 cursor-not-allowed" disabled title="Default for invoices — add a new card and set it as default before removing">Remove</button>
+                  <span class="text-xs text-gray-500 italic ml-2">Default for invoices — add a new card and set it as default before removing.</span>
+                {% else %}
+                  <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200" data-id="{{ pm.id }}">Remove</button>
+                {% endif %}
+            </div>
+          </div>
+        {% empty %}
+          <div class="text-sm text-gray-600">No payment methods yet.</div>
+        {% endfor %}
+      {% else %}
+        <div class="text-sm text-gray-600">No payment methods yet. You can add a card below even before a subscription — we'll create a Stripe customer for you when you save the card.</div>
+      {% endif %}
+    </div>
+
+    <div class="border rounded p-4 bg-gray-50">
+      <h3 class="text-sm font-medium mb-2">Add / Update Card</h3>
+      <div id="payment-element" class="mb-3"></div>
+      <button id="saveCardBtn" class="px-3 py-2 text-sm rounded bg-blue-600 text-white">Save Card</button>
+      <div id="pmStatus" class="text-xs mt-2 text-gray-600"></div>
+    </div>
+  </section>
   {# Invoices Section #}
   <section class="mb-8" id="invoices-section">
     <h2 class="text-xl font-semibold mb-2">Invoices</h2>
@@ -117,6 +144,7 @@
           <tr>
             <th class="p-2 text-left">Date</th>
             <th class="p-2 text-left">Amount</th>
+            <th class="p-2 text-left">Card</th>
             <th class="p-2 text-left">Status</th>
             <th class="p-2 text-left">Actions</th>
           </tr>
@@ -126,6 +154,13 @@
           <tr class="border-t">
             <td class="p-2">{{ inv.created|date:"M j, Y" }}</td>
             <td class="p-2">${{ inv.amount_due_dollars|floatformat:2 }}</td>
+            <td class="p-2">
+              {% if inv.card_last4 %}
+                **** {{ inv.card_last4 }}{% if inv.card_brand %} ({{ inv.card_brand }}){% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
             <td class="p-2">{{ inv.status }}</td>
             <td class="p-2"><a href="{{ inv.hosted_invoice_url }}" class="text-indigo-600" target="_blank">View</a></td>
           </tr>
@@ -149,21 +184,7 @@
     {% endif %}
   </section>
 
-  {# Cancel buttons at the bottom #}
-  {% if subscription %}
-    <div class="mt-8 flex justify-end gap-2">
-      {% if subscription.cancel_at_period_end %}
-        <button id="reactivateBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-green-600 text-white hover:bg-green-700">Reactivate</button>
-      {% else %}
-        <button id="cancelBtn" class="px-4 py-2 rounded bg-yellow-500 text-white hover:bg-yellow-600 text-sm">Cancel at Period End</button>
-      {% endif %}
-      {% if trial_remaining_seconds %}
-        <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="true">Immediate Cancel</button>
-      {% else %}
-        <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="false">Immediate Cancel</button>
-      {% endif %}
-    </div>
-  {% endif %}
+  
 </div>
 
 <script src="https://js.stripe.com/v3/"></script>
@@ -188,6 +209,43 @@
     return cookieValue;
   }
 
+  // Small helper to highlight and briefly pulse an element to draw attention
+  function highlightAndPulse(el) {
+    if (!el) return;
+    const prevOutline = el.style.outline;
+    const prevBox = el.style.boxShadow;
+    el.style.outline = '3px solid rgba(59,130,246,0.9)';
+    el.style.boxShadow = '0 0 12px rgba(59,130,246,0.6)';
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => {
+      el.style.outline = prevOutline || '';
+      el.style.boxShadow = prevBox || '';
+    }, 3500);
+  }
+
+  // Small toast/banner helper
+  function showToast(message, type="info", timeout=3500) {
+    // type: info|success|error
+    const existing = document.getElementById('cc-toast');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.id = 'cc-toast';
+    div.style.position = 'fixed';
+    div.style.right = '20px';
+    div.style.bottom = '28px';
+    div.style.zIndex = 9999;
+    div.style.padding = '12px 16px';
+    div.style.borderRadius = '10px';
+    div.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)';
+    div.style.fontSize = '14px';
+    if (type === 'success') { div.style.background = '#ecfdf5'; div.style.color = '#065f46'; }
+    else if (type === 'error') { div.style.background = '#fee2e2'; div.style.color = '#991b1b'; }
+    else { div.style.background = '#eef2ff'; div.style.color = '#3730a3'; }
+    div.textContent = message;
+    document.body.appendChild(div);
+    setTimeout(()=>{ div.style.opacity = '0'; setTimeout(()=>div.remove(), 300); }, timeout);
+  }
+
   // Payment Element setup
   const paymentSection = document.getElementById('payment-element');
   if (paymentSection) {
@@ -201,13 +259,108 @@
       paymentElement.mount('#payment-element');
 
       document.getElementById('saveCardBtn').addEventListener('click', async () => {
-        document.getElementById('pmStatus').textContent = 'Saving card...';
-        const {error} = await stripe.confirmSetup({ elements, confirmParams: { return_url: window.location.href }});
-        if (error) {
-          document.getElementById('pmStatus').textContent = error.message;
-        } else {
-          document.getElementById('pmStatus').textContent = 'Card saved. Refreshing...';
-          window.location.reload();
+        const pmStatusEl = document.getElementById('pmStatus');
+        pmStatusEl.textContent = 'Saving card...';
+        try {
+          // Confirm the SetupIntent client-side without redirect so we can capture the
+          // resulting payment method id and set it as the customer's default via API.
+          const result = await stripe.confirmSetup({ elements });
+          if (result.error) {
+            pmStatusEl.textContent = result.error.message || 'Failed to save card.';
+            return;
+          }
+
+          const setupIntent = result.setupIntent || result;
+          const paymentMethodId = setupIntent && setupIntent.payment_method;
+          if (!paymentMethodId) {
+            pmStatusEl.textContent = 'Saved card, but no payment method id was returned.';
+            return;
+          }
+
+          // Call backend to set this payment method as the default for invoices
+          const resp = await fetch(`/billing/api/bus/${orgSlug}/payment_method/default/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ payment_method_id: paymentMethodId })
+          });
+
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => 'server error');
+            pmStatusEl.textContent = 'Card saved but failed to set default: ' + txt;
+            return;
+          }
+
+          pmStatusEl.textContent = 'Card saved and set as default.';
+          showToast('Card saved and set as default.', 'success');
+
+          // Fetch the fresh list of payment methods and update the UI without reload
+          try {
+            const listResp = await fetch(`/billing/api/bus/${orgSlug}/payment_method/list/`);
+            if (listResp.ok) {
+              const payload = await listResp.json();
+              const container = document.getElementById('paymentMethodsList');
+              if (container) {
+                // Rebuild the list inner HTML
+                const items = payload.data || [];
+                let html = '';
+                if (items.length === 0) {
+                  html = '<div class="text-sm text-gray-600">No payment methods yet.</div>';
+                } else {
+                  for (const pm of items) {
+                    const isDefault = (pm.id === defaultPaymentId);
+                    html += `\n  <div class="flex items-center justify-between border rounded px-3 py-2 text-sm" data-pm-id="${pm.id}">\n    <div>**** ${pm.last4} — ${pm.brand || ''} exp ${pm.exp_month}/${pm.exp_year}`;
+                    if (isDefault) html += ` <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Default</span>`;
+                    html += `</div>\n    <div class="flex gap-2">`;
+                    if (!isDefault) {
+                      html += `<button class="set-default-btn text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" data-id="${pm.id}">Set Default</button>`;
+                    }
+                    if (isDefault && subscriptionActive) {
+                      html += `<button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 opacity-50 cursor-not-allowed" disabled title="Default for invoices — add a new card and set it as default before removing">Remove</button>`;
+                      html += `<span class="text-xs text-gray-500 italic ml-2">Default for invoices — add a new card and set it as default before removing.</span>`;
+                    } else {
+                      html += `<button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200" data-id="${pm.id}">Remove</button>`;
+                    }
+                    html += `</div>\n  </div>`;
+                  }
+                }
+                container.innerHTML = html;
+
+                // Re-bind event handlers for the new buttons
+                document.querySelectorAll('.set-default-btn').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                    const pmId = btn.getAttribute('data-id');
+                    fetch(`/billing/api/bus/${orgSlug}/payment_method/default/`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                      body: JSON.stringify({ payment_method_id: pmId })
+                    }).then(r => r.json()).then(() => {
+                      showToast('Default payment method updated.', 'success');
+                      setTimeout(()=> window.location.reload(), 700);
+                    });
+                  });
+                });
+
+                document.querySelectorAll('.delete-pm-btn').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                    const pmId = btn.getAttribute('data-id');
+                    if (!confirm('Remove this payment method?')) return;
+                    fetch(`/billing/api/bus/${orgSlug}/payment_method/delete/`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                      body: JSON.stringify({ payment_method_id: pmId })
+                    })
+                      .then(r => { if (!r.ok) throw new Error('Delete failed'); return r.json(); })
+                      .then(() => { showToast('Payment method removed.', 'info'); setTimeout(()=> window.location.reload(),700); })
+                      .catch(err => showToast('Delete failed: ' + err.message, 'error'));
+                  });
+                });
+              }
+            }
+          } catch (err) {
+            // ignore refresh errors, still show success
+          }
+        } catch (err) {
+          pmStatusEl.textContent = err && err.message ? err.message : 'Unexpected error saving card.';
         }
       });
     });
@@ -284,7 +437,7 @@
         alert('Please add a payment method first before converting your trial to a paid subscription.\n\nScroll down to the "Add / Update Card" section.');
         const pmSection = document.getElementById('payment-method-section');
         if (pmSection) {
-          pmSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          highlightAndPulse(pmSection);
         }
         return;
       }
@@ -328,11 +481,47 @@
 
   // Change plan
   const changePlanBtn = document.getElementById('changePlanBtn');
+  const hasDefaultPayment = {{ default_payment_method_id|yesno:"true,false" }};
+  const hasAnyPayment = {{ has_payment_methods|yesno:"true,false" }};
+  const defaultPaymentId = "{{ default_payment_method_id|default:''|escapejs }}";
+  const subscriptionActive = {{ subscription.active|yesno:"true,false"|default:'false' }};
+  const subscriptionStatus = "{{ subscription.status|default:"" }}";
   if (changePlanBtn) changePlanBtn.addEventListener('click', () => {
     const planId = document.getElementById('changePlanSelect').value;
-    if(!planId) return;
-    fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken }})
-      .then(() => window.location.reload());
+    if (!planId) return;
+
+    // If there are no payment methods at all, prompt user to add one first
+    if (!hasAnyPayment) {
+      alert('Please add a payment method before updating your subscription. You can add a card in the "Add / Update Card" box below.');
+      const pmSection = document.getElementById('payment-method-section');
+      if (pmSection) highlightAndPulse(pmSection);
+      return;
+    }
+
+    // If on trial, ask whether to start immediately or wait until trial ends
+    let startImmediately = true;
+    if (subscriptionStatus.toLowerCase() === 'trialing') {
+      startImmediately = confirm('You are currently on a trial. Click OK to end the trial and start the selected plan immediately (you will be billed), or Cancel to wait until the trial ends to begin the new plan.');
+    }
+
+    fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ start_immediately: startImmediately })
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(text || 'Failed to change plan');
+        }
+        return r.json();
+      })
+      .then((payload) => {
+        // Provide feedback if scheduled
+        if (payload && payload.message) alert(payload.message);
+        window.location.reload();
+      })
+      .catch(err => alert('Update failed: ' + err.message));
   });
 
   // Trial countdown
