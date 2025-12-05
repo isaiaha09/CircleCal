@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run migrations
+      env:
+        DJANGO_SETTINGS_MODULE: circlecalproject.settings
+      run: |
+        # Use the default sqlite DB for CI; run migrations to prepare schema
+        python manage.py migrate --noinput
+
+    - name: Run tests (pytest)
+      env:
+        DJANGO_SETTINGS_MODULE: circlecalproject.settings
+        PYTHONWARNINGS: default::DeprecationWarning
+      run: |
+        pytest -q
