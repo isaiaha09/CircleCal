@@ -19,6 +19,7 @@ from django.utils.crypto import get_random_string
 from calendar_app.forms import SignupForm
 from django.contrib.auth import login
 from django.contrib.auth import logout
+from accounts.models import Profile
 from django.utils import timezone
 from datetime import date
 from bookings.models import OrgSettings
@@ -55,10 +56,21 @@ def post_login_redirect(request):
     memberships = Membership.objects.filter(user=request.user, is_active=True).select_related("organization")
     count = memberships.count()
 
+    # If user's profile is incomplete, require profile completion before
+    # granting access to the dashboard. Treat missing Profile as incomplete.
+    try:
+        prof = request.user.profile
+        profile_complete = bool(prof.avatar or (prof.timezone and prof.timezone != 'UTC'))
+    except Exception:
+        profile_complete = False
+
     if count == 0:
         return redirect("calendar_app:create_business")
 
     if count == 1:
+        # If profile incomplete, send user to profile editing page first
+        if not profile_complete:
+            return redirect('accounts:profile')
         org = memberships.first().organization
         return redirect("calendar_app:dashboard", org_slug=org.slug)
 
@@ -343,13 +355,21 @@ def create_business(request):
             )
 
             messages.success(request, f"Organization '{org.name}' created.")
-            return redirect("calendar_app:dashboard", org_slug=org.slug)
+            # Require the user to customize their profile before accessing the dashboard
+            return redirect('accounts:profile')
     else:
         form = OrganizationCreateForm()
 
-    return render(request, "calendar_app/create_business.html", {
+    resp = render(request, "calendar_app/create_business.html", {
         "form": form,
     })
+    # Mark this path so that if the user logs out before completing
+    # creation, we can return them here after they log back in.
+    try:
+        resp.set_cookie('post_login_redirect', request.path, max_age=60*60*24)
+    except Exception:
+        pass
+    return resp
 
 
 @login_required
@@ -366,9 +386,15 @@ def choose_business(request):
 
     organizations = [m.organization for m in memberships]
 
-    return render(request, "calendar_app/choose_business.html", {
+    resp = render(request, "calendar_app/choose_business.html", {
         "organizations": organizations
     })
+    # Preserve returning users to this page if they logout mid-onboarding
+    try:
+        resp.set_cookie('post_login_redirect', request.path, max_age=60*60*24)
+    except Exception:
+        pass
+    return resp
 
 
 @login_required

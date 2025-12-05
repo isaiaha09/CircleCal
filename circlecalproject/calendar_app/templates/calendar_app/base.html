@@ -48,9 +48,13 @@
                         </form>
                     </nav>
                 {% else %}
-                    <nav class="hidden md:block">
+                    <nav class="hidden md:flex items-center space-x-4">
                         <a href="{% url 'calendar_app:choose_business' %}"
                             class="text-blue-600 font-medium">Choose Business</a>
+                        <form action="{% url 'accounts:logout' %}" method="post" class="inline">
+                            {% csrf_token %}
+                            <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
+                        </form>
                     </nav>
                 {% endif %}
                 {% else %}
@@ -109,9 +113,41 @@
         {% block content %}{% endblock %}
     </main>
 
-    {% block extra_scripts %}{% endblock %}
- 
-    <!-- Mobile Menu Toggle -->
+        {% block extra_scripts %}{% endblock %}
+
+        <!-- Global loading overlay (site-wide) -->
+        <div id="global-loading-overlay" class="hidden fixed inset-0 z-50 items-center justify-center bg-black bg-opacity-30">
+            <div class="bg-white p-6 rounded-lg flex flex-col items-center shadow-lg">
+                <div class="animate-spin rounded-full border-8 border-t-8 border-gray-200 h-16 w-16 mb-4" style="border-top-color:#2563EB"></div>
+                <div class="text-gray-700">Loading…</div>
+            </div>
+        </div>
+
+        <script>
+            // Global loading overlay helpers
+            function showLoading(msg) {
+                const ov = document.getElementById('global-loading-overlay');
+                if (!ov) return;
+                try {
+                    if (msg) {
+                        const txt = ov.querySelector('div.text-gray-700');
+                        if (txt) txt.textContent = msg;
+                    }
+                } catch(e){}
+                ov.classList.remove('hidden');
+                ov.classList.add('flex');
+            }
+            function hideLoading() {
+                const ov = document.getElementById('global-loading-overlay');
+                if (!ov) return;
+                ov.classList.add('hidden');
+                ov.classList.remove('flex');
+                try { const txt = ov.querySelector('div.text-gray-700'); if (txt) txt.textContent = 'Loading…'; } catch(e){}
+            }
+            try { window.showLoading = showLoading; window.hideLoading = hideLoading; } catch(e){}
+        </script>
+
+        <!-- Mobile Menu Toggle -->
     <script>
         const mobileMenuBtn = document.getElementById('mobileMenuBtn');
         const mobileMenu = document.getElementById('mobileMenu');
@@ -121,6 +157,8 @@
             });
         }
     </script>
+
+        
 
     <!-- Footer -->
     <footer class="bg-white border-t mt-12 py-8">

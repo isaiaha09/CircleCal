@@ -1,4 +1,5 @@
 import stripe
+from stripe.error import InvalidRequestError
 from django.conf import settings
 from django.utils import timezone
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -353,84 +354,317 @@ def manage_billing(request, org_slug):
         except Exception:
             payment_methods = []
 
-        # Only pull invoices if a real Stripe subscription exists
-        if subscription and subscription.stripe_subscription_id:
-            try:
-                if show_invoices:
+    # Only pull invoices if a real Stripe subscription exists
+    if subscription and subscription.stripe_subscription_id and org.stripe_customer_id:
+        try:
+            if show_invoices:
+                # Scope invoice listing to the specific subscription so the UI
+                # shows invoices relevant to this subscription (avoids mixing
+                # invoices from other subscriptions on the same customer).
+                try:
+                    invs = stripe.Invoice.list(subscription=subscription.stripe_subscription_id, limit=10)
+                except Exception:
+                    # Fallback to customer-wide listing if subscription-scoped list fails
                     invs = stripe.Invoice.list(customer=org.stripe_customer_id, limit=10)
-                    raw_invoices = invs.get("data", [])
-                    invoices = [
-                        {
-                            "created": i.get("created"),
-                            "amount_due_dollars": (i.get("amount_due", 0) / 100.0),
-                                           "status": i.get("status"),
-                                           "hosted_invoice_url": i.get("hosted_invoice_url"),
-                                           # Card info may be available via the invoice.payment_intent -> charges
-                                           "card_brand": None,
-                                           "card_last4": None,
-                        }
-                        for i in raw_invoices
-                    ]
-                    # Try to enrich invoices with card details where available
-                    for idx, raw in enumerate(raw_invoices):
-                        try:
-                            card_brand = None
-                            card_last4 = None
-                            # Prefer payment_intent -> charges
-                            pi = raw.get('payment_intent')
-                            if pi:
-                                try:
-                                    pi_obj = stripe.PaymentIntent.retrieve(pi)
-                                    charges = pi_obj.get('charges', {}).get('data', [])
-                                    if charges:
-                                        ch = charges[0]
-                                        pm_card = ch.get('payment_method_details', {}).get('card', {})
-                                        card_brand = pm_card.get('brand')
-                                        card_last4 = pm_card.get('last4')
-                                except Exception:
-                                    # ignore retrieval issues
-                                    pass
-                            # Fallback: invoice.charge (older API) -> Charge.retrieve
-                            if not card_last4:
-                                charge_id = raw.get('charge')
-                                if charge_id:
-                                    try:
-                                        ch = stripe.Charge.retrieve(charge_id)
-                                        pm_card = ch.get('payment_method_details', {}).get('card', {})
-                                        card_brand = pm_card.get('brand')
-                                        card_last4 = pm_card.get('last4')
-                                    except Exception:
-                                        pass
-                            if card_brand:
-                                invoices[idx]['card_brand'] = card_brand
-                            if card_last4:
-                                invoices[idx]['card_last4'] = card_last4
-                        except Exception:
-                            # never fail invoice listing because of enrichment
-                            continue
-            except Exception:
+
+                raw_invoices = invs.get("data", [])
                 invoices = []
+                from datetime import datetime
+                for i in raw_invoices:
+                    # Prefer showing the amount actually paid for paid invoices,
+                    # otherwise fall back to amount_due for open/draft invoices.
+                    amount_display = i.get('amount_paid') if i.get('amount_paid', 0) else i.get('amount_due', 0)
+                    # Convert Stripe unix timestamp to aware datetime for template rendering
+                    created_ts = i.get('created')
+                    created_dt = None
+                    try:
+                        if created_ts:
+                            # Use the current Django timezone when making the timestamp aware
+                            from django.utils import timezone as django_tz
+                            tz = django_tz.get_current_timezone()
+                            created_dt = timezone.make_aware(datetime.fromtimestamp(int(created_ts)), timezone=tz)
+                    except Exception:
+                        created_dt = None
+
+                    invoices.append({
+                        'created': created_dt,
+                        'amount_display_dollars': (amount_display / 100.0),
+                        'status': i.get('status'),
+                        'hosted_invoice_url': i.get('hosted_invoice_url'),
+                        'card_brand': None,
+                        'card_last4': None,
+                        'raw': i,
+                    })
+
+                # Try to enrich invoices with card details where available
+                for idx, entry in enumerate(invoices):
+                    raw = entry.get('raw')
+                    try:
+                        card_brand = None
+                        card_last4 = None
+                        # Prefer payment_intent -> charges
+                        pi = raw.get('payment_intent')
+                        if pi:
+                            try:
+                                pi_obj = stripe.PaymentIntent.retrieve(pi) if isinstance(pi, str) else pi
+                                charges = pi_obj.get('charges', {}).get('data', [])
+                                if charges:
+                                    ch = charges[0]
+                                    pm_card = ch.get('payment_method_details', {}).get('card', {})
+                                    card_brand = pm_card.get('brand')
+                                    card_last4 = pm_card.get('last4')
+                            except Exception:
+                                pass
+
+                        # Fallback: invoice.charge (older API) -> Charge.retrieve
+                        if not card_last4:
+                            charge_id = raw.get('charge')
+                            if charge_id:
+                                try:
+                                    ch = stripe.Charge.retrieve(charge_id)
+                                    pm_card = ch.get('payment_method_details', {}).get('card', {})
+                                    card_brand = pm_card.get('brand')
+                                    card_last4 = pm_card.get('last4')
+                                except Exception:
+                                    pass
+
+                        if card_brand:
+                            invoices[idx]['card_brand'] = card_brand
+                        if card_last4:
+                            invoices[idx]['card_last4'] = card_last4
+                    except Exception:
+                        # never fail invoice listing because of enrichment
+                        continue
+        except Exception:
+            invoices = []
+
+    # --- Include local scheduled subscription changes as pseudo-invoices ---
+    # These are local DB records (SubscriptionChange) that represent
+    # scheduled downgrades/upgrades. We surface them in the invoice list as
+    # zero-dollar entries with no card so the user can see upcoming changes.
+    try:
+        from billing.models import SubscriptionChange
+        # Show most recent 10 changes for this org
+        sch_changes = SubscriptionChange.objects.filter(organization=org).order_by('-created_at')[:10]
+        for sc in sch_changes:
             try:
-                if show_upcoming_invoice:
+                created_dt = sc.created_at
+                invoices.append({
+                    'created': created_dt,
+                    'amount_display_dollars': float((sc.amount_cents or 0) / 100.0),
+                    # Per UX request: display as paid/settled with no card
+                    'status': 'paid',
+                    'hosted_invoice_url': None,
+                    'card_brand': sc.card_brand,
+                    'card_last4': sc.card_last4,
+                    'raw': {
+                        'pseudo': True,
+                        'type': 'subscription_change',
+                        'id': sc.id,
+                        'new_plan': sc.new_plan.id if sc.new_plan else None,
+                        'new_plan_name': sc.new_plan.name if sc.new_plan else None,
+                        'change_type': sc.change_type,
+                        'effective_at': sc.effective_at if sc.effective_at else None,
+                        'status': sc.status,
+                        'amount_cents': sc.amount_cents,
+                        'card_brand': sc.card_brand,
+                        'card_last4': sc.card_last4,
+                        'stripe_invoice_id': sc.stripe_invoice_id,
+                    },
+                })
+            except Exception:
+                # don't let one bad change break invoice listing
+                continue
+    except Exception:
+        # If the model/table is not present yet (before migrations), skip quietly
+        pass
+
+    # --- Apply invoice filtering & sorting based on query params ---
+    # Supported filters:
+    # - sort: latest|earliest|lowest|highest
+    # - card: last4 string to filter by card used
+    # - status: invoice status (paid|open|draft|scheduled|processed|all)
+    try:
+        sort_by = (request.GET.get('inv_sort') or 'latest').lower()
+        filter_card = request.GET.get('inv_card')
+        filter_status = request.GET.get('inv_status')
+
+        # Build a normalized status value for pseudo-invoices
+        def _status_of(inv):
+            raw = inv.get('raw') or {}
+            if raw.get('pseudo'):
+                return (raw.get('status') or 'scheduled')
+            return (inv.get('status') or '').lower()
+
+        # Filter by card last4
+        if filter_card:
+            invoices = [i for i in invoices if (i.get('card_last4') and i.get('card_last4') == filter_card) or (i.get('raw', {}).get('card_last4') == filter_card)]
+
+        # Filter by status
+        if filter_status and filter_status.lower() not in ('', 'all'):
+            fs = filter_status.lower()
+            invoices = [i for i in invoices if _status_of(i) == fs]
+
+        # Sorting
+        if sort_by == 'latest':
+            invoices.sort(key=lambda x: x.get('created') or timezone.make_aware(timezone.datetime(1970,1,1)), reverse=True)
+        elif sort_by == 'earliest':
+            invoices.sort(key=lambda x: x.get('created') or timezone.make_aware(timezone.datetime(1970,1,1)))
+        elif sort_by == 'lowest':
+            invoices.sort(key=lambda x: float(x.get('amount_display_dollars') or 0.0))
+        elif sort_by == 'highest':
+            invoices.sort(key=lambda x: float(x.get('amount_display_dollars') or 0.0), reverse=True)
+    except Exception:
+        # If any filter fails, continue without filtering
+        pass
+
+    # Collect available card last4 values and status options for UI selects
+    try:
+        invoice_card_options = []
+        invoice_status_options = set()
+        for i in invoices:
+            card = i.get('card_last4') or (i.get('raw') or {}).get('card_last4')
+            if card and card not in invoice_card_options:
+                invoice_card_options.append(card)
+            st = (i.get('raw') or {}).get('status') if (i.get('raw') or {}).get('pseudo') else (i.get('status') or '')
+            st_norm = (st or '').lower()
+            if st_norm:
+                invoice_status_options.add(st_norm)
+        invoice_status_options = sorted(list(invoice_status_options))
+    except Exception:
+        invoice_card_options = []
+        invoice_status_options = []
+
+    # --- Group invoices by month and support month-based paging ---
+    # Build a list of months available from the invoices (YYYY-MM keys)
+    months = []
+    invoices_by_month = {}
+    try:
+        for inv in invoices:
+            created = inv.get('created')
+            if not created:
+                key = 'unknown'
+                label = 'Unknown'
+            else:
+                key = created.strftime('%Y-%m')
+                label = created.strftime('%B %Y')
+            if key not in invoices_by_month:
+                invoices_by_month[key] = {'label': label, 'items': []}
+            invoices_by_month[key]['items'].append(inv)
+
+        # Sort months descending (newest first)
+        months = [{'key': k, 'label': invoices_by_month[k]['label']} for k in sorted(invoices_by_month.keys(), reverse=True)]
+    except Exception:
+        months = []
+        invoices_by_month = {}
+
+    # Choose selected month from query param `invoice_month`; default to newest
+    selected_month = request.GET.get('invoice_month')
+    if not selected_month:
+        selected_month = months[0]['key'] if months else None
+
+    # Provide paged invoices (only the selected month's items) to the template
+    paged_invoices = []
+    selected_month_label = None
+    if selected_month and selected_month in invoices_by_month:
+        paged_invoices = invoices_by_month[selected_month]['items']
+        selected_month_label = invoices_by_month[selected_month]['label']
+    else:
+        # If no month selected or not found, show all invoices (fallback)
+        paged_invoices = invoices
+        selected_month_label = None
+
+    # Determine the upcoming invoice / next recurring charge. Prefer a
+    # subscription-scoped upcoming invoice from Stripe, but fall back to
+    # showing the subscription's recurring plan price if Stripe doesn't
+    # return a usable upcoming invoice.
+    try:
+        if subscription and subscription.stripe_subscription_id and org.stripe_customer_id and show_upcoming_invoice:
+            try:
+                ui = stripe.Invoice.upcoming(customer=org.stripe_customer_id, subscription=subscription.stripe_subscription_id)
+            except Exception:
+                try:
                     ui = stripe.Invoice.upcoming(customer=org.stripe_customer_id)
-                    # Use period_end as the billing date, fallback to created
-                    billing_timestamp = ui.get("period_end") or ui.get("created")
-                    # Convert Unix timestamp to datetime
-                    from datetime import datetime
-                    billing_date = None
-                    if billing_timestamp:
-                        billing_date = timezone.make_aware(datetime.fromtimestamp(billing_timestamp))
+                    if ui and ui.get('subscription') and ui.get('subscription') != subscription.stripe_subscription_id:
+                        ui = None
+                except Exception:
+                    ui = None
+
+            billing_date = None
+            amount_due = None
+            if ui:
+                billing_timestamp = ui.get('period_end') or ui.get('created')
+                if billing_timestamp:
+                    try:
+                        from datetime import datetime
+                        billing_date = timezone.make_aware(datetime.fromtimestamp(int(billing_timestamp)))
+                    except Exception:
+                        billing_date = None
+                amount_due = (ui.get('amount_due', 0) / 100.0) if ui.get('amount_due') is not None else None
+
+            # Prefer showing the price that will actually be billed next.
+            # If a scheduled change exists and is set to take effect at the
+            # end of the current period, show the scheduled_plan price. Fall
+            # back to the subscription's current plan price, then to Stripe's
+            # upcoming invoice amount if available.
+            upcoming_invoice = None
+            try:
+                # 1) If there's a scheduled_plan and it's scheduled to apply
+                # at (or very near) the subscription.current_period_end, show
+                # the scheduled plan price as the next charge.
+                if subscription and getattr(subscription, 'scheduled_plan', None) and subscription.scheduled_change_at and getattr(subscription.scheduled_plan, 'price', None) is not None and subscription.current_period_end:
+                    try:
+                        sched = subscription.scheduled_change_at
+                        cpe = subscription.current_period_end
+                        # Accept small time differences (<= 1 day) as equivalent
+                        if sched and cpe and abs((sched - cpe).total_seconds()) <= 86400:
+                            upcoming_invoice = {
+                                'billing_date': subscription.current_period_end,
+                                'amount_due_dollars': float(subscription.scheduled_plan.price),
+                            }
+                    except Exception:
+                        # ignore and fall through to other fallbacks
+                        upcoming_invoice = None
+
+                # 2) If no scheduled change applies, prefer the subscription's
+                # current plan price (this represents the recurring charge).
+                if upcoming_invoice is None and subscription and getattr(subscription, 'plan', None) and subscription.plan.price is not None:
                     upcoming_invoice = {
-                        "billing_date": billing_date,
-                        "amount_due_dollars": (ui.get("amount_due", 0) / 100.0),
+                        'billing_date': subscription.current_period_end,
+                        'amount_due_dollars': float(subscription.plan.price),
+                    }
+
+                # 3) As a last resort, use the Stripe upcoming invoice amount
+                # (if we were able to retrieve one above).
+                if upcoming_invoice is None and amount_due is not None:
+                    upcoming_invoice = {
+                        'billing_date': billing_date,
+                        'amount_due_dollars': amount_due,
                     }
             except Exception:
                 upcoming_invoice = None
+        else:
+            upcoming_invoice = None
+    except Exception:
+        upcoming_invoice = None
+
+    # Determine whether a scheduled change is a downgrade (new plan price < current plan price)
+    scheduled_change_is_downgrade = None
+    if subscription and getattr(subscription, 'scheduled_plan', None) and getattr(subscription, 'plan', None):
+        try:
+            cur_p = float(subscription.plan.price) if subscription.plan.price is not None else None
+            new_p = float(subscription.scheduled_plan.price) if subscription.scheduled_plan.price is not None else None
+            if cur_p is not None and new_p is not None:
+                scheduled_change_is_downgrade = (new_p < cur_p)
+        except Exception:
+            scheduled_change_is_downgrade = None
 
     return render(request, "billing/manage.html", {
         "org": org,
         "subscription": subscription,
         "plans": plans,
+        "scheduled_plan": (subscription.scheduled_plan if subscription and getattr(subscription, 'scheduled_plan', None) else None),
+        "scheduled_change_is_downgrade": scheduled_change_is_downgrade,
         # Expose a display_plan that falls back to a sensible default when
         # subscription.plan is missing (e.g., trial created without plan).
         "display_plan": (subscription.plan if subscription and subscription.plan else Plan.objects.filter(slug='basic').first()),
@@ -439,10 +673,18 @@ def manage_billing(request, org_slug):
         "default_payment_method_id": default_payment_method_id,
         "has_payment_methods": bool(payment_methods),
         "invoices": invoices,
+        "months": months,
+        "selected_month": selected_month,
+        "paged_invoices": paged_invoices,
         "upcoming_invoice": upcoming_invoice,
         "trial_remaining_seconds": trial_remaining_seconds,
         "trial_remaining_days": trial_remaining_days,
         "trial_end_iso": trial_end_iso,
+        "invoice_card_options": invoice_card_options,
+        "invoice_status_options": invoice_status_options,
+        "current_inv_sort": request.GET.get('inv_sort', 'latest'),
+        "current_inv_card": request.GET.get('inv_card', ''),
+        "current_inv_status": request.GET.get('inv_status', ''),
     })
 
 
@@ -502,6 +744,106 @@ def set_default_payment_method(request, org_slug):
         # Don't block user action if cache update fails
         pass
     return JsonResponse({"status": "ok"})
+
+
+@require_http_methods(["POST"])
+def resubscribe_subscription(request, org_slug):
+    """Create a new Stripe subscription for an org when previous subscription was canceled.
+
+    Expects JSON body with optional `plan_id` to select which plan to subscribe to.
+    If no `plan_id` provided, uses the local `subscription.plan` if present.
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    import json
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        body = json.loads(request.body.decode('utf-8') or "{}")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in resubscribe_subscription: {e}")
+        return HttpResponseBadRequest(f"Invalid JSON: {e}")
+
+    plan_id = body.get('plan_id')
+    if plan_id:
+        try:
+            plan = Plan.objects.get(id=plan_id)
+        except Plan.DoesNotExist:
+            return HttpResponseBadRequest('Plan not found.')
+    else:
+        sub = getattr(org, 'subscription', None)
+        if not sub or not sub.plan:
+            return HttpResponseBadRequest('No plan specified and no local subscription plan available.')
+        plan = sub.plan
+
+    if not plan.stripe_price_id:
+        return HttpResponseBadRequest('Plan missing Stripe price id.')
+
+    # Ensure stripe customer exists
+    if not org.stripe_customer_id:
+        return HttpResponseBadRequest('Organization has no Stripe customer. Add a payment method first.')
+
+    # Find default payment method if available
+    default_pm = None
+    try:
+        cust = stripe.Customer.retrieve(org.stripe_customer_id)
+        default_pm = cust.get('invoice_settings', {}).get('default_payment_method')
+    except Exception:
+        default_pm = None
+
+    if not default_pm:
+        # Try cached default
+        cached = PaymentMethod.objects.filter(organization=org, is_default=True).first()
+        if cached:
+            default_pm = cached.stripe_pm_id
+
+    # If still no payment method, try to list attached methods and pick first
+    if not default_pm:
+        try:
+            pms = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type='card')
+            if pms and pms.get('data'):
+                default_pm = pms['data'][0]['id']
+        except Exception:
+            default_pm = None
+
+    if not default_pm:
+        return HttpResponseBadRequest('No payment method available. Add a card first.')
+
+    try:
+        create_kwargs = {
+            'customer': org.stripe_customer_id,
+            'items': [{'price': plan.stripe_price_id}],
+            'default_payment_method': default_pm,
+            'expand': ['latest_invoice.payment_intent'],
+            'metadata': {'organization_id': str(org.id), 'plan_id': str(plan.id)}
+        }
+        new_sub = stripe.Subscription.create(**create_kwargs)
+        # Update local subscription row
+        subs, created = Subscription.objects.get_or_create(organization=org)
+        old_stripe_id = subs.stripe_subscription_id
+        subs.stripe_subscription_id = new_sub.id
+        subs.plan = plan
+        subs.status = new_sub.get('status') or 'active'
+        subs.active = (subs.status == 'active' or subs.status == 'trialing')
+        try:
+            if getattr(new_sub, 'current_period_end', None):
+                from datetime import datetime
+                subs.current_period_end = timezone.make_aware(datetime.fromtimestamp(new_sub.current_period_end))
+        except Exception:
+            pass
+        subs.scheduled_plan = None
+        subs.scheduled_change_at = None
+        subs.save()
+
+        logger.info(f"Created new Stripe subscription {new_sub.id} for org {org.slug} (replaced {old_stripe_id})")
+        return JsonResponse({'status': 'ok', 'subscription_id': new_sub.id})
+    except Exception as e:
+        logger.exception('Failed to create new subscription in resubscribe_subscription')
+        return HttpResponseBadRequest(str(e))
 
 
 @require_http_methods(["GET"])
@@ -594,25 +936,54 @@ def cancel_subscription(request, org_slug):
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error in cancel_subscription: {e}")
         return HttpResponseBadRequest(f"Invalid JSON: {e}")
-    
+
     immediate = body.get("immediate", False)
     sub = getattr(org, "subscription", None)
-    if not sub or not sub.stripe_subscription_id:
+    if not sub:
         return HttpResponseBadRequest("No subscription.")
-    
+
+    # If there's no Stripe subscription id, treat as already canceled locally
+    if not sub.stripe_subscription_id:
+        sub.status = "canceled"
+        sub.active = False
+        sub.end_date = timezone.now()
+        sub.save()
+        return JsonResponse({"status": "ok", "message": "Local subscription marked canceled (no Stripe id)."})
+
     try:
         if immediate:
             logger.info(f"Immediate cancel for org {org_slug}, subscription {sub.stripe_subscription_id}")
-            stripe.Subscription.delete(sub.stripe_subscription_id)
+            try:
+                stripe.Subscription.delete(sub.stripe_subscription_id)
+            except InvalidRequestError as e:
+                # Treat "No such subscription" as already canceled
+                if 'No such subscription' in str(e):
+                    logger.warning(f"Stripe subscription already missing for {sub.stripe_subscription_id}")
+                else:
+                    raise
             sub.status = "canceled"
             sub.active = False
+            sub.end_date = timezone.now()
         else:
             logger.info(f"Cancel at period end for org {org_slug}, subscription {sub.stripe_subscription_id}")
-            stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
-            sub.cancel_at_period_end = True
+            try:
+                stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
+                sub.cancel_at_period_end = True
+            except InvalidRequestError as e:
+                # If subscription missing, mark canceled immediately
+                if 'No such subscription' in str(e):
+                    logger.warning(f"Stripe subscription missing while scheduling cancel for {sub.stripe_subscription_id}; marking canceled locally")
+                    sub.status = "canceled"
+                    sub.active = False
+                    sub.end_date = timezone.now()
+                else:
+                    raise
         sub.save()
+    except InvalidRequestError as e:
+        logger.error(f"Stripe InvalidRequestError in cancel_subscription: {e}")
+        return HttpResponseBadRequest(str(e))
     except Exception as e:
-        logger.error(f"Stripe error in cancel_subscription: {e}")
+        logger.exception(f"Stripe error in cancel_subscription: {e}")
         return HttpResponseBadRequest(str(e))
     return JsonResponse({"status": "ok"})
 
@@ -633,6 +1004,208 @@ def reactivate_subscription(request, org_slug):
     except Exception as e:
         return HttpResponseBadRequest(str(e))
     return JsonResponse({"status": "ok"})
+
+
+@require_http_methods(["POST"])
+def cancel_scheduled_change(request, org_slug):
+    """Cancel a previously scheduled plan change (downgrade) for the org."""
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+    sub = getattr(org, 'subscription', None)
+    if not sub:
+        return HttpResponseBadRequest('No subscription.')
+    # Clear scheduled change
+    sub.scheduled_plan = None
+    sub.scheduled_change_at = None
+    sub.save()
+    return JsonResponse({'status': 'ok'})
+
+
+@require_http_methods(["GET", "POST"])
+def preview_plan_change(request, org_slug, plan_id):
+    """Return a proration/preview for changing to `plan_id`.
+
+    Uses Stripe's `Invoice.upcoming` to simulate what the next invoice would
+    look like if the subscription were changed to the provided plan. This is
+    useful to show users the prorated immediate charge before committing.
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    plan = get_object_or_404(Plan, id=plan_id)
+    sub = getattr(org, 'subscription', None)
+
+    # If caller requested to start immediately (useful when converting a trial
+    # to paid) then handle that scenario explicitly: return a preview that
+    # charges the full plan price now and sets the next billing date one
+    # billing period after the current date.
+    start_immediately_flag = False
+    try:
+        start_immediately_flag = str(request.GET.get('start_immediately', '')).lower() in ('1', 'true', 'yes')
+    except Exception:
+        start_immediately_flag = False
+
+    if start_immediately_flag and sub and getattr(sub, 'status', '').lower() == 'trialing':
+        # Simulate immediate first-charge for the selected plan
+        try:
+            import calendar as _calendar
+            from datetime import datetime, timedelta
+
+            now = timezone.now()
+            # Plan price is Decimal; convert to float for JSON serializable output
+            plan_price = float(plan.price) if plan.price is not None else 0.0
+
+            # Next billing date: add one billing period (monthly/yearly)
+            if getattr(plan, 'billing_period', '') == 'yearly':
+                month_offset = 12
+            else:
+                month_offset = 1
+
+            # Add months safely
+            month = now.month - 1 + month_offset
+            year = now.year + month // 12
+            month = month % 12 + 1
+            day = min(now.day, _calendar.monthrange(year, month)[1])
+            billing_dt = datetime(year, month, day, now.hour, now.minute, now.second, tzinfo=now.tzinfo)
+
+            proration_lines = [{
+                'description': f'{plan.name} (first period)',
+                'amount': plan_price,
+                'quantity': 1,
+                'proration': False,
+                'billing_reason': 'first_period'
+            }]
+
+            return JsonResponse({
+                'amount_due_dollars': plan_price,
+                'proration_amount_dollars': plan_price,
+                'recurring_amount_dollars': 0.0,
+                'billing_date_iso': billing_dt.isoformat(),
+                'billing_date': billing_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                'lines': proration_lines,
+                'proration_lines': proration_lines,
+                'recurring_lines': [],
+                'raw': None,
+            }, safe=False)
+        except Exception as e:
+            # If our local simulation fails, continue to fallback to Stripe preview
+            pass
+
+    # If no Stripe customer or price id, can't preview
+    if not plan.stripe_price_id:
+        return HttpResponseBadRequest('Plan missing Stripe price id.')
+
+    if not org.stripe_customer_id and not (sub and not sub.stripe_subscription_id):
+        # If customer missing and not in the special trial-without-stripe-sub case
+        return HttpResponseBadRequest('No Stripe customer available. Add a card first.')
+
+    try:
+        # If there is an existing Stripe subscription, include it to let Stripe
+        # compute prorations for a mid-period change. Otherwise (trial without
+        # a Stripe subscription), request an upcoming invoice for the first
+        # billing cycle by passing subscription_items only.
+        if sub and sub.stripe_subscription_id and org.stripe_customer_id:
+            # Retrieve the Stripe subscription to get the subscription item id
+            try:
+                stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
+                # Choose the first subscription item to replace
+                items = stripe_sub.get('items', {}).get('data', [])
+                if items:
+                    sub_item_id = items[0].get('id')
+                    inv = stripe.Invoice.upcoming(
+                        customer=org.stripe_customer_id,
+                        subscription=sub.stripe_subscription_id,
+                        subscription_items=[{"id": sub_item_id, "price": plan.stripe_price_id}],
+                    )
+                else:
+                    # Fallback: no items found, ask Stripe to compute based on new item
+                    inv = stripe.Invoice.upcoming(
+                        customer=org.stripe_customer_id,
+                        subscription=sub.stripe_subscription_id,
+                        subscription_items=[{"price": plan.stripe_price_id}],
+                    )
+            except Exception:
+                # If retrieval fails, fall back to the simpler upcoming call
+                inv = stripe.Invoice.upcoming(
+                    customer=org.stripe_customer_id,
+                    subscription=sub.stripe_subscription_id,
+                    subscription_items=[{"price": plan.stripe_price_id}],
+                )
+        else:
+            # No existing Stripe subscription: simulate first invoice
+            inv = stripe.Invoice.upcoming(
+                customer=org.stripe_customer_id,
+                subscription_items=[{"price": plan.stripe_price_id}],
+            )
+
+
+        amount_due = inv.get('amount_due', 0) / 100.0 if inv else 0.0
+        period_end_ts = None
+        if inv:
+            period_end_ts = inv.get('period_end') or inv.get('created')
+
+        # Build simplified lines and separate proration vs recurring lines so the
+        # UI can clearly show immediate charges vs upcoming recurring charges.
+        lines = []
+        proration_amount_cents = 0
+        recurring_amount_cents = 0
+        proration_lines = []
+        recurring_lines = []
+        if inv and inv.get('lines'):
+            for line in inv['lines'].get('data', []):
+                desc = line.get('description') or line.get('plan', {}).get('nickname') or line.get('id')
+                amt = int(line.get('amount', 0))
+                entry = {
+                    'description': desc,
+                    'amount': (amt / 100.0),
+                    'quantity': line.get('quantity'),
+                    'proration': bool(line.get('proration')),
+                    'billing_reason': line.get('billing_reason'),
+                }
+                lines.append(entry)
+                if entry['proration']:
+                    proration_amount_cents += amt
+                    proration_lines.append(entry)
+                else:
+                    recurring_amount_cents += amt
+                    recurring_lines.append(entry)
+
+        # Pending invoice items (separate field) are amounts Stripe will invoice
+        # now but they may not be marked as 'proration' lines. Include them in
+        # immediate charges.
+        pending_cents = int(inv.get('pending_invoice_items_amount', 0)) if inv else 0
+
+        proration_amount = (proration_amount_cents + pending_cents) / 100.0
+        recurring_amount = recurring_amount_cents / 100.0
+
+        from datetime import datetime
+        billing_date = None
+        if period_end_ts:
+            try:
+                billing_date = timezone.make_aware(datetime.fromtimestamp(period_end_ts))
+            except Exception:
+                billing_date = None
+
+        return JsonResponse({
+            'amount_due_dollars': amount_due,
+            'proration_amount_dollars': proration_amount,
+            'recurring_amount_dollars': recurring_amount,
+            'billing_date_iso': billing_date.isoformat() if billing_date else None,
+            'billing_date': billing_date.strftime('%Y-%m-%d %H:%M:%S') if billing_date else None,
+            'lines': lines,
+            'proration_lines': proration_lines,
+            'recurring_lines': recurring_lines,
+            'raw': inv,
+        }, safe=False)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception('Failed to preview plan change')
+        return HttpResponseBadRequest(str(e))
 
 
 @require_http_methods(["POST"])
@@ -709,19 +1282,329 @@ def change_subscription_plan(request, org_slug, plan_id):
     # Case 2: Existing Stripe subscription - modify it
     if not sub or not sub.stripe_subscription_id:
         return HttpResponseBadRequest("No subscription.")
-
+    # Prefer using Stripe's live subscription price to determine upgrade vs downgrade
+    current_price = None
+    stripe_sub_obj = None
     try:
-        # If user requested to wait and the subscription is currently trialing,
-        # don't hit Stripe — just record the desired plan locally to take effect
-        # after trial ends.
-        if not start_immediately and getattr(sub, 'status', '') == 'trialing':
-            sub.plan = new_plan
-            sub.save()
-            return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
+        if sub and sub.stripe_subscription_id:
+            stripe_sub_obj = stripe.Subscription.retrieve(sub.stripe_subscription_id, expand=['items.data.price'])
+            items = stripe_sub_obj.get('items', {}).get('data', [])
+            if items and items[0].get('price'):
+                price_obj = items[0].get('price')
+                # unit_amount is in cents
+                if price_obj.get('unit_amount') is not None:
+                    current_price = float(price_obj.get('unit_amount')) / 100.0
+    except Exception:
+        # Fall back to local DB price when Stripe call fails
+        try:
+            current_price = float(sub.plan.price) if sub.plan and sub.plan.price is not None else None
+        except Exception:
+            current_price = None
 
-        stripe.Subscription.modify(sub.stripe_subscription_id, items=[{"price": new_plan.stripe_price_id}])
+    # If user requested to wait and the subscription is currently trialing,
+    # record the desired plan locally to take effect after trial ends.
+    if not start_immediately and getattr(sub, 'status', '') == 'trialing':
         sub.plan = new_plan
         sub.save()
+        return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
+
+    # Decide upgrade vs downgrade based on Stripe price (preferred) or local DB price
+    is_upgrade = None
+    try:
+        if current_price is not None:
+            is_upgrade = float(new_plan.price) > current_price
+    except Exception:
+        is_upgrade = None
+
+    # If we can determine it's a downgrade, schedule it at period end (no refunds).
+    if is_upgrade is False:
+        sub.scheduled_plan = new_plan
+        sub.scheduled_change_at = sub.current_period_end or None
+        sub.save()
+        # Record a local SubscriptionChange so the user can see the scheduled change
+        try:
+            from billing.models import SubscriptionChange
+            SubscriptionChange.objects.create(
+                organization=org,
+                subscription=sub,
+                change_type='downgrade',
+                new_plan=new_plan,
+                effective_at=sub.scheduled_change_at,
+                amount_cents=0,
+                status='scheduled',
+            )
+        except Exception:
+            pass
+        return JsonResponse({"status": "ok", "message": "Plan downgrade scheduled to take effect at period end."})
+
+    # Upgrades (or unknown): apply immediately and create prorations
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Ensure customer and default payment method exist for immediate upgrades
+        if not org.stripe_customer_id:
+            return HttpResponseBadRequest("No Stripe customer. Add payment method first.")
+
+        # If Stripe subscription exists but is canceled, handle by creating
+        # a new Stripe subscription for the customer (so upgrade can be immediate).
+        if stripe_sub_obj and stripe_sub_obj.get('status') == 'canceled':
+            # For upgrades on a canceled subscription, create a fresh subscription
+            # using the customer's default payment method (or the first card).
+            cust = stripe.Customer.retrieve(org.stripe_customer_id)
+            default_pm = cust.get('invoice_settings', {}).get('default_payment_method')
+            if not default_pm:
+                # Try to find any attached payment method
+                pms = stripe.PaymentMethod.list(customer=org.stripe_customer_id, type='card')
+                if not pms or not pms.get('data'):
+                    return HttpResponseBadRequest('No payment method found. Please add a card before upgrading.')
+                default_pm = pms.get('data')[0].get('id')
+
+            # Create new subscription for the Team (new_plan)
+            new_sub = stripe.Subscription.create(
+                customer=org.stripe_customer_id,
+                items=[{"price": new_plan.stripe_price_id}],
+                default_payment_method=default_pm,
+                expand=["latest_invoice.payment_intent"],
+                metadata={"organization_id": str(org.id), "plan_id": str(new_plan.id), "recreated_from": sub.stripe_subscription_id},
+            )
+            logger.info(f"Recreated subscription {new_sub.id} for org {org.slug} due to canceled subscription {sub.stripe_subscription_id}")
+
+            # Update local subscription
+            sub.stripe_subscription_id = new_sub.id
+            sub.plan = new_plan
+            sub.status = new_sub.get('status')
+            sub.active = (sub.status == 'active' or sub.status == 'trialing')
+            if new_sub.get('current_period_end'):
+                from datetime import datetime
+                sub.current_period_end = timezone.make_aware(datetime.fromtimestamp(new_sub['current_period_end']))
+            sub.scheduled_plan = None
+            sub.scheduled_change_at = None
+            sub.save()
+
+            # Record the immediate change so users see it in the UI
+            try:
+                from billing.models import SubscriptionChange
+                SubscriptionChange.objects.create(
+                    organization=org,
+                    subscription=sub,
+                    change_type='upgrade',
+                    new_plan=new_plan,
+                    effective_at=sub.current_period_end,
+                    amount_cents=0,
+                    status='processed',
+                )
+            except Exception:
+                pass
+
+            # Log the preview/new subscription for auditing
+            try:
+                logger.info('Preview JSON (not available for canceled->new flow)')
+                logger.info(f'Created subscription {new_sub.id} status={new_sub.get("status")}')
+            except Exception:
+                pass
+
+            return JsonResponse({"status": "ok", "message": "Subscription recreated and upgraded immediately."})
+
+        # Otherwise, proceed with the usual immediate-upgrade flow for active subs
+        # Preview the upcoming invoice to obtain proration lines and amounts
+        try:
+            sub_item_id = stripe_sub_obj.get('items', {}).get('data', [])[0].get('id') if stripe_sub_obj and stripe_sub_obj.get('items', {}).get('data') else None
+            preview = stripe.Invoice.upcoming(
+                customer=org.stripe_customer_id,
+                subscription=sub.stripe_subscription_id,
+                subscription_items=[{"id": sub_item_id, "price": new_plan.stripe_price_id}] if sub_item_id else [{"price": new_plan.stripe_price_id}],
+            )
+            logger.info(f"Preview for change: org={org.slug} new_plan={new_plan.id} preview_lines={len(preview.get('lines', {}).get('data', []))}")
+        except Exception as e:
+            preview = None
+            logger.exception('Failed to preview upcoming invoice')
+
+        proration_lines = []
+        if preview and preview.get('lines'):
+            for line in preview['lines'].get('data', []):
+                if line.get('proration') or line.get('billing_reason') == 'pending_invoice_item':
+                    proration_lines.append(line)
+
+        # If Stripe preview returned no proration lines (or zero amount),
+        # fall back to a server-side proration calculation to ensure the
+        # customer is charged immediately for the prorated portion of the
+        # upgrade. This avoids situations where Stripe's upcoming invoice
+        # contains only the future recurring amount and nothing to invoice now.
+        total_proration_cents = 0
+        for l in proration_lines:
+            total_proration_cents += int(l.get('amount', 0) or 0)
+
+        if total_proration_cents == 0:
+            try:
+                # Attempt to compute prorated difference between new and current price
+                now_ts = int(timezone.now().timestamp())
+                # Prefer Stripe subscription timestamps when available
+                period_start = None
+                period_end = None
+                if stripe_sub_obj:
+                    period_start = int(stripe_sub_obj.get('current_period_start')) if stripe_sub_obj.get('current_period_start') else None
+                    period_end = int(stripe_sub_obj.get('current_period_end')) if stripe_sub_obj.get('current_period_end') else None
+                # Fallback to local subscription current_period_end if Stripe values missing
+                if not period_end and sub and getattr(sub, 'current_period_end', None):
+                    try:
+                        period_end = int(sub.current_period_end.timestamp())
+                    except Exception:
+                        period_end = None
+
+                if period_start and period_end and period_end > now_ts and period_end > period_start:
+                    remaining = period_end - now_ts
+                    total_period = period_end - period_start
+                    ratio = float(remaining) / float(total_period)
+                    # Determine price difference in cents
+                    new_price_cents = int(round(float(new_plan.price) * 100))
+                    cur_price_cents = None
+                    # Use Stripe current_price when available
+                    if current_price is not None:
+                        cur_price_cents = int(round(float(current_price) * 100))
+                    elif sub and sub.plan and sub.plan.price is not None:
+                        cur_price_cents = int(round(float(sub.plan.price) * 100))
+                    if cur_price_cents is None:
+                        raise ValueError('Cannot determine current price')
+                    diff_cents = new_price_cents - cur_price_cents
+                    if diff_cents > 0:
+                        prorate_cents = int(round(diff_cents * ratio))
+                        if prorate_cents > 0:
+                            # Build a minimal proration line structure compatible with downstream code
+                            proration_lines = [{
+                                'description': f'Prorated upgrade to {new_plan.name}',
+                                'amount': prorate_cents,
+                                'quantity': 1,
+                                'proration': True,
+                                'billing_reason': 'proration_fallback'
+                            }]
+                            total_proration_cents = prorate_cents
+                # else: leave proration_lines empty and handle below
+            except Exception:
+                # If anything goes wrong, fall back to no proration (will result in $0 now)
+                total_proration_cents = 0
+
+        # Apply the subscription change but disable automatic prorations so we
+        # can invoice only the prorations we want now.
+        stripe_sub = stripe.Subscription.modify(
+            sub.stripe_subscription_id,
+            items=[{"price": new_plan.stripe_price_id}],
+            proration_behavior="none",
+        )
+
+        # Create invoice items for each proration line (Stripe preview gives
+        # amounts in cents). This mirrors the prorations but ensures we only
+        # charge those amounts now, not the full recurring amount.
+        created_invoice = None
+        try:
+            currency = (preview.get('currency') if preview else 'usd') or 'usd'
+            for line in proration_lines:
+                amt = int(line.get('amount', 0))
+                desc = line.get('description') or (line.get('plan', {}) or {}).get('nickname') or 'Proration'
+                # Attach invoice items to the subscription so the resulting
+                # invoice is associated with the correct subscription id.
+                stripe.InvoiceItem.create(
+                    customer=org.stripe_customer_id,
+                    subscription=sub.stripe_subscription_id,
+                    amount=amt,
+                    currency=currency,
+                    description=desc,
+                )
+
+            # Create and finalize invoice to bill the created invoice items now
+            created_invoice = stripe.Invoice.create(customer=org.stripe_customer_id, subscription=sub.stripe_subscription_id)
+            stripe.Invoice.finalize_invoice(created_invoice.id)
+            try:
+                stripe.Invoice.pay(created_invoice.id)
+            except Exception:
+                pass
+
+            invoice_info = None
+            if created_invoice:
+                # Retrieve the finalized invoice with expanded payment details so
+                # we can surface the charged amount and payment method/card used.
+                try:
+                    inv = stripe.Invoice.retrieve(created_invoice.id, expand=['payment_intent', 'charge', 'latest_charge'])
+                except Exception:
+                    inv = stripe.Invoice.retrieve(created_invoice.id)
+
+                invoice_info = {
+                    'id': inv.id,
+                    'amount_due': inv.get('amount_due', 0),
+                    'amount_paid': inv.get('amount_paid', 0),
+                    'currency': inv.get('currency'),
+                    'status': inv.get('status'),
+                    'hosted_invoice_url': inv.get('hosted_invoice_url'),
+                }
+
+                # Attempt to extract card/PM details from payment_intent or charge
+                pm_details = None
+                try:
+                    pi = inv.get('payment_intent') or (inv.get('latest_charge') and {}).get('payment_intent')
+                    if pi:
+                        # If expanded above, pi is an object; otherwise retrieve
+                        if isinstance(pi, dict) and pi.get('id') and pi.get('charges'):
+                            ch = (pi.get('charges', {}).get('data') or [None])[0]
+                        else:
+                            pi_obj = stripe.PaymentIntent.retrieve(pi) if isinstance(pi, str) else pi
+                            ch = (pi_obj.get('charges', {}).get('data') or [None])[0]
+                        if ch:
+                            pm = ch.get('payment_method_details', {}).get('card')
+                            if pm:
+                                pm_details = {'brand': pm.get('brand'), 'last4': pm.get('last4')}
+                except Exception:
+                    pm_details = None
+
+                if pm_details:
+                    invoice_info['card_brand'] = pm_details.get('brand')
+                    invoice_info['card_last4'] = pm_details.get('last4')
+
+                logger.info(f"Created invoice {created_invoice.id} for proration for org={org.slug}")
+        except Exception:
+            created_invoice = None
+            logger.exception('Failed while creating/charging proration invoice items')
+
+        # Update local subscription record from Stripe response
+        sub.plan = new_plan
+        sub.status = stripe_sub.get('status', sub.status)
+        sub.active = (sub.status == 'active' or sub.status == 'trialing')
+        if stripe_sub.get('current_period_end'):
+            from datetime import datetime
+            sub.current_period_end = timezone.make_aware(datetime.fromtimestamp(stripe_sub['current_period_end']))
+        sub.scheduled_plan = None
+        sub.scheduled_change_at = None
+        sub.save()
+        # Create a SubscriptionChange record reflecting this processed upgrade
+        try:
+            from billing.models import SubscriptionChange
+            amt = None
+            try:
+                if invoice_info and invoice_info.get('amount_paid') is not None:
+                    amt = int(invoice_info.get('amount_paid') or 0)
+            except Exception:
+                amt = None
+            SubscriptionChange.objects.create(
+                organization=org,
+                subscription=sub,
+                change_type='upgrade',
+                new_plan=new_plan,
+                effective_at=sub.current_period_end,
+                amount_cents=(amt if amt is not None else int(total_proration_cents or 0)),
+                status='processed',
+                card_brand=(invoice_info.get('card_brand') if invoice_info else None),
+                card_last4=(invoice_info.get('card_last4') if invoice_info else None),
+                stripe_invoice_id=(invoice_info.get('id') if invoice_info else None),
+            )
+        except Exception:
+            pass
+        # If we created an invoice, include its info in the response so the
+        # client can display the charged amount and card used.
+        if created_invoice and invoice_info:
+            return JsonResponse({"status": "ok", "message": "Plan changed and prorated charges applied.", "invoice": invoice_info})
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception('Failed to change subscription plan')
         return HttpResponseBadRequest(str(e))
-    return JsonResponse({"status": "ok"})
+
+    return JsonResponse({"status": "ok", "message": "Plan changed and prorated charges applied."})

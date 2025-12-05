@@ -9,7 +9,7 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
         {% for plan in plans %}
-        <div class="relative border rounded-xl p-8 shadow-lg hover:shadow-xl transition {% if plan.slug == 'pro' %}border-blue-500 ring-2 ring-blue-500{% endif %}">
+        <div class="relative border rounded-xl p-8 shadow-lg hover:shadow-xl transition bg-white {% if plan.slug == 'pro' %}border-blue-500 ring-2 ring-blue-500{% endif %}">
             {# Trial badge for Basic when organization is currently in trial #}
             {% if subscription and subscription.status == 'trialing' and plan.slug == 'basic' and current_plan and current_plan.slug == 'basic' %}
             <div class="absolute right-4 -top-3">

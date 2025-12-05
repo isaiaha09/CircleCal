@@ -1,5 +1,5 @@
 from django.contrib import admin
-from billing.models import Plan, Subscription
+from billing.models import Plan, Subscription, SubscriptionChange
 
 
 @admin.register(Plan)
@@ -30,3 +30,21 @@ class SubscriptionAdmin(admin.ModelAdmin):
     )
     list_filter = ("status",)
     search_fields = ("organization__name", "plan__name", "stripe_subscription_id")
+
+
+@admin.register(SubscriptionChange)
+class SubscriptionChangeAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'organization',
+        'subscription',
+        'change_type',
+        'new_plan',
+        'effective_at',
+        'amount_cents',
+        'status',
+        'created_at',
+    )
+    list_filter = ('change_type', 'status', 'created_at')
+    search_fields = ('organization__name', 'subscription__stripe_subscription_id', 'new_plan__name')
+    readonly_fields = ('created_at', 'updated_at')

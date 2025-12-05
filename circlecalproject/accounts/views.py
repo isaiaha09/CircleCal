@@ -8,6 +8,8 @@ from billing.models import Subscription
 from django.views.decorators.http import require_POST
 from django.contrib.auth import logout
 from django.urls import reverse
+from two_factor.views import LoginView as TwoFactorLoginView
+from django.http import HttpResponseRedirect
 
 # Create your views here.
 @login_required
@@ -64,7 +66,15 @@ def profile_view(request):
 	memberships = Membership.objects.filter(user=user).select_related('organization')
 	pending_invites = Invite.objects.filter(email=user.email, accepted=False).select_related('organization') if user.email else []
 
-	return render(request, "accounts/profile.html", {
+
+	# If profile is incomplete, set a cookie so that a logout before finishing
+	# will return the user to this profile page after they log back in.
+	try:
+		incomplete = not (profile.avatar or (profile.timezone and profile.timezone != 'UTC'))
+	except Exception:
+		incomplete = True
+
+	resp = render(request, "accounts/profile.html", {
 		"form": form,
 		"user": user,
 		"activities": activities,
@@ -73,6 +83,37 @@ def profile_view(request):
 		"memberships": memberships,
 		"pending_invites": pending_invites,
 	})
+
+	if incomplete:
+		try:
+			resp.set_cookie('post_login_redirect', request.path, max_age=60*60*24)
+		except Exception:
+			pass
+
+	# If user submitted the form and it was valid we may want to redirect
+	# to the dashboard (if they have a business) rather than stay on profile.
+	# However the view above already handles POST behavior and redirects on success.
+	return resp
+
+
+class CustomLoginView(TwoFactorLoginView):
+	"""Wrap the two-factor login view to honor a `post_login_redirect` cookie.
+
+	If the cookie exists, after successful authentication redirect the user
+	to that path and remove the cookie.
+	"""
+
+	def form_valid(self, form):
+		# Default response from TwoFactorLoginView
+		response = super().form_valid(form)
+		# If a cookie was set for post-login redirect, redirect there.
+		redirect_to = self.request.COOKIES.get('post_login_redirect')
+		if redirect_to:
+			# Remove cookie and redirect
+			resp = HttpResponseRedirect(redirect_to)
+			resp.delete_cookie('post_login_redirect')
+			return resp
+		return response
 
 
 @login_required

@@ -18,5 +18,8 @@ urlpatterns = [
     path("api/bus/<slug:org_slug>/payment_method/list/", views.list_payment_methods, name="list_payment_methods"),
     path("api/bus/<slug:org_slug>/subscription/cancel/", views.cancel_subscription, name="cancel_subscription"),
     path("api/bus/<slug:org_slug>/subscription/reactivate/", views.reactivate_subscription, name="reactivate_subscription"),
+    path("api/bus/<slug:org_slug>/subscription/resubscribe/", views.resubscribe_subscription, name="resubscribe_subscription"),
     path("api/bus/<slug:org_slug>/subscription/change_plan/<int:plan_id>/", views.change_subscription_plan, name="change_subscription_plan"),
+    path("api/bus/<slug:org_slug>/subscription/preview_change/<int:plan_id>/", views.preview_plan_change, name="preview_plan_change"),
+    path("api/bus/<slug:org_slug>/subscription/cancel_scheduled/", views.cancel_scheduled_change, name="cancel_scheduled_change"),
 ]

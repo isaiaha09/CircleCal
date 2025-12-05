@@ -50,6 +50,12 @@ class Subscription(models.Model):
 
     stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True)
     cancel_at_period_end = models.BooleanField(default=False)
+    # If a downgrade (or any plan change) is requested to take effect at the
+    # end of the current billing period, store the target plan and the date
+    # when the change should be applied. This supports the "upgrades now,
+    # downgrades at period end" policy.
+    scheduled_plan = models.ForeignKey(Plan, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    scheduled_change_at = models.DateTimeField(null=True, blank=True)
     # Added fields referenced by webhook logic
     active = models.BooleanField(default=True)
     current_period_end = models.DateTimeField(null=True, blank=True)
@@ -93,3 +99,42 @@ class PaymentMethod(models.Model):
 
     def __str__(self):
         return f"PM {self.stripe_pm_id} @ {self.organization}" 
+
+
+class SubscriptionChange(models.Model):
+    """Represents a scheduled or processed subscription change (upgrade/downgrade).
+
+    This is a local, non-Stripe object used to surface scheduled changes in the
+    billing UI as pseudo-invoices (commonly shown as $0.00 entries with no card).
+    """
+    STATUS_CHOICES = [
+        ("scheduled", "Scheduled"),
+        ("processed", "Processed"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    CHANGE_TYPE_CHOICES = [
+        ("downgrade", "Downgrade"),
+        ("upgrade", "Upgrade"),
+        ("other", "Other"),
+    ]
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='subscription_changes')
+    subscription = models.ForeignKey('Subscription', on_delete=models.SET_NULL, null=True, blank=True, related_name='changes')
+    change_type = models.CharField(max_length=20, choices=CHANGE_TYPE_CHOICES, default='other')
+    new_plan = models.ForeignKey(Plan, on_delete=models.SET_NULL, null=True, blank=True)
+    effective_at = models.DateTimeField(null=True, blank=True)
+    amount_cents = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+    note = models.TextField(blank=True, null=True)
+    card_brand = models.CharField(max_length=50, blank=True, null=True)
+    card_last4 = models.CharField(max_length=8, blank=True, null=True)
+    stripe_invoice_id = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"SubscriptionChange {self.id} for {self.organization} -> {self.new_plan.name if self.new_plan else 'N/A'}"
