@@ -13,6 +13,8 @@ jobs:
     defaults:
       run:
         working-directory: circlecalproject
+    env:
+      SECRET_KEY: 'ci-secret-key'
     strategy:
       matrix:
         python-version: ['3.10', '3.11']
