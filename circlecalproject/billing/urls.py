@@ -22,4 +22,8 @@ urlpatterns = [
     path("api/bus/<slug:org_slug>/subscription/change_plan/<int:plan_id>/", views.change_subscription_plan, name="change_subscription_plan"),
     path("api/bus/<slug:org_slug>/subscription/preview_change/<int:plan_id>/", views.preview_plan_change, name="preview_plan_change"),
     path("api/bus/<slug:org_slug>/subscription/cancel_scheduled/", views.cancel_scheduled_change, name="cancel_scheduled_change"),
+    # Invoice actions
+    path("api/bus/<slug:org_slug>/invoice/<str:invoice_id>/hide/", views.invoice_hide, name="invoice_hide"),
+    path("api/bus/<slug:org_slug>/invoice/<str:invoice_id>/void/", views.invoice_void, name="invoice_void"),
+    path("api/bus/<slug:org_slug>/invoice/<str:invoice_id>/unhide/", views.invoice_unhide, name="invoice_unhide"),
 ]

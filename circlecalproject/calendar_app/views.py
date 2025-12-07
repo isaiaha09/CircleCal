@@ -397,6 +397,119 @@ def choose_business(request):
     return resp
 
 
+def admin_pin_view(request):
+    """Render a simple PIN entry form to gate access to the admin area.
+
+    The required PIN should be configured via the `ADMIN_PIN` setting or the
+    `ADMIN_PIN` environment variable. On success the middleware will allow
+    subsequent requests to the admin by setting `request.session['admin_pin_ok']`.
+    """
+    from django.conf import settings
+    from django.views.decorators.http import require_http_methods
+    from django.shortcuts import render, redirect
+    from django.middleware.csrf import get_token
+
+    # Determine configured PIN: prefer environment/settings, otherwise DB
+    admin_pin_setting = getattr(settings, 'ADMIN_PIN', None)
+    next_url = request.GET.get('next') or request.POST.get('next') or '/admin/'
+    error = None
+
+    # Rate-limiting using Django cache; use AXES settings for thresholds
+    from django.core.cache import cache
+    ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', 'unknown'))
+    if isinstance(ip, str) and ',' in ip:
+        ip = ip.split(',')[0].strip()
+    cache_key = f"admin_pin_attempts:{ip}"
+    failure_limit = getattr(settings, 'AXES_FAILURE_LIMIT', 5)
+    cooloff_hours = getattr(settings, 'AXES_COOLOFF_TIME', 0.25)
+    cooloff_seconds = int(float(cooloff_hours) * 3600)
+
+    # If no PIN configured in settings, check DB
+    db_pin_exists = False
+    try:
+        from .models import AdminPin
+        if AdminPin.get_latest_hash():
+            db_pin_exists = True
+    except Exception:
+        db_pin_exists = False
+
+    if not admin_pin_setting and not db_pin_exists:
+        return redirect(next_url)
+
+    # If we've exceeded attempts, show a lockout message
+    attempts = cache.get(cache_key, 0) or 0
+    if attempts >= failure_limit:
+        error = f"Too many attempts. Try again in {cooloff_seconds} seconds."
+        get_token(request)
+        return render(request, 'calendar_app/admin_pin.html', {'error': error, 'next': next_url})
+
+    if request.method == 'POST':
+        pin = request.POST.get('pin')
+        ok = False
+        # First check env/settings PIN
+        if admin_pin_setting and pin and pin == admin_pin_setting:
+            ok = True
+        else:
+            try:
+                # Check DB-stored hashed PIN
+                if pin and AdminPin.check_pin(pin):
+                    ok = True
+            except Exception:
+                ok = False
+
+        if ok:
+            # Success: clear attempts and set session flag
+            try:
+                cache.delete(cache_key)
+            except Exception:
+                pass
+            request.session['admin_pin_ok'] = True
+            return redirect(next_url)
+
+        # Failure: increment attempts and set expiry
+        attempts = attempts + 1
+        cache.set(cache_key, attempts, timeout=cooloff_seconds)
+        error = 'Incorrect PIN'
+
+    # Ensure CSRF token is set for the template
+    get_token(request)
+    return render(request, 'calendar_app/admin_pin.html', {'error': error, 'next': next_url})
+
+
+@login_required
+def admin_pin_manage(request):
+    """Admin UI to set or clear the stored DB PIN.
+
+    Only superusers may access this view. The UI writes to the `AdminPin`
+    model when setting a new PIN or clears all rows to remove DB-managed PIN.
+    """
+    if not request.user.is_superuser:
+        return HttpResponseForbidden()
+
+    from .models import AdminPin
+    message = None
+
+    if request.method == 'POST':
+        if 'set_pin' in request.POST:
+            new_pin = request.POST.get('new_pin')
+            if new_pin and len(new_pin) >= 4:
+                AdminPin.set_pin(new_pin)
+                message = 'PIN set successfully.'
+            else:
+                message = 'PIN must be at least 4 characters.'
+        elif 'clear_pin' in request.POST:
+            AdminPin.clear_pins()
+            message = 'PIN cleared.'
+    latest = AdminPin.objects.order_by('-id').first()
+    current_exists = bool(latest)
+    last_set = latest.created_at if latest else None
+    return render(request, 'calendar_app/admin_pin_manage.html', {
+        'message': message,
+        'current_exists': current_exists,
+        'last_set': last_set,
+    })
+
+
 @login_required
 def edit_business(request, org_slug):
     """

@@ -62,6 +62,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'calendar_app.middleware.AdminPinMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -165,6 +166,9 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 SITE_URL = os.getenv("SITE_URL") or ("http://127.0.0.1:8000" if DEBUG else "http://localhost:8000")
+
+# Optional admin PIN protection. Set via environment variable `ADMIN_PIN`.
+ADMIN_PIN = os.getenv('ADMIN_PIN')
 
 # Django Axes (Rate Limiting)
 AXES_FAILURE_LIMIT = 5

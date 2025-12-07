@@ -71,6 +71,7 @@ urlpatterns = [
          ),
          name='password_reset_complete_root'),
 
+    path('admin/pin/', include('calendar_app.urls_admin_pin')),
     path('admin/', admin.site.urls),
     path('', include('calendar_app.urls')),
     # Organization-scoped booking endpoints

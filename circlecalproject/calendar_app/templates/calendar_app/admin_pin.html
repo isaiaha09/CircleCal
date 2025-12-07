@@ -1,0 +1,32 @@
+{% load static %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin Access</title>
+  <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#f7f7fb; }
+    .pin-box { max-width:420px; margin:80px auto; background:white; padding:28px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.08);} 
+    .pin-input { font-size:18px; padding:10px; width:100%; box-sizing:border-box; margin-bottom:12px; }
+    .btn { background:#1f2937; color:white; padding:10px 14px; border-radius:6px; border:none; cursor:pointer }
+    .err { color:#b91c1c; margin-bottom:12px }
+  </style>
+</head>
+<body>
+  <div class="pin-box">
+    <h2>Admin Access</h2>
+    <p>Please enter the admin access PIN to continue to the admin area.</p>
+    {% if error %}
+      <div class="err">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}" />
+      <input name="pin" class="pin-input" type="password" placeholder="Enter PIN" autocomplete="off" autofocus />
+      <div style="text-align:right"><button class="btn" type="submit">Continue</button></div>
+    </form>
+  </div>
+</body>
+</html>

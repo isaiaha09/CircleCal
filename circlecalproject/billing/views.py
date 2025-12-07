@@ -10,6 +10,11 @@ from django.views.decorators.http import require_http_methods
 from accounts.models import Business as Organization
 from billing.models import Plan, Subscription, PaymentMethod
 from calendar_app.utils import user_has_role
+from billing.models import InvoiceMeta, InvoiceActionLog
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
+from django.utils import timezone as dj_timezone
+from django.db.models import Q
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -63,6 +68,93 @@ def create_checkout_session(request, org_slug, plan_id):
     )
 
     return redirect(session.url)
+
+
+@login_required
+@require_POST
+def invoice_hide(request, org_slug, invoice_id):
+    """Hide (archive) an invoice in the UI. Safe, reversible."""
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    # invoice_id here is expected to be a Stripe invoice id or subscription change id
+    stripe_id = invoice_id
+    # Try to find or create InvoiceMeta for this stripe invoice id
+    meta, created = InvoiceMeta.objects.get_or_create(organization=org, stripe_invoice_id=stripe_id)
+    meta.hidden = True
+    meta.save()
+    # Log action
+    InvoiceActionLog.objects.create(invoice_meta=meta, user=request.user, action='hide')
+    return JsonResponse({'success': True, 'hidden': True})
+
+
+@login_required
+@require_POST
+def invoice_void(request, org_slug, invoice_id):
+    """Void a Stripe invoice (when allowed) and mark it voided locally.
+
+    This calls Stripe's `void_invoice` for open/draft invoices. For paid
+    invoices, a credit note is generally required instead (we return an error).
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    stripe_id = invoice_id
+    # Fetch invoice from Stripe to ensure it belongs to this customer and can be voided
+    try:
+        si = stripe.Invoice.retrieve(stripe_id)
+    except Exception as e:
+        return JsonResponse({'error': 'Stripe invoice not found or inaccessible', 'details': str(e)}, status=400)
+
+    # Verify invoice belongs to this org's customer when possible
+    cust = si.get('customer')
+    if org.stripe_customer_id and cust and cust != org.stripe_customer_id:
+        return JsonResponse({'error': 'Invoice does not belong to this organization.'}, status=403)
+
+    status = si.get('status')
+    # Only allow voiding for draft/open invoices
+    if status not in ('draft', 'open'):
+        return JsonResponse({'error': f'Invoice status "{status}" cannot be voided via this endpoint. Consider creating a credit note.'}, status=400)
+
+    try:
+        stripe.Invoice.void_invoice(stripe_id)
+    except Exception as e:
+        return JsonResponse({'error': 'Stripe void failed', 'details': str(e)}, status=400)
+
+    # Mark local metadata
+    meta, created = InvoiceMeta.objects.get_or_create(organization=org, stripe_invoice_id=stripe_id)
+    meta.voided = True
+    meta.voided_at = dj_timezone.now()
+    meta.voided_by = request.user
+    meta.save()
+    InvoiceActionLog.objects.create(invoice_meta=meta, user=request.user, action='void')
+    return JsonResponse({'success': True, 'voided': True})
+
+
+@login_required
+@require_POST
+def invoice_unhide(request, org_slug, invoice_id):
+    """Unhide (un-archive) an invoice in the UI."""
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    stripe_id = invoice_id
+    try:
+        meta = InvoiceMeta.objects.filter(organization=org).filter(Q(stripe_invoice_id=stripe_id) | Q(subscription_change_id=stripe_id)).first()
+        if not meta:
+            return JsonResponse({'error': 'Invoice meta not found'}, status=404)
+        meta.hidden = False
+        meta.save()
+        InvoiceActionLog.objects.create(invoice_meta=meta, user=request.user, action='unhide')
+        return JsonResponse({'success': True, 'hidden': False})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @require_http_methods(["GET"])
@@ -333,6 +425,8 @@ def manage_billing(request, org_slug):
                 })
             default = next((p for p in cached if p.is_default), None)
             default_payment_method_id = default.stripe_pm_id if default else None
+            # Capture the default card last4 for UI convenience when available
+            default_card_last4 = default.last4 if default else None
         else:
             # Fallback to Stripe live API
             if org.stripe_customer_id:
@@ -341,8 +435,19 @@ def manage_billing(request, org_slug):
                     payment_methods = pms.get("data", [])
                     cust = stripe.Customer.retrieve(org.stripe_customer_id)
                     default_payment_method_id = cust.get("invoice_settings", {}).get("default_payment_method")
+                    # try to resolve default last4 from the retrieved payment methods
+                    default_card_last4 = None
+                    if default_payment_method_id and isinstance(payment_methods, list):
+                        for pm in payment_methods:
+                            pm_id = pm.get('id') if isinstance(pm, dict) else getattr(pm, 'id', None)
+                            if pm_id == default_payment_method_id:
+                                # pm may be a dict-like stripe object
+                                card = pm.get('card') if isinstance(pm, dict) else getattr(pm, 'card', None) or {}
+                                default_card_last4 = (card.get('last4') if isinstance(card, dict) else getattr(card, 'last4', None))
+                                break
                 except Exception:
                     payment_methods = []
+                    default_card_last4 = None
     except Exception:
         # If cache lookup fails for any reason, fall back to Stripe
         try:
@@ -351,8 +456,21 @@ def manage_billing(request, org_slug):
                 payment_methods = pms.get("data", [])
                 cust = stripe.Customer.retrieve(org.stripe_customer_id)
                 default_payment_method_id = cust.get("invoice_settings", {}).get("default_payment_method")
+                # try to resolve default last4
+                default_card_last4 = None
+                if default_payment_method_id and isinstance(payment_methods, list):
+                    for pm in payment_methods:
+                        pm_id = pm.get('id') if isinstance(pm, dict) else getattr(pm, 'id', None)
+                        if pm_id == default_payment_method_id:
+                            card = pm.get('card') if isinstance(pm, dict) else getattr(pm, 'card', None) or {}
+                            default_card_last4 = (card.get('last4') if isinstance(card, dict) else getattr(card, 'last4', None))
+                            break
         except Exception:
             payment_methods = []
+            default_card_last4 = None
+
+    # Respect optional query param to show archived (hidden) invoices
+    show_archived = str(request.GET.get('show_archived', '')).lower() in ('1', 'true', 'yes')
 
     # Only pull invoices if a real Stripe subscription exists
     if subscription and subscription.stripe_subscription_id and org.stripe_customer_id:
@@ -379,10 +497,11 @@ def manage_billing(request, org_slug):
                     created_dt = None
                     try:
                         if created_ts:
-                            # Use the current Django timezone when making the timestamp aware
-                            from django.utils import timezone as django_tz
-                            tz = django_tz.get_current_timezone()
-                            created_dt = timezone.make_aware(datetime.fromtimestamp(int(created_ts)), timezone=tz)
+                            # Stripe timestamps are UTC seconds. Create a UTC-aware
+                            # datetime then convert to the current Django timezone
+                            from datetime import datetime, timezone as dt_tz
+                            created_utc = datetime.fromtimestamp(int(created_ts), tz=dt_tz.utc)
+                            created_dt = timezone.localtime(created_utc)
                     except Exception:
                         created_dt = None
 
@@ -448,7 +567,17 @@ def manage_billing(request, org_slug):
         sch_changes = SubscriptionChange.objects.filter(organization=org).order_by('-created_at')[:10]
         for sc in sch_changes:
             try:
+                # Ensure subscription change timestamps are localized to Django timezone
                 created_dt = sc.created_at
+                try:
+                    # If naive, make aware then localize; if aware, just localize
+                    from django.utils import timezone as dj_tz
+                    if timezone.is_naive(created_dt):
+                        created_dt = dj_tz.make_aware(created_dt, dj_tz.get_current_timezone())
+                    created_dt = dj_tz.localtime(created_dt)
+                except Exception:
+                    # fallback to original value if localization fails
+                    created_dt = sc.created_at
                 invoices.append({
                     'created': created_dt,
                     'amount_display_dollars': float((sc.amount_cents or 0) / 100.0),
@@ -478,6 +607,24 @@ def manage_billing(request, org_slug):
     except Exception:
         # If the model/table is not present yet (before migrations), skip quietly
         pass
+
+    # --- Annotate invoices with hidden metadata so client can toggle archived rows ---
+    try:
+        from billing.models import InvoiceMeta
+        hidden_qs = InvoiceMeta.objects.filter(organization=org, hidden=True)
+        hidden_stripe_ids = set([s for s in hidden_qs.values_list('stripe_invoice_id', flat=True) if s])
+        hidden_change_ids = set([c for c in hidden_qs.values_list('subscription_change_id', flat=True) if c])
+
+        # Always annotate invoices with a boolean 'hidden' flag for UI use.
+        for inv in invoices:
+            raw = inv.get('raw') or {}
+            if raw.get('pseudo'):
+                inv['hidden'] = (raw.get('id') in hidden_change_ids)
+            else:
+                inv['hidden'] = ((raw.get('id') or '') in hidden_stripe_ids)
+    except Exception:
+        hidden_stripe_ids = set()
+        hidden_change_ids = set()
 
     # --- Apply invoice filtering & sorting based on query params ---
     # Supported filters:
@@ -534,6 +681,15 @@ def manage_billing(request, org_slug):
     except Exception:
         invoice_card_options = []
         invoice_status_options = []
+
+    # Ensure the default card last4 appears in the card options so users can
+    # filter by their default even if no invoice was paid with that card.
+    try:
+        if 'default_card_last4' in locals() and default_card_last4:
+            if default_card_last4 not in invoice_card_options:
+                invoice_card_options.insert(0, default_card_last4)
+    except Exception:
+        pass
 
     # --- Group invoices by month and support month-based paging ---
     # Build a list of months available from the invoices (YYYY-MM keys)
@@ -596,8 +752,9 @@ def manage_billing(request, org_slug):
                 billing_timestamp = ui.get('period_end') or ui.get('created')
                 if billing_timestamp:
                     try:
-                        from datetime import datetime
-                        billing_date = timezone.make_aware(datetime.fromtimestamp(int(billing_timestamp)))
+                        from datetime import datetime, timezone as dt_tz
+                        billing_utc = datetime.fromtimestamp(int(billing_timestamp), tz=dt_tz.utc)
+                        billing_date = timezone.localtime(billing_utc)
                     except Exception:
                         billing_date = None
                 amount_due = (ui.get('amount_due', 0) / 100.0) if ui.get('amount_due') is not None else None
@@ -648,6 +805,26 @@ def manage_billing(request, org_slug):
     except Exception:
         upcoming_invoice = None
 
+    # --- Detect locally applied discount (AppliedDiscount) for display ---
+    applied_discount = None
+    try:
+        from billing.models import AppliedDiscount
+        if subscription:
+            ad = AppliedDiscount.objects.filter(subscription=subscription, active=True).order_by('-applied_at').first()
+            if ad:
+                applied_discount = {
+                    'code': ad.discount_code.code,
+                    'percent_off': float(ad.discount_code.percent_off) if ad.discount_code.percent_off is not None else None,
+                    'amount_off_cents': ad.discount_code.amount_off_cents,
+                    'currency': ad.discount_code.currency,
+                    'applied_at': ad.applied_at.isoformat() if ad.applied_at else None,
+                    'proration_behavior': ad.proration_behavior,
+                    'source': 'local',
+                    'stripe_coupon_id': ad.stripe_coupon_id,
+                }
+    except Exception:
+        applied_discount = None
+
     # Determine whether a scheduled change is a downgrade (new plan price < current plan price)
     scheduled_change_is_downgrade = None
     if subscription and getattr(subscription, 'scheduled_plan', None) and getattr(subscription, 'plan', None):
@@ -659,7 +836,75 @@ def manage_billing(request, org_slug):
         except Exception:
             scheduled_change_is_downgrade = None
 
-    return render(request, "billing/manage.html", {
+        # AJAX filtering is always enabled client-side; the template will request JSON pages.
+        use_ajax_filters = True
+
+        # If requested as JSON (AJAX fetch), return server-side filtered + paged invoices as JSON payload
+        if str(request.GET.get('as_json', '')).lower() in ('1', 'true', 'yes'):
+            # Respect same filters used for the page: inv_sort, inv_card, inv_status, invoice_month, show_archived
+            page = 1
+            try:
+                page = max(1, int(request.GET.get('page', '1')))
+            except Exception:
+                page = 1
+            page_size = 25
+            try:
+                page_size = max(5, min(200, int(request.GET.get('page_size', page_size))))
+            except Exception:
+                page_size = 25
+
+            # Apply month filter server-side for paging
+            invoice_month = request.GET.get('invoice_month')
+            def _in_month(inv, month_key):
+                if not month_key:
+                    return True
+                created = inv.get('created')
+                if not created:
+                    return False
+                try:
+                    key = created.strftime('%Y-%m')
+                    return key == month_key or key.startswith(month_key[:7])
+                except Exception:
+                    return False
+
+            filtered = []
+            for inv in invoices:
+                # honor show_archived param: when show_archived not set, exclude hidden
+                if not show_archived and inv.get('hidden'):
+                    continue
+                if invoice_month and not _in_month(inv, invoice_month):
+                    continue
+                filtered.append(inv)
+
+            total = len(filtered)
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_items = filtered[start:end]
+
+            def _serialize(inv):
+                raw = inv.get('raw') or {}
+                created_dt = inv.get('created')
+                created_iso = created_dt.isoformat() if created_dt else None
+                created_display = created_dt.strftime('%B %d, %Y %I:%M %p') if created_dt else None
+                return {
+                    'id': raw.get('id') if isinstance(raw, dict) else None,
+                    'pseudo': bool(raw.get('pseudo')) if isinstance(raw, dict) else False,
+                    'created_iso': created_iso,
+                    'created_display': created_display,
+                    'amount_display_dollars': inv.get('amount_display_dollars'),
+                    'status': (raw.get('status') if isinstance(raw, dict) and raw.get('pseudo') else inv.get('status')),
+                    'hosted_invoice_url': inv.get('hosted_invoice_url'),
+                    'card_brand': inv.get('card_brand'),
+                    'card_last4': inv.get('card_last4'),
+                    'hidden': bool(inv.get('hidden')),
+                    'discount': (raw.get('discount') if isinstance(raw, dict) and raw.get('discount') else applied_discount),
+                }
+
+            data = [_serialize(i) for i in page_items]
+            has_more = end < total
+            return JsonResponse({'data': data, 'meta': {'total': total, 'page': page, 'page_size': page_size, 'has_more': has_more}})
+
+        return render(request, "billing/manage.html", {
         "org": org,
         "subscription": subscription,
         "plans": plans,
@@ -671,6 +916,7 @@ def manage_billing(request, org_slug):
         "stripe_publishable_key": publishable_key,
         "payment_methods": payment_methods,
         "default_payment_method_id": default_payment_method_id,
+        "use_ajax_filters": use_ajax_filters,
         "has_payment_methods": bool(payment_methods),
         "invoices": invoices,
         "months": months,
@@ -685,6 +931,19 @@ def manage_billing(request, org_slug):
         "current_inv_sort": request.GET.get('inv_sort', 'latest'),
         "current_inv_card": request.GET.get('inv_card', ''),
         "current_inv_status": request.GET.get('inv_status', ''),
+        "show_archived": show_archived,
+        # Provide JSON-serializable strings for use in client-side JS
+        "hidden_stripe_ids": list(hidden_stripe_ids) if 'hidden_stripe_ids' in locals() else [],
+        "hidden_change_ids": list(hidden_change_ids) if 'hidden_change_ids' in locals() else [],
+        "applied_discount": applied_discount,
+        # Upcoming invoice adjusted total when a local applied discount exists
+        "upcoming_invoice_adjusted": (None if not (upcoming_invoice and applied_discount) else (
+            (lambda ai, ad: {
+                'original': ai.get('amount_due_dollars'),
+                'discount_amount': ( (ai.get('amount_due_dollars') * (float(ad.get('percent_off')) / 100.0)) if ad.get('percent_off') is not None else ( (ad.get('amount_off_cents') or 0) / 100.0) ),
+                'adjusted': (ai.get('amount_due_dollars') - ( (ai.get('amount_due_dollars') * (float(ad.get('percent_off')) / 100.0)) if ad.get('percent_off') is not None else ( (ad.get('amount_off_cents') or 0) / 100.0) ))
+            })(upcoming_invoice, applied_discount)
+        )),
     })
 
 
@@ -694,6 +953,7 @@ def create_setup_intent(request, org_slug):
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
+
     if not org.stripe_customer_id:
         # Create customer if still missing
         customer = stripe.Customer.create(email=request.user.email, metadata={"organization_id": str(org.id)})
@@ -701,7 +961,6 @@ def create_setup_intent(request, org_slug):
         org.save()
     intent = stripe.SetupIntent.create(customer=org.stripe_customer_id, payment_method_types=["card"])
     return JsonResponse({"client_secret": intent.client_secret})
-
 
 @require_http_methods(["POST"])
 def set_default_payment_method(request, org_slug):

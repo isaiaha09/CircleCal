@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from accounts.models import Business as Organization, Membership
 from .utils import user_has_role
 from billing.models import Subscription, Plan
+from django.conf import settings
 class OrganizationMiddleware:
     """
     Resolve the organization for the current request.
@@ -129,3 +130,45 @@ class UserTimezoneMiddleware:
             except Exception:
                 pass
         return response
+
+
+class AdminPinMiddleware:
+    """
+    Simple middleware to require a PIN before exposing the Django admin pages.
+    Configure the PIN via `ADMIN_PIN` in environment/settings. If unset, the
+    middleware is a no-op.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # Only active if ADMIN_PIN is set
+        pin = getattr(settings, 'ADMIN_PIN', None)
+        # If no env PIN, check for DB-stored PIN
+        if not pin:
+            try:
+                from .models import AdminPin
+                if AdminPin.get_latest_hash():
+                    pin = True
+            except Exception:
+                pin = None
+
+        if not pin:
+            return self.get_response(request)
+
+        path = request.path or ''
+        # Allow access to the PIN entry page itself and any static/media paths
+        if path.startswith('/admin/pin') or path.startswith('/static/') or path.startswith(settings.MEDIA_URL):
+            return self.get_response(request)
+
+        # Intercept requests to the admin area
+        if path.startswith('/admin'):
+            if request.session.get('admin_pin_ok'):
+                return self.get_response(request)
+            # Redirect to the PIN entry page, preserving the intended destination
+            from urllib.parse import urlencode
+            qs = urlencode({'next': path})
+            return redirect(f'/admin/pin/?{qs}')
+
+        return self.get_response(request)

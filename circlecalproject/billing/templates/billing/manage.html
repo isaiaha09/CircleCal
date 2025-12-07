@@ -38,6 +38,9 @@
           <div class="pr-4">
             <div class="flex items-center gap-3">
               <h3 class="text-lg font-bold text-indigo-900">{{ display_plan.name }}</h3>
+              {% if applied_discount %}
+                <span class="inline-flex items-center px-3 py-1 rounded bg-green-100 text-green-800 text-sm font-semibold">Discount: {% if applied_discount.percent_off %}{{ applied_discount.percent_off }}%{% else %}${{ applied_discount.amount_off_cents|floatformat:-2|default_if_none:"" }}{% endif %} ({{ applied_discount.code }})</span>
+              {% endif %}
               {% if trial_remaining_seconds %}
                 <span class="inline-flex items-center px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 text-sm font-semibold">On Trial</span>
               {% elif subscription.status|lower == 'trialing' %}
@@ -108,12 +111,12 @@
             {% if subscription.cancel_at_period_end %}
               <button id="reactivateBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-green-600 text-white hover:bg-green-700">Reactivate</button>
             {% else %}
-              <button id="cancelBtn" class="px-4 py-2 rounded bg-yellow-500 text-white hover:bg-yellow-600 text-sm">Cancel at Period End</button>
+              <button id="cancelBtn" class="px-3 py-1 text-xs rounded bg-yellow-500 text-white hover:bg-yellow-600 md:px-4 md:py-2 md:text-sm">Cancel at Period End</button>
             {% endif %}
             {% if trial_remaining_seconds %}
-              <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="true">Immediate Cancel</button>
+              <button id="immediateCancelBtn" class="px-3 py-1 text-xs rounded bg-red-700 text-white hover:bg-red-800 md:px-4 md:py-2 md:text-sm" data-is-trial="true">Immediate Cancel</button>
             {% else %}
-              <button id="immediateCancelBtn" class="px-4 py-2 rounded bg-red-700 text-white hover:bg-red-800 text-sm" data-is-trial="false">Immediate Cancel</button>
+              <button id="immediateCancelBtn" class="px-3 py-1 text-xs rounded bg-red-700 text-white hover:bg-red-800 md:px-4 md:py-2 md:text-sm" data-is-trial="false">Immediate Cancel</button>
             {% endif %}
           </div>
         </div>
@@ -157,22 +160,20 @@
     <div id="paymentMethodsList" class="space-y-2 mb-4">
       {% if org.stripe_customer_id %}
         {% for pm in payment_methods %}
-          <div class="flex items-center justify-between border rounded px-3 py-2 text-sm" data-pm-id="{{ pm.id }}">
-            <div>
-              **** {{ pm.card.last4 }} — {{ pm.card.brand|title }} exp {{ pm.card.exp_month }}/{{ pm.card.exp_year }}
-                {% if pm.id == default_payment_method_id %}
-                  <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Default</span>
-                {% endif %}
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between border rounded px-3 py-2 text-sm" data-pm-id="{{ pm.id }}">
+            <div class="min-w-0">
+              <div class="truncate font-medium">**** {{ pm.card.last4 }} — {{ pm.card.brand|title }}</div>
+              <div class="text-xs text-gray-600 truncate">exp {{ pm.card.exp_month }}/{{ pm.card.exp_year }} {% if pm.id == default_payment_method_id %}<span class="ml-1 inline-block bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">Default</span>{% endif %}</div>
             </div>
-            <div class="flex gap-2">
+            <div class="flex gap-2 mt-2 sm:mt-0 flex-wrap">
                 {% if pm.id != default_payment_method_id %}
-                  <button class="set-default-btn text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" data-id="{{ pm.id }}">Set Default</button>
+                  <button class="set-default-btn text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 whitespace-nowrap" data-id="{{ pm.id }}">Set Default</button>
                 {% endif %}
                 {% if pm.id == default_payment_method_id %}
-                  <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 opacity-50 cursor-not-allowed" disabled title="Default payment method — add another card before removing">Remove</button>
-                  <span class="text-xs text-gray-500 italic ml-2">Default payment method — add another card before removing.</span>
+                  <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 opacity-50 cursor-not-allowed whitespace-nowrap" disabled title="Default payment method — add another card before removing">Remove</button>
+                  <span class="text-xs text-gray-500 italic ml-2 block sm:inline">Default payment method — add another card before removing.</span>
                 {% else %}
-                  <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200" data-id="{{ pm.id }}">Remove</button>
+                  <button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 whitespace-nowrap" data-id="{{ pm.id }}">Remove</button>
                 {% endif %}
             </div>
           </div>
@@ -207,57 +208,121 @@
   </section>
   {% endif %}
   {# Invoices Section #}
-  <section class="mb-8" id="invoices-section">
+  <section class="mb-8 relative" id="invoices-section">
     <div class="flex items-center justify-between mb-2">
       <h2 class="text-xl font-semibold">Invoices</h2>
       <div class="flex items-center space-x-3">
-        {% if months and months|length > 0 %}
-          <div class="flex items-center space-x-2">
-            <label class="text-sm text-gray-600">Month:</label>
-            <select id="invoiceMonthSelect" class="text-sm border rounded px-2 py-1">
-              {% for m in months %}
-                <option value="{{ m.key }}" {% if m.key == selected_month %}selected{% endif %}>{{ m.label }}</option>
+        <button id="openFiltersBtn" class="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm">Filters</button>
+      </div>
+    </div>
+
+    <!-- Floating Filters Panel (non-blocking) -->
+    <div id="invoice-filters-panel" class="absolute right-0 top-0 z-20 hidden w-full max-w-sm md:max-w-md">
+      <div class="bg-white rounded-lg shadow-lg border border-gray-200">
+        <div class="p-3 border-b flex items-center justify-between">
+          <h3 class="text-md font-semibold">Filters</h3>
+          <button id="closeFiltersBtn" class="text-gray-500 hover:text-gray-700">✕</button>
+        </div>
+        <div class="p-3 space-y-3 text-sm text-gray-700">
+          {% if months and months|length > 0 %}
+            <div class="flex items-center justify-between">
+              <label class="text-sm text-gray-600">Month</label>
+              <select id="invoiceMonthSelect" class="text-sm border rounded px-2 py-1">
+                {% for m in months %}
+                  <option value="{{ m.key }}" {% if m.key == selected_month %}selected{% endif %}>{{ m.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endif %}
+
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-gray-600">Sort</label>
+            <select id="invSortSelect" class="text-sm border rounded px-2 py-1">
+              <option value="latest" {% if current_inv_sort == 'latest' %}selected{% endif %}>Latest</option>
+              <option value="earliest" {% if current_inv_sort == 'earliest' %}selected{% endif %}>Earliest</option>
+              <option value="lowest" {% if current_inv_sort == 'lowest' %}selected{% endif %}>Least expensive</option>
+              <option value="highest" {% if current_inv_sort == 'highest' %}selected{% endif %}>Most expensive</option>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-gray-600">Card</label>
+            <select id="invCardSelect" class="text-sm border rounded px-2 py-1">
+              <option value="">All cards</option>
+              {% for c in invoice_card_options %}
+                <option value="{{ c }}" {% if c == current_inv_card %}selected{% endif %}>**** {{ c }}</option>
               {% endfor %}
             </select>
           </div>
-        {% endif %}
 
-        <div class="flex items-center space-x-2">
-          <label class="text-sm text-gray-600">Sort:</label>
-          <select id="invSortSelect" class="text-sm border rounded px-2 py-1">
-            <option value="latest" {% if current_inv_sort == 'latest' %}selected{% endif %}>Latest</option>
-            <option value="earliest" {% if current_inv_sort == 'earliest' %}selected{% endif %}>Earliest</option>
-            <option value="lowest" {% if current_inv_sort == 'lowest' %}selected{% endif %}>Least expensive</option>
-            <option value="highest" {% if current_inv_sort == 'highest' %}selected{% endif %}>Most expensive</option>
-          </select>
-        </div>
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-gray-600">Status</label>
+            <select id="invStatusSelect" class="text-sm border rounded px-2 py-1">
+              <option value="">All statuses</option>
+              {% for s in invoice_status_options %}
+                <option value="{{ s }}" {% if s == current_inv_status %}selected{% endif %}>{{ s|capfirst }}</option>
+              {% endfor %}
+            </select>
+          </div>
 
-        <div class="flex items-center space-x-2">
-          <label class="text-sm text-gray-600">Card:</label>
-          <select id="invCardSelect" class="text-sm border rounded px-2 py-1">
-            <option value="">All cards</option>
-            {% for c in invoice_card_options %}
-              <option value="{{ c }}" {% if c == current_inv_card %}selected{% endif %}>**** {{ c }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="flex items-center space-x-2">
-          <label class="text-sm text-gray-600">Status:</label>
-          <select id="invStatusSelect" class="text-sm border rounded px-2 py-1">
-            <option value="">All statuses</option>
-            {% for s in invoice_status_options %}
-              <option value="{{ s }}" {% if s == current_inv_status %}selected{% endif %}>{{ s|capfirst }}</option>
-            {% endfor %}
-          </select>
+          <div class="flex items-center justify-between">
+            <label class="text-sm text-gray-600">Show archived</label>
+            <input id="showArchivedToggle" type="checkbox" {% if show_archived %}checked{% endif %} />
+          </div>
         </div>
       </div>
     </div>
+    <style>
+      /* Row enter/leave animations */
+      .cc-row { transition: transform 180ms ease, opacity 180ms ease; }
+      .cc-row-enter { opacity: 0; transform: translateY(-6px) scale(0.995); }
+      .cc-row-hidden { opacity: 0 !important; transform: translateY(-6px) scale(0.995); height: 0; padding: 0; margin: 0; }
+
+      /* Hide invoice lists until JS applies filters to avoid flicker */
+      .cc-hide-until-js { visibility: hidden; }
+
+      /* Mobile invoice card list: show on small screens, hide on md+ */
+      #invoicesListMobile { display: none; }
+      @media (max-width: 767px) {
+        #invoicesListMobile { display: block; }
+        #invoicesTable { display: none; }
+      }
+    </style>
+    <script>
+      (function(){
+        const panel = document.getElementById('invoice-filters-panel');
+        const openBtn = document.getElementById('openFiltersBtn');
+        const closeBtn = document.getElementById('closeFiltersBtn');
+
+        function showPanel(){ if (!panel) return; panel.classList.remove('hidden'); }
+        function hidePanel(){ if (!panel) return; panel.classList.add('hidden'); }
+
+        openBtn?.addEventListener('click', (e)=>{ e.preventDefault(); showPanel(); });
+        closeBtn?.addEventListener('click', (e)=>{ e.preventDefault(); hidePanel(); });
+
+        // When any filter changes, apply client-side filters live (no page reload)
+        ['invSortSelect','invCardSelect','invStatusSelect','invoiceMonthSelect','showArchivedToggle'].forEach(id => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener('change', function(){
+            try { if (typeof applyInvoiceFilters === 'function') applyInvoiceFilters(); } catch (e) { console.error(e); }
+          });
+        });
+
+        // close panel when clicking outside (but keep it non-blocking)
+        document.addEventListener('click', function(e){
+          if (!panel || panel.classList.contains('hidden')) return;
+          const isInside = panel.contains(e.target) || openBtn.contains(e.target);
+          if (!isInside) hidePanel();
+        });
+      })();
+    </script>
     {% if trial_remaining_seconds %}
       <div class="text-sm text-gray-600">On trial – invoices will appear after trial ends.</div>
     {% elif invoices %}
 
-      <table id="invoicesTable" class="w-full text-sm border">
+      <div id="invoicesListMobile" class="space-y-3 mb-3 md:hidden cc-hide-until-js"></div>
+      <table id="invoicesTable" class="w-full text-sm border cc-hide-until-js">
         <thead class="bg-gray-100">
           <tr>
             <th class="p-2 text-left">Date</th>
@@ -268,15 +333,16 @@
           </tr>
         </thead>
         <tbody>
-        {% for inv in paged_invoices %}
-          <tr class="border-t"
+        {% for inv in invoices %}
+            <tr class="border-t"
               data-inv-id="{{ inv.raw.id|default:'' }}"
               data-amount="{{ inv.amount_display_dollars|default:0 }}"
               data-card="{{ inv.card_last4|default:'' }}"
               data-status="{% if inv.raw.pseudo %}{{ inv.raw.status|default:'scheduled' }}{% else %}{{ inv.status|default:'' }}{% endif %}"
               data-created="{{ inv.created|date:'c' }}"
               data-pseudo="{{ inv.raw.pseudo|default_if_none:False }}"
-          >
+              data-hidden="{{ inv.hidden|yesno:'1,0' }}"
+            >
             <td class="p-2">
               {% if inv.created %}
                 <div>{{ inv.created|date:"M j, Y" }}</div>
@@ -321,6 +387,12 @@
                 {% endwith %}
               {% elif inv.hosted_invoice_url %}
                 <a href="{{ inv.hosted_invoice_url }}" class="text-indigo-600" target="_blank">View</a>
+                {% if inv.hidden %}
+                  <button class="text-sm ml-3 unhide-inv-btn text-green-600" data-inv-id="{{ inv.raw.id }}">Unhide</button>
+                {% else %}
+                  <button class="text-sm ml-3 hide-inv-btn text-gray-600" data-inv-id="{{ inv.raw.id }}">Hide</button>
+                  <button class="text-sm ml-3 void-inv-btn text-red-600" data-inv-id="{{ inv.raw.id }}">Void</button>
+                {% endif %}
               {% else %}
                 —
               {% endif %}
@@ -332,24 +404,225 @@
         </tr>
         </tbody>
       </table>
+      <div class="mt-3 text-center">
+        <button id="invoicesLoadMore" class="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 hidden">Load more</button>
+      </div>
       <script>
-        (function(){
-          const sel = document.getElementById('invoiceMonthSelect');
-          if (!sel) return;
-          sel.addEventListener('change', function(){
-            const v = sel.value;
-            const url = new URL(window.location.href);
-            url.searchParams.set('invoice_month', v);
-            window.location.href = url.toString();
-          });
-        })();
+        // Do NOT auto-apply 'Show archived' when the checkbox is toggled.
+        // The Filters modal's Apply button controls when filters (including "Show archived") take effect.
+
+        // client-side will read per-invoice `data-hidden` if needed
+        // NOTE: month changes are handled client-side in applyInvoiceFilters (no reload)
     
-        // Client-side invoice filtering and sorting
+        // Client-side invoice filtering and sorting (supports AJAX rendering when server-side is enabled)
         (function(){
-          function applyInvoiceFilters(){
+          const useAjax = true; // AJAX filtering always enabled
+          let currentPage = 1;
+
+          function buildParams() {
+            const params = new URLSearchParams();
             const sort = document.getElementById('invSortSelect')?.value || '';
             const card = document.getElementById('invCardSelect')?.value || '';
             const status = document.getElementById('invStatusSelect')?.value || '';
+            const month = document.getElementById('invoiceMonthSelect')?.value || '';
+            const showArchived = !!document.getElementById('showArchivedToggle')?.checked;
+            if (sort) params.set('inv_sort', sort);
+            if (card) params.set('inv_card', card);
+            if (status) params.set('inv_status', status);
+            if (month) params.set('invoice_month', month);
+            if (showArchived) params.set('show_archived', '1');
+            return params;
+          }
+
+          function renderInvoiceRows(items, append=false, meta={}) {
+            const tbody = document.querySelector('#invoicesTable tbody');
+            const mobile = document.getElementById('invoicesListMobile');
+            if (!tbody || !mobile) return;
+            const noResults = document.getElementById('no-results-row');
+            // build table rows
+            let html = '';
+            for (const inv of items) {
+              const createdIso = inv.created_iso || '';
+              let createdDateStr = '';
+              let createdTimeStr = '';
+              if (createdIso) {
+                try {
+                  const d = new Date(createdIso);
+                  const parts = new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit', year: 'numeric' }).formatToParts(d);
+                  const month = (parts.find(p=>p.type==='month')||{}).value || '';
+                  const day = (parts.find(p=>p.type==='day')||{}).value || '';
+                  const year = (parts.find(p=>p.type==='year')||{}).value || '';
+                  createdDateStr = `${month}, ${day} ${year}`;
+                  createdTimeStr = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: true }).format(d);
+                } catch (e) {
+                  createdDateStr = createdIso;
+                  createdTimeStr = '';
+                }
+              }
+              const amount = inv.amount_display_dollars != null ? '$' + Number(inv.amount_display_dollars).toFixed(2) : '—';
+              const card = inv.card_last4 ? ('**** ' + inv.card_last4 + (inv.card_brand ? (' (' + inv.card_brand + ')') : '')) : '—';
+              const status = inv.pseudo ? (inv.status || '') : (inv.status || '');
+              const hiddenAttr = inv.hidden ? '1' : '0';
+              const dataInvId = inv.id || '';
+              html += `<tr class="border-t cc-row" data-inv-id="${dataInvId}" data-amount="${amount}" data-card="${inv.card_last4 || ''}" data-status="${status}" data-created="${createdIso}" data-pseudo="${inv.pseudo ? '1' : '0'}" data-hidden="${hiddenAttr}">`;
+              html += `<td class="p-2">${createdDateStr ? `<div>${createdDateStr}</div><div class="text-xs text-gray-500">${createdTimeStr}</div>` : '—'}</td>`;
+              html += `<td class="p-2">${amount}</td>`;
+              html += `<td class="p-2">${inv.pseudo ? '<span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-semibold">Scheduled change</span>' : card}</td>`;
+              html += `<td class="p-2">${inv.pseudo ? `<span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">${(inv.status||'').toString()}</span>` : (inv.status || '')}</td>`;
+              html += `<td class="p-2">`;
+              if (inv.pseudo) {
+                html += `<button class="view-change-btn text-indigo-600" data-change-id="${dataInvId}">View change</button>`;
+              } else if (inv.hosted_invoice_url) {
+                html += `<a href="${inv.hosted_invoice_url}" class="text-indigo-600" target="_blank">View</a>`;
+                if (inv.hidden) html += ` <button class="text-sm ml-3 unhide-inv-btn text-green-600" data-inv-id="${dataInvId}">Unhide</button>`;
+                else html += ` <button class="text-sm ml-3 hide-inv-btn text-gray-600" data-inv-id="${dataInvId}">Hide</button> <button class="text-sm ml-3 void-inv-btn text-red-600" data-inv-id="${dataInvId}">Void</button>`;
+              } else {
+                html += '—';
+              }
+              html += `</td></tr>`;
+            }
+            if (append) {
+              // append before the no-results row
+              const nr = tbody.querySelector('#no-results-row');
+              if (nr) {
+                nr.insertAdjacentHTML('beforebegin', html);
+              } else {
+                tbody.insertAdjacentHTML('beforeend', html);
+              }
+            } else {
+              tbody.innerHTML = html + (tbody.querySelector('#no-results-row') ? tbody.querySelector('#no-results-row').outerHTML : '');
+            }
+
+            // mobile cards
+            let mhtml = '';
+            for (const inv of items) {
+              const createdIso = inv.created_iso || '';
+              let createdDateStr = '';
+              let createdTimeStr = '';
+              if (createdIso) {
+                try {
+                  const d = new Date(createdIso);
+                  const parts = new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit', year: 'numeric' }).formatToParts(d);
+                  const month = (parts.find(p=>p.type==='month')||{}).value || '';
+                  const day = (parts.find(p=>p.type==='day')||{}).value || '';
+                  const year = (parts.find(p=>p.type==='year')||{}).value || '';
+                  createdDateStr = `${month}, ${day} ${year}`;
+                  createdTimeStr = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: true }).format(d);
+                } catch (e) {
+                  createdDateStr = createdIso;
+                  createdTimeStr = '';
+                }
+              }
+              const amount = inv.amount_display_dollars != null ? '$' + Number(inv.amount_display_dollars).toFixed(2) : '—';
+              const card = inv.card_last4 ? ('**** ' + inv.card_last4) : '—';
+              const status = inv.status || '';
+              const hiddenBadge = inv.hidden ? '<span class="text-xs text-gray-500 ml-2">(archived)</span>' : '';
+              mhtml += `<div class="border rounded p-3 bg-white shadow-sm">`;
+              mhtml += `<div class="flex justify-between items-start"><div class="text-sm font-medium">${createdDateStr || '—'}</div><div class="text-sm font-semibold">${amount}</div></div>`;
+              if (createdTimeStr) mhtml += `<div class="text-xs text-gray-600 mt-1 text-right">${createdTimeStr}</div>`;
+              mhtml += `<div class="text-xs text-gray-600 mt-1">${card} ${hiddenBadge}</div>`;
+              mhtml += `<div class="text-xs text-gray-600 mt-2">${status}</div>`;
+              mhtml += `</div>`;
+            }
+            if (append) mobile.insertAdjacentHTML('beforeend', mhtml); else mobile.innerHTML = mhtml;
+
+            // animate rows
+            // animate newly added rows
+            const newRows = Array.from(tbody.querySelectorAll('tr.cc-row'));
+            newRows.forEach(r => { r.classList.add('cc-row-enter'); requestAnimationFrame(()=> r.classList.remove('cc-row-enter')); });
+
+            // show/hide load more based on meta
+            const loadMoreBtn = document.getElementById('invoicesLoadMore');
+            if (loadMoreBtn) {
+              if (meta && meta.has_more) loadMoreBtn.classList.remove('hidden'); else loadMoreBtn.classList.add('hidden');
+            }
+
+            // Rebind invoice action buttons
+            bindInvoiceButtons();
+          }
+
+          function bindInvoiceButtons() {
+            document.querySelectorAll('.hide-inv-btn').forEach(btn => {
+              btn.removeEventListener('click', hideHandler);
+              btn.addEventListener('click', hideHandler);
+            });
+            document.querySelectorAll('.unhide-inv-btn').forEach(btn => {
+              btn.removeEventListener('click', unhideHandler);
+              btn.addEventListener('click', unhideHandler);
+            });
+            document.querySelectorAll('.void-inv-btn').forEach(btn => {
+              btn.removeEventListener('click', voidHandler);
+              btn.addEventListener('click', voidHandler);
+            });
+          }
+
+          async function hideHandler(e){
+            const invId = this.getAttribute('data-inv-id');
+            if (!confirm('Hide this invoice from the UI?')) return;
+            showLoading();
+            try {
+              const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/hide/`, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
+              const payload = await resp.json();
+              showToast('Invoice hidden', 'info');
+              applyInvoiceFilters();
+            } catch (e) { showToast('Hide failed', 'error'); }
+            hideLoading();
+          }
+
+          async function unhideHandler(e){
+            const invId = this.getAttribute('data-inv-id');
+            if (!confirm('Unhide this invoice?')) return;
+            showLoading();
+            try {
+              const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/unhide/`, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
+              const payload = await resp.json();
+              showToast('Invoice unhidden', 'success');
+              applyInvoiceFilters();
+            } catch (e) { showToast('Unhide failed', 'error'); }
+            hideLoading();
+          }
+
+          async function voidHandler(e){
+            const invId = this.getAttribute('data-inv-id');
+            if (!confirm('Void this invoice? This may not be reversible.')) return;
+            showLoading();
+            try {
+              const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/void/`, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
+              const payload = await resp.json();
+              if (payload && payload.error) { showToast('Void failed: ' + payload.error, 'error'); }
+              else showToast('Invoice voided', 'success');
+              applyInvoiceFilters();
+            } catch (e) { showToast('Void failed', 'error'); }
+            hideLoading();
+          }
+
+          async function applyInvoiceFilters(resetPage=true){
+            if (resetPage) currentPage = 1;
+            const params = buildParams();
+            if (useAjax) {
+              try {
+                params.set('as_json','1');
+                params.set('page', String(currentPage));
+                params.set('page_size', '25');
+                const url = window.location.pathname + '?' + params.toString();
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('Fetch failed');
+                const payload = await resp.json();
+                const items = payload.data || [];
+                const meta = payload.meta || {};
+                renderInvoiceRows(items, currentPage > 1, meta);
+                return;
+              } catch (e) {
+                console.error('AJAX invoice fetch failed', e);
+              }
+            }
+
+            // Fallback to client-side filtering when AJAX is not enabled
+            const sort = document.getElementById('invSortSelect')?.value || '';
+            const card = document.getElementById('invCardSelect')?.value || '';
+            const status = document.getElementById('invStatusSelect')?.value || '';
+            const month = document.getElementById('invoiceMonthSelect')?.value || '';
+            const showArchived = !!document.getElementById('showArchivedToggle')?.checked;
             const table = document.getElementById('invoicesTable');
             if (!table) return;
             const tbody = table.querySelector('tbody');
@@ -361,6 +634,8 @@
             rows.forEach(r => {
               const rCard = (r.getAttribute('data-card') || '').trim();
               const rStatus = (r.getAttribute('data-status') || '').trim().toLowerCase();
+              const rCreated = r.getAttribute('data-created') || '';
+              const rHidden = r.getAttribute('data-hidden') || '0';
               let show = true;
               if (card) {
                 show = show && (rCard === card);
@@ -368,11 +643,50 @@
               if (status) {
                 show = show && (rStatus === status.toLowerCase());
               }
-              r.style.display = show ? '' : 'none';
+              // Month filter: compare YYYY-MM
+              if (month) {
+                try {
+                  const d = rCreated ? new Date(rCreated) : null;
+                  if (d) {
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth()+1).padStart(2,'0');
+                    const rowKey = `${y}-${m}`;
+                    // if month value contains full date or extra text, compare prefix
+                    if (month.length >= 7) {
+                      show = show && (rowKey === month.substring(0,7));
+                    } else {
+                      show = show && (rowKey === month);
+                    }
+                  } else {
+                    show = false;
+                  }
+                } catch (e) { show = show && false; }
+              }
+
+              // Show archived toggle: if archived not allowed, hide rows with data-hidden == '1'
+              if (!showArchived && String(rHidden) === '1') {
+                show = false;
+              }
+              // animate hide/show via class toggles instead of immediate display:none
+              try {
+                // cancel any pending hide timeout
+                if (r.__hideTimeout) { clearTimeout(r.__hideTimeout); r.__hideTimeout = null; }
+                if (show) {
+                  // ensure element is in flow then remove hidden class to animate in
+                  if (r.style.display === 'none') r.style.display = '';
+                  // force reflow before removing class
+                  void r.offsetHeight;
+                  r.classList.remove('cc-row-hidden');
+                } else {
+                  // add hidden class to animate out, then set display:none after transition
+                  if (!r.classList.contains('cc-row-hidden')) r.classList.add('cc-row-hidden');
+                  r.__hideTimeout = setTimeout(()=>{ try{ r.style.display = 'none'; r.__hideTimeout = null; }catch(e){} }, 200);
+                }
+              } catch (e) { r.style.display = show ? '' : 'none'; }
             });
 
-            // Recompute visible rows for sorting
-            rows = rows.filter(r => r.style.display !== 'none');
+            // Recompute visible rows for sorting (exclude rows hidden or pending hide)
+            rows = rows.filter(r => r.style.display !== 'none' && !r.classList.contains('cc-row-hidden'));
 
             // show/hide the no-results row
             const noResults = document.getElementById('no-results-row');
@@ -413,12 +727,62 @@
             rows.forEach(r => tbody.appendChild(r));
           }
 
-          document.getElementById('invSortSelect')?.addEventListener('change', applyInvoiceFilters);
-          document.getElementById('invCardSelect')?.addEventListener('change', applyInvoiceFilters);
-          document.getElementById('invStatusSelect')?.addEventListener('change', applyInvoiceFilters);
+          // Persist filters into localStorage and load them on page load
+          const storageKey = 'cc_invoice_filters_{{ org.slug }}';
+          function saveFiltersToStorage(){
+            try{
+              const payload = {
+                inv_sort: document.getElementById('invSortSelect')?.value || '',
+                inv_card: document.getElementById('invCardSelect')?.value || '',
+                inv_status: document.getElementById('invStatusSelect')?.value || '',
+                invoice_month: document.getElementById('invoiceMonthSelect')?.value || '',
+                show_archived: !!document.getElementById('showArchivedToggle')?.checked,
+              };
+              localStorage.setItem(storageKey, JSON.stringify(payload));
+            }catch(e){/*ignore*/}
+          }
 
-          // Apply filters on load to reflect initial select values
-          document.addEventListener('DOMContentLoaded', applyInvoiceFilters);
+          function loadFiltersFromStorage(){
+            try{
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              const obj = JSON.parse(raw);
+              if (obj.inv_sort) { const s = document.getElementById('invSortSelect'); if (s) s.value = obj.inv_sort; }
+              if (obj.inv_card) { const s = document.getElementById('invCardSelect'); if (s) s.value = obj.inv_card; }
+              if (obj.inv_status) { const s = document.getElementById('invStatusSelect'); if (s) s.value = obj.inv_status; }
+              if (obj.invoice_month) { const s = document.getElementById('invoiceMonthSelect'); if (s) s.value = obj.invoice_month; }
+              if (typeof obj.show_archived !== 'undefined') { const s = document.getElementById('showArchivedToggle'); if (s) s.checked = !!obj.show_archived; }
+              return true;
+            }catch(e){ return false; }
+          }
+
+          ['invSortSelect','invCardSelect','invStatusSelect','invoiceMonthSelect','showArchivedToggle'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('change', ()=>{ saveFiltersToStorage(); applyInvoiceFilters(true); });
+          });
+
+          // Load more button
+          document.getElementById('invoicesLoadMore')?.addEventListener('click', function(){
+            currentPage += 1;
+            applyInvoiceFilters(false);
+          });
+
+          // On load: try to load saved filters, apply them immediately, then reveal lists
+          document.addEventListener('DOMContentLoaded', function(){
+            // If saved filters found, load and apply them
+            const loaded = loadFiltersFromStorage();
+            if (loaded) {
+              try{ applyInvoiceFilters(true); }catch(e){ console.error(e); }
+            } else {
+              try{ applyInvoiceFilters(true); }catch(e){ console.error(e); }
+            }
+            // Reveal lists now that filtering has been applied (or at least requested)
+            requestAnimationFrame(()=>{
+              document.getElementById('invoicesTable')?.classList.remove('cc-hide-until-js');
+              document.getElementById('invoicesListMobile')?.classList.remove('cc-hide-until-js');
+            });
+          });
           // Also run immediately in case DOMContentLoaded already fired
           applyInvoiceFilters();
         })();
@@ -434,7 +798,14 @@
     {% if trial_remaining_seconds %}
       <div class="text-sm text-gray-600">No charges during trial.</div>
     {% elif upcoming_invoice %}
-      <div class="text-sm">Next charge: <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"F j, Y" }}</strong>{% endif %}</div>
+      <div class="text-sm">
+        Next charge: <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"F j, Y" }}</strong>{% endif %}
+        {% if upcoming_invoice_adjusted %}
+          <div class="text-sm text-green-700 mt-1">Discount: -${{ upcoming_invoice_adjusted.discount_amount|floatformat:2 }} — New total: <strong>${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }}</strong></div>
+        {% elif applied_discount and not upcoming_invoice %}
+          <div class="text-sm text-green-700 mt-1">Discount scheduled: {{ applied_discount.code }} — {{ applied_discount.proration_behavior }}</div>
+        {% endif %}
+      </div>
     {% else %}
       <div class="text-sm text-gray-600">No upcoming invoice.</div>
     {% endif %}
@@ -587,7 +958,7 @@
                     }
                     if (isDefault) {
                       html += `<button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 opacity-50 cursor-not-allowed" disabled title="Default payment method — add another card before removing">Remove</button>`;
-                      html += `<span class="text-xs text-gray-500 italic ml-2">Default payment method — add another card before removing.</span>`;
+                      html += `<span class="text-xs text-gray-500 italic ml-2 block sm:inline">Default payment method — add another card before removing.</span>`;
                     } else {
                       html += `<button class="delete-pm-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200" data-id="${pm.id}">Remove</button>`;
                     }
@@ -789,6 +1160,78 @@
         })
         .then(() => { hideLoading(); window.location.reload(); })
         .catch(err => { hideLoading(); alert('Delete failed: ' + err.message); });
+    });
+  });
+
+  // Hide invoice action
+  document.querySelectorAll('.hide-inv-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const invId = btn.getAttribute('data-inv-id');
+      if (!confirm('Hide this invoice from the UI?')) return;
+      showLoading();
+      try {
+        const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/hide/`, {
+          method: 'POST', headers: { 'X-CSRFToken': csrftoken }
+        });
+        if (!resp.ok) throw new Error('Failed');
+        // Hide the row in the table
+        const row = document.querySelector(`tr[data-inv-id="${invId}"]`);
+        if (row) row.style.display = 'none';
+        showToast('Invoice hidden.', 'info');
+      } catch (e) {
+        showToast('Failed to hide invoice.', 'error');
+      } finally { hideLoading(); }
+    });
+  });
+
+  // Void invoice action
+  document.querySelectorAll('.void-inv-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const invId = btn.getAttribute('data-inv-id');
+      if (!confirm('Void this invoice in Stripe? This cannot be undone.')) return;
+      showLoading();
+      try {
+        const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/void/`, {
+          method: 'POST', headers: { 'X-CSRFToken': csrftoken }
+        });
+        const payload = await resp.json().catch(()=> ({}));
+        if (!resp.ok) {
+          showToast(payload.error || 'Failed to void invoice', 'error');
+        } else {
+          // Mark row as voided visually
+          const row = document.querySelector(`tr[data-inv-id="${invId}"]`);
+          if (row) {
+            row.setAttribute('data-status', 'voided');
+            const tds = row.querySelectorAll('td');
+            if (tds && tds.length >= 4) {
+              tds[3].innerHTML = '<span class="inline-flex items-center px-2 py-1 rounded bg-red-100 text-red-700 text-sm">Voided</span>';
+            }
+          }
+          showToast('Invoice voided.', 'success');
+        }
+      } catch (e) {
+        showToast('Failed to void invoice.', 'error');
+      } finally { hideLoading(); }
+    });
+  });
+
+  // Unhide invoice action (only shown when viewing archived)
+  document.querySelectorAll('.unhide-inv-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const invId = btn.getAttribute('data-inv-id');
+      if (!confirm('Unhide this invoice?')) return;
+      showLoading();
+      try {
+        const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/unhide/`, {
+          method: 'POST', headers: { 'X-CSRFToken': csrftoken }
+        });
+        if (!resp.ok) throw new Error('Failed');
+        const row = document.querySelector(`tr[data-inv-id="${invId}"]`);
+        if (row) row.style.display = 'none';
+        showToast('Invoice unhidden.', 'success');
+      } catch (e) {
+        showToast('Failed to unhide invoice.', 'error');
+      } finally { hideLoading(); }
     });
   });
 

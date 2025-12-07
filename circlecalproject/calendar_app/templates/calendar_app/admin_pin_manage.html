@@ -1,0 +1,64 @@
+{% load static %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Manage Admin PIN</title>
+  <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#f7f7fb; }
+    .box { max-width:640px; margin:40px auto; background:white; padding:20px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06);} 
+    .btn { background:#1f2937; color:white; padding:8px 12px; border-radius:6px; border:none; cursor:pointer }
+    .muted { color:#6b7280 }
+    .success { color:#065f46 }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>Admin PIN Management</h2>
+    {% if message %}<div class="success">{{ message }}</div>{% endif %}
+    <p class="muted">Current DB-stored PIN: {% if current_exists %}<strong>SET</strong>{% else %}<strong>NOT SET</strong>{% endif %}</p>
+    {% if last_set %}
+      <p class="muted">Last set: <strong>{{ last_set|date:"Y-m-d H:i:s" }}</strong></p>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <div style="margin:10px 0">
+        <label>New PIN (min 4 chars)</label><br>
+        <input name="new_pin" type="password" style="padding:8px; width:320px;" />
+        <button class="btn" name="set_pin" type="submit" id="set-pin-btn">Set PIN</button>
+      </div>
+    </form>
+    <form method="post" style="margin-top:8px">
+      {% csrf_token %}
+      <button class="btn" name="clear_pin" type="submit" id="clear-pin-btn">Clear DB PIN</button>
+    </form>
+  </div>
+  <script>
+    (function(){
+      var clearBtn = document.getElementById('clear-pin-btn');
+      var setBtn = document.getElementById('set-pin-btn');
+      if(clearBtn){
+        // Ask for confirmation before clearing the DB PIN
+        clearBtn.addEventListener('click', function(ev){
+          if(!confirm('Are you sure you want to clear the DB-stored admin PIN? This will remove the PIN requirement (if no env PIN is set).')){
+            ev.preventDefault();
+          }
+        });
+      }
+      if(setBtn){
+        setBtn.addEventListener('click', function(ev){
+          // If a PIN already exists, warn that this will replace it
+          var has = {{ 'true' if current_exists else 'false' }};
+          if(has){
+            if(!confirm('A DB PIN is already set. Setting a new PIN will replace it. Continue?')){
+              ev.preventDefault();
+            }
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
