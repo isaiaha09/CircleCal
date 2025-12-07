@@ -37,7 +37,9 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-django
+        pip install pytest pytest-django pytest-playwright playwright
+        # Install Playwright browsers and system dependencies
+        python -m playwright install --with-deps
 
     - name: Run migrations
       env:
