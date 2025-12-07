@@ -10,6 +10,9 @@ jobs:
   test:
     name: Test (pytest)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: circlecalproject
     strategy:
       matrix:
         python-version: ['3.10', '3.11']
