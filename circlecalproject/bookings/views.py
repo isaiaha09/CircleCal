@@ -174,6 +174,12 @@ def _has_overlap(org, start_dt, end_dt, service=None):
         end_utc = end_dt
 
     buf_after_td = timedelta(minutes=buf_after)
+    # Also compute UTC-projected proposed end so buffer-aware checks use the
+    # expanded candidate window when comparing against existing bookings.
+    try:
+        proposed_end_utc = proposed_end.astimezone(dj_tz.utc)
+    except Exception:
+        proposed_end_utc = proposed_end
     candidate_qs = Booking.objects.filter(
         organization=org,
         is_blocking=False,
@@ -191,11 +197,12 @@ def _has_overlap(org, start_dt, end_dt, service=None):
         except Exception:
             b_end = b.end
 
-        # 1) Direct overlap
-        if (b_start < end_utc) and (b_end > start_utc):
+        # 1) Direct overlap (use proposed_end including the candidate's after-buffer)
+        if (b_start < proposed_end_utc) and (b_end > start_utc):
             return True
 
         # 2) Existing booking AFTER-buffer: if candidate starts in that window
+        # (existing booking's AFTER-buffer prevents a candidate starting too soon)
         if start_utc >= b_end and start_utc < (b_end + buf_after_td):
             return True
 
