@@ -180,7 +180,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 blockEnd.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
 
             block.addEventListener("click", () => {
-                alert("BOOKING: " + block.innerText); 
+                showToast('info', "BOOKING: " + block.innerText);
                 // Here you will POST booking to Django
             });
 

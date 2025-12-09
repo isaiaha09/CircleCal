@@ -15,6 +15,7 @@ jobs:
         working-directory: circlecalproject
     env:
       SECRET_KEY: 'ci-secret-key'
+      DJANGO_SETTINGS_MODULE: circlecalproject.settings
     strategy:
       matrix:
         python-version: ['3.10', '3.11']

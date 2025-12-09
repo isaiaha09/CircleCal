@@ -2,44 +2,29 @@
 
 {% block extra_head %}
 <style>
-  /* Page-specific enhanced field styling */
+  /* Page-specific enhanced field styling (aligned with edit page) */
   .cc-field {
-    border: 2px solid #cbd5e1; /* slate-300 */
-    background: linear-gradient(#ffffff,#f1f5f9);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 2px 4px rgba(0,0,0,0.06);
+    border: 1px solid #d1d5db; /* gray-300 */
+    background: #ffffff;
+    padding: 0.7rem 0.9rem;
     border-radius: 0.5rem;
-    transition: border-color .18s ease, box-shadow .18s ease;
-    padding: 0.65rem 0.85rem; /* slightly larger height */
-    font-size: 0.95rem; /* subtle size bump */
-    width: 100%; /* ensure full available width */
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+    font-size: 0.97rem;
+    width: 100%;
   }
-  textarea.cc-field { min-height: 5.25rem; } /* gently taller textarea */
-  }
-  .cc-field:focus {
-    outline: none;
-    border-color: #2563eb; /* blue-600 */
-    box-shadow: 0 0 0 3px rgba(37,99,235,0.25), inset 0 1px 0 rgba(255,255,255,0.7);
-  }
-  .cc-field[disabled] { background:#f1f5f9; opacity:.65; cursor:not-allowed; }
-  .cc-field.error { border-color:#dc2626; box-shadow:0 0 0 3px rgba(220,38,38,0.2); }
-  /* Compact slug preview styling */
-  .slug-preview {
-    display:inline-block;
-    max-width:70px; /* keep it short */
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    padding:0.35rem 0.55rem; /* smaller than inputs */
-    font-size:0.75rem;
-    font-weight:500;
-  }
+  .cc-field[disabled] { background:#f8fafc; opacity:.9; }
+  .cc-field:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 4px rgba(37,99,235,0.08); }
+  .cc-page { max-width:78rem; margin:0 auto; padding:2.5rem 1.5rem; }
+  @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
+  .section-card { background:#fff; border:1px solid #e6edf3; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
+  .section-title { font-size:1rem; font-weight:600; margin-bottom:0.5rem; }
 </style>
 {% endblock %}
 
 {% block title %}New Service • {{ org.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto px-4">
+<div class="cc-page">
   <div class="mb-6 md:mb-10 text-center">
     <h1 class="text-3xl md:text-4xl font-bold mb-2">Add a Service</h1>
     <p class="text-sm md:text-base text-gray-600">Define what clients can book. Clear naming improves conversion.</p>
@@ -47,7 +32,7 @@
 
   <div class="grid md:grid-cols-3 gap-8">
     <!-- Form -->
-    <div class="md:col-span-2 bg-white border rounded-xl shadow-sm p-8">
+    <div class="md:col-span-2 bg-white border rounded-xl shadow-sm p-8 cc-form">
       {% if messages %}
         <div class="mb-6 space-y-2">
           {% for message in messages %}
@@ -78,9 +63,14 @@
 
         <div>
           <label class="block text-sm font-medium text-gray-700">Description</label>
-          <textarea name="description" rows="4" placeholder="Outline goals, structure, who it's for."
-            class="cc-field mt-1 w-full"></textarea>
+          <textarea name="description" rows="4" placeholder="Outline goals, structure, who it's for." class="cc-field mt-1 w-full"></textarea>
           <p class="mt-2 text-xs text-gray-500">Mention outcomes and any prerequisites.</p>
+        </div>
+
+        <div class="mt-4 p-3 rounded bg-blue-50 border border-blue-100 text-blue-800">
+          <strong class="block">Configure slot increments</strong>
+          <p class="text-sm">Slot increment stepping (how fine-grained client slots appear) is configured in the Day Schedule on the calendar. After creating the service, open the Day Schedule and apply your preferred increment to this service.</p>
+          <p class="mt-2"><a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm font-medium text-blue-700">Open Day Schedule →</a></p>
         </div>
 
         <div class="grid sm:grid-cols-2 gap-6">
@@ -103,18 +93,25 @@
 
         <div class="grid sm:grid-cols-2 gap-6">
           <div>
-            <label class="block text-sm font-medium text-gray-700">Prep Buffer (minutes)</label>
-            <input name="buffer_before" type="number" value="0" min="0"
-              class="cc-field mt-1 w-full" />
-            <p class="mt-2 text-xs text-gray-500">Blocks time before each booking.</p>
-          </div>
-          <div>
+            <!-- Prep buffer removed: buffer_before is deprecated and not used by availability/overlap logic -->
             <label class="block text-sm font-medium text-gray-700">Cleanup Buffer (minutes)</label>
             <input name="buffer_after" type="number" value="0" min="0"
               class="cc-field mt-1 w-full" />
             <p class="mt-2 text-xs text-gray-500">Blocks time after each booking.</p>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Allow appointment to end after availability?</label>
+            <div class="mt-2">
+              <label class="inline-flex items-center">
+                <input type="checkbox" name="allow_ends_after_availability" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="ml-2 text-sm text-gray-700">Allow clients to book a slot that starts inside availability even if the appointment ends after the availability window.</span>
+              </label>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">If enabled, the last available time slot may finish after your configured daily availability end.</p>
+          </div>
         </div>
+
+        <!-- Slot increment settings moved to Day Schedule modal (calendar). Removed from create service form to avoid duplication. -->
 
         <div class="grid sm:grid-cols-2 gap-6">
           <div>

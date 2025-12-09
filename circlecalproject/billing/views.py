@@ -1,5 +1,6 @@
 import stripe
-from stripe.error import InvalidRequestError
+# Canonical import for recent stripe versions: import error classes from top-level
+from stripe import InvalidRequestError
 from django.conf import settings
 from django.utils import timezone
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -396,6 +397,8 @@ def manage_billing(request, org_slug):
     trial_end_iso = None
     show_invoices = True
     show_upcoming_invoice = True
+    # Enable AJAX invoice filtering by default; templates expect this flag.
+    use_ajax_filters = True
 
     now = timezone.now()
 
@@ -836,75 +839,75 @@ def manage_billing(request, org_slug):
         except Exception:
             scheduled_change_is_downgrade = None
 
-        # AJAX filtering is always enabled client-side; the template will request JSON pages.
-        use_ajax_filters = True
+    # AJAX filtering is always enabled client-side; the template will request JSON pages.
+    use_ajax_filters = True
 
-        # If requested as JSON (AJAX fetch), return server-side filtered + paged invoices as JSON payload
-        if str(request.GET.get('as_json', '')).lower() in ('1', 'true', 'yes'):
-            # Respect same filters used for the page: inv_sort, inv_card, inv_status, invoice_month, show_archived
+    # If requested as JSON (AJAX fetch), return server-side filtered + paged invoices as JSON payload
+    if str(request.GET.get('as_json', '')).lower() in ('1', 'true', 'yes'):
+        # Respect same filters used for the page: inv_sort, inv_card, inv_status, invoice_month, show_archived
+        page = 1
+        try:
+            page = max(1, int(request.GET.get('page', '1')))
+        except Exception:
             page = 1
-            try:
-                page = max(1, int(request.GET.get('page', '1')))
-            except Exception:
-                page = 1
+        page_size = 25
+        try:
+            page_size = max(5, min(200, int(request.GET.get('page_size', page_size))))
+        except Exception:
             page_size = 25
+
+        # Apply month filter server-side for paging
+        invoice_month = request.GET.get('invoice_month')
+        def _in_month(inv, month_key):
+            if not month_key:
+                return True
+            created = inv.get('created')
+            if not created:
+                return False
             try:
-                page_size = max(5, min(200, int(request.GET.get('page_size', page_size))))
+                key = created.strftime('%Y-%m')
+                return key == month_key or key.startswith(month_key[:7])
             except Exception:
-                page_size = 25
+                return False
 
-            # Apply month filter server-side for paging
-            invoice_month = request.GET.get('invoice_month')
-            def _in_month(inv, month_key):
-                if not month_key:
-                    return True
-                created = inv.get('created')
-                if not created:
-                    return False
-                try:
-                    key = created.strftime('%Y-%m')
-                    return key == month_key or key.startswith(month_key[:7])
-                except Exception:
-                    return False
+        filtered = []
+        for inv in invoices:
+            # honor show_archived param: when show_archived not set, exclude hidden
+            if not show_archived and inv.get('hidden'):
+                continue
+            if invoice_month and not _in_month(inv, invoice_month):
+                continue
+            filtered.append(inv)
 
-            filtered = []
-            for inv in invoices:
-                # honor show_archived param: when show_archived not set, exclude hidden
-                if not show_archived and inv.get('hidden'):
-                    continue
-                if invoice_month and not _in_month(inv, invoice_month):
-                    continue
-                filtered.append(inv)
+        total = len(filtered)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_items = filtered[start:end]
 
-            total = len(filtered)
-            start = (page - 1) * page_size
-            end = start + page_size
-            page_items = filtered[start:end]
+        def _serialize(inv):
+            raw = inv.get('raw') or {}
+            created_dt = inv.get('created')
+            created_iso = created_dt.isoformat() if created_dt else None
+            created_display = created_dt.strftime('%B %d, %Y %I:%M %p') if created_dt else None
+            return {
+                'id': raw.get('id') if isinstance(raw, dict) else None,
+                'pseudo': bool(raw.get('pseudo')) if isinstance(raw, dict) else False,
+                'created_iso': created_iso,
+                'created_display': created_display,
+                'amount_display_dollars': inv.get('amount_display_dollars'),
+                'status': (raw.get('status') if isinstance(raw, dict) and raw.get('pseudo') else inv.get('status')),
+                'hosted_invoice_url': inv.get('hosted_invoice_url'),
+                'card_brand': inv.get('card_brand'),
+                'card_last4': inv.get('card_last4'),
+                'hidden': bool(inv.get('hidden')),
+                'discount': (raw.get('discount') if isinstance(raw, dict) and raw.get('discount') else applied_discount),
+            }
 
-            def _serialize(inv):
-                raw = inv.get('raw') or {}
-                created_dt = inv.get('created')
-                created_iso = created_dt.isoformat() if created_dt else None
-                created_display = created_dt.strftime('%B %d, %Y %I:%M %p') if created_dt else None
-                return {
-                    'id': raw.get('id') if isinstance(raw, dict) else None,
-                    'pseudo': bool(raw.get('pseudo')) if isinstance(raw, dict) else False,
-                    'created_iso': created_iso,
-                    'created_display': created_display,
-                    'amount_display_dollars': inv.get('amount_display_dollars'),
-                    'status': (raw.get('status') if isinstance(raw, dict) and raw.get('pseudo') else inv.get('status')),
-                    'hosted_invoice_url': inv.get('hosted_invoice_url'),
-                    'card_brand': inv.get('card_brand'),
-                    'card_last4': inv.get('card_last4'),
-                    'hidden': bool(inv.get('hidden')),
-                    'discount': (raw.get('discount') if isinstance(raw, dict) and raw.get('discount') else applied_discount),
-                }
+        data = [_serialize(i) for i in page_items]
+        has_more = end < total
+        return JsonResponse({'data': data, 'meta': {'total': total, 'page': page, 'page_size': page_size, 'has_more': has_more}})
 
-            data = [_serialize(i) for i in page_items]
-            has_more = end < total
-            return JsonResponse({'data': data, 'meta': {'total': total, 'page': page, 'page_size': page_size, 'has_more': has_more}})
-
-        return render(request, "billing/manage.html", {
+    return render(request, "billing/manage.html", {
         "org": org,
         "subscription": subscription,
         "plans": plans,

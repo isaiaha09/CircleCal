@@ -8,7 +8,7 @@ import json
 from django.utils.text import slugify
 from django.middleware.csrf import get_token
 from accounts.models import Business as Organization, Membership, Invite
-from bookings.models import Booking, Service
+from bookings.models import Booking, Service, ServiceSettingFreeze
 from bookings.models import WeeklyAvailability, ServiceWeeklyAvailability
 from django.db import transaction
 from django.http import HttpResponseForbidden
@@ -23,6 +23,334 @@ from accounts.models import Profile
 from django.utils import timezone
 from datetime import date
 from bookings.models import OrgSettings
+from zoneinfo import ZoneInfo
+from django.conf import settings
+from datetime import timedelta
+
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def update_service_settings(request, org_slug, service_id):
+    """API: update per-service slot settings from the calendar modal.
+
+    Expects JSON body with any of: time_increment_minutes (int), use_fixed_increment (bool),
+    allow_squished_bookings (bool), and optional apply_to_conflicts (bool).
+    If apply_to_conflicts is true, identical settings will be applied to conflicting services
+    that share overlapping service weekly availability windows.
+    """
+    org = request.organization
+    if not org:
+        return HttpResponseBadRequest('Organization required')
+
+    try:
+        svc = Service.objects.get(id=service_id, organization=org)
+    except Service.DoesNotExist:
+        return HttpResponseBadRequest('Invalid service')
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    # Read settings
+    fields = {}
+    if 'time_increment_minutes' in payload:
+        try:
+            fields['time_increment_minutes'] = int(payload.get('time_increment_minutes') or 0) or 30
+        except Exception:
+            fields['time_increment_minutes'] = 30
+    if 'use_fixed_increment' in payload:
+        fields['use_fixed_increment'] = bool(payload.get('use_fixed_increment'))
+    if 'allow_squished_bookings' in payload:
+        fields['allow_squished_bookings'] = bool(payload.get('allow_squished_bookings'))
+    if 'allow_ends_after_availability' in payload:
+        # Expect boolean-like values
+        try:
+            fields['allow_ends_after_availability'] = bool(payload.get('allow_ends_after_availability'))
+        except Exception:
+            pass
+    if 'is_active' in payload:
+        try:
+            fields['is_active'] = bool(payload.get('is_active'))
+        except Exception:
+            pass
+
+    # If no fields to update, nothing to do
+    if not fields:
+        return JsonResponse({'status': 'noop'})
+
+    # Conflict detection: find other services whose service-weekly windows overlap this service
+    apply_to_conflicts = bool(payload.get('apply_to_conflicts'))
+    conflicting = []
+    # Build set of (weekday, start, end) for this service
+    my_windows = list(svc.weekly_availability.filter(is_active=True).values_list('weekday', 'start_time', 'end_time'))
+    # Determine proposed field values (use current svc values when not provided)
+    proposed_time_inc = fields.get('time_increment_minutes', getattr(svc, 'time_increment_minutes', 30))
+    proposed_use_fixed = fields.get('use_fixed_increment', getattr(svc, 'use_fixed_increment', False))
+    proposed_allow_squished = fields.get('allow_squished_bookings', getattr(svc, 'allow_squished_bookings', False))
+
+    if my_windows:
+        other_svcs = Service.objects.filter(organization=org).exclude(id=svc.id)
+        for other in other_svcs:
+            other_rows = other.weekly_availability.filter(is_active=True)
+            overlap_found = False
+            for r in other_rows:
+                for (wd, st, et) in my_windows:
+                    if r.weekday == wd:
+                        # times overlap if r.start < et and r.end > st
+                        if (r.start_time < et) and (r.end_time > st):
+                            overlap_found = True
+                            break
+                if overlap_found:
+                    break
+            if not overlap_found:
+                continue
+
+            # Only consider it a conflict if the other service's current settings
+            # would differ from the proposed settings for this service. If they
+            # are already identical, no action needed.
+            other_time_inc = getattr(other, 'time_increment_minutes', 30)
+            other_use_fixed = getattr(other, 'use_fixed_increment', False)
+            other_allow_squished = getattr(other, 'allow_squished_bookings', False)
+
+            if (other_time_inc != proposed_time_inc) or (bool(other_use_fixed) != bool(proposed_use_fixed)) or (bool(other_allow_squished) != bool(proposed_allow_squished)):
+                # Include detailed settings and weekly windows to help the client UI decide
+                other_windows = list(other.weekly_availability.filter(is_active=True).values_list('weekday', 'start_time', 'end_time'))
+                # Convert model weekday (0=Mon..6=Sun) to UI index (0=Sun..6=Sat)
+                ui_windows = []
+                for (wd, st, et) in other_windows:
+                    ui_idx = (wd + 1) % 7
+                    ui_windows.append({'weekday': ui_idx, 'start': st.strftime('%H:%M'), 'end': et.strftime('%H:%M')})
+
+                conflicting.append({
+                    'id': other.id,
+                    'name': other.name,
+                    'time_increment_minutes': other_time_inc,
+                    'use_fixed_increment': bool(other_use_fixed),
+                    'allow_squished_bookings': bool(other_allow_squished),
+                    'weekly_windows': ui_windows,
+                })
+
+    # If conflicts found and not explicitly applying, return info for confirmation
+    if conflicting and not apply_to_conflicts:
+        return JsonResponse({'status': 'conflicts', 'conflicting': conflicting})
+
+    # Apply fields to primary service
+    for k, v in fields.items():
+        setattr(svc, k, v)
+    svc.save()
+
+    # Optionally apply to conflicting services
+    if conflicting and apply_to_conflicts:
+        other_ids = [c['id'] for c in conflicting]
+        Service.objects.filter(id__in=other_ids).update(**fields)
+
+    return JsonResponse({'status': 'ok', 'applied_to_conflicts': bool(conflicting and apply_to_conflicts)})
+
+
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def preview_service_update(request, org_slug, service_id):
+    """Return dates that have existing bookings for this service so the UI
+    can present a confirmation modal listing affected bookings.
+    Expects JSON body with optional updated fields (we only need max_booking_days
+    to scope the preview window)."""
+    org = request.organization
+    if not org:
+        return HttpResponseBadRequest('Organization required')
+
+    try:
+        svc = Service.objects.get(id=service_id, organization=org)
+    except Service.DoesNotExist:
+        return HttpResponseBadRequest('Invalid service')
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        payload = {}
+
+    # Determine scanning window: from today (org tz) to a reasonable horizon
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+    today_org = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        new_max = int(payload.get('max_booking_days', svc.max_booking_days))
+    except Exception:
+        new_max = svc.max_booking_days
+    horizon = today_org + timedelta(days=max(svc.max_booking_days or 0, new_max or 0, 365))
+
+    # Fetch bookings for this service within the horizon
+    b_qs = Booking.objects.filter(
+        organization=org,
+        service=svc,
+        start__gte=today_org,
+        start__lte=horizon
+    ).order_by('start')
+
+    conflicts = {}
+    for b in b_qs:
+        try:
+            local_start = b.start.astimezone(org_tz)
+        except Exception:
+            local_start = b.start
+        day = local_start.date().isoformat()
+        conflicts.setdefault(day, []).append({
+            'id': b.id,
+            'start': local_start.isoformat(),
+            'time': local_start.strftime('%H:%M'),
+            'client_name': b.client_name,
+            'client_email': b.client_email,
+        })
+
+    return JsonResponse({'status': 'ok', 'conflicts': conflicts})
+
+
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def apply_service_update(request, org_slug, service_id):
+    """Apply service updates but freeze old settings on dates that have bookings.
+    Expects JSON body with the same fields as `update_service_settings` plus
+    `confirm` boolean. When `confirm` is true, create `ServiceSettingFreeze`
+    rows for booked dates preserving prior settings, then save the new values.
+    """
+    org = request.organization
+    if not org:
+        return HttpResponseBadRequest('Organization required')
+
+    try:
+        svc = Service.objects.get(id=service_id, organization=org)
+    except Service.DoesNotExist:
+        return HttpResponseBadRequest('Invalid service')
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    if not payload.get('confirm'):
+        return HttpResponseBadRequest('Must include confirm=true to apply changes')
+
+    # Determine horizon similar to preview
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+    today_org = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        new_max = int(payload.get('max_booking_days', svc.max_booking_days))
+    except Exception:
+        new_max = svc.max_booking_days
+    horizon = today_org + timedelta(days=max(svc.max_booking_days or 0, new_max or 0, 365))
+
+    # Bookings that should cause freezes
+    b_qs = Booking.objects.filter(
+        organization=org,
+        service=svc,
+        start__gte=today_org,
+        start__lte=horizon
+    )
+
+    # Build set of dates with bookings
+    booked_dates = set()
+    for b in b_qs:
+        try:
+            d = b.start.astimezone(org_tz).date()
+        except Exception:
+            d = b.start.date()
+        booked_dates.add(d)
+
+    # Save freezes: preserve current service values for affected dates
+    freezes_created = 0
+    frozen_dates = []
+    freeze_error = None
+    try:
+        from django.db.utils import OperationalError
+        for d in booked_dates:
+            frozen = {
+                'duration': svc.duration,
+                'buffer_after': svc.buffer_after,
+                'time_increment_minutes': svc.time_increment_minutes,
+                'use_fixed_increment': bool(svc.use_fixed_increment),
+                'allow_ends_after_availability': bool(getattr(svc, 'allow_ends_after_availability', False)),
+                'allow_squished_bookings': bool(getattr(svc, 'allow_squished_bookings', False)),
+            }
+            try:
+                obj, created = ServiceSettingFreeze.objects.update_or_create(
+                    service=svc, date=d, defaults={'frozen_settings': frozen}
+                )
+                if created:
+                    freezes_created += 1
+                frozen_dates.append(d.isoformat())
+            except OperationalError as oe:
+                # Likely missing table (migrations not applied) — record and continue
+                freeze_error = str(oe)
+                break
+    except Exception as e:
+        # Defensive: if import or DB access fails, record and continue
+        try:
+            freeze_error = str(e)
+        except Exception:
+            freeze_error = 'unknown error while creating freezes'
+
+    # Apply provided fields to service (similar to update_service_settings)
+    fields = {}
+    if 'time_increment_minutes' in payload:
+        try:
+            fields['time_increment_minutes'] = int(payload.get('time_increment_minutes') or 0) or 30
+        except Exception:
+            fields['time_increment_minutes'] = 30
+    if 'use_fixed_increment' in payload:
+        fields['use_fixed_increment'] = bool(payload.get('use_fixed_increment'))
+    if 'allow_squished_bookings' in payload:
+        fields['allow_squished_bookings'] = bool(payload.get('allow_squished_bookings'))
+    if 'buffer_after' in payload:
+        try:
+            fields['buffer_after'] = int(payload.get('buffer_after'))
+        except Exception:
+            pass
+    if 'duration' in payload:
+        try:
+            fields['duration'] = int(payload.get('duration'))
+        except Exception:
+            pass
+    # Additional fields that the edit form may post
+    if 'allow_ends_after_availability' in payload:
+        try:
+            fields['allow_ends_after_availability'] = bool(payload.get('allow_ends_after_availability'))
+        except Exception:
+            pass
+    if 'is_active' in payload:
+        try:
+            fields['is_active'] = bool(payload.get('is_active'))
+        except Exception:
+            pass
+    if 'min_notice_hours' in payload:
+        try:
+            fields['min_notice_hours'] = int(payload.get('min_notice_hours'))
+        except Exception:
+            pass
+    if 'max_booking_days' in payload:
+        try:
+            fields['max_booking_days'] = int(payload.get('max_booking_days'))
+        except Exception:
+            pass
+    if 'time_increment_minutes' in payload and 'time_increment_minutes' not in fields:
+        try:
+            fields['time_increment_minutes'] = int(payload.get('time_increment_minutes'))
+        except Exception:
+            pass
+
+    for k, v in fields.items():
+        setattr(svc, k, v)
+    svc.save()
+
+    resp = {'status': 'ok', 'freezes_created': freezes_created, 'booked_dates_count': len(booked_dates), 'booked_dates': frozen_dates}
+    if freeze_error:
+        resp['freeze_error'] = str(freeze_error)
+        resp['warning'] = 'Freezes could not be created (DB may need migrations). Changes were still applied to the service.'
+
+    return JsonResponse(resp)
 
 
 def _build_org_weekly_map(org):
@@ -102,11 +430,39 @@ def calendar_view(request, org_slug):
         })
 
     coach_availability_json = json.dumps(availability_serialized)
+    # Prevent any accidental </script> sequences from being embedded raw into templates
+    if isinstance(coach_availability_json, str):
+        coach_availability_json = coach_availability_json.replace('</script>', '<\\/script>')
+    services_qs = Service.objects.filter(organization=org, is_active=True).order_by('name')
+    services = []
+    for s in services_qs:
+        services.append({
+            'id': s.id,
+            'name': s.name,
+            'slug': s.slug,
+            'duration': s.duration,
+            'time_increment_minutes': getattr(s, 'time_increment_minutes', 30),
+            'use_fixed_increment': bool(getattr(s, 'use_fixed_increment', False)),
+            'allow_squished_bookings': bool(getattr(s, 'allow_squished_bookings', False)),
+            'allow_ends_after_availability': bool(getattr(s, 'allow_ends_after_availability', False)),
+        })
+    services_json = json.dumps(services)
+    # Guard against raw closing script tags in service names/descriptions
+    if isinstance(services_json, str):
+        services_json = services_json.replace('</script>', '<\\/script>')
     get_token(request)
+    # Support auto-opening the Day Schedule modal via query params
+    auto_open_service = request.GET.get('open_day_schedule_for', '')
+    auto_open_date = request.GET.get('open_day_schedule_date', '')
+
     return render(request, "calendar_app/calendar.html", {
         'organization': org,
         'coach_availability_json': coach_availability_json,
         'org_timezone': org.timezone,  # Pass organization's timezone to template
+        'services': services_qs,
+        'services_json': services_json,
+        'auto_open_service': auto_open_service,
+        'auto_open_date': auto_open_date,
     })
 
 def demo_calendar_view(request):
@@ -639,18 +995,23 @@ def create_service(request, org_slug):
             messages.error(request, "Service name is required.")
             return render(request, "calendar_app/create_service.html", { "org": org })
 
-        svc = Service.objects.create(
+        # Create kwargs dynamically so absence of the DB migration won't crash the form
+        svc_kwargs = dict(
             organization=org,
             name=name,
             slug=slug,
             description=request.POST.get("description", ""),
             duration=int(request.POST.get("duration", 30)),
             price=float(request.POST.get("price", 0)),
-            buffer_before=int(request.POST.get("buffer_before", 0)),
             buffer_after=int(request.POST.get("buffer_after", 0)),
             min_notice_hours=int(request.POST.get("min_notice_hours", 1)),
             max_booking_days=int(request.POST.get("max_booking_days", 30)),
         )
+        field_names = [f.name for f in Service._meta.get_fields()]
+        if 'allow_ends_after_availability' in field_names:
+            svc_kwargs['allow_ends_after_availability'] = request.POST.get('allow_ends_after_availability') is not None
+
+        svc = Service.objects.create(**svc_kwargs)
         # Refund fields
         svc.refunds_allowed = request.POST.get("refunds_allowed") is not None
         try:
@@ -671,6 +1032,10 @@ def create_service(request, org_slug):
 def edit_service(request, org_slug, service_id):
     org = get_object_or_404(Organization, slug=org_slug)
     service = get_object_or_404(Service, id=service_id, organization=org)
+    # Check whether the DB field exists so we avoid touching it when not migrated
+    field_names = [f.name for f in Service._meta.get_fields()]
+    field_present = 'allow_ends_after_availability' in field_names
+
     if request.method == "POST":
         # Basic fields
         service.name = (request.POST.get("name") or service.name).strip()
@@ -696,8 +1061,29 @@ def edit_service(request, org_slug, service_id):
 
         service.duration = _set_int("duration", service.duration)
         service.price = _set_float("price", float(service.price))
-        service.buffer_before = _set_int("buffer_before", service.buffer_before)
+        # buffer_before is deprecated and no longer used in availability logic
         service.buffer_after = _set_int("buffer_after", service.buffer_after)
+        if field_present:
+            # Read all posted values for the checkbox (hidden fallback + checkbox)
+            try:
+                raw_list = request.POST.getlist('allow_ends_after_availability')
+                # raw_list may be ['0'] when unchecked, or ['0','1'] when checked (hidden + checkbox)
+                present = bool(raw_list)
+                raw_val = ','.join(raw_list)
+                # Store a small info message (kept for a short time) — will also set session debug below
+                try:
+                    messages.debug(request, f"DEBUG POST allow_ends_after_availability list={raw_list}")
+                except Exception:
+                    pass
+            except Exception:
+                raw_list = []
+                present = False
+                raw_val = None
+            # If any of posted values equals '1', treat as checked
+            try:
+                service.allow_ends_after_availability = any(v == '1' or v.lower() == 'true' for v in raw_list)
+            except Exception:
+                service.allow_ends_after_availability = False
         service.min_notice_hours = _set_int("min_notice_hours", service.min_notice_hours)
         service.max_booking_days = _set_int("max_booking_days", service.max_booking_days)
 
@@ -710,10 +1096,43 @@ def edit_service(request, org_slug, service_id):
 
         service.save()
         service.refresh_from_db()
+        # Store a short debug payload in session so PRG redirect can display raw POST state
+        try:
+            present = 'allow_ends_after_availability' in request.POST
+            raw_val = request.POST.get('allow_ends_after_availability')
+            request.session['cc_debug_post'] = {
+                'present': bool(present),
+                'raw': raw_val,
+                'saved': bool(service.allow_ends_after_availability)
+            }
+        except Exception:
+            try:
+                request.session['cc_debug_post'] = {'error': 'failed to capture POST debug'}
+            except Exception:
+                pass
         messages.success(request, "Service updated.")
-        return render(request, "calendar_app/edit_service.html", { "org": org, "service": service })
+        # Post-Redirect-Get: redirect so the saved state is authoritative and URL/query params propagate
+        # Add temporary query params with debug info to surface POST/DB state immediately (safe, short-lived)
+        try:
+            from urllib.parse import urlencode
+            qs = urlencode({
+                'cc_dbg_present': int(bool(present)),
+                'cc_dbg_raw': raw_val if raw_val is not None else '',
+                'cc_dbg_saved': int(bool(service.allow_ends_after_availability))
+            })
+            return redirect(f"{request.path}?{qs}")
+        except Exception:
+            return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
 
-    return render(request, "calendar_app/edit_service.html", { "org": org, "service": service })
+    # Pop any debug payload saved during the POST redirect so the template can show raw POST info
+    debug_post = None
+    try:
+        debug_post = request.session.pop('cc_debug_post', None)
+    except Exception:
+        debug_post = None
+
+    return render(request, "calendar_app/edit_service.html", { "org": org, "service": service, 'needs_migration': not field_present, 'cc_debug_post': debug_post })
+
 
 
 def team_dashboard(request, org_slug):
@@ -1019,6 +1438,13 @@ def create_service(request, org_slug):
                     max_booking_days=max_booking_days,
                     is_active=True,
                 )
+                # Per-service client slot settings
+                try:
+                    svc.time_increment_minutes = int(request.POST.get('time_increment_minutes', svc.time_increment_minutes if hasattr(svc, 'time_increment_minutes') else 30))
+                except Exception:
+                    svc.time_increment_minutes = 30
+                svc.use_fixed_increment = request.POST.get('use_fixed_increment') is not None
+                svc.allow_squished_bookings = request.POST.get('allow_squished_bookings') is not None
                 # Refund fields
                 svc.refunds_allowed = request.POST.get("refunds_allowed") is not None
                 try:
@@ -1082,6 +1508,14 @@ def edit_service(request, org_slug, service_id):
                 service.max_booking_days = max_booking_days
                 service.is_active = is_active
 
+                # Per-service slot settings
+                try:
+                    service.time_increment_minutes = int(request.POST.get('time_increment_minutes', service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30))
+                except Exception:
+                    service.time_increment_minutes = 30
+                service.use_fixed_increment = request.POST.get('use_fixed_increment') is not None
+                service.allow_squished_bookings = request.POST.get('allow_squished_bookings') is not None
+
                 # Refund fields
                 service.refunds_allowed = request.POST.get("refunds_allowed") is not None
                 cutoff_raw = request.POST.get("refund_cutoff_hours")
@@ -1105,7 +1539,65 @@ def edit_service(request, org_slug, service_id):
 
                 service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
 
+                # Gather proposed slot settings (do not persist yet)
+                try:
+                    new_time_increment = int(request.POST.get('time_increment_minutes', service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30))
+                except Exception:
+                    new_time_increment = service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30
+                new_use_fixed = request.POST.get('use_fixed_increment') is not None
+                new_allow_squished = request.POST.get('allow_squished_bookings') is not None
+
+                # Conflict detection with other services (sharing overlapping weekly windows)
+                conflict_services = []
+                my_windows = []
+                for w in service.weekly_availability.filter(is_active=True):
+                    my_windows.append((w.weekday, w.start_time, w.end_time))
+                if my_windows:
+                    others = Service.objects.filter(organization=org).exclude(id=service.id)
+                    for other in others:
+                        for r in other.weekly_availability.filter(is_active=True):
+                            for (wd, st, et) in my_windows:
+                                if r.weekday == wd and (r.start_time < et) and (r.end_time > st):
+                                    conflict_services.append(other.name)
+                                    break
+                            if conflict_services and conflict_services[-1] == other.name:
+                                break
+
+                apply_to_conflicts = request.POST.get('apply_to_conflicts') is not None
+                # If conflicts exist and user didn't confirm applying, re-render with warning
+                if conflict_services and not apply_to_conflicts:
+                    # Do not persist changes yet; show prompt to user
+                    messages.warning(request, 'Conflicting services detected. Confirm to apply settings to them as well.')
+                    # Render template with conflict_services context so the template shows the checkbox
+                    org_map = _build_org_weekly_map(org)
+                    svc_map = _build_service_weekly_map(service)
+                    weekday_labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+                    weekly_edit_rows = []
+                    for ui in range(7):
+                        org_ranges = ', '.join(org_map[ui]) if org_map and org_map[ui] else ''
+                        svc_ranges = ', '.join(svc_map[ui]) if svc_map and svc_map[ui] else ''
+                        weekly_edit_rows.append({'ui': ui, 'label': weekday_labels[ui], 'org_ranges': org_ranges, 'svc_ranges': svc_ranges})
+                    return render(request, "calendar_app/edit_service.html", {
+                        "org": org,
+                        "service": service,
+                        "weekly_edit_rows": weekly_edit_rows,
+                        "conflict_services": conflict_services,
+                    })
+
+                # Persist changes (and optionally apply to conflicts)
                 service.save()
+                if conflict_services and apply_to_conflicts:
+                    # Apply slot fields to conflicting services
+                    others_qs = Service.objects.filter(organization=org).exclude(id=service.id)
+                    for other in others_qs:
+                        for r in other.weekly_availability.filter(is_active=True):
+                            for (wd, st, et) in my_windows:
+                                if r.weekday == wd and (r.start_time < et) and (r.end_time > st):
+                                    other.time_increment_minutes = new_time_increment
+                                    other.use_fixed_increment = new_use_fixed
+                                    other.allow_squished_bookings = new_allow_squished
+                                    other.save()
+                                    break
                 # Handle per-service weekly availability fields.
                 # Expect form fields named `svc_avail_0` .. `svc_avail_6` representing UI weekday 0=Sunday..6=Saturday
                 # Each field may contain comma-separated ranges like "09:00-12:00,13:00-17:00" or be empty.

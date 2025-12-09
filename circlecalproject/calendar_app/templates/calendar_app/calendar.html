@@ -2,6 +2,7 @@
 {% block title %}Calendar{% endblock %}
 {% block extra_head %}
 <!-- Select2 Styles + JS -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
@@ -43,6 +44,9 @@
     --gray-600: #4b5563;
     --gray-700: #374151;
     --gray-900: #111827;
+    --cc-wave-duration: 14s;
+    --cc-page-gutter: 16px; /* default page gutter for consistent side padding */
+    --cc-inner-max: 1180px;
 }
 
 /* Calendar base styling with modern card design */
@@ -98,6 +102,111 @@ th[role='presentation'] { border-right-color: transparent !important; }
     justify-content: center;
     height: 100%;
 }
+
+/* Top border color wave for section cards */
+.section-card, .cc-page > .section-card, .border.rounded-lg, .section-card .section-title {
+    position: relative;
+}
+.section-card::before, .border.rounded-lg::before {
+    content: '';
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -6px;
+    height: 6px;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    /* Use the canonical per-date overrides gradient */
+    background: linear-gradient(to right, var(--primary-500), var(--success-500), var(--danger-500));
+    background-size: 400% 100%;
+    /* smooth oscillation using multi-stop keyframes (no alternate) */
+    animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
+    animation-delay: var(--cc-wave-offset, 0s);
+    z-index: 2;
+}
+@keyframes cc-wave {
+    0% { background-position: 0% 50%; }
+    25% { background-position: 50% 50%; }
+    50% { background-position: 100% 50%; }
+    75% { background-position: 50% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* Apply animated top-border gradient to main sections at all screen sizes */
+/* Make top gradient part of each container's rounded top by clipping
+   the pseudo-element to the container and using the container's radius. */
+#defaultAvailabilityContainer,
+#bookingsInlineSection,
+#calendar,
+#timeModal,
+#timeCirclesModal {
+    position: relative;
+    overflow: hidden; /* clip the ::before gradient to container border-radius */
+}
+
+#defaultAvailabilityContainer::before,
+#bookingsInlineSection::before,
+#calendar::before,
+#timeModal::before,
+#timeCirclesModal::before {
+    content: '';
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 6px;
+    /* inherit the container's top border radius so the gradient visually
+       appears as part of the container (prevents the 'hat' effect). */
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+    background: linear-gradient(to right, var(--primary-500), var(--success-500), var(--danger-500));
+    background-size: 400% 100%;
+    animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
+    animation-delay: var(--cc-wave-offset, 0s);
+    z-index: 50;
+    pointer-events: none;
+}
+
+/* Mobile-friendly adjustments */
+@media (max-width: 768px) {
+        --cc-page-gutter: 16px; 
+        Default Weekly Availability keeps desktop baseline styles */
+    #bookingsInlineSection,
+    #calendar,
+    #timeModal,
+    #timeCirclesModal {
+        position: relative; /* ensure pseudo-element positions relative to container */
+    }
+
+    /* Place the gradient inside the container (top:0) so it's not clipped on desktop.
+       Use a CSS var for animation-delay so we can sync multiple elements from JS. */
+    #bookingsInlineSection::before,
+    #calendar::before,
+    #timeModal::before,
+    #timeCirclesModal::before {
+        content: '';
+        display: block;
+        position: absolute;
+        right: 0;
+        top: 0; /* inside the container to avoid being clipped by overflow */
+        height: 6px;
+        border-top-left-radius: 12px;
+        border-top-right-radius: 12px;
+            background: linear-gradient(to right, var(--primary-500), var(--success-500), var(--danger-500));
+            background-size: 400% 100%;
+            animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
+            /* allow external sync via --cc-wave-offset */
+            animation-delay: var(--cc-wave-offset, 0s);
+        z-index: 50;
+        pointer-events: none;
+    }
+    #calendar { padding: 12px; }
+    .fc .fc-view-harness { margin-top: 80px; }
+    .fc-daygrid-day-number { width: 40px; height: 40px; font-size: 1.1rem; }
+    .time-circle { width: 56px !important; height: 56px !important; font-size: 12px !important; }
+}
 .fc-daygrid-day-number {
     position: absolute;
     margin-top: 100%;
@@ -110,10 +219,13 @@ th[role='presentation'] { border-right-color: transparent !important; }
     width: 50px;
     height: 50px;
     font-size: 1.5rem;
-    border-radius: 50%;
+    border-radius: 50% !important;
     font-weight: 600;
     transition: transform 0.2s ease, background-color 0.2s ease;
 }
+
+/* Ensure time-circle elements remain circular */
+.time-circle { border-radius: 50% !important; overflow: visible; }
 
 /* Pointer for available day numbers */
 .fc-day-available .fc-daygrid-day-number { cursor: pointer !important; }
@@ -161,12 +273,15 @@ th[role='presentation'] { border-right-color: transparent !important; }
 }
 
 /* Temporary highlight during drag - unavailable days */
-.fc-day-unavailable .fc-daygrid-day-number.temp-highlight {
-    background: linear-gradient(135deg, rgba(45, 45, 45, 0.8), rgba(26, 26, 26, 0.9));
-    color: white;
-    transform: translate(-50%, -50%) scale(1.3);
-    border-color: #000000;
+    .fc-day-unavailable .fc-daygrid-day-number.temp-highlight {
+        background: linear-gradient(135deg, rgba(45, 45, 45, 0.8), rgba(26, 26, 26, 0.9));
+        color: white;
+        transform: translate(-50%, -50%) scale(1.3);
+        border-color: #000000;
 }
+
+/* Removed: centralized mobile rules for availability UI — will be replaced with scoped media below */
+/* (rules targeting .availability-ui removed) */
 
 
 /* Current day styling - highlighted */
@@ -375,6 +490,66 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
   display: inline-block;
 }
 
+
+/* Range row layout adjustments to prevent action buttons overlapping inputs on small screens */
+.range-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+.range-row .time-input-container {
+    flex: 0 0 auto;
+    min-width: 0; /* allow mobile overrides to control width; avoid forcing large widths on desktop */
+}
+.range-start, .range-end, .modal-range-start, .modal-range-end {
+    text-align: center;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--gray-300);
+    background: white;
+    font-weight: 600;
+    min-width: 0; /* allow responsive rules to set exact widths per breakpoint */
+}
+.remove-range-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border: none;
+    background: #dc3545;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+}
+.remove-range-btn .remove-icon { font-size: 14px; line-height: 1; }
+    .remove-range-btn .remove-text { display: none; }
+/* Position the unavailable checkbox slightly lower and to the right
+   so it visually aligns near the remove button across all devices. */
+.unavailable-checkbox {
+    position: relative;
+    top: 6px; /* move down */
+    left: 6px; /* move right */
+    width: 18px;
+    height: 18px;
+}
+.add-range-btn {
+    padding: 6px 10px !important;
+    background: #007bff !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+/* Removed mobile @media rules that targeted availability-specific classes so
+   Default Weekly Availability keeps desktop baseline styles. */
+
+
 /* Custom Time Picker Dropdown */
 .custom-time-picker {
   position: absolute;
@@ -555,7 +730,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     left: 0;
     right: 0;
     height: 6px;
+    /* Use the canonical per-date overrides gradient and animate it (in sync) */
     background: linear-gradient(to right, var(--primary-500), var(--success-500), var(--danger-500));
+    background-size: 400% 100%;
+    animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
+    animation-delay: var(--cc-wave-offset, 0s);
+    z-index: 50;
+    pointer-events: none;
 }
 
 /* Overrides table visuals */
@@ -720,55 +901,14 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         padding: 6px 8px !important;
         font-size: 11px !important;
     }
-    
-    /* Default Weekly Availability Container */
-    #defaultAvailabilityContainer {
-        flex: 1 1 100% !important;
-        min-width: 100% !important;
-        padding: 16px !important;
-        margin-bottom: 16px !important;
-    }
-    
-    #defaultAvailabilityContainer h3 {
-        font-size: 16px !important;
-    }
-    
-    #defaultAvailabilityContainer table {
-        font-size: 12px;
-    }
-    
-    #defaultAvailabilityContainer th {
-        padding: 8px !important;
-        font-size: 11px !important;
-    }
-    
-    #defaultAvailabilityContainer td {
-        padding-top: 12px !important;
-        padding-bottom: 12px !important;
-        padding-left: 8px !important;
-        padding-right: 8px !important;
-    }
-    
-    #defaultAvailabilityContainer td[colspan="2"] {
-        padding-left: 20px !important;
-    }
-    
-    #defaultAvailabilityContainer input[type="time"] {
-        width: 90px;
-        font-size: 12px;
-        padding: 4px 6px !important;
-    }
-    
-    #defaultAvailabilityContainer .add-range-btn,
-    #defaultAvailabilityContainer .range-row button {
-        padding: 5px 8px !important;
-        font-size: 11px !important;
-    }
-    
-    #saveDefaultAvailabilityBtn {
-        width: 100%;
-        padding: 10px 16px !important;
-    }
+
+    /* Removed nested desktop @media that touched .range-row to avoid
+       any accidental mobile/medium interactions. */
+
+    /* Default Weekly Availability: responsive rules removed per request. */
+    /* (Removed mobile/medium @media blocks and small-screen overrides that targeted
+       #defaultAvailabilityContainer, .range-row, .range-start, .range-end,
+       .remove-range-btn, .unavailable-checkbox so desktop styles are the baseline.) */
     
     /* Calendar Container */
     div[style*="flex:2 1 640px"] {
@@ -806,16 +946,9 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 }
 
 /* Landscape Mobile (tablets in landscape, large phones) */
-@media (max-width: 1024px) and (min-width: 769px) {
+@media (max-width: 1200px) and (min-width: 769px) {
     #weeklyCalendarRow { flex-wrap: wrap !important; }
-    #defaultAvailabilityContainer {
-        flex: 1 1 380px !important;
-        min-width: 380px !important;
-    }
-    
-    #defaultAvailabilityContainer td[colspan="2"] {
-        padding-left: 30px !important;
-    }
+    /* Default availability responsive settings removed */
     
     div[style*="flex:2 1 640px"] {
         flex: 1 1 500px !important;
@@ -826,7 +959,6 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 /* Small phones (portrait) */
 @media (max-width: 480px) {
     #overridesContainer,
-    #defaultAvailabilityContainer,
     #calendar {
         border-radius: 12px !important;
     }
@@ -835,10 +967,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         font-size: 20px !important;
     }
     
-    #defaultAvailabilityContainer input[type="time"] {
-        width: 75px;
-        font-size: 11px;
-    }
+    /* Default availability time input mobile sizing removed */
     
     #calendar-controls {
         gap: 6px !important;
@@ -909,7 +1038,6 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     
     /* Remove extra margins on cards and prevent overflow */
     #overridesContainer,
-    #defaultAvailabilityContainer,
     #calendar {
         margin-left: 0 !important;
         margin-right: 0 !important;
@@ -937,10 +1065,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         box-sizing: border-box !important;
     }
     
-    /* Default availability table should not force width */
-    #defaultAvailabilityContainer table {
-        max-width: 100% !important;
-    }
+    /* Default availability media rules removed */
 }
 
 /* Widen layout on desktop: use more of the screen width */
@@ -971,12 +1096,99 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     #calendar { height: 100% !important; }
 }
 
-/* Ensure side-by-side wraps only on smaller screens */
-@media (max-width: 1024px) {
-    #weeklyCalendarRow { flex-wrap: wrap !important; gap: 20px !important; }
+/* Keep a consistent horizontal gutter (side padding) for medium viewports
+   so content doesn't touch the right edge as the layout narrows. This
+   preserves the current visual spacing until the availability column must
+   wrap on small screens. */
+@media (min-width: 481px) and (max-width: 1200px) {
+    main.max-w-6xl,
+    main.max-w-7xl,
+    main {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+        box-sizing: border-box !important;
+    }
+    header .max-w-7xl,
+    header > div,
+    footer .max-w-7xl,
+    footer > div {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+        box-sizing: border-box !important;
+    }
+    /* Add a small inner gutter for the two-column calendar/availability row */
+    #weeklyCalendarRow {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+        box-sizing: border-box !important;
+    }
+}
+
+
+</style>
+
+<style>
+/* Removed: minimal mobile-only availability rules targeting .availability-ui */
+</style>
+
+<style>
+/* Center content column and prevent edge leakage across wide and medium viewports */
+@media (min-width: 900px) {
+    :root { 
+        --cc-page-gutter: 16px; 
+        --cc-inner-max: 1180px; 
+    }
+
+    main.max-w-6xl,
+    main.max-w-7xl,
+    main {
+        width: 100% !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-left: var(--cc-page-gutter) !important;
+        padding-right: var(--cc-page-gutter) !important;
+        box-sizing: border-box !important;
+    }
+
+    header .max-w-7xl,
+    header > div,
+    footer .max-w-7xl,
+    footer > div {
+        max-width: var(--cc-inner-max) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-left: var(--cc-page-gutter) !important;
+        padding-right: var(--cc-page-gutter) !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Align the main cards to the centered column and allow them to shrink */
+    #overridesContainer,
+    #weeklyCalendarRow,
+    #defaultAvailabilityContainer,
+    #calendar,
+    #bookingsInlineSection {
+        max-width: 100% !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Override inline min-widths (set on elements via style attributes) so they
+       don't push past the centered column and leak to the viewport edge. */
+    #defaultAvailabilityContainer, div[style*="flex:2 1 640px"] {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Keep weekly row aligned with the centered column */
+    #weeklyCalendarRow { padding-left: 0 !important; padding-right: 0 !important; box-sizing: border-box !important; }
 }
 </style>
+
 <!-- Controls will be overlaid inside the calendar area -->
+<!-- Removed mobile/medium @media rules that targeted the Default Weekly Availability UI -->
 <!-- Per-date Overrides Table - Modern Card (moved to top) -->
 <div id="overridesContainer" style="margin-top:24px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
     <h3 id="overridesHeader" class="overrides-header" style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">
@@ -1001,7 +1213,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 </div>
 
 <div id="weeklyCalendarRow" style="display:flex; gap:40px; align-items:stretch; flex-wrap:nowrap; margin-top:24px; width:100%;">
-    <div id="defaultAvailabilityContainer" style="flex:1 1 540px; min-width:540px; margin-bottom:32px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+    <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 540px; min-width:540px; margin-bottom:32px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
     <h3 style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
     <table style="width:100%; border-collapse:collapse;">
         <thead>
@@ -1026,10 +1238,170 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                 <button id="selectDaysBtn" class="calendar-btn">Select Day</button>
                 <button id="selectAllBtn" class="calendar-btn" style="background:var(--success-500);">Highlight All</button>
                 <button id="clearSelectionBtn" class="calendar-btn" style="background:var(--danger-500);">Clear</button>
+                <button id="retryInitCalendarBtn" class="calendar-btn" style="background:transparent; color:var(--primary-500); border:1px solid var(--primary-500);">Retry</button>
             </div>
         </div>
 </div>
 <!-- Inline Bookings Section -->
+<style>
+/* Apply horizontal scrolling for bookings only on small–medium screens */
+@media (max-width: 1200px) {
+    #bookingsScrollWrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    #bookingsScrollWrapper table { min-width: 720px; width: 100%; }
+}
+</style>
+
+<style>
+/* Small screens: match default availability gutters to other cards (safe, mobile-only) */
+@media (max-width: 768px) {
+    /* Match the inline padding used by other cards (24px) so edges align */
+    #defaultAvailabilityContainer {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        padding-left: 24px !important;
+        padding-right: 24px !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    /* Ensure the inner table respects card padding and doesn't add extra left offset */
+    #defaultAvailabilityContainer table {
+        width: 100% !important;
+        table-layout: fixed !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* When the weekly row stacks, remove any row-level padding so cards line up */
+    #weeklyCalendarRow {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        box-sizing: border-box !important;
+    }
+}
+</style>
+
+<style>
+/* Emergency mobile overrides to prevent right-edge overflow caused by inline min-widths
+     Only active on small viewports so desktop styles remain untouched. */
+@media (max-width: 768px) {
+    /* Force the weekly row to stack vertically so columns don't push past viewport */
+    #weeklyCalendarRow {
+        flex-direction: column !important;
+        gap: 16px !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Allow both columns to shrink and fit the viewport */
+    #defaultAvailabilityContainer,
+    div[style*="flex:2 1 640px"],
+    #calendar {
+        min-width: 0 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    /* Ensure the table inside the availability card doesn't add extra width */
+    #defaultAvailabilityContainer table {
+        width: 100% !important;
+        table-layout: fixed !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Reduce any large fixed min-widths applied elsewhere to prevent overflow */
+    [style*="min-width:540px"], [style*="min-width:640px"], [style*="min-width:600px"] {
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+}
+</style>
+
+<style>
+/* Mobile-only: compact and left-align contents inside Default Weekly Availability */
+@media (max-width: 768px) {
+    /* Make the card contents align left and use slightly smaller spacing */
+    #defaultAvailabilityContainer {
+        text-align: left !important;
+        padding-left: 16px !important;
+        padding-right: 16px !important;
+        box-sizing: border-box !important;
+        /* base font-size for the card so everything is smaller */
+        font-size: 12px !important;
+    }
+
+    /* Headings and table text smaller */
+    #defaultAvailabilityContainer h3 {
+        font-size: 14px !important;
+        margin-bottom: 10px !important;
+        text-align: left !important;
+    }
+    /* day label and other tds slightly smaller */
+    #defaultAvailabilityContainer table th,
+    #defaultAvailabilityContainer table td {
+        font-size: 11px !important;
+        padding: 6px 6px !important;
+        vertical-align: middle !important;
+    }
+    /* specifically reduce the first column (day name) padding and size */
+    #defaultAvailabilityContainer tbody td:first-child {
+        font-size: 11px !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+        white-space: nowrap !important;
+    }
+
+    /* Compact range rows and inputs */
+    #defaultAvailabilityContainer .range-row {
+        gap: 6px !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        flex-wrap: nowrap !important;
+    }
+    #defaultAvailabilityContainer .range-row .time-input-container {
+        display: inline-block !important;
+    }
+    #defaultAvailabilityContainer .range-start,
+    #defaultAvailabilityContainer .range-end {
+        padding: 3px !important;
+        font-size: 9px !important;
+        border-radius: 6px !important;
+        min-width: 0 !important;
+        width: auto !important; /* compact but wide enough for times like 09:00 AM */
+        box-sizing: border-box !important;
+    }
+
+    /* Smaller action buttons */
+    #defaultAvailabilityContainer .add-range-btn {
+        padding: 6px 8px !important;
+        font-size: 12px !important;
+        border-radius: 6px !important;
+    }
+    #defaultAvailabilityContainer .remove-range-btn {
+        padding: 2px 6px !important;
+        font-size: 12px !important;
+        border-radius: 4px !important;
+    }
+
+    /* Nudge the checkbox a bit less on small screens */
+    #defaultAvailabilityContainer .unavailable-checkbox {
+        top: 4px !important;
+        left: 4px !important;
+        width: 16px !important;
+        height: 16px !important;
+    }
+
+    /* Ensure the time-picker appended to body doesn't overflow the card visually */
+    #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 280px !important; }
+}
+</style>
+
 <div id="bookingsInlineSection" style="margin-top:24px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
         <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Bookings</h3>
@@ -1038,6 +1410,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
             <button id="bookingsRefreshBtn" type="button" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">Refresh</button>
         </div>
     </div>
+    <div id="bookingsScrollWrapper">
     <table style="width:100%; border-collapse:collapse;">
         <thead>
             <tr style="border-bottom:2px solid var(--gray-200); background:var(--gray-50);">
@@ -1052,6 +1425,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
             <tr><td colspan="5" style="text-align:center; color:var(--gray-600); padding:16px;">Loading…</td></tr>
         </tbody>
     </table>
+    </div>
 </div>
 <!-- Time Frame Modal -->
 <!-- ========================= -->
@@ -1065,7 +1439,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 
                 <!-- Per-date ranges UI (each row shows Start / End on the left) -->
         <!-- Multiple ranges container for per-date overrides -->
-        <div id="modalRangesContainer" style="display:flex; flex-direction:column; gap:8px; margin-top:12px;"></div>
+        <div id="modalRangesContainer" class="availability-ui" style="display:flex; flex-direction:column; gap:8px; margin-top:12px;"></div>
         <div style="display:flex; justify-content:center; gap:8px; margin-top:8px;">
             <button type="button" id="addModalRangeBtn" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:6px; cursor:pointer;">Add Range</button>
         </div>
@@ -1612,10 +1986,6 @@ document.addEventListener('DOMContentLoaded', function() {
         function createRangeRow(dayIndex, startVal = '', endVal = '') {
             const row = document.createElement('div');
             row.className = 'range-row';
-            row.style.display = 'flex';
-            row.style.alignItems = 'center';
-            row.style.gap = '8px';
-            row.style.marginBottom = '0';
 
             // Wrap start input in positioned container
             const startContainer = document.createElement('div');
@@ -1669,14 +2039,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
-            removeBtn.textContent = 'Remove';
-            removeBtn.style.padding = '4px 8px';
-            removeBtn.style.border = 'none';
-            removeBtn.style.background = '#dc3545';
-            removeBtn.style.color = 'white';
-            removeBtn.style.borderRadius = '6px';
-            removeBtn.style.cursor = 'pointer';
-
+            removeBtn.className = 'remove-range-btn';
+            removeBtn.setAttribute('aria-label', 'Remove range');
+            removeBtn.innerHTML = '<span class="remove-icon" aria-hidden="true">✖</span>';
             removeBtn.addEventListener('click', () => row.remove());
 
             row.appendChild(startContainer);
@@ -1696,7 +2061,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div id="ranges-container-${dayIndex}" style="display:flex; flex-direction:column; gap:4px;"></div>
                     <div style="margin-top:6px;"><button type="button" class="add-range-btn" data-day="${dayIndex}" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:6px; cursor:pointer;">Add range</button></div>
                 </td>
-                <td style="text-align:center; vertical-align:top; padding-top:10px;"><input type="checkbox" class="unavailable-checkbox" data-day="${dayIndex}" ${defaultAvailability[dayIndex].unavailable ? "checked" : ""}></td>
+                <td style="text-align:right; vertical-align:top; padding-top:18px; padding-right:8px;"><input type="checkbox" class="unavailable-checkbox" data-day="${dayIndex}" ${defaultAvailability[dayIndex].unavailable ? "checked" : ""}></td>
             `;
 
             container.appendChild(row);
@@ -1853,6 +2218,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const calendarEl = document.getElementById('calendar');
     const clearBtn = document.getElementById('clearSelectionBtn');
     const selectBtn = document.getElementById('selectDaysBtn');
+     const retryInitBtn = document.getElementById('retryInitCalendarBtn');
+    if (retryInitBtn) retryInitBtn.addEventListener('click', () => { try { location.reload(); } catch(e){} });
     
     const orgSlug = "{{ organization.slug }}";
     const orgTimezone = "{{ org_timezone }}";  // e.g., 'America/Los_Angeles'
@@ -2116,6 +2483,34 @@ document.addEventListener('DOMContentLoaded', function() {
     try { updateUnavailableDays(); } catch (e) { console.warn('updateUnavailableDays failed', e); }
     try { reapplySelections(); } catch (e) { /* optional */ }
     try { updateClearButton(); } catch (e) { /* optional */ }
+
+    // Minimal runtime fix: on small viewports, make sure the availability
+    // container's min-height is at least as tall as its content so nothing
+    // visually leaks out. This only runs on page load and on resize for
+    // viewports <= 768px.
+    (function ensureAvailabilityContainerFits() {
+        function apply() {
+            try {
+                if (window.innerWidth > 768) return;
+                const el = document.getElementById('defaultAvailabilityContainer');
+                if (!el) return;
+                // Use scrollHeight to measure content; add small padding safety.
+                const wanted = Math.max(el.scrollHeight + 24, 520);
+                el.style.minHeight = wanted + 'px';
+                // Keep overflow hidden so the top-gradient (::before) is clipped
+                // to the container's border-radius and doesn't produce a 'hat' effect.
+                el.style.overflow = 'hidden';
+            } catch (err) { /* ignore */ }
+        }
+        // Run after next paint to allow layout to settle
+        requestAnimationFrame(() => setTimeout(apply, 0));
+        // Also adjust on viewport resizes (debounced)
+        let t = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(t);
+            t = setTimeout(apply, 120);
+        });
+    })();
 
     // Save client-facing view settings to localStorage so public profile can read them
     try {
@@ -2405,30 +2800,22 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarContainer = document.getElementById('calendar');
         if (!calendarContainer) return;
 
-        const observer = new MutationObserver(() => {
+        // Avoid observing full calendar DOM changes (expensive).
+        // Instead perform a single initial pass and rely on FullCalendar lifecycle
+        // hooks (`eventsSet`, `datesSet`) which already call `updateUnavailableDays()`
+        // when the calendar changes. Observing the entire subtree caused repeated
+        // full DOM traversals and frequent calls to `updateUnavailableDays`, which
+        // can be very CPU intensive when FullCalendar updates the view.
+        (function applyPastClassesOnce() {
             document.querySelectorAll('.fc-daygrid-day').forEach(cell => {
                 const dateStr = cell.dataset.date;
                 const numberEl = cell.querySelector('.fc-daygrid-day-number');
                 if (!numberEl) return;
-
                 numberEl.classList.remove('past-day');
-                if (isPastDate(dateStr)) {
-                    numberEl.classList.add('past-day');
-                }
+                if (isPastDate(dateStr)) numberEl.classList.add('past-day');
             });
-            // Recompute unavailable/available day classes any time the calendar DOM mutates
             try { updateUnavailableDays(); } catch (e) { /* ignore errors during reapply */ }
-        });
-
-        observer.observe(calendarContainer, { childList: true, subtree: true });
-
-        // Initial pass
-        document.querySelectorAll('.fc-daygrid-day').forEach(cell => {
-            const dateStr = cell.dataset.date;
-            const numberEl = cell.querySelector('.fc-daygrid-day-number');
-            if (!numberEl) return;
-            if (isPastDate(dateStr)) numberEl.classList.add('past-day');
-        });
+        })();
     }
 
     // Return the first per-date timed override for a given date, or null.
@@ -4571,5 +4958,37 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedDaysSummary = document.getElementById('selectedDaysSummary');
 
 });
+    // Sync the cc-wave animations across sections by setting a shared negative
+    // animation-delay equal to the elapsed phase of the animation duration.
+    // This keeps all gradients visually in-step even if elements mount at
+    // slightly different times.
+    (function syncCcWave() {
+        try {
+            // Read duration from CSS var if present, fallback to 14s
+            const root = document.documentElement;
+            const cssRaw = getComputedStyle(root).getPropertyValue('--cc-wave-duration') || '14s';
+            const cssDur = parseFloat(cssRaw);
+            const dur = Number(cssDur) || 14; // seconds
+
+            // Set a single initial offset so elements mounted at different times
+            // appear visually in-step. Avoid updating this every animation frame
+            // (which forces repaints each frame) — recompute only when the page
+            // becomes visible again to keep CPU usage low.
+            function setOffsetOnce() {
+                const nowSec = performance.now() / 1000; // high-res
+                const elapsed = nowSec % dur; // seconds into animation
+                const offset = `-${elapsed.toFixed(3)}s`;
+                root.style.setProperty('--cc-wave-offset', offset);
+            }
+
+            setOffsetOnce();
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) setOffsetOnce();
+            });
+        } catch (e) { /* fail silently */ }
+    })();
+
 </script>
 {% endblock %}
+
+

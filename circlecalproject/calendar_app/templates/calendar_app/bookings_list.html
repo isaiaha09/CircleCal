@@ -257,11 +257,11 @@ async function deleteBooking(id, date, clientName) {
         `;
       }
     } else {
-      alert('Failed to delete booking');
+      showToast('error', 'Failed to delete booking');
     }
   } catch (error) {
     console.error('Error:', error);
-    alert('Error deleting booking');
+    showToast('error', 'Error deleting booking');
   }
 }
 </script>

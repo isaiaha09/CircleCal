@@ -407,7 +407,7 @@ window.bookedSlotsThisSession = window.bookedSlotsThisSession || [];
 
 <script>
 document.addEventListener("DOMContentLoaded", async function () {
-  try { console.log('public service calendar init'); } catch (e) {}
+  try { /* init */ } catch (e) {}
   const dayGrid = document.getElementById("dayGrid");
   const monthHeader = document.getElementById("monthHeader");
   const timeModal = document.getElementById("timeModal");
@@ -484,7 +484,6 @@ document.addEventListener("DOMContentLoaded", async function () {
       const resp = await fetch(batchUrl);
       if (resp.ok) {
         dayHasSlots = await resp.json();
-        console.log('Availability summary loaded:', dayHasSlots);
       }
     } catch(e) {
       console.error('Batch availability fetch failed', e);
@@ -551,8 +550,6 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     // Wait for all detailed availability calls to resolve
     try { await Promise.all(fetches); } catch (_) {}
-    // Debug: log detailed availability for this month
-    console.log('Detailed day availability:', detailedDayHasSlots);
 
     // If a newer render started, abort applying this one
     if (myToken !== renderToken) {
@@ -675,6 +672,31 @@ document.addEventListener("DOMContentLoaded", async function () {
           if (typeof parsed.increment === 'number') previewIncrement = parsed.increment;
         }
       } catch (e) {}
+
+      // Prefer server-provided effective per-date settings when available so the
+      // public booking page reflects edits (including per-date freezes).
+      try {
+        const svcSlug = serviceSelect.value || '{{ service.slug }}';
+        const effUrl = `/bus/{{ org.slug }}/services/${encodeURIComponent(svcSlug)}/effective/?date=${encodeURIComponent(rangeStartDate.toISOString().slice(0,10))}${cacheBuster}`;
+        const effResp = await fetch(effUrl, { credentials: 'same-origin' });
+        if (effResp && effResp.ok) {
+          try {
+            const eff = await effResp.json();
+            if (eff) {
+              // If service uses fixed increments, prefer duration+buffer
+              if (eff.use_fixed_increment) {
+                const dur = Number(eff.duration || 0);
+                const buf = Number(eff.buffer_after || 0);
+                if (!isNaN(dur)) previewIncrement = Math.max(5, dur + (isNaN(buf) ? 0 : buf));
+              } else if (eff.time_increment_minutes) {
+                previewIncrement = Number(eff.time_increment_minutes) || previewIncrement;
+              }
+            }
+          } catch (err) { /* ignore parse errors */ }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch effective service settings', err);
+      }
 
       // Service data map for quick client-side updates
       const SERVICE_MAP = {
@@ -923,7 +945,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       timeModal.style.display = 'flex';
     } catch (e) {
       console.error(e);
-      alert("Could not load availability. Please try another day.");
+      try { showToast('error', "Could not load availability. Please try another day."); } catch(err){ console.error('toast failed', err); }
     }
   }
 

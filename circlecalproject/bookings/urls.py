@@ -8,8 +8,8 @@ urlpatterns = [
     # GET: list events for this org
     path('bus/<slug:org_slug>/events/', views.events, name='events'),
 
-    # POST: create a single booking
-    path('bus/<slug:org_slug>/bookings/', views.create_booking, name='create_booking'),
+    # POST: create a single booking (API endpoint)
+    path('bus/<slug:org_slug>/bookings/create/', views.create_booking, name='create_booking'),
 
     # POST: batch create bookings
     path('bus/<slug:org_slug>/bookings/batch_create/', views.batch_create, name='batch_create'),
@@ -31,6 +31,13 @@ urlpatterns = [
         "bus/<slug:org_slug>/services/<slug:service_slug>/availability/",
         views.service_availability,
         name="service_availability"
+    ),
+
+    # Effective per-date service settings (returns frozen settings if a freeze exists)
+    path(
+        "bus/<slug:org_slug>/services/<slug:service_slug>/effective/",
+        views.service_effective_settings,
+        name="service_effective_settings"
     ),
 
     # Batch availability summary for a date range (returns {date: hasSlots} map)

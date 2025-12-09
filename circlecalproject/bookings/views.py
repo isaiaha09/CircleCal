@@ -54,7 +54,58 @@ def booking_to_event(bk: Booking):
             event['backgroundColor'] = '#d0f0d0'
             event['extendedProps']['override_type'] = 'available'
 
+    # Include service metadata so admin/front-end can consider buffers
+    try:
+        if bk.service is not None:
+            event['extendedProps']['service_slug'] = bk.service.slug
+            event['extendedProps']['service_buffer_after'] = int(getattr(bk.service, 'buffer_after', 0))
+            event['extendedProps']['service_allow_ends_after_availability'] = bool(getattr(bk.service, 'allow_ends_after_availability', False))
+            # New per-service client settings
+            event['extendedProps']['service_time_increment_minutes'] = int(getattr(bk.service, 'time_increment_minutes', 30))
+            event['extendedProps']['service_use_fixed_increment'] = bool(getattr(bk.service, 'use_fixed_increment', False))
+            event['extendedProps']['service_allow_squished_bookings'] = bool(getattr(bk.service, 'allow_squished_bookings', False))
+    except Exception:
+        # be resilient to any model quirks
+        pass
+
     return event
+
+
+def _anchors_for_date(org, service, day_date, org_tz, total_length):
+    """Return a list of aware datetimes representing the valid booking anchors
+    for a given organization, service and date (in org_tz). Anchors are spaced
+    by `total_length` and are computed from the service or org weekly windows.
+    """
+    anchors = []
+    from datetime import datetime
+
+    # Determine base windows for that weekday
+    weekday = day_date.weekday()
+    svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+    base_windows = []
+    if svc_rows.exists():
+        for w in svc_rows.order_by('start_time'):
+            w_start = datetime(day_date.year, day_date.month, day_date.day, w.start_time.hour, w.start_time.minute, tzinfo=org_tz)
+            w_end = datetime(day_date.year, day_date.month, day_date.day, w.end_time.hour, w.end_time.minute, tzinfo=org_tz)
+            base_windows.append((w_start, w_end))
+    else:
+        weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
+        for w in weekly_rows:
+            w_start = datetime(day_date.year, day_date.month, day_date.day, w.start_time.hour, w.start_time.minute, tzinfo=org_tz)
+            w_end = datetime(day_date.year, day_date.month, day_date.day, w.end_time.hour, w.end_time.minute, tzinfo=org_tz)
+            base_windows.append((w_start, w_end))
+
+    # If no windows, nothing to return
+    if not base_windows:
+        return anchors
+
+    for win_start, win_end in base_windows:
+        slot_start = win_start.replace(second=0, microsecond=0)
+        while slot_start + total_length <= win_end:
+            anchors.append(slot_start)
+            slot_start = slot_start + total_length
+
+    return anchors
 
 
 def _require_org_and_role(request, roles=("owner", "admin", "manager", "staff")):
@@ -75,18 +126,80 @@ def _require_org_and_role(request, roles=("owner", "admin", "manager", "staff"))
     return org, None
 
 
-def _has_overlap(org, start_dt, end_dt):
+def _has_overlap(org, start_dt, end_dt, service=None):
     """
     Prevent overlapping bookings inside the same organization.
-    Overlap rule:
-      existing.start < new_end AND existing.end > new_start
+    If `service` is provided, take its `buffer_before` and `buffer_after` into account
+    for the proposed booking window. This matches the slot generation logic which
+    treats the new booking's buffers as part of the conflict window.
+
+    Overlap rule (with buffers):
+      existing.start < proposed_end AND existing.end > proposed_start
+    where proposed_start = start_dt - buffer_before, proposed_end = end_dt + buffer_after
     """
-    return Booking.objects.filter(
+    # If a service is provided, expand the proposed window by its AFTER-buffer only.
+    # We intentionally no longer apply a `buffer_before` for overlap prevention.
+    if service is not None:
+        try:
+            buf_after = int(getattr(service, 'buffer_after', 0))
+        except Exception:
+            buf_after = 0
+        from datetime import timedelta
+        proposed_start = start_dt
+        proposed_end = end_dt + timedelta(minutes=buf_after)
+    else:
+        proposed_start = start_dt
+        proposed_end = end_dt
+
+    # Fetch candidate bookings and evaluate conflicts explicitly so we can
+    # apply the AFTER-buffer on existing bookings (not as part of the
+    # proposed booking window).
+    from datetime import timedelta
+    try:
+        buf_after = int(getattr(service, 'buffer_after', 0)) if service is not None else 0
+    except Exception:
+        buf_after = 0
+
+    # Narrow DB query to likely-relevant bookings: any existing booking that
+    # starts before the candidate's end plus the AFTER-buffer might matter.
+    from django.utils import timezone as dj_tz
+    # Normalize candidate times to UTC where possible
+    try:
+        start_utc = start_dt.astimezone(dj_tz.utc)
+    except Exception:
+        start_utc = start_dt
+    try:
+        end_utc = end_dt.astimezone(dj_tz.utc)
+    except Exception:
+        end_utc = end_dt
+
+    buf_after_td = timedelta(minutes=buf_after)
+    candidate_qs = Booking.objects.filter(
         organization=org,
-        start__lt=end_dt,
-        end__gt=start_dt,
-        is_blocking=False,   # allow blocking to overlap if you want; remove if not
-    ).exists()
+        is_blocking=False,
+        start__lt=end_utc + buf_after_td,
+    )
+
+    for b in candidate_qs:
+        # Normalize booking times to UTC if possible
+        try:
+            b_start = b.start.astimezone(dj_tz.utc)
+        except Exception:
+            b_start = b.start
+        try:
+            b_end = b.end.astimezone(dj_tz.utc)
+        except Exception:
+            b_end = b.end
+
+        # 1) Direct overlap
+        if (b_start < end_utc) and (b_end > start_utc):
+            return True
+
+        # 2) Existing booking AFTER-buffer: if candidate starts in that window
+        if start_utc >= b_end and start_utc < (b_end + buf_after_td):
+            return True
+
+    return False
 
 
 def is_within_weekly_availability(org, start_dt, end_dt):
@@ -182,6 +295,9 @@ def is_within_availability(org, start_dt, end_dt, service=None):
         org_tz = timezone.get_current_timezone()
     if timezone.is_naive(start_dt):
         start_dt = make_aware(start_dt, org_tz)
+
+    # Normalize seconds/microseconds to align with anchor generation
+    start_dt = start_dt.replace(second=0, microsecond=0)
     if timezone.is_naive(end_dt):
         end_dt = make_aware(end_dt, org_tz)
 
@@ -221,7 +337,9 @@ def is_within_availability(org, start_dt, end_dt, service=None):
             avs = make_aware(avs, org_tz)
         if timezone.is_naive(ave):
             ave = make_aware(ave, org_tz)
-        if avs <= start_dt and end_dt <= ave:
+        # If service explicitly allows ending after availability, permit slots
+        # that start within an availability override even if their end extends past it.
+        if avs <= start_dt and (end_dt <= ave or (service and getattr(service, 'allow_ends_after_availability', False) and start_dt < ave)):
             return True
 
     # 3. Fall back to weekly windows logic
@@ -237,11 +355,39 @@ def is_within_availability(org, start_dt, end_dt, service=None):
             start_t = start_dt.time()
             end_t = end_dt.time()
             for w in svc_rows:
-                if w.start_time <= start_t and end_t <= w.end_time:
-                    return True
+                # If service allows ending after availability, only require the slot START
+                # to be within the service window (start >= w.start_time and start < w.end_time).
+                if getattr(service, 'allow_ends_after_availability', False):
+                    if w.start_time <= start_t and start_t < w.end_time:
+                        return True
+                else:
+                    if w.start_time <= start_t and end_t <= w.end_time:
+                        return True
             return False
 
-    return is_within_weekly_availability(org, start_dt, end_dt)
+    # Fallback to organization-wide weekly availability. If the service allows
+    # ending after availability, relax the requirement to only ensure the slot
+    # START is within a weekly window; otherwise require the slot END to also be within.
+    any_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    if not any_rows:
+        return True
+    windows = WeeklyAvailability.objects.filter(
+        organization=org,
+        is_active=True,
+        weekday=start_dt.weekday(),
+    )
+    if not windows.exists():
+        return False
+    start_t = start_dt.time()
+    end_t = end_dt.time()
+    for w in windows:
+        if getattr(service, 'allow_ends_after_availability', False):
+            if w.start_time <= start_t and start_t < w.end_time:
+                return True
+        else:
+            if w.start_time <= start_t and end_t <= w.end_time:
+                return True
+    return False
 
 @csrf_exempt
 @require_http_methods(['GET'])
@@ -296,6 +442,8 @@ def create_booking(request, org_slug):
     if err:
         return err
 
+    
+    
     # -----------------------------
     # 1. Parse JSON
     # -----------------------------
@@ -340,10 +488,9 @@ def create_booking(request, org_slug):
     # -----------------------------
     # 3. Apply service rules
     # -----------------------------
-    # Calculate end time using service duration + buffer_after
-    end_dt = start_dt + timedelta(
-        minutes=service.duration + service.buffer_after
-    )
+    # Calculate end time using service duration only (buffers are not stored on the
+    # booking record; they are enforced during overlap checks and slot generation).
+    end_dt = start_dt + timedelta(minutes=service.duration)
 
     now = timezone.now()
 
@@ -359,8 +506,21 @@ def create_booking(request, org_slug):
     # 4. Overlap prevention
     # -----------------------------
     # Use your existing overlap logic
-    if _has_overlap(org, start_dt, end_dt):
-        return HttpResponseBadRequest("Time slot overlaps an existing booking.")
+    # Enforce that requested start is aligned to service anchors (duration + buffers)
+        # Do NOT require client-provided start times to align to internal anchors.
+        # The public availability endpoint controls UI increments. Here we only
+        # enforce that the requested booking doesn't overlap existing bookings
+        # when considering the service's buffers.
+
+    # Overlap check (buffer-aware when `service` provided)
+    overlap_result = _has_overlap(org, start_dt, end_dt, service=service)
+    squish_warning = None
+    if overlap_result:
+        # If the service allows 'squished' bookings, permit creation but add a non-blocking warning
+        if getattr(service, 'allow_squished_bookings', False):
+            squish_warning = 'slot_violates_buffer'
+        else:
+            return HttpResponseBadRequest("Time slot overlaps an existing booking.")
 
     # -----------------------------
     # -----------------------------
@@ -383,12 +543,27 @@ def create_booking(request, org_slug):
         client_email=data.get('client_email', ''),
         is_blocking=False,   # service bookings are never "blocking" events
     )
-
-    return JsonResponse({
+    resp = {
         'status': 'ok',
         'id': bk.id,
         'event': booking_to_event(bk)
-    })
+    }
+    if squish_warning:
+        resp['warning'] = squish_warning
+        # Notify owner about squished booking (non-blocking warning)
+        try:
+            owner = getattr(org, 'owner', None)
+            if owner and owner.email:
+                send_mail(
+                    subject=f"Booking created that violates buffers for {service.name}",
+                    message=f"A booking was created on {bk.start.astimezone(timezone.get_default_timezone()).isoformat()} for service {service.name} which does not conform to the configured buffer rules.",
+                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+                    recipient_list=[owner.email],
+                    fail_silently=True,
+                )
+        except Exception:
+            pass
+    return JsonResponse(resp)
 
 
 @csrf_exempt
@@ -449,7 +624,7 @@ def batch_create(request, org_slug):
             continue
 
         # Optional overlap prevention for real service bookings only
-        if not bool(data.get("is_blocking", False)) and _has_overlap(org, s, e):
+        if not bool(data.get("is_blocking", False)) and _has_overlap(org, s, e, service=None):
             continue
 
         bk = Booking.objects.create(
@@ -593,7 +768,7 @@ def public_service_page(request, org_slug, service_slug):
             from .emails import send_booking_confirmation
             if client_email:
                 send_booking_confirmation(booking)
-            # Optional: notify owner (plain text)
+
             if getattr(org, "owner", None) and org.owner.email:
                 # Styled HTML owner notification
                 try:
@@ -605,6 +780,21 @@ def public_service_page(request, org_slug, service_slug):
             pass
 
         return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
+        # Notify owner if this booking would violate service buffers (squished)
+        try:
+            if getattr(service, 'allow_squished_bookings', False):
+                if _has_overlap(org, start, end, service=service):
+                    owner = getattr(org, 'owner', None)
+                    if owner and owner.email:
+                        send_mail(
+                            subject=f"Public booking violates buffers for {service.name}",
+                            message=f"A public booking was made for {service.name} at {start.isoformat()} which violates buffer settings.",
+                            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+                            recipient_list=[owner.email],
+                            fail_silently=True,
+                        )
+        except Exception:
+            pass
 
     # GET - add trial context for banner
     subscription = get_subscription(org)
@@ -663,8 +853,8 @@ def create_service(request, org_slug):
             description=request.POST.get("description", ""),
             duration=int(request.POST.get("duration", 30)),
             price=float(request.POST.get("price", 0)),
-            buffer_before=int(request.POST.get("buffer_before", 0)),
             buffer_after=int(request.POST.get("buffer_after", 0)),
+            allow_ends_after_availability=bool(request.POST.get('allow_ends_after_availability', False)),
             min_notice_hours=int(request.POST.get("min_notice_hours", 1)),
             max_booking_days=int(request.POST.get("max_booking_days", 30)),
         )
@@ -817,10 +1007,16 @@ def service_availability(request, org_slug, service_slug):
     # - weekly availability (your logic)
     # ---------------------------------------------
 
-    duration = timedelta(minutes=service.duration)
-    buffer_before = timedelta(minutes=service.buffer_before)
-    buffer_after = timedelta(minutes=service.buffer_after)
-    total_length = duration
+    # We'll compute effective per-window settings to honor any per-date freezes
+    # (created when an owner updates a service but wants days with existing
+    # bookings to continue using the old settings). For each window we fetch
+    # the freeze (if any) and derive duration, buffer_after and increment.
+
+    # Whether to apply buffers to the window edges/spacing. This can be
+    # controlled by the public page via the `edge_buffers` query param. When
+    # false (default) the availability will show denser UI increments and
+    # only hide slots after bookings using the booked appointment buffers.
+    apply_edge_buffers = request.GET.get('edge_buffers') in ('1', 'true', 'True')
 
     available_slots = []
 
@@ -845,83 +1041,234 @@ def service_availability(request, org_slug, service_slug):
                 w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
                 base_windows.append((w_start, w_end))
 
-    # Determine slot increment from organization settings (client view preference)
-    # Fallback order: OrgSettings.block_size -> service.duration -> 15
-    # Allow front-end override via ?inc= minutes (display increment)
+    # Determine slot increment: front-end may pass `?inc=` (minutes) to control
+    # the UI tick spacing. If provided and valid, use it for slot iteration;
+    # otherwise fall back to the service's configured increment or, when
+    # `use_fixed_increment` is True, to duration+buffer.
     inc_param = request.GET.get('inc')
-    slot_inc_minutes = None
-    if inc_param:
-        try:
+    try:
+        if inc_param:
             val = int(inc_param)
-            if 1 <= val <= 240:  # sanity bounds
-                slot_inc_minutes = val
-        except Exception:
-            slot_inc_minutes = None
-    if slot_inc_minutes is None:
+            display_inc = timedelta(minutes=val) if 1 <= val <= 24 * 60 else None
+        else:
+            display_inc = None
+    except Exception:
+        display_inc = None
+
+    if display_inc is None:
+        # server-configured default
         try:
-            slot_inc_minutes = getattr(org.settings, 'block_size', None)
+            if getattr(service, 'use_fixed_increment', False):
+                display_inc = timedelta(minutes=(service.duration + (service.buffer_after or 0)))
+            else:
+                display_inc = timedelta(minutes=getattr(service, 'time_increment_minutes', service.duration))
         except Exception:
-            slot_inc_minutes = None
-    if not slot_inc_minutes or slot_inc_minutes <= 0:
-        slot_inc_minutes = service.duration if service.duration > 0 else 15
-    slot_increment = timedelta(minutes=slot_inc_minutes)
+            display_inc = timedelta(minutes=service.duration)
+
+    slot_increment = display_inc
 
     for win_start, win_end in base_windows:
         # Keep windows even if their early portion violates min notice; we'll just skip early slots.
         if win_end <= original_range_start or win_start >= range_end:
             continue
         window_end = min(win_end, range_end, latest_allowed)
-        if window_end - win_start < total_length:
+        # Resolve per-date freeze (if present)
+        freeze = None
+        try:
+            from bookings.models import ServiceSettingFreeze
+            freeze = ServiceSettingFreeze.objects.filter(service=service, date=win_start.date()).first()
+        except Exception:
+            freeze = None
+
+        if freeze and isinstance(freeze.frozen_settings, dict):
+            f = freeze.frozen_settings
+            try:
+                duration = timedelta(minutes=int(f.get('duration', getattr(service, 'duration'))))
+            except Exception:
+                duration = timedelta(minutes=service.duration)
+            try:
+                buffer_after = timedelta(minutes=int(f.get('buffer_after', getattr(service, 'buffer_after', 0))))
+            except Exception:
+                buffer_after = timedelta(minutes=getattr(service, 'buffer_after', 0))
+            try:
+                if bool(f.get('use_fixed_increment', False)):
+                    display_inc = timedelta(minutes=(int(f.get('duration', getattr(service, 'duration'))) + int(f.get('buffer_after', getattr(service, 'buffer_after', 0)))))
+                else:
+                    display_inc = timedelta(minutes=int(f.get('time_increment_minutes', getattr(service, 'time_increment_minutes', service.duration))))
+            except Exception:
+                display_inc = timedelta(minutes=getattr(service, 'time_increment_minutes', service.duration))
+            allow_ends_after = bool(f.get('allow_ends_after_availability', getattr(service, 'allow_ends_after_availability', False)))
+            allow_squished = bool(f.get('allow_squished_bookings', getattr(service, 'allow_squished_bookings', False)))
+        else:
+            duration = timedelta(minutes=service.duration)
+            buffer_after = timedelta(minutes=service.buffer_after)
+            try:
+                if getattr(service, 'use_fixed_increment', False):
+                    display_inc = timedelta(minutes=(service.duration + (service.buffer_after or 0)))
+                else:
+                    display_inc = timedelta(minutes=getattr(service, 'time_increment_minutes', service.duration))
+            except Exception:
+                display_inc = timedelta(minutes=service.duration)
+            allow_ends_after = getattr(service, 'allow_ends_after_availability', False)
+            allow_squished = getattr(service, 'allow_squished_bookings', False)
+
+        total_length = duration + buffer_after
+
+        # Determine minimal needed window length. If the service owner allows
+        # appointments to end after availability, we only require room for the
+        # duration; otherwise respect the full spacing (duration + buffer_after)
+        min_needed = duration if allow_ends_after else (total_length if apply_edge_buffers else duration)
+        if window_end - win_start < min_needed:
             continue
 
-        # Anchor first slot exactly at defined window start (allow irregular minutes like 08:20)
-        slot_start = win_start.replace(second=0, microsecond=0)
-
-        while slot_start + total_length <= window_end:
-            slot_end = slot_start + total_length
-
-            # Weekly availability check (skip if not inside) unless override windows active
-            if not availability_override_windows and not is_within_availability(org, slot_start, slot_end, service):
-                slot_start += slot_increment
-                continue
-
-            # Min notice: only hide slots on the SAME calendar day as 'now' if too soon.
-            # Future days should display all raw window starts regardless of notice.
+        # Build a list of busy intervals (with after-buffers applied) that intersect this window
+        busy_intervals = []
+        for b in existing:
             try:
-                is_same_day = slot_start.date() == now_org.date()
+                b_start = b.start.astimezone(org_tz)
+                b_end = b.end.astimezone(org_tz)
             except Exception:
-                is_same_day = False
-            if is_same_day and slot_start < earliest_allowed:
-                slot_start += slot_increment
+                b_start = b.start
+                b_end = b.end
+            try:
+                b_buf_after = timedelta(minutes=getattr(b.service, 'buffer_after', 0) or 0)
+            except Exception:
+                b_buf_after = timedelta(0)
+            if b_end <= win_start or b_start >= window_end:
                 continue
+            busy_intervals.append((max(b_start, win_start), min(b_end, window_end), b_buf_after))
 
-            # Conflict detection (buffers)
-            conflict = False
-            proposed_start = (slot_start - buffer_before).astimezone(org_tz)
-            proposed_end = (slot_end + buffer_after).astimezone(org_tz)
-            for booked_start, booked_end in busy:
-                if proposed_start < booked_end and proposed_end > booked_start:
-                    conflict = True
-                    break
-            if not conflict:
-                for booked_start, booked_end in busy:
-                    if slot_start < booked_end and slot_end > booked_start:
-                        conflict = True
+        busy_intervals.sort(key=lambda x: x[0])
+
+        # Build free segments by walking busy intervals and moving the cursor past
+        # each booking's end + after-buffer.
+        segments = []
+        cursor = win_start
+        for b_start, b_end, b_buf_after in busy_intervals:
+            if b_start > cursor:
+                segments.append((cursor, b_start))
+            cursor = max(cursor, b_end + b_buf_after)
+        if cursor < window_end:
+            segments.append((cursor, window_end))
+
+        # Determine slot stepping (use display_inc computed earlier)
+        if apply_edge_buffers:
+            slot_increment = total_length
+        else:
+            slot_increment = display_inc
+
+        # Generate slots within each free segment. Start at segment start so
+        # bookings shift subsequent anchors forward (e.g., booking ended at 10:05 -> first
+        # slot in segment is 10:05, then +increment etc.).
+        for seg_start, seg_end in segments:
+            slot_start = seg_start.replace(second=0, microsecond=0)
+            while slot_start < seg_end:
+                slot_end = slot_start + duration
+
+                # If owner disallows ending after availability, make sure slot fits in segment
+                if not allow_ends_after:
+                    needed = (total_length if apply_edge_buffers else duration)
+                    if slot_start + needed > seg_end:
                         break
 
-            if not conflict:
+                    # If service does NOT allow squished bookings, ensure candidate's
+                    # post-buffer does not collide with the next busy interval (seg_end)
+                    if not allow_squished:
+                        try:
+                            cand_end_plus = slot_end + timedelta(minutes=(buffer_after.total_seconds() / 60))
+                        except Exception:
+                            cand_end_plus = slot_end
+                        if cand_end_plus > seg_end:
+                            # This candidate would violate the post-buffer before the next booking; skip it
+                            slot_start += slot_increment
+                            continue
+
+                # Weekly availability enforcement
+                if not availability_override_windows and not is_within_availability(org, slot_start, slot_end, service):
+                    slot_start += slot_increment
+                    continue
+
+                # Min notice handling (only for same-day slots)
+                try:
+                    is_same_day = slot_start.date() == now_org.date()
+                except Exception:
+                    is_same_day = False
+                if is_same_day and slot_start < earliest_allowed:
+                    slot_start += slot_increment
+                    continue
+
                 available_slots.append({
                     "start": slot_start.isoformat(),
                     "end": slot_end.isoformat(),
+                    # mark whether this candidate would violate the post-buffer
+                    # rules (useful for client UI to show a heads-up)
+                    "violates_buffer": (slot_end + buffer_after > seg_end),
+                    # Expose whether this slot was generated using a per-date freeze
+                    "used_freeze": bool(freeze),
+                    "freeze_date": (freeze.date.isoformat() if freeze and getattr(freeze, 'date', None) else None),
                 })
-            elif settings.DEBUG:
-                try:
-                    print(f"[availability] exclude slot {slot_start.isoformat()} -> {slot_end.isoformat()} (conflict)")
-                except Exception:
-                    pass
-            slot_start += slot_increment
+
+                slot_start += slot_increment
 
     return JsonResponse(available_slots, safe=False)
+
+
+@require_http_methods(["GET"])
+def service_effective_settings(request, org_slug, service_slug):
+    """Return the effective service settings for a given date.
+
+    If a `ServiceSettingFreeze` exists for the requested date, return the
+    frozen settings; otherwise return the current service fields.
+    Query params: date=YYYY-MM-DD (optional, defaults to org-local today)
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    service = get_object_or_404(Service, slug=service_slug, organization=org)
+
+    date_param = request.GET.get('date')
+    target_date = None
+    try:
+        if date_param:
+            from django.utils.dateparse import parse_date
+            target_date = parse_date(date_param)
+    except Exception:
+        target_date = None
+
+    # Default to org-local today if no valid date provided
+    if not target_date:
+        try:
+            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        except Exception:
+            org_tz = timezone.get_current_timezone()
+        target_date = timezone.now().astimezone(org_tz).date()
+
+    # Try to locate a freeze for this service/date
+    try:
+        from bookings.models import ServiceSettingFreeze
+        freeze = ServiceSettingFreeze.objects.filter(service=service, date=target_date).first()
+    except Exception:
+        freeze = None
+
+    if freeze and isinstance(freeze.frozen_settings, dict):
+        out = dict(freeze.frozen_settings)
+        # Ensure types are normalized
+        out['use_fixed_increment'] = bool(out.get('use_fixed_increment', False))
+        out['allow_ends_after_availability'] = bool(out.get('allow_ends_after_availability', False))
+        out['allow_squished_bookings'] = bool(out.get('allow_squished_bookings', False))
+    else:
+        out = {
+            'duration': int(getattr(service, 'duration', 0) or 0),
+            'buffer_after': int(getattr(service, 'buffer_after', 0) or 0),
+            'time_increment_minutes': int(getattr(service, 'time_increment_minutes', 0) or 0),
+            'use_fixed_increment': bool(getattr(service, 'use_fixed_increment', False)),
+            'allow_ends_after_availability': bool(getattr(service, 'allow_ends_after_availability', False)),
+            'allow_squished_bookings': bool(getattr(service, 'allow_squished_bookings', False)),
+        }
+
+    # Include service id/slug for convenience
+    out['service_id'] = service.id
+    out['service_slug'] = service.slug
+
+    return JsonResponse(out)
 
 
 @require_http_methods(["GET"])

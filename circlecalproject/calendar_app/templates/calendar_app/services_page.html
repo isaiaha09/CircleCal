@@ -209,7 +209,7 @@ document.getElementById("confirmBookingBtn").addEventListener("click", function 
     const email = document.getElementById("clientEmail").value;
 
     if (!name || !email) {
-        alert("Please enter your name and email.");
+        showToast('info', "Please enter your name and email.");
         return;
     }
 
@@ -226,11 +226,11 @@ document.getElementById("confirmBookingBtn").addEventListener("click", function 
         .then(res => res.json())
         .then(data => {
             if (data.status === "ok") {
-                alert("Booking confirmed!");
+                showToast('success', "Booking confirmed!");
                 closeModal();
                 location.reload();
             } else {
-                alert("Error: " + JSON.stringify(data));
+                showToast('error', "Error: " + JSON.stringify(data));
             }
         });
 });

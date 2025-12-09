@@ -235,6 +235,10 @@
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
+    <div style="margin-top:8px;">
+      <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="edgeBuffersToggle"> Apply buffers to first/last available slots</label>
+      <div style="font-size:0.85rem; color:#444; margin-top:6px;">When enabled, the calendar will enforce the service buffers at the start/end of the daily window and space bookable anchors accordingly. When disabled (default), the calendar shows denser increments and buffers are only applied after a slot is booked.</div>
+    </div>
     <div><strong>Refunds:</strong>
       <span id="mainSvcRefundLine"></span>
       <div id="mainSvcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
@@ -255,6 +259,8 @@
       refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
       refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
       refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+      buffer_after: {{ s.buffer_after|default:0 }},
+      allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
       weekly_ranges: []
     };
   {% endfor %}
@@ -447,7 +453,7 @@ window.bookedSlotsThisSession = window.bookedSlotsThisSession || [];
 
 <script>
 document.addEventListener("DOMContentLoaded", async function () {
-  try { console.log('public service calendar init'); } catch (e) {}
+  try { /* init */ } catch (e) {}
   const dayGrid = document.getElementById("dayGrid");
   const monthHeader = document.getElementById("monthHeader");
   const timeModal = document.getElementById("timeModal");
@@ -522,9 +528,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     dayHasSlots = {};
     try {
       const resp = await fetch(batchUrl);
-      if (resp.ok) {
+        if (resp.ok) {
         dayHasSlots = await resp.json();
-        console.log('Availability summary loaded:', dayHasSlots);
       }
     } catch(e) {
       console.error('Batch availability fetch failed', e);
@@ -577,7 +582,25 @@ document.addEventListener("DOMContentLoaded", async function () {
         const pad = n => String(n).padStart(2,'0');
         const toIsoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
         const cacheBuster = `&_t=${Date.now()}`;
-        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}&inc=30${cacheBuster}`;
+        // Determine whether to apply edge buffers for this service. Preference order:
+        // 1) explicit localStorage override if present, 2) server-side service setting.
+        function getEdgeBuffersForService(slug) {
+          try {
+            const raw = localStorage.getItem('edge_buffers_' + slug);
+            if (raw === '1' || raw === 'true') return 1;
+            if (raw === '0' || raw === 'false') return 0;
+          } catch (e) {}
+          try {
+            const s = SERVICE_MAP[slug] || {};
+            return s.allow_ends_after_availability ? 1 : 0;
+          } catch (e) { return 0; }
+        }
+        const edgeVal = getEdgeBuffersForService(window.selectedServiceSlug || '{{ service.slug }}');
+        // If the service is configured to use fixed increments, do NOT force an `inc` param
+        // so the server can apply duration+buffer spacing. Otherwise include the preview tick.
+        const svcForLoop = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+        const incQuery = (svcForLoop.use_fixed_increment ? '' : '&inc=30');
+        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
         fetches.push(
           fetch(availUrl)
             .then(r => r.ok ? r.json() : [])
@@ -591,8 +614,6 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     // Wait for all detailed availability calls to resolve
     try { await Promise.all(fetches); } catch (_) {}
-    // Debug: log detailed availability for this month
-    console.log('Detailed day availability:', detailedDayHasSlots);
 
     // If a newer render started, abort applying this one
     if (myToken !== renderToken) {
@@ -706,8 +727,12 @@ document.addEventListener("DOMContentLoaded", async function () {
       // Add cache-busting timestamp to always fetch fresh data
       const cacheBuster = `&_t=${Date.now()}`;
       // Fetch ONLY availability - include increment override so backend can adjust slot stepping
-      // Read prospective client view settings early (may be stored from internal calendar)
+      // Start with the service's server-side configured increment, but allow local override
       let previewIncrement = 30;
+      try {
+        const svc = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+        if (typeof svc.time_increment_minutes === 'number') previewIncrement = svc.time_increment_minutes;
+      } catch (e) {}
       try {
         const rawPreview = localStorage.getItem('client_view_settings');
         if (rawPreview) {
@@ -728,6 +753,11 @@ document.addEventListener("DOMContentLoaded", async function () {
               refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
               refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
               refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+              buffer_after: {{ s.buffer_after|default:0 }},
+              allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
+              time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
+              use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
+              allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
             },
           {% endfor %}
         {% else %}
@@ -739,6 +769,11 @@ document.addEventListener("DOMContentLoaded", async function () {
             refunds_allowed: {{ service.refunds_allowed|yesno:"true,false" }},
             refund_cutoff_hours: {{ service.refund_cutoff_hours|default:0 }},
             refund_policy_text: "{{ service.refund_policy_text|default:""|escapejs }}",
+            buffer_after: {{ service.buffer_after|default:0 }},
+            allow_ends_after_availability: {{ service.allow_ends_after_availability|yesno:"true,false" }},
+            time_increment_minutes: {{ service.time_increment_minutes|default:30 }},
+            use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }},
+            allow_squished_bookings: {{ service.allow_squished_bookings|yesno:"true,false" }},
           },
         {% endif %}
       };
@@ -771,7 +806,23 @@ document.addEventListener("DOMContentLoaded", async function () {
       serviceSelect.addEventListener('change', (e) => {
         updateServiceDetails(e.target.value);
       });
-      const availUrl = "{% url 'bookings:service_availability' org.slug service.slug %}" + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}&inc=${previewIncrement}${cacheBuster}`;
+      // Include edge buffer preference (prefer server setting, allow local override)
+      const edgeVal2 = (function(){
+        try {
+          const raw = localStorage.getItem('edge_buffers_' + (window.selectedServiceSlug || '{{ service.slug }}'));
+          if (raw === '1' || raw === 'true') return 1;
+          if (raw === '0' || raw === 'false') return 0;
+        } catch (e) {}
+        try {
+          const s = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+          return s.allow_ends_after_availability ? 1 : 0;
+        } catch (e) { return 0; }
+      })();
+      // If service enforces fixed increments, don't send `inc` so server uses duration+buffer
+      const svcPreview = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+      const previewIncQuery = (svcPreview.use_fixed_increment ? '' : `&inc=${previewIncrement}`);
+      const availUrl = "{% url 'bookings:service_availability' org.slug service.slug %}" + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}${previewIncQuery}&edge_buffers=${edgeVal2}${cacheBuster}`;
+      console.debug('Fetching availability for modal:', availUrl);
       const availResp = await fetch(availUrl);
       if (!availResp.ok) throw new Error("Failed to load availability");
       const slots = await availResp.json();
@@ -839,28 +890,31 @@ document.addEventListener("DOMContentLoaded", async function () {
         const mm = parseInt(m[2], 10);
         return h * 60 + mm;
       }
+      // Preserve metadata such as violates_buffer when present
       const slotRanges = slots.map(s => {
         const startMin = isoToLocalMinutes(s.start);
         const endMin = isoToLocalMinutes(s.end);
-        return { startMin, endMin };
+        return { startMin, endMin, meta: { violates_buffer: !!s.violates_buffer } };
       }).filter(r => r.startMin != null && r.endMin != null && r.endMin > r.startMin);
 
       // Group slots by hour for exact rendering; labels derive from slot starts
       const slotsByHour = new Map(); // hourStartMin -> [{startMin, endMin, label}]
-      for (const s of slots) {
-        const sm = isoToLocalMinutes(s.start);
-        const em = isoToLocalMinutes(s.end);
-        if (sm == null || em == null || em <= sm) continue;
-        const hourKey = Math.floor(sm/60)*60;
-        const h = Math.floor(sm/60);
-        const m = sm % 60;
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        let dispH = h % 12; if (dispH === 0) dispH = 12;
-        const label = `${dispH}:${String(m).padStart(2,'0')} ${ampm}`;
-        const arr = slotsByHour.get(hourKey) || [];
-        arr.push({ startMin: sm, endMin: em, label });
-        slotsByHour.set(hourKey, arr);
-      }
+        for (let idx=0; idx<slots.length; idx++) {
+          const s = slots[idx];
+          const sm = isoToLocalMinutes(s.start);
+          const em = isoToLocalMinutes(s.end);
+          if (sm == null || em == null || em <= sm) continue;
+          const hourKey = Math.floor(sm/60)*60;
+          const h = Math.floor(sm/60);
+          const m = sm % 60;
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          let dispH = h % 12; if (dispH === 0) dispH = 12;
+          const label = `${dispH}:${String(m).padStart(2,'0')} ${ampm}`;
+          const arr = slotsByHour.get(hourKey) || [];
+          // attach index so we can cross-reference metadata later
+          arr.push({ startMin: sm, endMin: em, label, slotIndex: idx });
+          slotsByHour.set(hourKey, arr);
+        }
 
       // Render rows using saved Client View settings (block size + increment),
       // but only at valid server-provided start times.
@@ -919,6 +973,11 @@ document.addEventListener("DOMContentLoaded", async function () {
           // Render circles for all server-provided starts (each window may have its own baseline).
           for (const sm of hourMap.get(hourStart)) {
             const endMin = startToEnd.get(sm);
+            // find original slot object to read metadata
+            const slotObj = slots.find(sl => {
+              const ssm = isoToLocalMinutes(sl.start);
+              return ssm === sm;
+            }) || {};
             const slotKey = `${year}-${month}-${day}-${sm}`;
             const wasBookedThisSession = window.bookedSlotsThisSession.includes(slotKey);
             const circle = document.createElement('div');
@@ -926,6 +985,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             circle.textContent = labelFromMin(sm);
             circle.dataset.startMin = String(sm);
             circle.dataset.endMin = String(endMin);
+            // If this slot violates buffer rules we no longer show a tooltip
+            // or change the circle background here so it appears like other slots.
+            // (Keep metadata on `slotObj` for potential server-side handling.)
 
             if (!wasBookedThisSession) {
               circle.addEventListener('click', () => {
@@ -963,7 +1025,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       timeModal.style.display = 'flex';
     } catch (e) {
       console.error(e);
-      alert("Could not load availability. Please try another day.");
+      try { showToast('error', "Could not load availability. Please try another day."); } catch(err){ console.error('toast failed', err); }
     }
   }
 

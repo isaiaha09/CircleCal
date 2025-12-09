@@ -42,6 +42,9 @@ urlpatterns = [
     path('bus/<slug:org_slug>/services/create/', views.create_service, name="create_service"),
     path('bus/<slug:org_slug>/services/<int:service_id>/edit/', views.edit_service, name="edit_service"),
     path('bus/<slug:org_slug>/services/<int:service_id>/delete/', views.delete_service, name="delete_service"),
+    path('bus/<slug:org_slug>/services/<int:service_id>/update_settings/', views.update_service_settings, name='update_service_settings'),
+    path('bus/<slug:org_slug>/services/<int:service_id>/preview_update/', views.preview_service_update, name='preview_service_update'),
+    path('bus/<slug:org_slug>/services/<int:service_id>/apply_update/', views.apply_service_update, name='apply_service_update'),
 
     # Bookings
     path('bus/<slug:org_slug>/bookings/', views.bookings_list, name="bookings_list"),

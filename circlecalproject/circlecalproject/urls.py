@@ -73,9 +73,9 @@ urlpatterns = [
 
     path('admin/pin/', include('calendar_app.urls_admin_pin')),
     path('admin/', admin.site.urls),
-    path('', include('calendar_app.urls')),
-    # Organization-scoped booking endpoints
+    # Organization-scoped booking endpoints (API first so they take precedence)
     path('', include('bookings.urls')),
+    path('', include('calendar_app.urls')),
     path('billing/', include('billing.urls')),
     # Backward-compatible redirects from /org/... to /bus/...
     re_path(r'^org/(?P<rest>.*)$', RedirectView.as_view(url='/bus/%(rest)s', permanent=True)),

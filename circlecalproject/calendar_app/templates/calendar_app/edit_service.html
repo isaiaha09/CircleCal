@@ -3,60 +3,284 @@
 {% block title %}Edit Service • {{ org.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-xl mx-auto py-8 px-4">
+{% block extra_head %}
+<style>
+  .cc-page { max-width:78rem; margin:0 auto; padding:2.5rem 1.5rem; }
+  @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
+  .cc-form input[type="text"], .cc-form input[type="number"], .cc-form textarea, .cc-form select {
+    padding: 0.65rem 0.85rem;
+    border-radius: 0.5rem;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+    font-size: 0.95rem;
+    width: 100%;
+  }
+  .cc-form textarea { min-height: 5rem; }
+  .section-card { background:#fff; border:1px solid #e6edf3; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
+  .section-title { font-size:1rem; font-weight:600; margin-bottom:0.5rem; }
+</style>
+{% endblock %}
+
+<div class="cc-page">
   <h1 class="text-2xl font-semibold mb-2">Edit Service</h1>
   <p class="text-sm text-gray-500 mb-6">
     Update your service details.
   </p>
 
+  {% if cc_debug_post %}
+    <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
+      <strong>DEBUG POST:</strong>
+      <div class="text-sm mt-1">
+        {% if cc_debug_post.error %}
+          {{ cc_debug_post.error }}
+        {% else %}
+          present={{ cc_debug_post.present|yesno:'true,false' }}, raw={{ cc_debug_post.raw }}, saved={{ cc_debug_post.saved|yesno:'true,false' }}
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+  {% if request.GET.cc_dbg_present %}
+    <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
+      <strong>DEBUG (from URL):</strong>
+      <div class="text-sm mt-1">present={{ request.GET.cc_dbg_present }}, raw={{ request.GET.cc_dbg_raw }}, saved={{ request.GET.cc_dbg_saved }}</div>
+    </div>
+  {% endif %}
 
-  <form method="post" class="space-y-4">
+
+  <form method="post" class="space-y-6 cc-form">
     {% csrf_token %}
 
-    <div>
-      <label class="block text-sm font-medium text-gray-700">Name</label>
-      <input name="name" type="text" required value="{{ service.name }}"
-             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-    </div>
+    {% if needs_migration %}
+      <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
+        <strong>Database migration required:</strong>
+        <div class="text-sm">The feature "Allow appointment to end after availability" requires a database migration. Please run <code>python manage.py migrate</code> on the server to enable this setting.</div>
+      </div>
+    {% endif %}
 
-    <div>
-      <label class="block text-sm font-medium text-gray-700">Slug (URL-friendly)</label>
-      <input type="text" value="{{ service.slug }}" disabled
-             class="mt-1 block w-full rounded-md border-gray-300 bg-gray-100 shadow-sm text-sm">
-      <p class="mt-1 text-xs text-gray-500">Slug cannot be changed to avoid breaking booking links</p>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-gray-700">Description</label>
-      <textarea name="description" rows="3"
-                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ service.description }}</textarea>
-    </div>
-
-    <div class="grid grid-cols-2 gap-4">
-      <div>
-        <label class="block text-sm font-medium text-gray-700">Duration (minutes)</label>
-        <input name="duration" type="number" value="{{ service.duration }}" min="1"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+    <div class="section-card">
+      <div class="section-title">Basic Info</div>
+      <div class="mb-3">
+        <label class="block text-sm font-medium text-gray-700">Name</label>
+        <input name="name" type="text" required value="{{ service.name }}">
+      </div>
+      <div class="mb-3">
+        <label class="block text-sm font-medium text-gray-700">Slug (URL-friendly)</label>
+        <input type="text" value="{{ service.slug }}" disabled>
+        <p class="mt-1 text-xs text-gray-500">Slug cannot be changed to avoid breaking booking links</p>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
-        <input name="price" type="number" step="0.01" value="{{ service.price }}"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        <label class="block text-sm font-medium text-gray-700">Description</label>
+        <textarea name="description" rows="4">{{ service.description }}</textarea>
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-4">
-      <div>
-        <label class="block text-sm font-medium text-gray-700">Prep time before (minutes)</label>
-        <input name="buffer_before" type="number" value="{{ service.buffer_before }}" min="0"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-        <p class="mt-1 text-xs text-gray-500">Time blocked before each appointment starts</p>
+    <!-- core timing controls are shown below in a grouped card -->
+
+    <!-- Slot increment settings are configured in the Day Schedule modal (calendar). Removed from edit page to avoid duplication. -->
+    <!-- Per-service client slot settings -->
+    <div class="border rounded-lg p-4 mb-4">
+      <div class="grid grid-cols-1 gap-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Client slot increment (minutes)</label>
+          <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="{{ service.time_increment_minutes|default:30 }}" min="5"
+                 class="mt-1 block w-40 rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+          <p class="mt-1 text-xs text-gray-500">When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
+        </div>
+        <div style="margin-top:12px;">
+          <a href="{% url 'calendar_app:calendar' org.slug %}?open_day_schedule_for={{ service.id }}&open_day_schedule_date={% now "Y-m-d" %}" class="inline-flex items-center gap-2 px-3 py-1 rounded bg-indigo-600 text-white text-sm">Open Day Schedule</a>
+          <p class="mt-2 text-xs text-gray-500">Opens the Day Schedule modal so you can set slot increments and related settings for this service.</p>
+        </div>
+
+        <div>
+          <label class="inline-flex items-center">
+            <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" {% if service.use_fixed_increment %}checked{% endif %}
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500">When enabled, clients will only see anchors spaced by the service duration plus cleanup buffer.</p>
+        </div>
+        <div>
+          <label class="inline-flex items-center">
+            <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" {% if service.allow_squished_bookings %}checked{% endif %}
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500">When enabled, the system will allow bookings that fit the service duration even if they don't satisfy the configured buffers. Owners will receive a notification when such bookings occur.</p>
+        </div>
       </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700">Cleanup time after (minutes)</label>
-        <input name="buffer_after" type="number" value="{{ service.buffer_after }}" min="0"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-        <p class="mt-1 text-xs text-gray-500">Time blocked after each appointment ends</p>
+    </div>
+
+    <script>
+      // When Use Fixed Increments is enabled, disable/grey the Allow Squished and the increment input.
+      // Also keep the increment in-sync with the Day Schedule modal via localStorage ('client_view_settings').
+      (function(){
+        try {
+          const fixed = document.getElementById('use_fixed_increment');
+          const squish = document.getElementById('allow_squished_bookings');
+          const incInput = document.getElementById('time_increment_minutes');
+          const form = document.querySelector('form.cc-form');
+          if (!fixed) return;
+
+          // Visual helper class
+          const style = document.createElement('style');
+          style.innerHTML = '.squish-disabled-label { opacity: 0.6; } .inc-disabled { opacity: 0.55; }';
+          document.head.appendChild(style);
+
+          const parentLabel = squish ? (squish.closest('label') || squish.parentNode) : null;
+
+          function updateState() {
+            const disabled = fixed.checked;
+            if (squish) {
+              try { squish.disabled = disabled; } catch(e){}
+              if (parentLabel) parentLabel.classList.toggle('squish-disabled-label', disabled);
+            }
+            if (incInput) {
+              try { incInput.disabled = disabled; } catch(e){}
+              incInput.classList.toggle('inc-disabled', disabled);
+            }
+          }
+
+          // When increment input changes, ask to confirm and propagate to localStorage so modal reads it
+          const initialIncVal = incInput ? Number(incInput.value) : null;
+
+          function setClientIncrementFromInput(val) {
+            try {
+              const raw = localStorage.getItem('client_view_settings') || '{}';
+              let parsed = {};
+              try { parsed = JSON.parse(raw); } catch(_) { parsed = {}; }
+              parsed.increment = Number(val) || 30;
+              localStorage.setItem('client_view_settings', JSON.stringify(parsed));
+              try { showToast('success', 'Client increment updated for Day Schedule modal.'); } catch(e){}
+            } catch (e) { console.warn('setClientIncrement failed', e); }
+          }
+
+          if (incInput) {
+            incInput.addEventListener('change', function(ev){
+              try {
+                if (fixed.checked) {
+                  // Shouldn't happen because input is disabled, but guard
+                  try { showToast('warning', 'Disable Fixed Increments to change the client increment.'); } catch(e){}
+                  incInput.value = initialIncVal;
+                  return;
+                }
+                const newVal = Number(incInput.value);
+                if (isNaN(newVal) || newVal < 5) {
+                  try { showToast('warning', 'Enter a valid increment (5+ minutes).'); } catch(e){}
+                  incInput.value = initialIncVal;
+                  return;
+                }
+                const confirmMsg = `Change client increment to ${newVal} minutes? This will update the Day Schedule modal's client view settings.`;
+                if (!confirm(confirmMsg)) {
+                  // revert
+                  incInput.value = initialIncVal;
+                  return;
+                }
+                // propagate to localStorage so calendar modal picks it up
+                setClientIncrementFromInput(newVal);
+              } catch (e) { console.warn('inc change handler failed', e); }
+            });
+          }
+
+          // Reflect localStorage changes (from modal or other tabs) into this input
+          window.addEventListener('storage', function(e){
+            if (e.key === 'client_view_settings') {
+              try {
+                const parsed = JSON.parse(e.newValue || '{}');
+                if (parsed && typeof parsed.increment === 'number' && incInput && !fixed.checked) {
+                  incInput.value = String(parsed.increment);
+                }
+              } catch (err) { /* ignore */ }
+            }
+          });
+
+          // Before submitting the service edit form, if the increment was changed from the original value,
+          // confirm the user wants to persist the change to the server as well.
+          if (form && incInput) {
+            form.addEventListener('submit', function(ev){
+              try {
+                const cur = Number(incInput.value);
+                if (!isNaN(initialIncVal) && cur !== Number(initialIncVal)) {
+                  const ok = confirm(`You changed the slot increment from ${initialIncVal} to ${cur} minutes. Save this change to the service?`);
+                  if (!ok) {
+                    ev.preventDefault();
+                    return false;
+                  }
+                  // Also update localStorage so modal and other tabs reflect the new value
+                  setClientIncrementFromInput(cur);
+                }
+              } catch (e) { /* allow submit on error */ }
+            });
+          }
+
+          // Initialize state and sync with localStorage if appropriate
+          updateState();
+          try {
+            const raw = localStorage.getItem('client_view_settings');
+            if (raw && incInput && !fixed.checked) {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed.increment === 'number') {
+                incInput.value = String(parsed.increment);
+              }
+            }
+          } catch (e) { /* ignore parse errors */ }
+
+          // attach handler to fixed checkbox
+          fixed.addEventListener('change', updateState);
+        } catch (e) { console.warn('squish-disable and increment sync wiring failed', e); }
+      })();
+    </script>
+
+    <script>
+      // Ensure hidden fallback reflects the actual checkbox state on submit
+      (function(){
+        try {
+          const form = document.querySelector('form.cc-form');
+          const chk = form ? form.querySelector('input[type="checkbox"][name="allow_ends_after_availability"]') : null;
+          const hidden = form ? form.querySelector('input[type="hidden"][name="allow_ends_after_availability"]') : null;
+          if (!form || !chk || !hidden) return;
+          form.addEventListener('submit', function(){
+            try { hidden.value = chk.checked ? '1' : '0'; } catch(e){}
+          });
+        } catch(e) { console.warn('sync hidden checkbox failed', e); }
+      })();
+    </script>
+
+    <!-- Group core timing settings into a clear section -->
+    <div class="border rounded-lg p-4 mb-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Duration (minutes)</label>
+          <input name="duration" type="number" value="{{ service.duration }}" min="1"
+                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
+          <input name="price" type="number" step="0.01" value="{{ service.price }}"
+                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 mt-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Cleanup time after (minutes)</label>
+          <input name="buffer_after" type="number" value="{{ service.buffer_after }}" min="0"
+                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+          <p class="mt-1 text-xs text-gray-500">Time blocked after each appointment ends</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Allow appointment to end after availability?</label>
+          <div class="mt-2">
+            <label class="inline-flex items-center">
+              <!-- hidden fallback ensures a value is always posted even when unchecked -->
+              <input type="hidden" name="allow_ends_after_availability" value="0">
+              <input type="checkbox" name="allow_ends_after_availability" value="1" {% if service.allow_ends_after_availability %}checked{% endif %}
+                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+              <span class="ml-2 text-sm text-gray-700">Allow clients to book slots that start before the availability end even if they finish after it.</span>
+            </label>
+          </div>
+          <p class="mt-1 text-xs text-gray-500">Enable to allow the final time slot to finish after your daily availability end.</p>
+        </div>
       </div>
     </div>
 
@@ -82,6 +306,14 @@
         Service is active (visible on public booking page)
       </label>
     </div>
+
+    {% if conflict_services %}
+      <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
+        <strong>Conflicting services detected</strong>
+        <p class="text-sm">The following services have overlapping availability windows: {{ conflict_services|join:", " }}.</p>
+        <label class="inline-flex items-center mt-2"><input type="checkbox" name="apply_to_conflicts" value="1" class="rounded border-gray-300"> <span class="ml-2 text-sm">Apply these settings to the listed services as well</span></label>
+      </div>
+    {% endif %}
 
     <!-- Refund Policy -->
     <div class="border-t pt-4 space-y-3">
@@ -125,11 +357,142 @@
       </div>
     </div>
 
-      <button type="submit"
+      <button id="svc-save-btn" type="button"
               class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
         Save Changes
       </button>
     </div>
   </form>
 </div>
+<template id="svc-conflict-modal-tpl">
+  <div class="cc-modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1200">
+    <div style="background:#fff;padding:1rem;border-radius:8px;max-width:760px;width:95%;box-shadow:0 6px 24px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 0.5rem 0;font-weight:700">Conflicting bookings detected</h3>
+      <p style="margin:0 0 0.75rem 0;color:#444">The following booked days will keep the previous settings. Confirm to freeze old settings for these dates and apply your changes to all other days.</p>
+      <div id="svc-conflict-list" style="max-height:320px;overflow:auto;border:1px solid #eee;padding:8px;border-radius:4px;margin-bottom:10px;font-family:monospace;font-size:0.9rem"></div>
+      <div style="text-align:right">
+        <button id="svc-conflict-cancel" style="margin-right:8px;padding:6px 10px;border-radius:6px;border:1px solid #ccc;background:#fafafa">Cancel</button>
+        <button id="svc-conflict-confirm" style="padding:6px 10px;border-radius:6px;background:#2563eb;color:#fff;border:none">Confirm and Apply</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+(function(){
+  try{
+    const btn = document.getElementById('svc-save-btn');
+    const form = document.querySelector('form.cc-form');
+    if (!btn || !form) return;
+
+    function getCsrf(){
+      const el = form.querySelector('input[name=csrfmiddlewaretoken]');
+      return el ? el.value : '';
+    }
+
+    async function postJson(url, payload){
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCsrf()
+        },
+        body: JSON.stringify(payload || {})
+      });
+      return res.json();
+    }
+
+    function serializeFormToPayload(){
+      const fd = new FormData(form);
+      const out = {};
+      for (const [k,v] of fd.entries()){
+        // normalize boolean checkboxes
+        if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'is_active' || k === 'refunds_allowed' || k === 'allow_ends_after_availability'){
+          out[k] = v === 'on' || v === '1' || v === 'true';
+        } else if (k === 'time_increment_minutes' || k === 'duration' || k === 'buffer_after' || k === 'min_notice_hours' || k === 'max_booking_days' || k === 'refund_cutoff_hours'){
+          out[k] = Number(v);
+        } else if (k.startsWith('svc_avail_')){
+          // include availability text for completeness
+          out[k] = v;
+        } else {
+          out[k] = v;
+        }
+      }
+      return out;
+    }
+
+    function buildConflictText(conflicts){
+      const lines = [];
+      const days = Object.keys(conflicts).sort();
+      for (const d of days){
+        const items = conflicts[d];
+        for (const it of items){
+          const name = it.client_name || '(no name)';
+          const email = it.client_email ? ` <${it.client_email}>` : '';
+          const time = it.time || (new Date(it.start)).toLocaleTimeString();
+          lines.push(`${d} ${time} — ${name}${email}`);
+        }
+      }
+      return lines.join('\n');
+    }
+
+    function showModal(conflicts, onConfirm){
+      const tpl = document.getElementById('svc-conflict-modal-tpl');
+      const clone = tpl.content.cloneNode(true);
+      const backdrop = clone.querySelector('.cc-modal-backdrop');
+      const list = clone.querySelector('#svc-conflict-list');
+      list.textContent = buildConflictText(conflicts) || 'No bookings found.';
+      document.body.appendChild(backdrop);
+      backdrop.querySelector('#svc-conflict-cancel').addEventListener('click', function(){ backdrop.remove(); });
+      backdrop.querySelector('#svc-conflict-confirm').addEventListener('click', async function(){
+        backdrop.remove();
+        try {
+          // call onConfirm (may be async). If it throws, fall back to submitting the form
+          await onConfirm();
+        } catch (err) {
+          console.warn('apply-confirm failed, falling back to form submit', err);
+          try { form.submit(); } catch(e){ /* last resort: reload */ window.location.reload(); }
+        }
+      });
+    }
+
+    btn.addEventListener('click', async function(){
+      try{
+        const payload = serializeFormToPayload();
+        const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
+        const preview = await postJson(previewUrl, payload);
+        if (!preview || preview.status !== 'ok'){
+          // No preview available or error — fall back to normal submit
+          form.submit();
+          return;
+        }
+        const conflicts = preview.conflicts || {};
+        if (Object.keys(conflicts).length === 0){
+          // No booked dates, proceed with applying update normally via form submit
+          form.submit();
+          return;
+        }
+
+        // Show modal listing bookings and ask for confirmation
+        showModal(conflicts, async function(){
+          // On confirm, call apply_update endpoint with confirm=true
+          payload.confirm = true;
+          const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
+          const applied = await postJson(applyUrl, payload);
+          if (applied && applied.status === 'ok'){
+            // Reload to reflect saved service state
+            window.location.reload();
+            return;
+          }
+          // fallback: submit the form so server-side path also saves
+          form.submit();
+        });
+      } catch (e){
+        console.warn('preview failed', e);
+        form.submit();
+      }
+    });
+  } catch(e){ console.warn('service preview wiring failed', e); }
+})();
+</script>
 {% endblock %}

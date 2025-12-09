@@ -274,15 +274,22 @@
     </div>
     <style>
       /* Row enter/leave animations */
-      .cc-row { transition: transform 180ms ease, opacity 180ms ease; }
+      .cc-row { transition: transform 260ms ease, opacity 260ms ease; }
       .cc-row-enter { opacity: 0; transform: translateY(-6px) scale(0.995); }
-      .cc-row-hidden { opacity: 0 !important; transform: translateY(-6px) scale(0.995); height: 0; padding: 0; margin: 0; }
+      /* cc-row-hidden should only fade/translate the row and disable pointer events.
+        Avoid collapsing height/padding/margin so layout doesn't jump during cross-fade. */
+      .cc-row-hidden { opacity: 0 !important; transform: translateY(-6px) scale(0.995); pointer-events: none; }
 
       /* Hide invoice lists until JS applies filters to avoid flicker */
       .cc-hide-until-js { visibility: hidden; }
 
       /* Mobile invoice card list: show on small screens, hide on md+ */
       #invoicesListMobile { display: none; }
+      /* Mobile card transitions
+        cc-mobile-card mirrors table row transitions for cross-fade */
+      .cc-mobile-card { transition: transform 260ms ease, opacity 260ms ease; }
+      .cc-mobile-enter { opacity: 0; transform: translateY(-6px) scale(0.995); }
+      .cc-mobile-hidden { opacity: 0 !important; transform: translateY(-6px) scale(0.995); pointer-events: none; }
       @media (max-width: 767px) {
         #invoicesListMobile { display: block; }
         #invoicesTable { display: none; }
@@ -437,9 +444,15 @@
           function renderInvoiceRows(items, append=false, meta={}) {
             const tbody = document.querySelector('#invoicesTable tbody');
             const mobile = document.getElementById('invoicesListMobile');
-            if (!tbody || !mobile) return;
+            // Allow rendering when either table or mobile container exists.
+            if (!tbody && !mobile) return;
+            // Diagnostic logging to help trace why mobile cards might be missing
+            try { console.debug('renderInvoiceRows called', { itemsCount: items.length, append: append, hasTbody: !!tbody, hasMobile: !!mobile }); } catch (e) {}
             const noResults = document.getElementById('no-results-row');
             // build table rows
+            // when not appending, mark new rows with an enter class so they
+            // start hidden and can transition to visible smoothly
+            const enterClass = append ? '' : ' cc-row-enter';
             let html = '';
             for (const inv of items) {
               const createdIso = inv.created_iso || '';
@@ -464,7 +477,7 @@
               const status = inv.pseudo ? (inv.status || '') : (inv.status || '');
               const hiddenAttr = inv.hidden ? '1' : '0';
               const dataInvId = inv.id || '';
-              html += `<tr class="border-t cc-row" data-inv-id="${dataInvId}" data-amount="${amount}" data-card="${inv.card_last4 || ''}" data-status="${status}" data-created="${createdIso}" data-pseudo="${inv.pseudo ? '1' : '0'}" data-hidden="${hiddenAttr}">`;
+              html += `<tr class="border-t cc-row${enterClass}" data-inv-id="${dataInvId}" data-amount="${amount}" data-card="${inv.card_last4 || ''}" data-status="${status}" data-created="${createdIso}" data-pseudo="${inv.pseudo ? '1' : '0'}" data-hidden="${hiddenAttr}">`;
               html += `<td class="p-2">${createdDateStr ? `<div>${createdDateStr}</div><div class="text-xs text-gray-500">${createdTimeStr}</div>` : '—'}</td>`;
               html += `<td class="p-2">${amount}</td>`;
               html += `<td class="p-2">${inv.pseudo ? '<span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-semibold">Scheduled change</span>' : card}</td>`;
@@ -481,19 +494,19 @@
               }
               html += `</td></tr>`;
             }
-            if (append) {
-              // append before the no-results row
-              const nr = tbody.querySelector('#no-results-row');
-              if (nr) {
-                nr.insertAdjacentHTML('beforebegin', html);
+            if (tbody) {
+              if (append) {
+                const nr = tbody.querySelector('#no-results-row');
+                if (nr) nr.insertAdjacentHTML('beforebegin', html); else tbody.insertAdjacentHTML('beforeend', html);
               } else {
-                tbody.insertAdjacentHTML('beforeend', html);
+                const nr = tbody.querySelector('#no-results-row');
+                const nrHTML = nr ? nr.outerHTML : '';
+                tbody.innerHTML = html + nrHTML;
               }
-            } else {
-              tbody.innerHTML = html + (tbody.querySelector('#no-results-row') ? tbody.querySelector('#no-results-row').outerHTML : '');
             }
 
             // mobile cards
+            const enterClassMobile = append ? '' : ' cc-mobile-enter';
             let mhtml = '';
             for (const inv of items) {
               const createdIso = inv.created_iso || '';
@@ -517,28 +530,45 @@
               const card = inv.card_last4 ? ('**** ' + inv.card_last4) : '—';
               const status = inv.status || '';
               const hiddenBadge = inv.hidden ? '<span class="text-xs text-gray-500 ml-2">(archived)</span>' : '';
-              mhtml += `<div class="border rounded p-3 bg-white shadow-sm">`;
+              mhtml += `<div class="border rounded p-3 bg-white shadow-sm cc-mobile-card${enterClassMobile}">`;
               mhtml += `<div class="flex justify-between items-start"><div class="text-sm font-medium">${createdDateStr || '—'}</div><div class="text-sm font-semibold">${amount}</div></div>`;
               if (createdTimeStr) mhtml += `<div class="text-xs text-gray-600 mt-1 text-right">${createdTimeStr}</div>`;
               mhtml += `<div class="text-xs text-gray-600 mt-1">${card} ${hiddenBadge}</div>`;
               mhtml += `<div class="text-xs text-gray-600 mt-2">${status}</div>`;
               mhtml += `</div>`;
             }
-            if (append) mobile.insertAdjacentHTML('beforeend', mhtml); else mobile.innerHTML = mhtml;
+            // Update mobile list (only if container exists). Do this after mhtml is
+            // constructed so we don't reference an undefined variable.
+            if (mobile) {
+              if (append) {
+                mobile.insertAdjacentHTML('beforeend', mhtml);
+              } else {
+                try { console.debug('mobile before len', mobile.innerHTML.length); } catch (e) {}
+                mobile.innerHTML = mhtml;
+                try { console.debug('mobile after len', mobile.innerHTML.length); } catch (e) {}
+              }
+            }
 
             // animate rows
-            // animate newly added rows
-            const newRows = Array.from(tbody.querySelectorAll('tr.cc-row'));
-            newRows.forEach(r => { r.classList.add('cc-row-enter'); requestAnimationFrame(()=> r.classList.remove('cc-row-enter')); });
+            // animate newly added rows; if we replaced the HTML after a timeout,
+            // ensure animation runs after the DOM update. Use a short delay to
+            // allow the replacement to complete before querying the new rows.
+            setTimeout(()=>{
+              // Table rows
+              const newRows = Array.from(tbody.querySelectorAll('tr.cc-row'));
+              newRows.forEach(r => requestAnimationFrame(()=> r.classList.remove('cc-row-enter')));
+              // Mobile cards
+              const newCards = Array.from(document.querySelectorAll('#invoicesListMobile .cc-mobile-card'));
+              newCards.forEach(c => requestAnimationFrame(()=> c.classList.remove('cc-mobile-enter')));
 
+              // Rebind invoice action buttons after new rows/cards are in DOM
+              bindInvoiceButtons();
+            }, 280);
             // show/hide load more based on meta
             const loadMoreBtn = document.getElementById('invoicesLoadMore');
             if (loadMoreBtn) {
               if (meta && meta.has_more) loadMoreBtn.classList.remove('hidden'); else loadMoreBtn.classList.add('hidden');
             }
-
-            // Rebind invoice action buttons
-            bindInvoiceButtons();
           }
 
           function bindInvoiceButtons() {
@@ -563,9 +593,9 @@
             try {
               const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/hide/`, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
               const payload = await resp.json();
-              showToast('Invoice hidden', 'info');
+              showToast('info', 'Invoice hidden');
               applyInvoiceFilters();
-            } catch (e) { showToast('Hide failed', 'error'); }
+            } catch (e) { showToast('error', 'Hide failed'); }
             hideLoading();
           }
 
@@ -576,9 +606,9 @@
             try {
               const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/unhide/`, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
               const payload = await resp.json();
-              showToast('Invoice unhidden', 'success');
+              showToast('success', 'Invoice unhidden');
               applyInvoiceFilters();
-            } catch (e) { showToast('Unhide failed', 'error'); }
+            } catch (e) { showToast('error', 'Unhide failed'); }
             hideLoading();
           }
 
@@ -589,10 +619,10 @@
             try {
               const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/void/`, { method: 'POST', headers: {'X-CSRFToken': csrftoken} });
               const payload = await resp.json();
-              if (payload && payload.error) { showToast('Void failed: ' + payload.error, 'error'); }
-              else showToast('Invoice voided', 'success');
+              if (payload && payload.error) { showToast('error', 'Void failed: ' + payload.error); }
+              else showToast('success', 'Invoice voided');
               applyInvoiceFilters();
-            } catch (e) { showToast('Void failed', 'error'); }
+            } catch (e) { showToast('error', 'Void failed'); }
             hideLoading();
           }
 
@@ -680,7 +710,7 @@
                 } else {
                   // add hidden class to animate out, then set display:none after transition
                   if (!r.classList.contains('cc-row-hidden')) r.classList.add('cc-row-hidden');
-                  r.__hideTimeout = setTimeout(()=>{ try{ r.style.display = 'none'; r.__hideTimeout = null; }catch(e){} }, 200);
+                  r.__hideTimeout = setTimeout(()=>{ try{ r.style.display = 'none'; r.__hideTimeout = null; }catch(e){} }, 260);
                 }
               } catch (e) { r.style.display = show ? '' : 'none'; }
             });
@@ -778,9 +808,36 @@
               try{ applyInvoiceFilters(true); }catch(e){ console.error(e); }
             }
             // Reveal lists now that filtering has been applied (or at least requested)
+            const tableEl = document.getElementById('invoicesTable');
+            const mobileEl = document.getElementById('invoicesListMobile');
             requestAnimationFrame(()=>{
-              document.getElementById('invoicesTable')?.classList.remove('cc-hide-until-js');
-              document.getElementById('invoicesListMobile')?.classList.remove('cc-hide-until-js');
+              if (tableEl) {
+                tableEl.classList.remove('cc-hide-until-js');
+                tableEl.style.display = '';
+              }
+              if (mobileEl) {
+                mobileEl.classList.remove('cc-hide-until-js');
+                // Force mobile list visible on small viewports in case CSS was
+                // overridden elsewhere. Use an inline !important fallback when
+                // computed style still hides the element.
+                try {
+                  if (window.matchMedia && window.matchMedia('(max-width: 767px)').matches) {
+                    mobileEl.style.display = 'block';
+                  } else {
+                    mobileEl.style.display = '';
+                  }
+                  // Diagnostic: if another stylesheet is still forcing display:none
+                  const comp = window.getComputedStyle(mobileEl).display;
+                  if (comp === 'none' && window.matchMedia && window.matchMedia('(max-width: 767px)').matches) {
+                    // Force with important to override other rules only on small viewports
+                    mobileEl.style.setProperty('display', 'block', 'important');
+                    mobileEl.style.visibility = 'visible';
+                    console.warn('billing.manage: invoicesListMobile forced visible for small viewport (computed display was none)');
+                  }
+                } catch (e) {
+                  mobileEl.style.display = '';
+                }
+              }
             });
           });
           // Also run immediately in case DOMContentLoaded already fired
@@ -850,28 +907,11 @@
     }, 3500);
   }
 
-  // Small toast/banner helper
-  function showToast(message, type="info", timeout=3500) {
-    // type: info|success|error
-    const existing = document.getElementById('cc-toast');
-    if (existing) existing.remove();
-    const div = document.createElement('div');
-    div.id = 'cc-toast';
-    div.style.position = 'fixed';
-    div.style.right = '20px';
-    div.style.bottom = '28px';
-    div.style.zIndex = 9999;
-    div.style.padding = '12px 16px';
-    div.style.borderRadius = '10px';
-    div.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)';
-    div.style.fontSize = '14px';
-    if (type === 'success') { div.style.background = '#ecfdf5'; div.style.color = '#065f46'; }
-    else if (type === 'error') { div.style.background = '#fee2e2'; div.style.color = '#991b1b'; }
-    else { div.style.background = '#eef2ff'; div.style.color = '#3730a3'; }
-    div.textContent = message;
-    document.body.appendChild(div);
-    setTimeout(()=>{ div.style.opacity = '0'; setTimeout(()=>div.remove(), 300); }, timeout);
-  }
+  // Use the global site-wide `showToast(type, message, timeout)` helper
+  // defined in the base template. This file previously provided a
+  // local message-first wrapper; we've removed it to standardize the
+  // signature. If the global helper is not present, callers will need
+  // a fallback — however templates extending the base should provide it.
 
   // showLoading/hideLoading are provided globally by base template
 
@@ -927,7 +967,7 @@
           }
 
           pmStatusEl.textContent = 'Card saved and set as default.';
-          showToast('Card saved and set as default.', 'success');
+          showToast('success', 'Card saved and set as default.');
 
           // Update in-memory default id so the refreshed list shows remove disabled
           defaultPaymentId = paymentMethodId;
@@ -976,7 +1016,7 @@
                       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                       body: JSON.stringify({ payment_method_id: pmId })
                     }).then(r => r.json()).then(() => {
-                      showToast('Default payment method updated.', 'success');
+                      showToast('success', 'Default payment method updated.');
                       setTimeout(()=> window.location.reload(), 700);
                     });
                   });
@@ -992,8 +1032,8 @@
                       body: JSON.stringify({ payment_method_id: pmId })
                     })
                       .then(r => { if (!r.ok) throw new Error('Delete failed'); return r.json(); })
-                      .then(() => { showToast('Payment method removed.', 'info'); setTimeout(()=> window.location.reload(),700); })
-                      .catch(err => showToast('Delete failed: ' + err.message, 'error'));
+                      .then(() => { showToast('info', 'Payment method removed.'); setTimeout(()=> window.location.reload(),700); })
+                      .catch(err => showToast('error', 'Delete failed: ' + err.message));
                   });
                 });
               }
@@ -1098,12 +1138,12 @@
       });
       if (!resp.ok) {
         const txt = await resp.text().catch(()=> 'error');
-        showToast('Failed to cancel scheduled change: ' + txt, 'error');
+        showToast('error', 'Failed to cancel scheduled change: ' + txt);
         hideLoading();
         return;
       }
       const payload = await resp.json().catch(()=> ({}));
-      showToast('Scheduled change cancelled', 'success');
+      showToast('success', 'Scheduled change cancelled');
       // Update the corresponding invoice row in the table if present
       const row = document.querySelector(`tr[data-inv-id="${changeId}"]`);
       if (row) {
@@ -1124,7 +1164,7 @@
       hideLoading();
     } catch (e) {
       hideLoading();
-      showToast('Failed to cancel scheduled change', 'error');
+      showToast('error', 'Failed to cancel scheduled change');
     }
   });
 
@@ -1159,7 +1199,7 @@
           return r.json();
         })
         .then(() => { hideLoading(); window.location.reload(); })
-        .catch(err => { hideLoading(); alert('Delete failed: ' + err.message); });
+                    .catch(err => { hideLoading(); showToast('error', 'Delete failed: ' + err.message); });
     });
   });
 
@@ -1177,9 +1217,9 @@
         // Hide the row in the table
         const row = document.querySelector(`tr[data-inv-id="${invId}"]`);
         if (row) row.style.display = 'none';
-        showToast('Invoice hidden.', 'info');
+        showToast('info', 'Invoice hidden.');
       } catch (e) {
-        showToast('Failed to hide invoice.', 'error');
+        showToast('error', 'Failed to hide invoice.');
       } finally { hideLoading(); }
     });
   });
@@ -1196,7 +1236,7 @@
         });
         const payload = await resp.json().catch(()=> ({}));
         if (!resp.ok) {
-          showToast(payload.error || 'Failed to void invoice', 'error');
+          showToast('error', payload.error || 'Failed to void invoice');
         } else {
           // Mark row as voided visually
           const row = document.querySelector(`tr[data-inv-id="${invId}"]`);
@@ -1207,10 +1247,10 @@
               tds[3].innerHTML = '<span class="inline-flex items-center px-2 py-1 rounded bg-red-100 text-red-700 text-sm">Voided</span>';
             }
           }
-          showToast('Invoice voided.', 'success');
+          showToast('success', 'Invoice voided.');
         }
       } catch (e) {
-        showToast('Failed to void invoice.', 'error');
+        showToast('error', 'Failed to void invoice.');
       } finally { hideLoading(); }
     });
   });
@@ -1258,7 +1298,7 @@
       const selectedPlan = planSelect ? planSelect.value : null;
       
       if (!selectedPlan) {
-        alert('To end your trial and continue with a paid subscription, please:\n\n1. Select a plan below in the "Change Plan" section\n2. Add a payment method if you haven\'t already\n3. Click "Update Plan" to convert to paid\n\nIf you want to simply cancel without converting, just let the trial expire naturally.');
+        showToast('To end your trial and continue with a paid subscription, please:\n\n1. Select a plan below in the "Change Plan" section\n2. Add a payment method if you haven\'t already\n3. Click "Update Plan" to convert to paid\n\nIf you want to simply cancel without converting, just let the trial expire naturally.', 'info', 8000);
         // Scroll to change plan section
         const changePlanSection = document.getElementById('change-plan-section');
         if (changePlanSection) {
@@ -1272,7 +1312,7 @@
       // Has plan selected - check if payment method exists
       const hasPaymentMethod = document.querySelector('#paymentMethodsList [data-pm-id]');
       if (!hasPaymentMethod) {
-        alert('Please add a payment method first before converting your trial to a paid subscription.\n\nScroll down to the "Add / Update Card" section.');
+        showToast('Please add a payment method first before converting your trial to a paid subscription.\n\nScroll down to the "Add / Update Card" section.', 'info', 6000);
         const pmSection = document.getElementById('payment-method-section');
         if (pmSection) {
           highlightAndPulse(pmSection);
@@ -1293,7 +1333,7 @@
           return r.json();
         })
         .then(() => window.location.reload())
-        .catch(err => alert('Conversion failed: ' + err.message));
+        .catch(err => showToast('Conversion failed: ' + err.message, 'error'));
     } else {
       // Regular immediate cancel for active subscription
       if(!confirm('Immediate cancel will terminate access now. Continue?')) return;
@@ -1312,7 +1352,7 @@
           return r.json();
         })
         .then(() => window.location.reload())
-        .catch(err => alert('Cancel failed: ' + err.message));
+        .catch(err => showToast('Cancel failed: ' + err.message, 'error'));
     }
   });
 
@@ -1346,7 +1386,7 @@
 
     // If there are no payment methods at all, prompt user to add one first
     if (!hasAnyPayment) {
-      alert('Please add a payment method before updating your subscription. You can add a card in the "Add / Update Card" box below.');
+      showToast('Please add a payment method before updating your subscription. You can add a card in the "Add / Update Card" box below.', 'info', 6000);
       const pmSection = document.getElementById('payment-method-section');
       if (pmSection) highlightAndPulse(pmSection);
       return;
@@ -1397,13 +1437,13 @@
           })
             .then(async r => { if (!r.ok) { const txt = await r.text().catch(()=>'server error'); throw new Error(txt||'preview failed'); } return r.json(); })
             .then(preview2 => openPreviewModal(preview2, planId))
-            .catch(err => alert('Preview failed: ' + err.message));
+            .catch(err => showToast('Preview failed: ' + err.message, 'error'));
         } else {
           // Populate and open modal with preview breakdown. Confirm button will proceed.
           openPreviewModal(preview, planId);
         }
       })
-      .catch(err => alert('Preview failed: ' + err.message));
+        .catch(err => showToast('Preview failed: ' + err.message, 'error'));
   });
 
   // Trial countdown
@@ -1548,28 +1588,23 @@ function openPreviewModal(preview, planId) {
         hideLoading();
         closePreviewModal();
         // If the server returned invoice details, surface them to the user
-        if (payload && payload.invoice) {
+            if (payload && payload.invoice) {
           try {
             const inv = payload.invoice;
             const amt = (Number(inv.amount_paid || inv.amount_due || 0) / 100.0).toFixed(2);
             const brand = inv.card_brand || '';
             const last4 = inv.card_last4 ? ' ****' + inv.card_last4 : '';
             const msg = `Charged $${amt} to ${brand}${last4}`;
-            if (typeof showToast === 'function') {
-              showToast(msg, 'success');
-            } else {
-              alert(msg);
-            }
+            showToast(msg, 'success');
           } catch (e) {
             // ignore presentation errors
           }
         } else if (payload && payload.message) {
-          if (typeof showToast === 'function') showToast(payload.message, 'info');
-          else alert(payload.message);
+          showToast(payload.message, 'info');
         }
         setTimeout(()=>window.location.reload(), 500);
       })
-        .catch(err => { hideLoading(); closePreviewModal(); alert('Update failed: ' + (err && err.message ? err.message : String(err))); });
+        .catch(err => { hideLoading(); closePreviewModal(); showToast('Update failed: ' + (err && err.message ? err.message : String(err)), 'error'); });
   };
 }
 

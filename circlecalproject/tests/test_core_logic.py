@@ -27,12 +27,12 @@ class CoreLogicTests(TestCase):
     def test_is_within_availability_overrides(self):
         # Create a blocking per-date override for tomorrow covering 10:00-12:00
         tomorrow = (timezone.now() + timedelta(days=1)).date()
-        start_dt = datetime.combine(tomorrow, time(10,0))
-        end_dt = datetime.combine(tomorrow, time(12,0))
+        start_dt = timezone.make_aware(datetime.combine(tomorrow, time(10,0)), timezone.get_current_timezone())
+        end_dt = timezone.make_aware(datetime.combine(tomorrow, time(12,0)), timezone.get_current_timezone())
         Booking.objects.create(organization=self.org, start=start_dt, end=end_dt, is_blocking=True, service=None)
 
         # A slot fully inside the blocking window should be unavailable
         from bookings.views import is_within_availability
-        s = datetime.combine(tomorrow, time(10,30))
-        e = datetime.combine(tomorrow, time(11,0))
+        s = timezone.make_aware(datetime.combine(tomorrow, time(10,30)), timezone.get_current_timezone())
+        e = timezone.make_aware(datetime.combine(tomorrow, time(11,0)), timezone.get_current_timezone())
         self.assertFalse(is_within_availability(self.org, s, e, service=None))

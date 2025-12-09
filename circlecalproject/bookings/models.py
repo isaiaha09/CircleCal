@@ -16,9 +16,29 @@ class Service(models.Model):
 
     duration = models.PositiveIntegerField(help_text="Duration in minutes")
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-
     buffer_before = models.PositiveIntegerField(default=0)
     buffer_after = models.PositiveIntegerField(default=0)
+    # If true, allow a booking that starts inside the availability window
+    # even if its end extends past the configured window end. Owners can
+    # enable this when they are ok with appointments finishing after their
+    # listed availability end time.
+    allow_ends_after_availability = models.BooleanField(default=False)
+
+    # Per-service client-visible slot increment (minutes). This is stored
+    # per-service so coaches can persist a preferred increments value.
+    # When `use_fixed_increment` is True, the system will use the
+    # service duration + buffer to compute increments instead of this value.
+    time_increment_minutes = models.PositiveIntegerField(default=30, help_text="Client-visible slot increment in minutes")
+
+    # If true, use fixed increments equal to service duration + buffer settings
+    # (i.e., slots step by duration+buffer). When false, `time_increment_minutes`
+    # controls the visible increments for clients.
+    use_fixed_increment = models.BooleanField(default=False)
+
+    # Allow bookings that fit the service duration even if they would violate
+    # buffer rules (i.e., 'squished' bookings). When True, such bookings are
+    # allowed but should generate non-blocking warnings to the owner.
+    allow_squished_bookings = models.BooleanField(default=False)
 
     min_notice_hours = models.PositiveIntegerField(default=1)
     max_booking_days = models.PositiveIntegerField(default=60)
@@ -153,3 +173,21 @@ class ServiceWeeklyAvailability(models.Model):
             )
             if not matches.exists():
                 raise ValidationError("Service availability window must be within the organization's weekly availability. Update the organization's calendar to allow this time.")
+
+
+class ServiceSettingFreeze(models.Model):
+    """Preserve service slot-related settings for a specific date so that
+    changes to a Service do not retroactively affect days that already have
+    bookings. The `frozen_settings` JSON stores the old values for the keys
+    that influence slot generation (duration, buffer_after, time_increment_minutes,
+    use_fixed_increment, allow_ends_after_availability, allow_squished_bookings).
+    """
+    service = models.ForeignKey('Service', on_delete=models.CASCADE, related_name='setting_freezes')
+    date = models.DateField()
+    frozen_settings = models.JSONField(default=dict)
+
+    class Meta:
+        unique_together = ('service', 'date')
+
+    def __str__(self):
+        return f"Freeze for {self.service} on {self.date}"
