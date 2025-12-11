@@ -1334,29 +1334,7 @@ def logout(request):
 
 
 
-@login_required
-@require_roles(['owner', 'admin', 'manager'])
-def services_page(request, org_slug):
-    """
-    List all services for this organization (coach dashboard view).
-    Only owner/admin/manager can access.
-    """
-    org = request.organization  # middleware already sets this for org routes
 
-    services = Service.objects.filter(organization=org).order_by("name")
-    selected_slug = request.GET.get("service")
-    service = None
-    if selected_slug:
-        service = services.filter(slug=selected_slug).first()
-    if not service:
-        service = services.first()
-
-    print(f"[DEBUG] services_page: org={org.slug}, num_services={services.count()}, selected_service={getattr(service, 'slug', None)}")
-    return render(request, "calendar_app/public_service_page.html", {
-        "org": org,
-        "services": services,
-        "service": service,
-    })
 
 
 @login_required
