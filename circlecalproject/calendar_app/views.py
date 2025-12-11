@@ -445,6 +445,8 @@ def calendar_view(request, org_slug):
             'use_fixed_increment': bool(getattr(s, 'use_fixed_increment', False)),
             'allow_squished_bookings': bool(getattr(s, 'allow_squished_bookings', False)),
             'allow_ends_after_availability': bool(getattr(s, 'allow_ends_after_availability', False)),
+            # Provide a simple weekly availability map for the client to compute next-available dates
+            'weekly_map': _build_service_weekly_map(s),
         })
     services_json = json.dumps(services)
     # Guard against raw closing script tags in service names/descriptions
@@ -693,6 +695,7 @@ def create_business(request):
     Create a brand new organization during onboarding or later.
     """
     if request.method == "POST":
+        
         form = OrganizationCreateForm(request.POST)
         if form.is_valid():
             org = form.save(commit=False)
@@ -1485,6 +1488,19 @@ def edit_service(request, org_slug, service_id):
         max_booking_days_raw = request.POST.get("max_booking_days") or "30"
         is_active = request.POST.get("is_active") == "on"
 
+        # Snapshot current service settings so we can freeze them for booked dates
+        try:
+            current_settings_snapshot = {
+                'duration': int(getattr(service, 'duration', 0) or 0),
+                'buffer_after': int(getattr(service, 'buffer_after', 0) or 0),
+                'time_increment_minutes': int(getattr(service, 'time_increment_minutes', 0) or 0),
+                'use_fixed_increment': bool(getattr(service, 'use_fixed_increment', False)),
+                'allow_ends_after_availability': bool(getattr(service, 'allow_ends_after_availability', False)),
+                'allow_squished_bookings': bool(getattr(service, 'allow_squished_bookings', False)),
+            }
+        except Exception:
+            current_settings_snapshot = None
+
         if not name:
             messages.error(request, "Name is required.")
         else:
@@ -1585,6 +1601,52 @@ def edit_service(request, org_slug, service_id):
                     })
 
                 # Persist changes (and optionally apply to conflicts)
+                # Before saving, create freezes for any future dates that already have bookings
+                try:
+                    if current_settings_snapshot is not None:
+                        # Determine horizon similar to preview/apply logic
+                        try:
+                            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+                        except Exception:
+                            org_tz = timezone.get_current_timezone()
+                        today_org = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+                        try:
+                            new_max = int(max_booking_days)
+                        except Exception:
+                            new_max = service.max_booking_days or 0
+                        horizon = today_org + timedelta(days=max(service.max_booking_days or 0, new_max or 0, 365))
+
+                        # Bookings that should cause freezes
+                        b_qs = Booking.objects.filter(
+                            organization=org,
+                            service=service,
+                            start__gte=today_org,
+                            start__lte=horizon
+                        )
+                        booked_dates = set()
+                        for b in b_qs:
+                            try:
+                                d = b.start.astimezone(org_tz).date()
+                            except Exception:
+                                d = b.start.date()
+                            booked_dates.add(d)
+
+                        # Create freezes preserving the current settings for these dates
+                        from django.db.utils import OperationalError
+                        for d in booked_dates:
+                            try:
+                                ServiceSettingFreeze.objects.update_or_create(
+                                    service=service,
+                                    date=d,
+                                    defaults={'frozen_settings': current_settings_snapshot}
+                                )
+                            except OperationalError:
+                                # If migrations missing or DB error, skip freezes but continue
+                                break
+                except Exception:
+                    # Defensive: don't block saving if freeze creation fails
+                    pass
+
                 service.save()
                 if conflict_services and apply_to_conflicts:
                     # Apply slot fields to conflicting services

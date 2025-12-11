@@ -223,8 +223,7 @@
   <div class="calendar-grid" id="dayGrid"></div>
 
   <div id="mainServiceDetails" class="service-details-fade">
-    <div style="color:red; font-weight:bold;">TEST INFO BOX: If you see this, the box is rendering.</div>
-    <div><strong>Name:</strong> <span id="mainSvcName"></span></div>
+    <div id="mainSvcTitle" class="modal-title" style="margin-bottom:6px;"></div>
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
@@ -248,6 +247,12 @@
       refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
       refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
       refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+      // Settings from edit_service.html
+      time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
+      use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
+      buffer_after: {{ s.buffer_after|default:0 }},
+      allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
+      allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
     };
   {% endfor %}
 
@@ -255,7 +260,6 @@
     // Info box elements
     const mainServiceSelect = document.getElementById("mainServiceSelect");
     const mainServiceDetails = document.getElementById("mainServiceDetails");
-    const mainSvcName = document.getElementById("mainSvcName");
     const mainSvcDesc = document.getElementById("mainSvcDesc");
     const mainSvcDuration = document.getElementById("mainSvcDuration");
     const mainSvcPrice = document.getElementById("mainSvcPrice");
@@ -266,7 +270,8 @@
     function updateMainServiceDetails(slug) {
       const d = SERVICE_MAP[slug];
       if (!d) return;
-      mainSvcName.textContent = d.name;
+      const mainSvcTitle = document.getElementById('mainSvcTitle');
+      if (mainSvcTitle) mainSvcTitle.textContent = d.name;
       mainSvcDesc.textContent = d.description || "—";
       mainSvcDuration.textContent = d.duration || 0;
       mainSvcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
@@ -370,6 +375,7 @@
         <div><strong>Description:</strong> <span id="svcDesc">{{ service.description|default:"—" }}</span></div>
         <div><strong>Duration:</strong> <span id="svcDuration">{{ service.duration }}</span> minutes</div>
         <div><strong>Price:</strong> $<span id="svcPrice">{{ service.price }}</span></div>
+        <!-- Client-facing modal intentionally omits buffer/increment/fixed/allow settings -->
         <div><strong>Refunds:</strong>
           <span id="svcRefundLine">
             {% if service.refunds_allowed %}
@@ -480,6 +486,25 @@ document.addEventListener("DOMContentLoaded", async function () {
     const batchUrl = "{% url 'bookings:batch_availability_summary' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(monthStart))}&end=${encodeURIComponent(toIsoLocal(monthEnd))}${cacheBuster}`;
     
     dayHasSlots = {};
+    // Determine per-service increment and allow-ends flag for prefetches using the public SERVICE_MAP
+    const selSvcSlugForPrefetch = window.selectedServiceSlug || '{{ service.slug }}';
+    let incForPrefetch = 30;
+    let allowEndsPrefetch = false;
+    try {
+      const svcMeta = SERVICE_MAP[selSvcSlugForPrefetch];
+      if (svcMeta) {
+        if (svcMeta.use_fixed_increment) {
+          const d = Number(svcMeta.duration || 0);
+          const b = Number(svcMeta.buffer_after || 0);
+          if (!isNaN(d)) incForPrefetch = Math.max(5, d + (isNaN(b) ? 0 : b));
+        } else if (typeof svcMeta.time_increment_minutes === 'number') {
+          incForPrefetch = Math.max(5, svcMeta.time_increment_minutes);
+        }
+        allowEndsPrefetch = !!svcMeta.allow_ends_after_availability;
+      }
+    } catch (err) {
+      console.warn('prefetch service meta parse failed', err);
+    }
     try {
       const resp = await fetch(batchUrl);
       if (resp.ok) {
@@ -536,7 +561,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         const pad = n => String(n).padStart(2,'0');
         const toIsoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
         const cacheBuster = `&_t=${Date.now()}`;
-        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}&inc=30${cacheBuster}`;
+        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', selSvcSlugForPrefetch) + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}&inc=${incForPrefetch}&allow_ends_after_availability=${allowEndsPrefetch?1:0}${cacheBuster}`;
         fetches.push(
           fetch(availUrl)
             .then(r => r.ok ? r.json() : [])
@@ -675,13 +700,14 @@ document.addEventListener("DOMContentLoaded", async function () {
 
       // Prefer server-provided effective per-date settings when available so the
       // public booking page reflects edits (including per-date freezes).
+      let eff = null;
       try {
         const svcSlug = serviceSelect.value || '{{ service.slug }}';
         const effUrl = `/bus/{{ org.slug }}/services/${encodeURIComponent(svcSlug)}/effective/?date=${encodeURIComponent(rangeStartDate.toISOString().slice(0,10))}${cacheBuster}`;
         const effResp = await fetch(effUrl, { credentials: 'same-origin' });
         if (effResp && effResp.ok) {
           try {
-            const eff = await effResp.json();
+            eff = await effResp.json();
             if (eff) {
               // If service uses fixed increments, prefer duration+buffer
               if (eff.use_fixed_increment) {
@@ -710,6 +736,11 @@ document.addEventListener("DOMContentLoaded", async function () {
               refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
               refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
               refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+              time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
+              use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
+              buffer_after: {{ s.buffer_after|default:0 }},
+              allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
+              allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
             },
           {% endfor %}
         {% else %}
@@ -721,6 +752,11 @@ document.addEventListener("DOMContentLoaded", async function () {
             refunds_allowed: {{ service.refunds_allowed|yesno:"true,false" }},
             refund_cutoff_hours: {{ service.refund_cutoff_hours|default:0 }},
             refund_policy_text: "{{ service.refund_policy_text|default:""|escapejs }}",
+            time_increment_minutes: {{ service.time_increment_minutes|default:30 }},
+            use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }},
+            buffer_after: {{ service.buffer_after|default:0 }},
+            allow_ends_after_availability: {{ service.allow_ends_after_availability|yesno:"true,false" }},
+            allow_squished_bookings: {{ service.allow_squished_bookings|yesno:"true,false" }},
           },
         {% endif %}
       };
@@ -732,6 +768,8 @@ document.addEventListener("DOMContentLoaded", async function () {
         svcDesc.textContent = d.description || "—";
         svcDuration.textContent = d.duration || 0;
         svcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+        // show additional settings
+        // Client-facing modal intentionally omits buffer/increment/fixed/allow details
         if (d.refunds_allowed) {
           svcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
           if (d.refund_policy_text) {
@@ -753,10 +791,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       serviceSelect.addEventListener('change', (e) => {
         updateServiceDetails(e.target.value);
       });
-      const availUrl = "{% url 'bookings:service_availability' org.slug service.slug %}" + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}&inc=${previewIncrement}${cacheBuster}`;
-      const availResp = await fetch(availUrl);
-      if (!availResp.ok) throw new Error("Failed to load availability");
-      const slots = await availResp.json();
+      const svcSlug = serviceSelect.value || window.selectedServiceSlug || '{{ service.slug }}';
 
       // If detailed fetch yields no slots, do not mutate the day circle state.
       // Simply avoid opening the modal or show a lightweight notice.
@@ -765,7 +800,22 @@ document.addEventListener("DOMContentLoaded", async function () {
         return;
       }
 
-      // Read client view settings (saved from internal calendar)
+      // Determine whether this date already has any bookings (public busy intervals).
+      // If so, do NOT apply client view overrides for this date — prefer server
+      // effective settings which may include freezes protecting booked days.
+      let dateHasBookings = false;
+      try {
+        const busyUrl = `{% url 'bookings:public_busy' org.slug %}` + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}${cacheBuster}`;
+        const busyResp = await fetch(busyUrl, { credentials: 'same-origin' });
+        if (busyResp && busyResp.ok) {
+          const busyJson = await busyResp.json().catch(()=>null);
+          if (Array.isArray(busyJson) && busyJson.length > 0) dateHasBookings = true;
+        }
+      } catch (e) { /* ignore busy fetch errors; assume no bookings */ }
+
+      // Read client view settings (saved from internal calendar). These are
+      // applied visually only when the selected date does not already have
+      // bookings — server-side freezes will protect booked days from updates.
       let clientSettings = { block: 1, increment: 30, startHour: 9 };
       try {
         const raw = localStorage.getItem('client_view_settings');
@@ -778,7 +828,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       } catch (e) {}
 
       const blockMinutes = Math.max(1, clientSettings.block) * 60;
-      const inc = Math.max(5, clientSettings.increment);
+      // Choose increment: prefer server-provided effective increment (previewIncrement)
+      // when available or when the date has bookings; otherwise allow clientSettings to override.
+      const inc = Math.max(5, (dateHasBookings ? (previewIncrement || 30) : (clientSettings.increment || previewIncrement || 30)));
 
       // Styles for circles
       const styleId = 'publicTimeCirclesStyle';
@@ -800,6 +852,16 @@ document.addEventListener("DOMContentLoaded", async function () {
         `;
         document.head.appendChild(style);
       }
+      // Fetch availability from server using the final increment/allow_ends decision
+      let allowEndsForAvail = false;
+      try {
+        const svcMeta = SERVICE_MAP[svcSlug] || {};
+        allowEndsForAvail = (typeof eff === 'object' && eff !== null && ('allow_ends_after_availability' in eff)) ? !!eff.allow_ends_after_availability : !!svcMeta.allow_ends_after_availability;
+      } catch (err) { /* ignore */ }
+      const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', svcSlug) + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}&inc=${inc}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
+      const availResp = await fetch(availUrl);
+      if (!availResp.ok) throw new Error("Failed to load availability");
+      const slots = await availResp.json();
 
       // If no slots, show message
       if (!Array.isArray(slots) || slots.length === 0) {
@@ -875,31 +937,39 @@ document.addEventListener("DOMContentLoaded", async function () {
         const hours = [];
         const hourMap = new Map();
         for (const sm of validStarts) {
-          const hourStart = Math.floor(sm/60)*60; // minute-of-day of the hour
-          if (!hourMap.has(hourStart)) {
-            hourMap.set(hourStart, []);
-            hours.push(hourStart);
+          const blockStart = Math.floor(sm / blockMinutes) * blockMinutes; // minute-of-day of the block
+          if (!hourMap.has(blockStart)) {
+            hourMap.set(blockStart, []);
+            hours.push(blockStart);
           }
-          hourMap.get(hourStart).push(sm);
+          hourMap.get(blockStart).push(sm);
         }
 
-        for (const hourStart of hours) {
+        for (const blockStart of hours) {
           const row = document.createElement('div');
           row.className = 'circles-row';
           const hourLabel = document.createElement('div');
           hourLabel.className = 'circles-hour';
           const labelDate = new Date(year, month, day);
-          labelDate.setHours(Math.floor(hourStart/60), hourStart%60, 0, 0);
-          // Show minutes if not on the hour, e.g., 8:20 AM
-          const labelOpts = { hour: 'numeric', minute: (hourStart%60!==0?'2-digit':undefined), hour12: true };
-          hourLabel.textContent = labelDate.toLocaleString(undefined, labelOpts);
+          labelDate.setHours(Math.floor(blockStart/60), blockStart%60, 0, 0);
+          // If block spans multiple hours, show a range label (e.g., 8 AM - 10 AM)
+          let labelText;
+          if (blockMinutes > 60) {
+            const endDate = new Date(labelDate.getTime() + blockMinutes * 60000);
+            const opts = { hour: 'numeric', hour12: true };
+            labelText = `${labelDate.toLocaleString(undefined, opts)} - ${endDate.toLocaleString(undefined, opts)}`;
+          } else {
+            const labelOpts = { hour: 'numeric', minute: (blockStart%60!==0?'2-digit':undefined), hour12: true };
+            labelText = labelDate.toLocaleString(undefined, labelOpts);
+          }
+          hourLabel.textContent = labelText;
           row.appendChild(hourLabel);
 
           const circlesContainer = document.createElement('div');
           circlesContainer.className = 'circles-container';
 
           // Render circles for all server-provided starts (each window may have its own baseline).
-          for (const sm of hourMap.get(hourStart)) {
+          for (const sm of hourMap.get(blockStart)) {
             const endMin = startToEnd.get(sm);
             const slotKey = `${year}-${month}-${day}-${sm}`;
             const wasBookedThisSession = window.bookedSlotsThisSession.includes(slotKey);

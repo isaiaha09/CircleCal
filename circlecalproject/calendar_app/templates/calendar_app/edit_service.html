@@ -23,6 +23,12 @@
 {% endblock %}
 
 <div class="cc-page">
+  {% if request.GET.saved %}
+    <div class="mb-4 p-3 rounded bg-green-50 border-l-4 border-green-400 text-green-800" role="status" aria-live="polite">
+      <strong>Changes saved</strong>
+      <div class="text-sm mt-1">Your changes were saved successfully.</div>
+    </div>
+  {% endif %}
   <h1 class="text-2xl font-semibold mb-2">Edit Service</h1>
   <p class="text-sm text-gray-500 mb-6">
     Update your service details.
@@ -88,7 +94,10 @@
           <p class="mt-1 text-xs text-gray-500">When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
         </div>
         <div style="margin-top:12px;">
-          <a href="{% url 'calendar_app:calendar' org.slug %}?open_day_schedule_for={{ service.id }}&open_day_schedule_date={% now "Y-m-d" %}" class="inline-flex items-center gap-2 px-3 py-1 rounded bg-indigo-600 text-white text-sm">Open Day Schedule</a>
+          <!-- Use JS to set localStorage for a clean redirect; fallback href includes params for non-JS users -->
+          <a href="{% url 'calendar_app:calendar' org.slug %}?open_day_schedule_for={{ service.id }}&open_day_schedule_date={% now "Y-m-d" %}"
+             onclick="try{ event.preventDefault(); localStorage.setItem('cc_auto_open_service', '{{ service.id }}'); localStorage.setItem('cc_auto_open_date', '{% now "Y-m-d" %}'); window.location.href='{% url 'calendar_app:calendar' org.slug %}'; }catch(e){}; return false;"
+             class="inline-flex items-center gap-2 px-3 py-1 rounded bg-indigo-600 text-white text-sm">Open Day Schedule</a>
           <p class="mt-2 text-xs text-gray-500">Opens the Day Schedule modal so you can set slot increments and related settings for this service.</p>
         </div>
 
@@ -403,21 +412,35 @@
     }
 
     function serializeFormToPayload(){
+      // Use FormData for textual/numeric fields but ensure known checkboxes are
+      // always present in the payload (false when unchecked). Unchecked
+      // checkboxes are not included in FormData, which previously caused the
+      // server-side JSON apply path to ignore those toggles.
       const fd = new FormData(form);
       const out = {};
       for (const [k,v] of fd.entries()){
-        // normalize boolean checkboxes
-        if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'is_active' || k === 'refunds_allowed' || k === 'allow_ends_after_availability'){
-          out[k] = v === 'on' || v === '1' || v === 'true';
-        } else if (k === 'time_increment_minutes' || k === 'duration' || k === 'buffer_after' || k === 'min_notice_hours' || k === 'max_booking_days' || k === 'refund_cutoff_hours'){
+        // numeric conversions for obvious numeric fields
+        if (k === 'time_increment_minutes' || k === 'duration' || k === 'buffer_after' || k === 'min_notice_hours' || k === 'max_booking_days' || k === 'refund_cutoff_hours'){
           out[k] = Number(v);
         } else if (k.startsWith('svc_avail_')){
-          // include availability text for completeness
           out[k] = v;
         } else {
           out[k] = v;
         }
       }
+
+      // Ensure boolean checkbox keys are always present. Read their checked state
+      // directly from the DOM so unchecked boxes produce `false` in the payload.
+      const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'is_active', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
+      for (const name of booleanNames){
+        try{
+          const el = form.querySelector(`[name="${name}"]`);
+          out[name] = !!(el && (el.type === 'checkbox' ? el.checked : (el.value === '1' || el.value === 'true')));
+        } catch (e) {
+          out[name] = false;
+        }
+      }
+
       return out;
     }
 
@@ -460,36 +483,52 @@
       try{
         const payload = serializeFormToPayload();
         const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
+        const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
+
+        async function applyAndRedirect(pl) {
+          try {
+            pl.confirm = true;
+            const applied = await postJson(applyUrl, pl);
+            if (applied && applied.status === 'ok'){
+              // Redirect with saved flag to show banner
+              const base = window.location.pathname;
+              window.location.href = base + '?saved=1';
+              return true;
+            }
+            return false;
+          } catch (err) {
+            return false;
+          }
+        }
+
         const preview = await postJson(previewUrl, payload);
         if (!preview || preview.status !== 'ok'){
-          // No preview available or error — fall back to normal submit
-          form.submit();
+          // Preview unavailable: attempt to apply directly, fallback to form submit
+          const ok = await applyAndRedirect(payload);
+          if (!ok) form.submit();
           return;
         }
+
         const conflicts = preview.conflicts || {};
         if (Object.keys(conflicts).length === 0){
-          // No booked dates, proceed with applying update normally via form submit
-          form.submit();
+          // No booked dates: apply directly via JSON and redirect to show saved banner
+          const ok = await applyAndRedirect(payload);
+          if (!ok) form.submit();
           return;
         }
 
         // Show modal listing bookings and ask for confirmation
         showModal(conflicts, async function(){
           // On confirm, call apply_update endpoint with confirm=true
-          payload.confirm = true;
-          const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
-          const applied = await postJson(applyUrl, payload);
-          if (applied && applied.status === 'ok'){
-            // Reload to reflect saved service state
-            window.location.reload();
-            return;
+          const ok = await applyAndRedirect(payload);
+          if (!ok) {
+            // fallback: submit the form so server-side path also saves
+            try { form.submit(); } catch(e){ window.location.reload(); }
           }
-          // fallback: submit the form so server-side path also saves
-          form.submit();
         });
       } catch (e){
         console.warn('preview failed', e);
-        form.submit();
+        try { form.submit(); } catch (err){ window.location.reload(); }
       }
     });
   } catch(e){ console.warn('service preview wiring failed', e); }

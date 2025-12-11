@@ -1488,12 +1488,16 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         </div>
         <div>
           <label for="clientIncrementSelect">Increment:</label><br>
-          <select id="clientIncrementSelect">
-            <option value="15">15 min</option>
-            <option value="30" selected>30 min</option>
-            <option value="45">45 min</option>
-            <option value="60">60 min</option>
-          </select>
+                    <select id="clientIncrementSelect">
+                        <option value="15">15 min</option>
+                        <option value="30" selected>30 min</option>
+                        <option value="45">45 min</option>
+                        <option value="60">60 min</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                    <span id="clientCustomIncrementContainer" style="display:none; margin-left:8px; gap:6px; align-items:center;">
+                        <input type="number" id="clientCustomIncrementInput" placeholder="Minutes" min="5" style="width:84px;" />
+                    </span>
         </div>
         <div>
           <button id="saveClientSettingsBtn" 
@@ -1503,6 +1507,9 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         </div>
       </div>
     </div>
+        <div style="margin-top:6px; font-size:13px; color:var(--gray-600); font-style:italic;">
+                These client view settings are synchronized with the Edit Service increment settings — changes here will update the Edit Service page and the public booking view, and vice versa.
+        </div>
 
     <!-- Coach Preview Section -->
     <div id="coachTimeSettings" style="margin-bottom: 32px; padding:20px; border-radius:12px; background:var(--gray-50); flex-direction: column;">
@@ -2223,6 +2230,10 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const orgSlug = "{{ organization.slug }}";
     const orgTimezone = "{{ org_timezone }}";  // e.g., 'America/Los_Angeles'
+    // Services metadata from server (includes per-service weekly_map)
+    const SERVICES = {{ services_json|default:"[]"|safe }} || [];
+    const AUTO_OPEN_SERVICE = "{{ auto_open_service|default:'' }}";
+    const AUTO_OPEN_DATE = "{{ auto_open_date|default:'' }}";
      
     if (!calendarEl) return;
 
@@ -2335,6 +2346,54 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Render the calendar so DOM/date cells exist for later manipulation
     try { calendar.render(); } catch (e) { console.warn('calendar.render failed', e); }
+
+        // If the admin requested opening the Day Schedule for a service, compute the
+        // soonest date with default weekly availability for that service and open the modal.
+        (function(){
+            try {
+                if (!AUTO_OPEN_SERVICE) return;
+                // AUTO_OPEN_SERVICE may be an id (numeric). Find service by id.
+                const svcId = Number(AUTO_OPEN_SERVICE) || null;
+                const svc = SERVICES.find(s => Number(s.id) === svcId);
+                if (!svc) return;
+
+                // Starting date: prefer AUTO_OPEN_DATE, fall back to today
+                let start = null;
+                if (AUTO_OPEN_DATE && AUTO_OPEN_DATE.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    start = new Date(AUTO_OPEN_DATE + 'T00:00:00');
+                } else {
+                    const t = new Date();
+                    start = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+                }
+
+                // Search forward up to 365 days for the first weekday that has any default ranges
+                let foundDate = null;
+                for (let i = 0; i < 365; i++) {
+                    const candidate = new Date(start);
+                    candidate.setDate(start.getDate() + i);
+                    const dow = candidate.getDay(); // 0=Sunday..6=Saturday
+                    const weekly = (svc.weekly_map && Array.isArray(svc.weekly_map)) ? svc.weekly_map : [];
+                    const ranges = weekly[dow] || [];
+                    if (ranges && ranges.length > 0) {
+                        // Ensure not a past date
+                        const iso = candidate.toISOString().slice(0,10);
+                        if (!isPastDate(iso)) {
+                            foundDate = iso;
+                            // Convert ranges like '09:00-12:00' to objects expected by modal
+                            const rangesObjs = ranges.map(r => {
+                                const parts = (r||'').split('-');
+                                return { start: (parts[0]||'09:00').trim(), end: (parts[1]||'17:00').trim() };
+                            });
+                            // Use service-level increment if present (client view increment may differ)
+                            const inc = svc.time_increment_minutes || 30;
+                            // Open the Day Schedule modal for this date
+                            try { openTimeCirclesModal(foundDate, inc, 1, rangesObjs); } catch (e) { console.warn('auto-open modal failed', e); }
+                            break;
+                        }
+                    }
+                }
+            } catch (e) { console.warn('auto-open Day Schedule failed', e); }
+        })();
 
     // Relocate calendar controls below the month title on mobile, revert on desktop
     function relocateCalendarControls() {
@@ -2512,17 +2571,211 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     })();
 
-    // Save client-facing view settings to localStorage so public profile can read them
+    // Save client-facing view settings to localStorage so public profile can read them.
+    // Also allow a custom increment value and sync it immediately so the edit
+    // service page (which listens to storage events) stays in sync.
     try {
         const saveClientBtn = document.getElementById('saveClientSettingsBtn');
+        const clientIncrementSelect = document.getElementById('clientIncrementSelect');
+        const clientBlockSelect = document.getElementById('clientBlockSelect');
+        // Reuse the existing custom increment UI used by the coach section
+        const sharedCustomIncrementContainer = document.getElementById('customIncrementContainer');
+        const sharedCustomIncrementInput = document.getElementById('customIncrementInput');
+        const sharedApplyCustomIncrementBtn = document.getElementById('applyCustomIncrementBtn');
+
+        const CLIENT_KEY = 'client_view_settings';
+        const STANDARD_INCREMENTS = ['15','30','45','60'];
+
+        function readClientSettingsFromStorage(){
+            try {
+                const raw = localStorage.getItem(CLIENT_KEY) || '{}';
+                const parsed = JSON.parse(raw);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (e) { return {}; }
+        }
+
+        function writeClientSettingsToStorage(obj){
+            try {
+                localStorage.setItem(CLIENT_KEY, JSON.stringify(obj || {}));
+                // Dispatch a storage event for same-window listeners (some browsers won't).
+                try { window.dispatchEvent(new Event('storage')); } catch(e){}
+            } catch (e) { console.error('write client view storage failed', e); }
+        }
+
+        // Initialize client increment select from storage (or leave default)
+        try {
+            const stored = readClientSettingsFromStorage();
+            if (stored && typeof stored.increment !== 'undefined') {
+                const inc = String(stored.increment);
+                // If it's a standard option, select it. Otherwise switch the select
+                // to the 'custom' choice and prefill the custom inputs (do not add
+                // custom options to the dropdown to avoid clutter).
+                if (STANDARD_INCREMENTS.includes(inc)) {
+                    if (clientIncrementSelect) clientIncrementSelect.value = inc;
+                } else if (clientIncrementSelect) {
+                    // Put the select into the 'custom' position and show custom inputs
+                    try {
+                        clientIncrementSelect.value = 'custom';
+                    } catch (e) { /* ignore */ }
+                    if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
+                        sharedCustomIncrementContainer.style.display = 'flex';
+                        sharedCustomIncrementInput.value = String(inc);
+                    }
+                    const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                    const clientCustomInput = document.getElementById('clientCustomIncrementInput');
+                    if (clientCustomContainer && clientCustomInput) {
+                        clientCustomContainer.style.display = 'inline-flex';
+                        clientCustomInput.value = String(inc);
+                    }
+                }
+            }
+        } catch (e) { /* ignore init errors */ }
+
+        // When the client increment select changes, if it's one of the standard
+        // increments, write to storage immediately. If it's an unfamiliar value
+        // (like 'custom' or something not numeric) show the custom input.
+        if (clientIncrementSelect) {
+            clientIncrementSelect.addEventListener('change', function(){
+                try {
+                    const val = clientIncrementSelect.value;
+                    if (STANDARD_INCREMENTS.includes(val)) {
+                        // hide any custom UI if visible
+                        if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'none';
+                        const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                        if (clientCustomContainer) clientCustomContainer.style.display = 'none';
+                        const payload = Object.assign({}, readClientSettingsFromStorage(), { block: Number(clientBlockSelect?.value || 1), increment: Number(val) });
+                        writeClientSettingsToStorage(payload);
+                    } else if (val === 'custom') {
+                        // Show the client-specific custom input
+                        const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                        if (clientCustomContainer) clientCustomContainer.style.display = 'inline-flex';
+                        // Also show shared custom UI so user can use either
+                        if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'flex';
+                        if (sharedCustomIncrementInput) sharedCustomIncrementInput.value = '';
+                    } else {
+                        // Not standard — show shared custom input
+                        if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'flex';
+                        if (sharedCustomIncrementInput) sharedCustomIncrementInput.value = '';
+                    }
+                } catch (e) { console.warn('client increment change handler failed', e); }
+            });
+        }
+
+        // Client custom input is persisted when the user clicks the
+        // 'Save for Client View' button below. We removed the separate
+        // Apply button to simplify UX.
+
+        // Also keep coach preview controls in sync: initialize coach select/value
+        // from storage when the modal loads (if present). We'll set these up in
+        // the openTimeCirclesModal initializer below as well, but add a small
+        // defensive update here for any code paths that reuse this block.
+        try {
+            const coachIncrementSelect = document.getElementById('incrementSelect');
+            const coachCustomIncrementInput = document.getElementById('customIncrementInput');
+            if (coachIncrementSelect) {
+                const stored = readClientSettingsFromStorage();
+                if (stored && typeof stored.increment !== 'undefined') {
+                    const s = String(stored.increment);
+                    // If standard, select; otherwise set to 'custom' and prefill coach custom input
+                    if (STANDARD_INCREMENTS.includes(s)) {
+                        coachIncrementSelect.value = s;
+                        if (coachCustomIncrementInput) {
+                            const coachCustomContainer = document.getElementById('customIncrementContainer');
+                            if (coachCustomContainer) coachCustomContainer.style.display = 'none';
+                            coachCustomIncrementInput.value = '';
+                        }
+                    } else {
+                        try { coachIncrementSelect.value = 'custom'; } catch(e){}
+                        if (coachCustomIncrementInput) {
+                            coachCustomIncrementInput.value = s;
+                            const coachCustomContainer = document.getElementById('customIncrementContainer');
+                            if (coachCustomContainer) coachCustomContainer.style.display = 'flex';
+                        }
+                    }
+                }
+            }
+        } catch (e) { /* ignore */ }
+
+        // Wire the shared custom increment apply button so it updates the select,
+        // hides the custom UI, and writes to storage.
+        if (sharedApplyCustomIncrementBtn && sharedCustomIncrementInput && clientIncrementSelect) {
+            sharedApplyCustomIncrementBtn.onclick = () => {
+                try {
+                    const v = parseInt(sharedCustomIncrementInput.value, 10);
+                    if (isNaN(v) || v < 5) return alert('Enter a valid increment (5+ minutes).');
+                    // Do not add persistent options to the dropdown. Use the 'custom'
+                    // select value and prefill both client and shared custom inputs.
+                    try { clientIncrementSelect.value = 'custom'; } catch(e){}
+                    const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                    const clientCustomInput = document.getElementById('clientCustomIncrementInput');
+                    if (clientCustomContainer && clientCustomInput) {
+                        clientCustomContainer.style.display = 'inline-flex';
+                        clientCustomInput.value = String(v);
+                    }
+                    const payload = Object.assign({}, readClientSettingsFromStorage(), { block: Number(clientBlockSelect?.value || 1), increment: Number(v) });
+                    writeClientSettingsToStorage(payload);
+                    alert('Custom client increment applied.');
+                } catch (e) { console.error('apply custom increment failed', e); alert('Unable to apply custom increment.'); }
+            };
+        }
+
+        // Save button: persist current selections (including custom increment)
         if (saveClientBtn) {
             saveClientBtn.onclick = () => {
                 try {
-                    const block = document.getElementById('clientBlockSelect')?.value;
-                    const increment = document.getElementById('clientIncrementSelect')?.value;
-                    const payload = { block: Number(block || 1), increment: Number(increment || 30) };
-                    const key = `client_view_settings`;
-                    localStorage.setItem(key, JSON.stringify(payload));
+                    const block = Number(clientBlockSelect?.value || 1);
+                    let incrementVal = clientIncrementSelect?.value;
+                    if (!incrementVal || isNaN(Number(incrementVal))) {
+                        // If select is non-numeric (e.g., 'custom'), read the shared custom input
+                        incrementVal = Number(sharedCustomIncrementInput?.value || 30);
+                    } else {
+                        incrementVal = Number(incrementVal);
+                    }
+                    const payload = { block: Number(block), increment: Number(incrementVal) };
+                    writeClientSettingsToStorage(payload);
+                    // Also attempt to persist to the service settings when the modal
+                    // was opened for a specific service (e.g., via Edit Service -> Open Day Schedule).
+                    try {
+                        const svcId = Number(AUTO_OPEN_SERVICE) || null;
+                        if (svcId) {
+                            // Preview -> apply flow so server can create per-date freezes for
+                            // any dates with bookings. This prevents changes from affecting
+                            // already-booked days.
+                            (async function(){
+                                try {
+                                    const previewResp = await fetch(`/bus/${orgSlug}/services/${svcId}/preview_update/`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                                        body: JSON.stringify({ time_increment_minutes: Number(incrementVal) })
+                                    });
+                                    const previewJson = previewResp && previewResp.ok ? await previewResp.json().catch(()=>null) : null;
+                                    if (!previewJson || previewJson.status !== 'ok' || !previewJson.conflicts || Object.keys(previewJson.conflicts).length === 0) {
+                                        // No conflicts detected: apply immediately
+                                        await fetch(`/bus/${orgSlug}/services/${svcId}/apply_update/`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                                            body: JSON.stringify({ time_increment_minutes: Number(incrementVal), confirm: true })
+                                        }).then(r => r.json().catch(()=>null)).then(d => { /* no-op */ }).catch(()=>{});
+                                    } else {
+                                        // Conflicts exist (dates with bookings). Ask user to confirm applying
+                                        const days = Object.keys(previewJson.conflicts || {});
+                                        const msg = `This change would affect ${days.length} day(s) that already have bookings. Those days will be preserved (old settings will be frozen) if you continue. Apply changes?`;
+                                        if (confirm(msg)) {
+                                            await fetch(`/bus/${orgSlug}/services/${svcId}/apply_update/`, {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                                                body: JSON.stringify({ time_increment_minutes: Number(incrementVal), confirm: true })
+                                            }).then(r => r.json().catch(()=>null)).then(d => { /* no-op */ }).catch(()=>{});
+                                        } else {
+                                            // User cancelled: do not apply to server; client view persisted only
+                                        }
+                                    }
+                                } catch (err) {
+                                    console.error('preview/apply update failed', err);
+                                }
+                            })();
+                        }
+                    } catch (e) { /* ignore server persist errors */ }
                     alert('Client view settings saved — public page will use these when viewing a day.');
                 } catch (err) {
                     console.error('save client settings failed', err);
@@ -2530,6 +2783,78 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             };
         }
+
+        // Keep storage in sync if other tabs change it
+        window.addEventListener('storage', function(e){
+            if (e.key !== CLIENT_KEY) return;
+            try {
+                const parsed = readClientSettingsFromStorage();
+                if (!parsed) return;
+                const inc = parsed.increment;
+                if (typeof inc !== 'undefined') {
+                    const s = String(inc);
+                    // update client select
+                    if (clientIncrementSelect) {
+                        if (STANDARD_INCREMENTS.includes(s)) {
+                            clientIncrementSelect.value = s;
+                            if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'none';
+                        } else {
+                            // ensure option exists
+                            // If it's a known standard increment, set the select to it.
+                            // Otherwise set select to 'custom' and show the client custom input.
+                            if (STANDARD_INCREMENTS.includes(s)) {
+                                clientIncrementSelect.value = s;
+                                if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'none';
+                            } else {
+                                try { clientIncrementSelect.value = 'custom'; } catch(e){}
+                                if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
+                                    sharedCustomIncrementContainer.style.display = 'flex';
+                                    sharedCustomIncrementInput.value = String(s);
+                                }
+                                const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                                const clientCustomInput = document.getElementById('clientCustomIncrementInput');
+                                if (clientCustomContainer && clientCustomInput) {
+                                    clientCustomContainer.style.display = 'inline-flex';
+                                    clientCustomInput.value = String(s);
+                                }
+                            }
+                            if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
+                                sharedCustomIncrementContainer.style.display = 'flex';
+                                sharedCustomIncrementInput.value = String(s);
+                            }
+                        }
+                    }
+
+                    // update coach select and custom input if present
+                    try {
+                        const coachIncrementSelect = document.getElementById('incrementSelect');
+                        const coachCustomIncrementInput = document.getElementById('customIncrementInput');
+                        const coachCustomIncrementContainer = document.getElementById('customIncrementContainer');
+                        if (coachIncrementSelect) {
+                            if (STANDARD_INCREMENTS.includes(s)) {
+                                coachIncrementSelect.value = s;
+                                if (coachCustomIncrementContainer) coachCustomIncrementContainer.style.display = 'none';
+                            } else {
+                                // Do not append a persistent option for non-standard increments.
+                                // Select the 'custom' bucket and prefill the coach custom input.
+                                try { coachIncrementSelect.value = 'custom'; } catch (e) {}
+                                if (coachCustomIncrementContainer && coachCustomIncrementInput) {
+                                    coachCustomIncrementContainer.style.display = 'flex';
+                                    coachCustomIncrementInput.value = String(s);
+                                }
+                            }
+                        }
+                    } catch (ee) { /* ignore coach update errors */ }
+                    // update client custom input if present
+                    try {
+                        const clientCustomInput = document.getElementById('clientCustomIncrementInput');
+                        const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                        if (clientCustomInput) clientCustomInput.value = String(s);
+                        if (clientCustomContainer) clientCustomContainer.style.display = STANDARD_INCREMENTS.includes(s) ? 'none' : 'inline-flex';
+                    } catch (ee) { /* ignore */ }
+                }
+            } catch (err) { /* ignore */ }
+        });
     } catch (e) { console.warn('client settings save wiring failed', e); }
 
     // Ensure every day-number has a click handler that opens the proper modal
@@ -2951,6 +3276,103 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Call after calendar.render()
+    // If the edit_service page requested opening the Day Schedule modal for a service,
+    // compute the next available date (based on the service's weekly_map) and open it.
+    (function autoOpenDaySchedule(){
+        try{
+            // Prefer localStorage keys for a clean redirect; fall back to query params
+            let autoService = null, autoDate = null;
+            try {
+                const lsSvc = localStorage.getItem('cc_auto_open_service');
+                const lsDate = localStorage.getItem('cc_auto_open_date');
+                if (lsSvc) {
+                    autoService = lsSvc;
+                    autoDate = lsDate || "";
+                    // clear keys so this only runs once
+                    try { localStorage.removeItem('cc_auto_open_service'); } catch(e){}
+                    try { localStorage.removeItem('cc_auto_open_date'); } catch(e){}
+                }
+            } catch (e) {
+                // localStorage may be unavailable; ignore
+            }
+            if (!autoService) {
+                if (AUTO_OPEN_SERVICE && AUTO_OPEN_DATE) {
+                    autoService = AUTO_OPEN_SERVICE;
+                    autoDate = AUTO_OPEN_DATE;
+                }
+            }
+            if (!autoService || !autoDate) return;
+
+            // Find the service by id (autoService may be string)
+            const svcId = String(autoService);
+            const svc = SERVICES.find(s => String(s.id) === svcId);
+            if (!svc) return;
+
+            // helper: format Date to YYYY-MM-DD
+            function formatYMD(d){
+                const y = d.getFullYear();
+                const m = String(d.getMonth()+1).padStart(2,'0');
+                const dd = String(d.getDate()).padStart(2,'0');
+                return `${y}-${m}-${dd}`;
+            }
+
+            // parse autoDate as local date
+            const parts = (autoDate || '').split('-');
+            let startDate = null;
+            if (parts.length === 3){
+                startDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            } else {
+                startDate = new Date();
+            }
+
+            // weekly_map expected: array length 7, each item is array of ranges like ['09:00-12:00']
+            const weekly = Array.isArray(svc.weekly_map) ? svc.weekly_map : [[],[],[],[],[],[],[]];
+
+            // scan up to 365 days forward for a weekday that has availability
+            let foundDate = null;
+            for (let i=0;i<365;i++){
+                const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+                const dow = d.getDay(); // 0=Sunday..6=Saturday
+                const ranges = weekly[dow] || [];
+                if (Array.isArray(ranges) && ranges.length > 0){
+                    foundDate = d;
+                    break;
+                }
+            }
+
+            if (!foundDate) {
+                // no weekly availability; fallback to the provided date
+                try { foundDate = new Date(startDate); } catch(e){ foundDate = new Date(); }
+            }
+
+            // Build ranges object for the modal: convert 'HH:MM-HH:MM' -> {start, end}
+            const dow = foundDate.getDay();
+            const rawRanges = (weekly[dow] && Array.isArray(weekly[dow])) ? weekly[dow] : [];
+            const modalRanges = rawRanges.map(r => {
+                const p = (r || '').split('-');
+                return { start: (p[0]||'09:00').trim(), end: (p[1]||'17:00').trim() };
+            });
+
+            // Determine client increment (use time_increment_minutes unless use_fixed_increment true)
+            const increment = (!svc.use_fixed_increment && Number(svc.time_increment_minutes)) ? Number(svc.time_increment_minutes) : Number(svc.time_increment_minutes) || 30;
+
+            // Delay opening slightly to ensure calendar cells & modal DOM exist
+            setTimeout(() => {
+                try{
+                    const dateStr = formatYMD(foundDate);
+                    // openTimeCirclesModal used for Day Schedule
+                    if (typeof openTimeCirclesModal === 'function'){
+                        openTimeCirclesModal(dateStr, increment, 1, modalRanges);
+                    } else {
+                        // fallback: highlight the day cell
+                        const cell = document.querySelector(`.fc-daygrid-day[data-date="${dateStr}"] .fc-daygrid-day-number`);
+                        if (cell) cell.classList.add('selected');
+                    }
+                } catch (e){ console.warn('autoOpenDaySchedule failed', e); }
+            }, 300);
+
+        } catch (e) { /* ignore */ }
+    })();
     markPastDaysImmediately();
 
     // Render a table of per-date overrides (available/unavailable) based on calendar background events
@@ -3683,10 +4105,22 @@ document.addEventListener('DOMContentLoaded', function() {
             };
 
             coachIncrementSelect.onchange = () => {
-                if (coachIncrementSelect.value === "custom") coachCustomIncrementContainer.style.display = "flex";
-                else {
+                if (coachIncrementSelect.value === "custom") {
+                    coachCustomIncrementContainer.style.display = "flex";
+                } else {
                     coachCustomIncrementContainer.style.display = "none";
                     currentIncrement = parseInt(coachIncrementSelect.value);
+                    // Persist coach-chosen increment into client_view_settings so other pages sync
+                    try {
+                        const key = 'client_view_settings';
+                        const raw = localStorage.getItem(key) || '{}';
+                        let parsed = {};
+                        try { parsed = JSON.parse(raw); } catch(_) { parsed = {}; }
+                        parsed.increment = Number(coachIncrementSelect.value);
+                        parsed.block = parsed.block || 1;
+                        localStorage.setItem(key, JSON.stringify(parsed));
+                        try { window.dispatchEvent(new Event('storage')); } catch(e){}
+                    } catch (e) { /* ignore storage errors */ }
                     renderGrid(currentBlockSize);
                 }
             };
@@ -3695,6 +4129,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (isNaN(val) || val < 5) return alert("Enter valid increment 5+");
                 coachCustomIncrementContainer.style.display = "none";
                 currentIncrement = val;
+                // Persist custom value to client_view_settings so other pages sync
+                try {
+                    const key = 'client_view_settings';
+                    const raw = localStorage.getItem(key) || '{}';
+                    let parsed = {};
+                    try { parsed = JSON.parse(raw); } catch(_) { parsed = {}; }
+                    parsed.increment = Number(val);
+                    parsed.block = parsed.block || 1;
+                    localStorage.setItem(key, JSON.stringify(parsed));
+                    try { window.dispatchEvent(new Event('storage')); } catch(e){}
+                } catch (e) { /* ignore */ }
                 renderGrid(currentBlockSize);
             };
 
@@ -3804,6 +4249,92 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let currentBlockSize = hourBlockSize;
         let currentIncrement = increment;
+
+        // When coach changes preview increment or applies a custom increment,
+        // update the visible time circles immediately so the modal reflects
+        // the current preview settings.
+        try {
+            if (coachIncrementSelect) {
+                coachIncrementSelect.addEventListener('change', function(){
+                    try {
+                        const val = coachIncrementSelect.value;
+                        if (STANDARD_INCREMENTS.includes(val)) {
+                            currentIncrement = Number(val);
+                            if (coachCustomIncrementContainer) coachCustomIncrementContainer.style.display = 'none';
+                        } else if (val === 'custom') {
+                            if (coachCustomIncrementContainer) coachCustomIncrementContainer.style.display = 'flex';
+                            const v = parseInt(coachCustomIncrementInput?.value || 0, 10);
+                            if (!isNaN(v) && v > 0) currentIncrement = v;
+                        }
+                        try { renderGrid(currentBlockSize); } catch (e) { /* ignore render errors */ }
+                    } catch (e) { /* ignore */ }
+                });
+            }
+
+            if (coachApplyCustomIncrementBtn) {
+                coachApplyCustomIncrementBtn.onclick = () => {
+                    try {
+                        const v = parseInt(coachCustomIncrementInput?.value || '', 10);
+                        if (isNaN(v) || v < 5) return alert('Enter a valid increment (5+ minutes).');
+                        currentIncrement = v;
+                        // Persist coach preview to client view storage so other UI can reflect it
+                        try {
+                            const payload = Object.assign({}, readClientSettingsFromStorage(), { block: Number(coachHourBlockSelect?.value || currentBlockSize), increment: Number(v) });
+                            writeClientSettingsToStorage(payload);
+                        } catch (e) { /* ignore storage write failures */ }
+                        try { renderGrid(currentBlockSize); } catch (e) { /* ignore */ }
+                    } catch (e) { console.error('coach apply custom increment failed', e); alert('Unable to apply custom increment.'); }
+                };
+            }
+        } catch (e) { /* defensive */ }
+
+        // Initialize client/coach increment selects from shared storage so the
+        // modal reflects any change made elsewhere (edit_service or another tab).
+        try {
+            const storedRaw = localStorage.getItem('client_view_settings');
+            if (storedRaw) {
+                const parsedStored = JSON.parse(storedRaw);
+                if (parsedStored && typeof parsedStored.increment === 'number') {
+                    currentIncrement = parsedStored.increment;
+                    // Update client select if present. Do not add persistent options;
+                    // instead switch to 'custom' and prefill custom inputs when needed.
+                    const clientSelect = document.getElementById('clientIncrementSelect');
+                    if (clientSelect) {
+                        const s = String(parsedStored.increment);
+                        if (STANDARD_INCREMENTS.includes(s)) {
+                            clientSelect.value = s;
+                        } else {
+                            try { clientSelect.value = 'custom'; } catch (e) {}
+                            const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
+                            const clientCustomInput = document.getElementById('clientCustomIncrementInput');
+                            if (clientCustomContainer && clientCustomInput) {
+                                clientCustomContainer.style.display = 'inline-flex';
+                                clientCustomInput.value = String(s);
+                            }
+                            if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
+                                sharedCustomIncrementContainer.style.display = 'flex';
+                                sharedCustomIncrementInput.value = String(s);
+                            }
+                        }
+                    }
+                    // Update coach select if present
+                    const coachSelect = document.getElementById('incrementSelect');
+                    const coachCustomInput = document.getElementById('customIncrementInput');
+                    const coachCustomContainer = document.getElementById('customIncrementContainer');
+                    if (coachSelect) {
+                        const s = String(parsedStored.increment);
+                        if (STANDARD_INCREMENTS.includes(s)) {
+                            coachSelect.value = s;
+                            if (coachCustomContainer) coachCustomContainer.style.display = 'none';
+                        } else {
+                            try { coachSelect.value = 'custom'; } catch (e) {}
+                            if (coachCustomInput) coachCustomInput.value = String(parsedStored.increment);
+                            if (coachCustomContainer) coachCustomContainer.style.display = 'flex';
+                        }
+                    }
+                }
+            }
+        } catch (e) { /* ignore parse errors */ }
 
         // Fetch bookings for this date
         let bookingsForDate = [];
@@ -3975,7 +4506,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         const circle = document.createElement('div');
                         const slotDate = parseYMD(date);
                         slotDate.setHours(hour, min, 0, 0);
-                        const slotEndDate = new Date(slotDate.getTime() + (increment * 60000));
+                        const slotEndDate = new Date(slotDate.getTime() + (currentIncrement * 60000));
                         const now = new Date();
 
                         // Check if this slot overlaps with any booking
