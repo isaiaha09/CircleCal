@@ -1031,22 +1031,62 @@ def service_availability(request, org_slug, service_slug):
     if availability_override_windows:
         base_windows = [(ov_start.astimezone(org_tz), ov_end.astimezone(org_tz)) for ov_start, ov_end in availability_override_windows]
     else:
+        # First, allow a frozen per-date weekly window snapshot to override
+        # current weekly availability. This preserves the exact windows that were
+        # in effect when a ServiceSettingFreeze was created for a date with
+        # existing bookings.
         weekday = original_range_start.weekday()
-        # Prefer service-specific weekly windows if defined
-        svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
-        if svc_rows.exists():
+        freeze = None
+        try:
+            from bookings.models import ServiceSettingFreeze
+            freeze = ServiceSettingFreeze.objects.filter(service=service, date=original_range_start.date()).first()
+            if freeze:
+                try:
+                    # If there are no bookings for that frozen date, ignore the freeze
+                    try:
+                        org_tz_check = org_tz
+                    except Exception:
+                        org_tz_check = timezone.get_current_timezone()
+                    day_start_chk = datetime(original_range_start.year, original_range_start.month, original_range_start.day, 0, 0, 0)
+                    if day_start_chk.tzinfo is None:
+                        day_start_chk = make_aware(day_start_chk, org_tz_check)
+                    day_end_chk = day_start_chk + timedelta(days=1)
+                    has_bookings_chk = Booking.objects.filter(service=service, organization=org, start__gte=day_start_chk, start__lt=day_end_chk).exists()
+                    if not has_bookings_chk:
+                        freeze = None
+                except Exception:
+                    # on error, be conservative and keep freeze
+                    pass
+        except Exception:
+            freeze = None
+
+        if freeze and isinstance(freeze.frozen_settings, dict) and freeze.frozen_settings.get('weekly_windows'):
             base_windows = []
-            for w in svc_rows.order_by('start_time'):
-                w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
-                w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
-                base_windows.append((w_start, w_end))
+            for w in freeze.frozen_settings.get('weekly_windows', []):
+                try:
+                    sh, sm = (int(x) for x in (w.get('start', '00:00').split(':')))
+                    eh, em = (int(x) for x in (w.get('end', '00:00').split(':')))
+                    w_start = original_range_start.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                    w_end = original_range_start.replace(hour=eh, minute=em, second=0, microsecond=0)
+                    base_windows.append((w_start, w_end))
+                except Exception:
+                    continue
         else:
-            weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
-            base_windows = []
-            for w in weekly_rows:
-                w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
-                w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
-                base_windows.append((w_start, w_end))
+            # Prefer service-specific weekly windows if defined
+            svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+            if svc_rows.exists():
+                base_windows = []
+                for w in svc_rows.order_by('start_time'):
+                    w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                    w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                    base_windows.append((w_start, w_end))
+            else:
+                weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
+                base_windows = []
+                for w in weekly_rows:
+                    w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                    w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                    base_windows.append((w_start, w_end))
 
     # Determine slot increment: front-end may pass `?inc=` (minutes) to control
     # the UI tick spacing. If provided and valid, use it for slot iteration;
@@ -1084,6 +1124,21 @@ def service_availability(request, org_slug, service_slug):
         try:
             from bookings.models import ServiceSettingFreeze
             freeze = ServiceSettingFreeze.objects.filter(service=service, date=win_start.date()).first()
+            if freeze:
+                try:
+                    try:
+                        org_tz_check = org_tz
+                    except Exception:
+                        org_tz_check = timezone.get_current_timezone()
+                    day_start_chk = datetime(win_start.year, win_start.month, win_start.day, 0, 0, 0)
+                    if day_start_chk.tzinfo is None:
+                        day_start_chk = make_aware(day_start_chk, org_tz_check)
+                    day_end_chk = day_start_chk + timedelta(days=1)
+                    has_bookings_chk = Booking.objects.filter(service=service, organization=org, start__gte=day_start_chk, start__lt=day_end_chk).exists()
+                    if not has_bookings_chk:
+                        freeze = None
+                except Exception:
+                    pass
         except Exception:
             freeze = None
 
@@ -1185,7 +1240,14 @@ def service_availability(request, org_slug, service_slug):
                             cand_end_plus = slot_end + timedelta(minutes=(buffer_after.total_seconds() / 60))
                         except Exception:
                             cand_end_plus = slot_end
-                        if cand_end_plus > seg_end:
+                        # Allow the candidate if it ends exactly at the segment/window end
+                        # (owners should not need to enable `allow_ends_after_availability` when
+                        #  the appointment finishes exactly at the availability end).
+                        try:
+                            ends_at_window = (slot_end == seg_end)
+                        except Exception:
+                            ends_at_window = False
+                        if not ends_at_window and cand_end_plus > seg_end:
                             # This candidate would violate the post-buffer before the next booking; skip it
                             slot_start += slot_increment
                             continue
@@ -1204,16 +1266,30 @@ def service_availability(request, org_slug, service_slug):
                     slot_start += slot_increment
                     continue
 
-                available_slots.append({
+                # Determine whether to mark buffer violations. Only expose this
+                # information to authenticated org members (owners/admins/managers).
+                try:
+                    is_org_member = False
+                    if getattr(request, 'user', None) and request.user.is_authenticated:
+                        from accounts.models import Membership
+                        is_org_member = Membership.objects.filter(user=request.user, organization=org, is_active=True, role__in=['owner','admin','manager']).exists()
+                except Exception:
+                    is_org_member = False
+
+                slot_info = {
                     "start": slot_start.isoformat(),
                     "end": slot_end.isoformat(),
-                    # mark whether this candidate would violate the post-buffer
-                    # rules (useful for client UI to show a heads-up)
-                    "violates_buffer": (slot_end + buffer_after > seg_end),
-                    # Expose whether this slot was generated using a per-date freeze
                     "used_freeze": bool(freeze),
                     "freeze_date": (freeze.date.isoformat() if freeze and getattr(freeze, 'date', None) else None),
-                })
+                }
+
+                if is_org_member:
+                    try:
+                        slot_info['violates_buffer'] = (slot_end + buffer_after > seg_end)
+                    except Exception:
+                        slot_info['violates_buffer'] = False
+
+                available_slots.append(slot_info)
 
                 slot_start += slot_increment
 
@@ -1252,6 +1328,27 @@ def service_effective_settings(request, org_slug, service_slug):
     try:
         from bookings.models import ServiceSettingFreeze
         freeze = ServiceSettingFreeze.objects.filter(service=service, date=target_date).first()
+        # If a freeze exists but there are no bookings on that date anymore
+        # (for example bookings were deleted/cancelled), ignore the freeze so
+        # the date becomes malleable again.
+        if freeze:
+            try:
+                # Determine org-local day range for the target_date
+                try:
+                    org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+                except Exception:
+                    org_tz = timezone.get_current_timezone()
+                day_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0)
+                if day_start.tzinfo is None:
+                    day_start = make_aware(day_start, org_tz)
+                day_end = day_start + timedelta(days=1)
+                # If there are no bookings for this service in that day window, ignore the freeze
+                has_bookings = Booking.objects.filter(service=service, organization=org, start__gte=day_start, start__lt=day_end).exists()
+                if not has_bookings:
+                    freeze = None
+            except Exception:
+                # If anything goes wrong checking bookings, fall back to honoring the freeze
+                pass
     except Exception:
         freeze = None
 

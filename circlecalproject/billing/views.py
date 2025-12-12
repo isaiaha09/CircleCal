@@ -20,6 +20,37 @@ from django.db.models import Q
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
+def stripe_invoice_upcoming(**kwargs):
+    """Compatibility wrapper for Stripe's upcoming invoice preview.
+
+    Older stripe-python versions exposed this as `Invoice.upcoming(...)`;
+    newer generated clients (v14+) provide `Invoice.create_preview(...)`.
+    This helper tries `upcoming` first, then falls back to `create_preview`.
+    """
+    inv_fn = getattr(stripe.Invoice, 'upcoming', None)
+    if callable(inv_fn):
+        return inv_fn(**kwargs)
+    # Fallback for newer client naming
+    inv_fn = getattr(stripe.Invoice, 'create_preview', None)
+    if callable(inv_fn):
+        # Newer stripe client expects some different parameter names
+        # Translate `subscription_items` -> `subscription_details` which
+        # the newer `create_preview` endpoint accepts.
+        call_kwargs = dict(kwargs)
+        if 'subscription_items' in call_kwargs and 'subscription_details' not in call_kwargs:
+            # Newer API expects a structured `subscription_details` object.
+            # If caller passed a list (old `subscription_items`), nest it under
+            # `items` to avoid creating `subscription_details[0]` style params.
+            items = call_kwargs.pop('subscription_items')
+            # If the caller already passed items as a dict-like mapping, keep it
+            if isinstance(items, dict):
+                call_kwargs['subscription_details'] = items
+            else:
+                call_kwargs['subscription_details'] = {'items': items}
+        return inv_fn(**call_kwargs)
+    raise AttributeError('stripe.Invoice has neither "upcoming" nor "create_preview"')
+
+
 def _require_org_owner_or_admin(request, org):
     if not user_has_role(request.user, org, ["owner", "admin"]):
         return HttpResponseForbidden("Only owners/admins can manage billing.")
@@ -611,6 +642,43 @@ def manage_billing(request, org_slug):
         # If the model/table is not present yet (before migrations), skip quietly
         pass
 
+    # If a local applied discount exists and we have an upcoming invoice,
+    # add a pseudo-invoice entry so the Invoices section clearly shows
+    # that a discount will be applied on the next billing date.
+    try:
+        # `applied_discount` is computed later; safe-guard by reading it from locals
+        _ad = locals().get('applied_discount')
+        _ui = locals().get('upcoming_invoice')
+        if _ad and _ui:
+            orig = float(_ui.get('amount_due_dollars') or 0.0)
+            if _ad.get('percent_off') is not None:
+                discount_amt = orig * (float(_ad.get('percent_off')) / 100.0)
+            else:
+                discount_amt = float(( _ad.get('amount_off_cents') or 0 ) / 100.0)
+            adjusted = max(0.0, orig - discount_amt)
+
+            created_dt = _ui.get('billing_date') if isinstance(_ui.get('billing_date'), type(timezone.now())) else timezone.now()
+
+            invoices.append({
+                'created': created_dt,
+                'amount_display_dollars': float(adjusted),
+                'status': 'paid',
+                'hosted_invoice_url': None,
+                'card_brand': None,
+                'card_last4': None,
+                'raw': {
+                    'pseudo': True,
+                    'type': 'applied_discount',
+                    'original_amount': orig,
+                    'discount_amount': discount_amt,
+                    'adjusted_amount': adjusted,
+                    'discount': _ad,
+                    'billing_date': _ui.get('billing_date'),
+                },
+            })
+    except Exception:
+        pass
+
     # --- Annotate invoices with hidden metadata so client can toggle archived rows ---
     try:
         from billing.models import InvoiceMeta
@@ -740,10 +808,10 @@ def manage_billing(request, org_slug):
     try:
         if subscription and subscription.stripe_subscription_id and org.stripe_customer_id and show_upcoming_invoice:
             try:
-                ui = stripe.Invoice.upcoming(customer=org.stripe_customer_id, subscription=subscription.stripe_subscription_id)
+                ui = stripe_invoice_upcoming(customer=org.stripe_customer_id, subscription=subscription.stripe_subscription_id)
             except Exception:
                 try:
-                    ui = stripe.Invoice.upcoming(customer=org.stripe_customer_id)
+                    ui = stripe_invoice_upcoming(customer=org.stripe_customer_id)
                     if ui and ui.get('subscription') and ui.get('subscription') != subscription.stripe_subscription_id:
                         ui = None
                 except Exception:
@@ -801,6 +869,15 @@ def manage_billing(request, org_slug):
                         'billing_date': billing_date,
                         'amount_due_dollars': amount_due,
                     }
+
+                # If we still don't have a billing date, prefer the local
+                # subscription.current_period_end (if available) so the UI can
+                # show a next-charge date even when Stripe preview omits it.
+                if upcoming_invoice and not upcoming_invoice.get('billing_date'):
+                    if subscription and getattr(subscription, 'current_period_end', None):
+                        upcoming_invoice['billing_date'] = subscription.current_period_end
+                    elif billing_date:
+                        upcoming_invoice['billing_date'] = billing_date
             except Exception:
                 upcoming_invoice = None
         else:
@@ -827,6 +904,7 @@ def manage_billing(request, org_slug):
                 }
     except Exception:
         applied_discount = None
+    
 
     # Determine whether a scheduled change is a downgrade (new plan price < current plan price)
     scheduled_change_is_downgrade = None
@@ -1378,28 +1456,28 @@ def preview_plan_change(request, org_slug, plan_id):
                 items = stripe_sub.get('items', {}).get('data', [])
                 if items:
                     sub_item_id = items[0].get('id')
-                    inv = stripe.Invoice.upcoming(
+                    inv = stripe_invoice_upcoming(
                         customer=org.stripe_customer_id,
                         subscription=sub.stripe_subscription_id,
                         subscription_items=[{"id": sub_item_id, "price": plan.stripe_price_id}],
                     )
                 else:
                     # Fallback: no items found, ask Stripe to compute based on new item
-                    inv = stripe.Invoice.upcoming(
+                    inv = stripe_invoice_upcoming(
                         customer=org.stripe_customer_id,
                         subscription=sub.stripe_subscription_id,
                         subscription_items=[{"price": plan.stripe_price_id}],
                     )
             except Exception:
                 # If retrieval fails, fall back to the simpler upcoming call
-                inv = stripe.Invoice.upcoming(
+                inv = stripe_invoice_upcoming(
                     customer=org.stripe_customer_id,
                     subscription=sub.stripe_subscription_id,
                     subscription_items=[{"price": plan.stripe_price_id}],
                 )
         else:
             # No existing Stripe subscription: simulate first invoice
-            inv = stripe.Invoice.upcoming(
+            inv = stripe_invoice_upcoming(
                 customer=org.stripe_customer_id,
                 subscription_items=[{"price": plan.stripe_price_id}],
             )
@@ -1672,7 +1750,7 @@ def change_subscription_plan(request, org_slug, plan_id):
         # Preview the upcoming invoice to obtain proration lines and amounts
         try:
             sub_item_id = stripe_sub_obj.get('items', {}).get('data', [])[0].get('id') if stripe_sub_obj and stripe_sub_obj.get('items', {}).get('data') else None
-            preview = stripe.Invoice.upcoming(
+            preview = stripe_invoice_upcoming(
                 customer=org.stripe_customer_id,
                 subscription=sub.stripe_subscription_id,
                 subscription_items=[{"id": sub_item_id, "price": new_plan.stripe_price_id}] if sub_item_id else [{"price": new_plan.stripe_price_id}],

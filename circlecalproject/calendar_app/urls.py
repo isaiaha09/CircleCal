@@ -49,6 +49,9 @@ urlpatterns = [
     # Bookings
     path('bus/<slug:org_slug>/bookings/', views.bookings_list, name="bookings_list"),
     path('bus/<slug:org_slug>/bookings/<int:booking_id>/delete/', views.delete_booking, name="delete_booking"),
+    # Audit endpoints for owner-facing audit snippets
+    path('bus/<slug:org_slug>/bookings/audit/', views.bookings_audit_list, name='bookings_audit_list'),
+    path('bus/<slug:org_slug>/bookings/audit/export/', views.bookings_audit_export, name='bookings_audit_export'),
 
     # Dashboard (org-specific)
     path('bus/<slug:org_slug>/dashboard/', views.dashboard, name="dashboard"),

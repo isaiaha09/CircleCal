@@ -113,6 +113,49 @@
       {% endif %}
     </tbody>
   </table>
+  
+  <!-- Audit: Cancelled / Deleted Bookings -->
+  <div style="margin-top:28px;">
+    <h2 style="font-size:1.25rem; margin-bottom:8px;">Recently Cancelled / Deleted</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+      <label style="font-size:14px;"><input type="checkbox" id="auditSelectAll"> Select all</label>
+      <div>
+        <button class="btn-sm btn-view" id="exportAuditBtn">Export Selected</button>
+      </div>
+    </div>
+    <table style="width:100%; border-collapse:collapse; background:white;">
+      <thead>
+        <tr style="background:#f8f9fa;">
+          <th style="padding:8px; text-align:left; font-weight:600; width:36px;"><!-- checkbox col --></th>
+          <th style="padding:8px; text-align:left; font-weight:600;">Event</th>
+          <th style="padding:8px; text-align:left; font-weight:600;">Booking ID</th>
+          <th style="padding:8px; text-align:left; font-weight:600;">Service</th>
+          <th style="padding:8px; text-align:left; font-weight:600;">Start</th>
+          <th style="padding:8px; text-align:left; font-weight:600;">Client</th>
+          <th style="padding:8px; text-align:left; font-weight:600;">When</th>
+          <th style="padding:8px; text-align:left; font-weight:600;">Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if audit_entries %}
+          {% for a in audit_entries %}
+            <tr>
+              <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="{{ a.id }}"></td>
+              <td style="padding:8px;">{{ a.get_event_type_display }}</td>
+              <td style="padding:8px;">{{ a.booking_id|default:'-' }}</td>
+              <td style="padding:8px;">{{ a.service.name|default:'-' }}</td>
+              <td style="padding:8px;">{% if a.start %}{{ a.start|timezone:organization.timezone|date:'M d, Y g:i A' }}{% else %}-{% endif %}</td>
+              <td style="padding:8px;">{{ a.client_name|default:'-' }}<div style="font-size:12px; color:#666">{{ a.client_email }}</div></td>
+              <td style="padding:8px;">{{ a.created_at|timezone:organization.timezone|date:'M d, Y g:i A' }}</td>
+              <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit({{ a.id }})" data-snapshot='{{ a.booking_snapshot|escapejs }}'>View</button></td>
+            </tr>
+            {% endfor %}
+        {% else %}
+          <tr><td colspan="7" style="padding:16px; text-align:center; color:#6c757d;">No recent audited deletions or cancellations.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Booking Detail Modal -->
@@ -159,9 +202,33 @@
   </div>
 </div>
 
+<!-- Audit Modal -->
+<div id="auditModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000; padding: 20px;">
+  <div style="background: white; padding: 24px; border-radius: 12px; max-width: 700px; width: 100%; position: relative;">
+    <button onclick="closeAuditModal()" style="position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">×</button>
+    <h2 style="margin-bottom:12px;">Audit Details</h2>
+    <pre id="auditContent" style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:8px; max-height:60vh; overflow:auto;"></pre>
+    <div style="display:flex; justify-content:flex-end; margin-top:12px;"><button onclick="closeAuditModal()" style="padding:8px 14px; background:#6c757d; color:white; border:none; border-radius:6px;">Close</button></div>
+  </div>
+</div>
+
 <script>
 const orgSlug = "{{ organization.slug }}";
 const csrftoken = '{{ csrf_token }}';
+
+function viewAudit(id) {
+  const btn = event.currentTarget;
+  if (!btn) return;
+  const raw = btn.getAttribute('data-snapshot');
+  try {
+    const parsed = JSON.parse(raw);
+    document.getElementById('auditContent').textContent = JSON.stringify(parsed, null, 2);
+  } catch (e) {
+    document.getElementById('auditContent').textContent = raw || 'No detail available';
+  }
+  document.getElementById('auditModal').style.display = 'flex';
+}
+function closeAuditModal(){ document.getElementById('auditModal').style.display = 'none'; }
 
 // Filter functionality
 document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -263,6 +330,39 @@ async function deleteBooking(id, date, clientName) {
     console.error('Error:', error);
     showToast('error', 'Error deleting booking');
   }
+}
+
+// Audit select-all and export
+const auditSelectAll = document.getElementById('auditSelectAll');
+if (auditSelectAll) {
+  auditSelectAll.addEventListener('change', (e) => {
+    document.querySelectorAll('.auditRowCb').forEach(cb => cb.checked = e.target.checked);
+  });
+}
+
+const exportAuditBtn = document.getElementById('exportAuditBtn');
+if (exportAuditBtn) {
+  exportAuditBtn.addEventListener('click', async () => {
+    const ids = Array.from(document.querySelectorAll('.auditRowCb:checked')).map(cb => Number(cb.value));
+    if (!ids.length) { alert('No audit rows selected'); return; }
+    try {
+      const resp = await fetch(`/bus/${orgSlug}/bookings/audit/export/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+        body: JSON.stringify({ ids })
+      });
+      if (!resp.ok) { alert('Export failed'); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'audit_export.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); alert('Export error'); }
+  });
 }
 </script>
 {% endblock %}

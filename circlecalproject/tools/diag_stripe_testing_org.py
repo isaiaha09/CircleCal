@@ -39,7 +39,12 @@ else:
 
 print('\n--- Upcoming invoice (Stripe.Invoice.upcoming) ---')
 try:
-    ui = stripe.Invoice.upcoming(customer=org.stripe_customer_id)
+    # Newer stripe client libs use `create_preview` instead of `upcoming`
+    ui = getattr(stripe.Invoice, 'upcoming', None)
+    if callable(ui):
+        ui = ui(customer=org.stripe_customer_id)
+    else:
+        ui = stripe.Invoice.create_preview(customer=org.stripe_customer_id)
     pp.pprint(ui)
 except Exception as e:
     print('Upcoming invoice error:', e)

@@ -5,20 +5,46 @@
 {% block content %}
 {% block extra_head %}
 <style>
-  .cc-page { max-width:78rem; margin:0 auto; padding:2.5rem 1.5rem; }
-  @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
-  .cc-form input[type="text"], .cc-form input[type="number"], .cc-form textarea, .cc-form select {
-    padding: 0.65rem 0.85rem;
+  /* Page-specific enhanced field styling (aligned with create service) */
+  .cc-field {
+    border: 1px solid #d1d5db; /* gray-300 */
+    background: #ffffff;
+    padding: 0.7rem 0.9rem;
     border-radius: 0.5rem;
-    border: 1px solid #d1d5db;
-    background: #fff;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
-    font-size: 0.95rem;
+    font-size: 0.97rem;
     width: 100%;
   }
-  .cc-form textarea { min-height: 5rem; }
-  .section-card { background:#fff; border:1px solid #e6edf3; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
+  .cc-field[disabled] { background:#f8fafc; opacity:.9; }
+  .cc-field:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 4px rgba(37,99,235,0.08); }
+  .cc-page { max-width:78rem; margin:0 auto; padding:2.5rem 1.5rem; }
+  @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
+  .section-card { background:#fff; border:1px solid #c0c7d1; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
   .section-title { font-size:1rem; font-weight:600; margin-bottom:0.5rem; }
+  /* Inputs inside section cards use a unified light border so areas are obvious */
+  .section-card input[type="text"],
+  .section-card input[type="number"],
+  .section-card input[type="email"],
+  .section-card textarea,
+  .section-card select,
+  .section-card .cc-field,
+  .section-card .mt-1.block {
+    border: 1px solid #c0c7d1; /* same as card border (darker) */
+    background: #ffffff;
+    padding: 0.6rem 0.8rem;
+    border-radius: 0.5rem;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .section-card input[disabled], .section-card textarea[disabled] { background:#f8fafc; opacity:.95; }
+  .section-card input:focus, .section-card textarea:focus, .section-card select:focus, .section-card .cc-field:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.06);
+  }
+  /* Availability disabled overlay */
+  .availability-disabled { position: relative; opacity: 0.8; }
+  .availability-disabled .availability-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center; border-radius:0.75rem; z-index:20; }
+  .availability-disabled .availability-overlay .msg { max-width:56rem; padding:1rem 1.5rem; text-align:center; color:#374151; }
 </style>
 {% endblock %}
 
@@ -29,8 +55,17 @@
       <div class="text-sm mt-1">Your changes were saved successfully.</div>
     </div>
   {% endif %}
-  <h1 class="text-2xl font-semibold mb-2">Edit Service</h1>
-  <p class="text-sm text-gray-500 mb-6">
+  <!-- Top action buttons: Cancel (left) and Save (right) -->
+  <div class="flex items-center justify-between mb-4">
+    <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
+    <div class="flex items-center">
+      <button type="button" class="svc-save-btn inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Save Changes</button>
+      <a id="svc-view-btn" data-saved="{{ request.GET.saved|yesno:'1,0' }}" href="{% url 'bookings:public_service_page' org.slug service.slug %}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-3 py-2 ml-3 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50 {% if not request.GET.saved %}opacity-50 cursor-not-allowed{% endif %}">View public page</a>
+    </div>
+  </div>
+
+  <h1 class="text-2xl font-semibold mb-2 text-center">Edit Service</h1>
+  <p class="text-sm text-gray-500 mb-6 text-center max-w-2xl mx-auto">
     Update your service details.
   </p>
 
@@ -57,6 +92,63 @@
   <form method="post" class="space-y-6 cc-form">
     {% csrf_token %}
 
+    <!-- Prominent active toggle: moved to the top for visibility -->
+    <div class="section-card mb-4" style="border:1px solid #2563eb;background:#f0f9ff;box-shadow:0 2px 6px rgba(37,99,235,0.06);">
+      <div class="flex items-center justify-between">
+        <div>
+          <label for="is_active" class="inline-flex items-center">
+            <input type="checkbox" name="is_active" id="is_active" {% if service.is_active %}checked{% endif %}
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if is_only_active_service %}opacity-60 cursor-not-allowed{% endif %}"
+                   {% if is_only_active_service %}disabled aria-disabled="true"{% endif %}>
+            <div class="ml-3">
+              <div class="text-lg font-semibold text-gray-800">Service is active</div>
+              <div class="text-sm text-gray-600">Visible on the public booking page</div>
+            </div>
+          </label>
+          {% if is_only_active_service %}
+            <p class="mt-2 text-sm text-gray-700">You currently have only one active service. To keep your public booking page available to clients, activate another service before disabling this one.</p>
+          {% endif %}
+        </div>
+        <div class="text-sm text-gray-700">
+          <span class="inline-flex items-center px-2 py-1 rounded bg-white text-gray-700">Important</span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    // Hours / minutes helper for buffer_after: keep hidden `buffer_after` in minutes in-sync
+    document.addEventListener('DOMContentLoaded', function(){
+      try{
+        const hidden = document.getElementById('buffer_hidden');
+        const h = document.getElementById('buffer_hours');
+        const m = document.getElementById('buffer_minutes');
+        if (!hidden || !h || !m) return;
+
+        function setFieldsFromHidden(){
+          const total = Number(hidden.value) || 0;
+          const hours = Math.floor(total / 60);
+          const mins = total % 60;
+          h.value = hours;
+          m.value = mins;
+        }
+
+        function updateHidden(){
+          const hours = Math.max(0, Number(h.value) || 0);
+          let mins = Math.max(0, Number(m.value) || 0);
+          if (mins > 59) mins = 59;
+          const total = (hours * 60) + mins;
+          hidden.value = total;
+        }
+
+        h.addEventListener('input', updateHidden);
+        m.addEventListener('input', updateHidden);
+
+        // initialize
+        setFieldsFromHidden();
+      } catch(e){ console.warn('buffer hours/min wiring failed', e); }
+    });
+    </script>
+
     {% if needs_migration %}
       <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
         <strong>Database migration required:</strong>
@@ -68,39 +160,35 @@
       <div class="section-title">Basic Info</div>
       <div class="mb-3">
         <label class="block text-sm font-medium text-gray-700">Name</label>
-        <input name="name" type="text" required value="{{ service.name }}">
+        <input name="name" type="text" required value="{{ service.name }}" class="cc-field mt-1 w-full">
       </div>
       <div class="mb-3">
         <label class="block text-sm font-medium text-gray-700">Slug (URL-friendly)</label>
-        <input type="text" value="{{ service.slug }}" disabled>
-        <p class="mt-1 text-xs text-gray-500">Slug cannot be changed to avoid breaking booking links</p>
+        {% if can_edit_slug %}
+          <input name="slug" type="text" value="{{ service.slug }}" class="cc-field mt-1 w-full">
+          <p class="mt-1 text-xs text-gray-500">You may change the URL slug while no bookings exist for this service. Once a booking exists, the slug becomes immutable to avoid breaking booking links.</p>
+        {% else %}
+          <input type="text" value="{{ service.slug }}" disabled class="cc-field mt-1 w-full">
+          <p class="mt-1 text-xs text-gray-500">Slug cannot be changed because this service already has bookings. To edit the slug, remove all bookings first.</p>
+        {% endif %}
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700">Description</label>
-        <textarea name="description" rows="4">{{ service.description }}</textarea>
+        <textarea name="description" rows="4" class="cc-field mt-1 w-full">{{ service.description }}</textarea>
       </div>
     </div>
 
     <!-- core timing controls are shown below in a grouped card -->
 
     <!-- Slot increment settings are configured in the Day Schedule modal (calendar). Removed from edit page to avoid duplication. -->
-    <!-- Per-service client slot settings -->
-    <div class="border rounded-lg p-4 mb-4">
+    <!-- Per-service slot settings (single, cleaned block) -->
+    <div class="section-card">
       <div class="grid grid-cols-1 gap-3">
         <div>
           <label class="block text-sm font-medium text-gray-700">Client slot increment (minutes)</label>
-          <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="{{ service.time_increment_minutes|default:30 }}" min="5"
-                 class="mt-1 block w-40 rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-          <p class="mt-1 text-xs text-gray-500">When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
+          <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="{{ service.time_increment_minutes|default:30 }}" min="5" class="cc-field mt-1 w-40">
+          <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
         </div>
-        <div style="margin-top:12px;">
-          <!-- Use JS to set localStorage for a clean redirect; fallback href includes params for non-JS users -->
-          <a href="{% url 'calendar_app:calendar' org.slug %}?open_day_schedule_for={{ service.id }}&open_day_schedule_date={% now "Y-m-d" %}"
-             onclick="try{ event.preventDefault(); localStorage.setItem('cc_auto_open_service', '{{ service.id }}'); localStorage.setItem('cc_auto_open_date', '{% now "Y-m-d" %}'); window.location.href='{% url 'calendar_app:calendar' org.slug %}'; }catch(e){}; return false;"
-             class="inline-flex items-center gap-2 px-3 py-1 rounded bg-indigo-600 text-white text-sm">Open Day Schedule</a>
-          <p class="mt-2 text-xs text-gray-500">Opens the Day Schedule modal so you can set slot increments and related settings for this service.</p>
-        </div>
-
         <div>
           <label class="inline-flex items-center">
             <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" {% if service.use_fixed_increment %}checked{% endif %}
@@ -148,6 +236,24 @@
               try { incInput.disabled = disabled; } catch(e){}
               incInput.classList.toggle('inc-disabled', disabled);
             }
+
+            // Propagate the effective client increment to localStorage so the public
+            // calendar reflects the change immediately. When fixed increments are
+            // enabled, use duration + buffer_after; otherwise use the visible input.
+            try {
+              const durationEl = document.querySelector('input[name="duration"]');
+              const bufferEl = document.querySelector('input[name="buffer_after"]');
+              const dur = durationEl ? Number(durationEl.value) : null;
+              const buf = bufferEl ? Number(bufferEl.value) : 0;
+              if (disabled) {
+                // fixed increment
+                if (dur != null && !isNaN(dur)) {
+                  setClientIncrementFromInput(Number(dur) + Number(buf));
+                }
+              } else {
+                if (incInput) setClientIncrementFromInput(Number(incInput.value) || 30);
+              }
+            } catch (e) { /* ignore */ }
           }
 
           // When increment input changes, ask to confirm and propagate to localStorage so modal reads it
@@ -183,7 +289,7 @@
                 if (!confirm(confirmMsg)) {
                   // revert
                   incInput.value = initialIncVal;
-                  return;
+                    const btns = Array.from(document.querySelectorAll('.svc-save-btn'));
                 }
                 // propagate to localStorage so calendar modal picks it up
                 setClientIncrementFromInput(newVal);
@@ -255,13 +361,52 @@
       })();
     </script>
 
+      <script>
+      // Hours / minutes helper for duration: keep hidden `duration` in minutes in-sync
+      document.addEventListener('DOMContentLoaded', function(){
+        try{
+          const hidden = document.getElementById('duration_hidden');
+          const h = document.getElementById('duration_hours');
+          const m = document.getElementById('duration_minutes');
+          if (!hidden || !h || !m) return;
+
+          function setFieldsFromHidden(){
+            const total = Number(hidden.value) || 0;
+            const hours = Math.floor(total / 60);
+            const mins = total % 60;
+            h.value = hours;
+            m.value = mins;
+          }
+
+          function updateHidden(){
+            const hours = Math.max(0, Number(h.value) || 0);
+            const mins = Math.max(0, Number(m.value) || 0);
+            const total = (hours * 60) + mins;
+            hidden.value = total;
+          }
+
+          h.addEventListener('input', updateHidden);
+          m.addEventListener('input', updateHidden);
+
+          // initialize
+          setFieldsFromHidden();
+        } catch(e){ console.warn('duration hours/min wiring failed', e); }
+      });
+      </script>
+
     <!-- Group core timing settings into a clear section -->
-    <div class="border rounded-lg p-4 mb-4">
+    <div class="section-card">
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700">Duration (minutes)</label>
-          <input name="duration" type="number" value="{{ service.duration }}" min="1"
-                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+          <label class="block text-sm font-medium text-gray-700">Duration</label>
+          <div class="mt-1 flex items-center gap-2">
+            <input id="duration_hours" type="number" min="0" class="cc-field w-24" placeholder="Hours">
+            <span class="text-sm text-gray-600">Hours</span>
+            <input id="duration_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes">
+            <span class="text-sm text-gray-600">Minutes</span>
+        </div>
+          <input type="hidden" name="duration" id="duration_hidden" value="{{ service.duration }}">
+          <p class="mt-1 text-xs text-gray-500">Enter Hours and Minutes; they will be saved as total minutes.</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
@@ -271,12 +416,17 @@
       </div>
 
       <div class="grid grid-cols-2 gap-4 mt-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700">Cleanup time after (minutes)</label>
-          <input name="buffer_after" type="number" value="{{ service.buffer_after }}" min="0"
-                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-          <p class="mt-1 text-xs text-gray-500">Time blocked after each appointment ends</p>
-        </div>
+         <div>
+           <label class="block text-sm font-medium text-gray-700">Buffer Time Post Service Appointment</label>
+           <div class="mt-1 flex items-center gap-2">
+             <input id="buffer_hours" type="number" min="0" class="cc-field w-24" placeholder="Hours">
+             <span class="text-sm text-gray-600">Hours</span>
+             <input id="buffer_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes">
+             <span class="text-sm text-gray-600">Minutes</span>
+           </div>
+           <input type="hidden" name="buffer_after" id="buffer_hidden" value="{{ service.buffer_after }}">
+           <p class="mt-1 text-xs text-gray-500">Enter buffer time after appointment; saved as total minutes.</p>
+         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700">Allow appointment to end after availability?</label>
           <div class="mt-2">
@@ -296,25 +446,19 @@
     <div class="grid grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium text-gray-700">How soon can clients book? (hours)</label>
-        <input name="min_notice_hours" type="number" value="{{ service.min_notice_hours }}" min="0"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-        <p class="mt-1 text-xs text-gray-500">Prevent last-minute bookings (e.g., 24 = 1 day notice)</p>
+       <input name="min_notice_hours" type="number" value="{{ service.min_notice_hours }}" min="0"
+         class="cc-field mt-1 w-full" />
+       <p class="mt-2 text-xs text-gray-500">Prevent last‑minute bookings (e.g. 24 = one day).</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700">How far ahead can clients book? (days)</label>
-        <input name="max_booking_days" type="number" value="{{ service.max_booking_days }}" min="1"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-        <p class="mt-1 text-xs text-gray-500">Limit how far into the future slots are visible</p>
+       <input name="max_booking_days" type="number" value="{{ service.max_booking_days }}" min="1"
+         class="cc-field mt-1 w-full" />
+       <p class="mt-2 text-xs text-gray-500">Limit how far out clients can book.</p>
       </div>
     </div>
 
-    <div class="flex items-center">
-      <input type="checkbox" name="is_active" id="is_active" {% if service.is_active %}checked{% endif %}
-             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-      <label for="is_active" class="ml-2 text-sm text-gray-700">
-        Service is active (visible on public booking page)
-      </label>
-    </div>
+    <!-- removed duplicate is_active toggle (moved to top) -->
 
     {% if conflict_services %}
       <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
@@ -325,51 +469,64 @@
     {% endif %}
 
     <!-- Refund Policy -->
-    <div class="border-t pt-4 space-y-3">
+    <div class="section-card">
       <h2 class="text-base font-semibold">Refund Policy</h2>
-      <div class="flex items-center">
-        <input type="checkbox" name="refunds_allowed" id="refunds_allowed" {% if service.refunds_allowed %}checked{% endif %}
-               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-        <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
-        <input name="refund_cutoff_hours" type="number" value="{{ service.refund_cutoff_hours }}" min="0"
-               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-        <p class="mt-1 text-xs text-gray-500">Minimum 1 hour when refunds are enabled. Set to 0 by unchecking "Allow refunds".</p>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700">Custom refund policy text</label>
-        <textarea name="refund_policy_text" rows="3"
-                  class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ service.refund_policy_text }}</textarea>
-      </div>
-    </div>
-
-    <div class="flex items-center justify-between pt-4">
-      <a href="{% url 'calendar_app:dashboard' org.slug %}"
-         class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
-    <!-- Service availability editor -->
-    <div class="border-t pt-4 space-y-3">
-      <h2 class="text-base font-semibold">Service availability</h2>
-      <p class="text-sm text-gray-500">Specify which days/times this service is offered. These must be within your organization's default weekly availability shown below. Use comma-separated ranges like <code>09:00-12:00,13:00-17:00</code>.</p>
-      <div class="grid grid-cols-1 gap-2 mt-2">
-        {% for row in weekly_edit_rows %}
-          <div class="flex items-center gap-3">
-            <div style="width:64px; font-weight:600">{{ row.label }}</div>
-            <div class="text-xs text-gray-600">Default: {{ row.org_ranges|default:'—' }}</div>
-          </div>
+        <div class="flex items-center mt-3">
+          <input type="checkbox" name="refunds_allowed" id="refunds_allowed" {% if service.refunds_allowed %}checked{% endif %}
+                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+          <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
+        </div>
+        <div class="refund-policy-controls mt-3">
           <div>
-            <input type="text" name="svc_avail_{{ row.ui }}" value="{{ row.svc_ranges }}"
-                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="e.g. 09:00-12:00,13:00-17:00">
+            <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
+            <input name="refund_cutoff_hours" type="number" value="{{ service.refund_cutoff_hours }}" min="0"
+                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
+            <p class="mt-1 text-xs text-gray-500">Minimum 1 hour when refunds are enabled. Set to 0 by unchecking "Allow refunds".</p>
           </div>
-        {% endfor %}
+          <div class="mt-3">
+            <label class="block text-sm font-medium text-gray-700">Custom refund policy text</label>
+            <textarea name="refund_policy_text" rows="3"
+                      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ service.refund_policy_text }}</textarea>
+          </div>
+        </div>
+    </div>
+
+    <div class="section-card {% if is_only_active_service %}availability-disabled{% endif %}">
+      <!-- Service availability editor -->
+      <div class="mt-0">
+        <h2 class="text-base font-semibold">Service availability</h2>
+        <p class="text-sm text-gray-500">Specify which days/times this service is offered. These must be within your organization's default weekly availability shown below. Use comma-separated ranges like <code>09:00-12:00,13:00-17:00</code>.</p>
+        {% if is_only_active_service %}
+          <div class="availability-overlay" role="status" aria-live="polite">
+            <div class="msg">
+              <strong class="block mb-1">Service availability disabled</strong>
+              <div class="text-sm">You must have at least two active services to edit per-service availability. Activate another service to enable these controls.</div>
+            </div>
+          </div>
+        {% endif %}
+        <div class="grid grid-cols-1 gap-2 mt-2">
+          {% for row in weekly_edit_rows %}
+            <div class="flex items-center gap-3">
+              <div style="width:64px; font-weight:600">{{ row.label }}</div>
+              <div class="text-xs text-gray-600">Default: {{ row.org_ranges|default:'—' }}</div>
+            </div>
+            <div>
+              <input type="text" name="svc_avail_{{ row.ui }}" value="{{ row.svc_ranges }}"
+                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="e.g. 09:00-12:00,13:00-17:00"
+                     {% if is_only_active_service %}disabled aria-disabled="true"{% endif %}>
+            </div>
+          {% endfor %}
+        </div>
       </div>
     </div>
 
-      <button id="svc-save-btn" type="button"
-              class="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
-        Save Changes
-      </button>
+    <!-- Bottom action bar: Cancel (left) and Save (right) -->
+    <div class="flex items-center justify-between mt-6">
+      <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
+      <div class="flex items-center">
+        <button type="button" class="svc-save-btn inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Save Changes</button>
+        <a id="svc-view-btn-bottom" data-saved="{{ request.GET.saved|yesno:'1,0' }}" href="{% url 'bookings:public_service_page' org.slug service.slug %}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-3 py-2 ml-3 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50 {% if not request.GET.saved %}opacity-50 cursor-not-allowed{% endif %}">View public page</a>
+      </div>
     </div>
   </form>
 </div>
@@ -390,9 +547,9 @@
 <script>
 (function(){
   try{
-    const btn = document.getElementById('svc-save-btn');
+    const btns = Array.from(document.querySelectorAll('.svc-save-btn'));
     const form = document.querySelector('form.cc-form');
-    if (!btn || !form) return;
+    if (!btns.length || !form) return;
 
     function getCsrf(){
       const el = form.querySelector('input[name=csrfmiddlewaretoken]');
@@ -412,14 +569,9 @@
     }
 
     function serializeFormToPayload(){
-      // Use FormData for textual/numeric fields but ensure known checkboxes are
-      // always present in the payload (false when unchecked). Unchecked
-      // checkboxes are not included in FormData, which previously caused the
-      // server-side JSON apply path to ignore those toggles.
       const fd = new FormData(form);
       const out = {};
       for (const [k,v] of fd.entries()){
-        // numeric conversions for obvious numeric fields
         if (k === 'time_increment_minutes' || k === 'duration' || k === 'buffer_after' || k === 'min_notice_hours' || k === 'max_booking_days' || k === 'refund_cutoff_hours'){
           out[k] = Number(v);
         } else if (k.startsWith('svc_avail_')){
@@ -429,12 +581,11 @@
         }
       }
 
-      // Ensure boolean checkbox keys are always present. Read their checked state
-      // directly from the DOM so unchecked boxes produce `false` in the payload.
       const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'is_active', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
       for (const name of booleanNames){
         try{
-          const el = form.querySelector(`[name="${name}"]`);
+          // Prefer the checkbox input (if present) over any hidden fallback input
+          let el = form.querySelector(`[name="${name}"][type="checkbox"]`) || form.querySelector(`[name="${name}"]`);
           out[name] = !!(el && (el.type === 'checkbox' ? el.checked : (el.value === '1' || el.value === 'true')));
         } catch (e) {
           out[name] = false;
@@ -470,16 +621,15 @@
       backdrop.querySelector('#svc-conflict-confirm').addEventListener('click', async function(){
         backdrop.remove();
         try {
-          // call onConfirm (may be async). If it throws, fall back to submitting the form
           await onConfirm();
         } catch (err) {
           console.warn('apply-confirm failed, falling back to form submit', err);
-          try { form.submit(); } catch(e){ /* last resort: reload */ window.location.reload(); }
+          try { form.submit(); } catch(e){ window.location.reload(); }
         }
       });
     }
 
-    btn.addEventListener('click', async function(){
+    async function onSaveClick(ev){
       try{
         const payload = serializeFormToPayload();
         const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
@@ -490,7 +640,6 @@
             pl.confirm = true;
             const applied = await postJson(applyUrl, pl);
             if (applied && applied.status === 'ok'){
-              // Redirect with saved flag to show banner
               const base = window.location.pathname;
               window.location.href = base + '?saved=1';
               return true;
@@ -503,7 +652,6 @@
 
         const preview = await postJson(previewUrl, payload);
         if (!preview || preview.status !== 'ok'){
-          // Preview unavailable: attempt to apply directly, fallback to form submit
           const ok = await applyAndRedirect(payload);
           if (!ok) form.submit();
           return;
@@ -511,18 +659,14 @@
 
         const conflicts = preview.conflicts || {};
         if (Object.keys(conflicts).length === 0){
-          // No booked dates: apply directly via JSON and redirect to show saved banner
           const ok = await applyAndRedirect(payload);
           if (!ok) form.submit();
           return;
         }
 
-        // Show modal listing bookings and ask for confirmation
         showModal(conflicts, async function(){
-          // On confirm, call apply_update endpoint with confirm=true
           const ok = await applyAndRedirect(payload);
           if (!ok) {
-            // fallback: submit the form so server-side path also saves
             try { form.submit(); } catch(e){ window.location.reload(); }
           }
         });
@@ -530,8 +674,241 @@
         console.warn('preview failed', e);
         try { form.submit(); } catch (err){ window.location.reload(); }
       }
-    });
+    }
+
+    for (const b of btns){
+      b.addEventListener('click', onSaveClick);
+    }
   } catch(e){ console.warn('service preview wiring failed', e); }
+})();
+  // Add handlers to show a short auto-dismissing toast when View button is clicked without saving
+  (function(){
+    try {
+      function showToast(type, message, timeout=3500){
+        try{
+          const id = 'cc-toast';
+          let el = document.getElementById(id);
+          if (!el){
+            el = document.createElement('div');
+            el.id = id;
+            el.style.position = 'fixed';
+            el.style.right = '20px';
+            el.style.bottom = '20px';
+            el.style.zIndex = 2000;
+            document.body.appendChild(el);
+          }
+          const itm = document.createElement('div');
+          itm.style.marginTop = '8px';
+          itm.style.padding = '10px 14px';
+          itm.style.borderRadius = '8px';
+          itm.style.color = '#fff';
+          itm.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)';
+          itm.style.fontSize = '13px';
+          itm.style.maxWidth = '320px';
+          itm.style.backdropFilter = 'blur(4px)';
+          if (type === 'success') { itm.style.background = '#16a34a'; }
+          else if (type === 'warn' || type === 'warning') { itm.style.background = '#f59e0b'; }
+          else { itm.style.background = '#374151'; }
+          itm.textContent = message;
+          el.appendChild(itm);
+          setTimeout(()=>{ try{ itm.remove(); if (!el.childElementCount) el.remove(); }catch(e){} }, timeout);
+        }catch(e){ try{ alert(message); }catch(_){} }
+      }
+
+      function attach(btnId){
+        const b = document.getElementById(btnId);
+        if (!b) return;
+        b.addEventListener('click', function(ev){
+          try{
+            const saved = b.getAttribute('data-saved') === '1';
+            if (!saved){
+              ev.preventDefault();
+              ev.stopPropagation();
+              showToast('warning', 'Please save changes before viewing the public booking page.');
+              return false;
+            }
+            // otherwise allow default (open link)
+          }catch(e){ /* ignore */ }
+        });
+      }
+
+      attach('svc-view-btn');
+      attach('svc-view-btn-bottom');
+
+      // Prevent clicks on Save when form is not dirty; show toast like View button.
+      // Disabled <button> elements do not fire click events in many browsers, so listen
+      // at the document level during capture to reliably intercept attempts.
+      function attachSaveGuard(){
+        // Listen for pointerdown which fires even when a button is disabled in many browsers.
+        document.addEventListener('pointerdown', function(ev){
+          try{
+            const btn = ev.target && ev.target.closest && ev.target.closest('.svc-save-btn');
+            if (!btn) return;
+            const disabled = btn.disabled || btn.classList.contains('cursor-not-allowed') || btn.classList.contains('opacity-50');
+            if (disabled){
+              ev.preventDefault();
+              ev.stopPropagation();
+              try{ showToast('warning', 'Please make changes before saving.'); } catch(e){ alert('Please make changes before saving.'); }
+              return false;
+            }
+          } catch(e) { /* ignore */ }
+        }, true);
+
+        // Also capture Enter/Space key attempts when focused on the button (keyboard users).
+        document.addEventListener('keydown', function(ev){
+          try{
+            const active = document.activeElement;
+            if (!active) return;
+            if (!active.classList || !active.classList.contains('svc-save-btn')) return;
+            if (ev.key === 'Enter' || ev.key === ' '){
+              const disabled = active.disabled || active.classList.contains('cursor-not-allowed') || active.classList.contains('opacity-50');
+              if (disabled){
+                ev.preventDefault();
+                ev.stopPropagation();
+                try{ showToast('warning', 'Please make changes before saving.'); } catch(e){ alert('Please make changes before saving.'); }
+                return false;
+              }
+            }
+          } catch(e) { /* ignore */ }
+        }, true);
+      }
+
+      attachSaveGuard();
+    } catch(e) { console.warn('svc view btn wiring failed', e); }
+  })();
+</script>
+<script>
+  // Toggle greying/disabled state of refund cutoff & policy when checkbox toggles
+  (function(){
+    try{
+      const chk = document.getElementById('refunds_allowed');
+      const wrapper = document.querySelector('.refund-policy-controls');
+      if (!chk || !wrapper) return;
+      const inputs = wrapper.querySelectorAll('input, textarea');
+      function update(){
+        const enabled = !!chk.checked;
+        inputs.forEach(i => {
+          try{ i.disabled = !enabled; }catch(e){}
+        });
+        wrapper.classList.toggle('refund-disabled', !enabled);
+      }
+      chk.addEventListener('change', update);
+      // initialize on load
+      update();
+    }catch(e){ console.warn('refund toggle wiring failed', e); }
+  })();
+</script>
+<style>
+.refund-disabled { opacity: 0.72; }
+.refund-disabled input, .refund-disabled textarea { opacity: 0.72; }
+</style>
+<script>
+(function(){
+  try{
+    const form = document.querySelector('form.cc-form');
+    if (!form) return;
+
+    const viewBtns = Array.from(document.querySelectorAll('#svc-view-btn, #svc-view-btn-bottom'));
+    if (!viewBtns.length) return;
+
+    // Serialize form into a stable JSON string for comparison with saved snapshot
+    function serializeForm(){
+      const fd = new FormData(form);
+      const out = {};
+      for (const [k,v] of fd.entries()){
+        const el = form.querySelector(`[name="${k}"]`);
+        if (el && el.type === 'checkbox'){
+          out[k] = el.checked ? '1' : '0';
+        } else {
+          out[k] = v;
+        }
+      }
+      // Ensure known boolean fields are present even if unchecked (not in FormData)
+      const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'is_active', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
+      for (const name of booleanNames){
+        if (!(name in out)){
+          const el = form.querySelector(`[name="${name}"]`);
+          if (el && el.type === 'checkbox') out[name] = el.checked ? '1' : '0';
+          else if (el) out[name] = el.value;
+          else out[name] = '';
+        }
+      }
+
+      // Sort keys to make stable string
+      const keys = Object.keys(out).sort();
+      const stable = {};
+      for (const k of keys) stable[k] = out[k];
+      return JSON.stringify(stable);
+    }
+
+    const savedSnapshot = serializeForm();
+
+    function setViewButtonsEnabled(enabled){
+      for (const b of viewBtns){
+        if (enabled){
+          b.classList.remove('opacity-50','cursor-not-allowed');
+          b.removeAttribute('aria-disabled');
+          b.setAttribute('data-saved', '1');
+        } else {
+          b.classList.add('opacity-50','cursor-not-allowed');
+          b.setAttribute('aria-disabled', 'true');
+          b.setAttribute('data-saved', '0');
+        }
+      }
+    }
+
+    function setSaveButtonsEnabled(enabled){
+      const saveBtns = Array.from(document.querySelectorAll('.svc-save-btn'));
+      for (const s of saveBtns){
+        try { s.disabled = !enabled; } catch(e){}
+        if (!enabled) {
+          s.classList.add('opacity-50','cursor-not-allowed');
+        } else {
+          s.classList.remove('opacity-50','cursor-not-allowed');
+        }
+      }
+    }
+
+    // Initialize according to whether current form equals saved snapshot
+    const isInitiallySaved = (serializeForm() === savedSnapshot);
+    setViewButtonsEnabled(isInitiallySaved);
+    setSaveButtonsEnabled(!isInitiallySaved);
+
+    // Compare current form to saved snapshot and toggle buttons
+    function updateState(){
+      try{
+        const cur = serializeForm();
+        const isSameAsSaved = cur === savedSnapshot;
+        setViewButtonsEnabled(isSameAsSaved);
+        // Save enabled only when form is dirty
+        setSaveButtonsEnabled(!isSameAsSaved);
+      } catch (e){ console.warn('svc view compare failed', e); }
+    }
+
+    // Add listeners to keep live comparison; debounce to avoid excessive work
+    let timer = null;
+    function scheduleUpdate(){
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(()=>{ timer = null; updateState(); }, 120);
+    }
+
+    const controls = form.querySelectorAll('input, textarea, select');
+    controls.forEach(c => {
+      c.addEventListener('input', scheduleUpdate);
+      c.addEventListener('change', scheduleUpdate);
+    });
+
+    // If a save happens and the page is not reloaded, we can update the savedSnapshot to match current
+    // (some code paths redirect; others may update in-place). Listen for successful submit event that
+    // results in form submit via existing save button handlers by hooking submit.
+    form.addEventListener('submit', function(){
+      // update snapshot after short delay to allow any pre-submit handlers to run
+      setTimeout(function(){
+        try{ savedSnapshot = serializeForm(); setViewButtonsEnabled(true); setSaveButtonsEnabled(false); }catch(e){}
+      }, 500);
+    });
+
+  } catch (e){ console.warn('svc view btn dirty wiring failed', e); }
 })();
 </script>
 {% endblock %}

@@ -106,6 +106,13 @@
             {% if subscription.current_period_end %}
               <div><strong>Period Ends:</strong> {{ subscription.current_period_end|date:"M j, Y g:i A" }}</div>
             {% endif %}
+            {# Show next charge amount/date in the subscription details when available #}
+            {% if upcoming_invoice_adjusted %}
+              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
+              <div class="text-sm text-green-700 mt-1">Discount: -${{ upcoming_invoice_adjusted.discount_amount|floatformat:2 }} — Original: <s>${{ upcoming_invoice_adjusted.original|floatformat:2 }}</s></div>
+            {% elif upcoming_invoice %}
+              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
+            {% endif %}
           </div>
           <div class="flex items-center gap-2">
             {% if subscription.cancel_at_period_end %}
@@ -340,7 +347,7 @@
           </tr>
         </thead>
         <tbody>
-        {% for inv in invoices %}
+        {% for inv in paged_invoices %}
             <tr class="border-t"
               data-inv-id="{{ inv.raw.id|default:'' }}"
               data-amount="{{ inv.amount_display_dollars|default:0 }}"
@@ -844,6 +851,20 @@
           applyInvoiceFilters();
         })();
       </script>
+      <script>
+        // Bind discount card button after DOM ready (button sits later in DOM)
+        document.addEventListener('DOMContentLoaded', function(){
+          try {
+            const btn = document.getElementById('viewDiscountInvoiceBtn');
+            if (btn) {
+              btn.addEventListener('click', function(){
+                const invSection = document.getElementById('invoices-section');
+                if (invSection) invSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }
+          } catch (e) { console.error('bind viewDiscountInvoiceBtn', e); }
+        });
+      </script>
     {% else %}
       <div class="text-sm text-gray-600">No invoices yet.</div>
     {% endif %}
@@ -852,6 +873,24 @@
   {# Upcoming Invoice Section #}
   <section class="mb-4" id="upcoming-invoice-section">
     <h2 class="text-xl font-semibold mb-2">Upcoming Invoice</h2>
+    {# Always-visible discount card: shows adjusted next charge when a local discount exists #}
+    {% if upcoming_invoice_adjusted %}
+      <div class="mb-3 p-4 border rounded bg-green-50">
+        <div class="flex items-start justify-between">
+          <div>
+            <div class="text-sm text-green-800 font-semibold">Discount applied to next charge</div>
+            <div class="text-2xl font-bold text-green-700 mt-1">${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }} <span class="text-sm text-gray-600">of <s>${{ upcoming_invoice_adjusted.original|floatformat:2 }}</s></span></div>
+            <div class="text-sm text-green-700 mt-1">Discount: -${{ upcoming_invoice_adjusted.discount_amount|floatformat:2 }}</div>
+            {% if upcoming_invoice and upcoming_invoice.billing_date %}
+              <div class="text-xs text-gray-700 mt-1">Next billing date: <strong>{{ upcoming_invoice.billing_date|date:"F j, Y" }}</strong></div>
+            {% endif %}
+          </div>
+          <div class="ml-4">
+            <button id="viewDiscountInvoiceBtn" class="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700">View in Invoices</button>
+          </div>
+        </div>
+      </div>
+    {% endif %}
     {% if trial_remaining_seconds %}
       <div class="text-sm text-gray-600">No charges during trial.</div>
     {% elif upcoming_invoice %}
@@ -1049,6 +1088,33 @@
   }
 
   // Subscription-change modal handler
+  function populateSubscriptionChangeFields(data) {
+    try {
+      document.getElementById('sc-type').textContent = (data.changeType || '').replace(/_/g, ' ').toUpperCase();
+      document.getElementById('sc-new-plan').textContent = data.newPlanName || '—';
+      const eff = data.effectiveAt ? new Date(data.effectiveAt) : null;
+      document.getElementById('sc-effective').textContent = eff ? eff.toLocaleString() : '—';
+      document.getElementById('sc-amount').textContent = formatMoney(data.amountCents || 0);
+      if (data.cardBrand || data.cardLast4) {
+        document.getElementById('sc-card').textContent = `${data.cardBrand || ''} **** ${data.cardLast4 || ''}`;
+        document.getElementById('sc-card-row').style.display = 'block';
+      } else {
+        document.getElementById('sc-card-row').style.display = 'none';
+      }
+      if (data.stripeInvoiceId) {
+        const link = document.getElementById('sc-invoice-link');
+        link.href = `https://dashboard.stripe.com/invoices/${data.stripeInvoiceId}`;
+        link.textContent = data.stripeInvoiceId;
+        document.getElementById('sc-invoice-row').style.display = 'block';
+      } else {
+        document.getElementById('sc-invoice-row').style.display = 'none';
+      }
+      document.getElementById('sc-status').textContent = data.status || '';
+    } catch (e) {
+      console.error('populateSubscriptionChangeFields error', e);
+    }
+  }
+
   function formatMoney(cents) {
     try {
       const v = Number(cents) / 100.0;
@@ -1291,49 +1357,95 @@
   const immediateCancelBtn = document.getElementById('immediateCancelBtn');
   if (immediateCancelBtn) immediateCancelBtn.addEventListener('click', () => {
     const isTrial = immediateCancelBtn.getAttribute('data-is-trial') === 'true';
-    
+    // Helper modal for immediate-cancel choices
+    function openImmediateCancelModal(selectedPlan, hasPaymentMethod) {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+
+      const box = document.createElement('div');
+      box.className = 'bg-white rounded-lg shadow-lg p-6 max-w-lg w-full text-center';
+
+      const title = document.createElement('div');
+      title.className = 'text-lg font-semibold mb-2';
+      title.textContent = 'End Trial — Choose an action';
+      box.appendChild(title);
+
+      const msg = document.createElement('div');
+      msg.className = 'mb-4 text-sm text-gray-800';
+      msg.textContent = 'Would you like to immediately cancel your trial and delete your account, or convert your trial to a paid subscription now?';
+      box.appendChild(msg);
+
+      const btnRow = document.createElement('div');
+      btnRow.className = 'flex justify-center gap-3 mt-4';
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'px-4 py-2 bg-red-600 text-white rounded';
+      deleteBtn.textContent = 'Delete account and cancel';
+      deleteBtn.onclick = async function() {
+        try {
+          // call account delete endpoint
+          const resp = await fetch('/accounts/delete/', { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(()=>null);
+            throw new Error(txt || 'Failed to delete account');
+          }
+          // successful delete will redirect (server side); but ensure we navigate
+          window.location.href = '/';
+        } catch (e) {
+          showToast('Failed to delete account: ' + (e && e.message ? e.message : String(e)), 'error');
+        }
+      };
+
+      const convertBtn = document.createElement('button');
+      convertBtn.className = 'px-4 py-2 bg-blue-600 text-white rounded';
+      convertBtn.textContent = 'Convert to selected plan';
+      convertBtn.onclick = function() {
+        document.body.removeChild(overlay);
+        // If no plan selected, send user to the Change Plan section
+        if (!selectedPlan) {
+          const changePlanSection = document.getElementById('change-plan-section');
+          if (changePlanSection) {
+            changePlanSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            changePlanSection.style.border = '2px solid #3b82f6';
+            setTimeout(() => { changePlanSection.style.border = ''; }, 3000);
+          }
+          return;
+        }
+        // If plan selected but no payment method, prompt to add one
+        if (!hasPaymentMethod) {
+          showToast('Please add a payment method first before converting your trial to a paid subscription. Scroll down to the "Add / Update Card" section.', 'info', 6000);
+          const pmSection = document.getElementById('payment-method-section');
+          if (pmSection) highlightAndPulse(pmSection);
+          return;
+        }
+        // Otherwise, proceed with preview flow like Update Plan
+        try { window.__ccTrialImmediate = true; } catch (e) {}
+        const query = new URLSearchParams();
+        query.set('start_immediately', 'true');
+        fetch(`/billing/api/bus/${orgSlug}/subscription/preview_change/${selectedPlan}/?` + query.toString(), { method: 'GET', headers: { 'X-CSRFToken': csrftoken } })
+          .then(async r => { if (!r.ok) { const txt = await r.text().catch(()=> 'server error'); throw new Error(txt || 'preview failed'); } return r.json(); })
+          .then(preview => openPreviewModal(preview, selectedPlan))
+          .catch(err => showToast('Preview failed: ' + err.message, 'error'));
+      };
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'px-4 py-2 bg-gray-200 rounded';
+      cancelBtn.textContent = 'Close';
+      cancelBtn.onclick = function(){ document.body.removeChild(overlay); };
+
+      btnRow.appendChild(deleteBtn);
+      btnRow.appendChild(convertBtn);
+      btnRow.appendChild(cancelBtn);
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+    }
+
     if (isTrial) {
-      // Trial user wants to end trial - must convert to paid first
       const planSelect = document.getElementById('changePlanSelect');
       const selectedPlan = planSelect ? planSelect.value : null;
-      
-      if (!selectedPlan) {
-        showToast('To end your trial and continue with a paid subscription, please:\n\n1. Select a plan below in the "Change Plan" section\n2. Add a payment method if you haven\'t already\n3. Click "Update Plan" to convert to paid\n\nIf you want to simply cancel without converting, just let the trial expire naturally.', 'info', 8000);
-        // Scroll to change plan section
-        const changePlanSection = document.getElementById('change-plan-section');
-        if (changePlanSection) {
-          changePlanSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          changePlanSection.style.border = '2px solid #ef4444';
-          setTimeout(() => { changePlanSection.style.border = ''; }, 3000);
-        }
-        return;
-      }
-      
-      // Has plan selected - check if payment method exists
-      const hasPaymentMethod = document.querySelector('#paymentMethodsList [data-pm-id]');
-      if (!hasPaymentMethod) {
-        showToast('Please add a payment method first before converting your trial to a paid subscription.\n\nScroll down to the "Add / Update Card" section.', 'info', 6000);
-        const pmSection = document.getElementById('payment-method-section');
-        if (pmSection) {
-          highlightAndPulse(pmSection);
-        }
-        return;
-      }
-      
-      // All set - convert trial to paid plan
-      if(!confirm(`Convert your trial to the selected paid plan now?`)) return;
-      fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${selectedPlan}/`, { 
-        method: 'POST', 
-        headers: { 'X-CSRFToken': csrftoken }
-      })
-        .then(r => {
-          if (!r.ok) {
-            return r.text().then(t => { throw new Error(t); });
-          }
-          return r.json();
-        })
-        .then(() => window.location.reload())
-        .catch(err => showToast('Conversion failed: ' + err.message, 'error'));
+      const hasPaymentMethod = !!document.querySelector('#paymentMethodsList [data-pm-id]');
+      openImmediateCancelModal(selectedPlan, hasPaymentMethod);
     } else {
       // Regular immediate cancel for active subscription
       if(!confirm('Immediate cancel will terminate access now. Continue?')) return;
@@ -1371,6 +1483,51 @@
       .then(() => { showToast('Scheduled change cancelled.', 'success'); setTimeout(()=>window.location.reload(),600); })
       .catch(err => showToast('Failed to cancel: ' + err.message, 'error'));
   });
+
+  // Small helper to show a styled confirm modal for trial -> immediate start
+  function openTrialConfirmModal(onConfirm, onCancel) {
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    overlay.id = 'cc-trial-confirm-overlay';
+
+    const box = document.createElement('div');
+    box.className = 'bg-white rounded-lg shadow-lg p-6 max-w-md w-full text-center';
+
+    const msg = document.createElement('div');
+    msg.className = 'mb-4 text-sm text-gray-800';
+    msg.textContent = 'You are currently on a trial. Click Confirm to end the trial and start the selected plan immediately (you will be billed), or Cancel to wait until the trial ends to begin the new plan.';
+    box.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex justify-end gap-3';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'px-4 py-2 bg-gray-200 rounded';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = function(){
+      document.body.removeChild(overlay);
+      try { onCancel && onCancel(); } catch(e) { console.error(e); }
+    };
+
+    const okBtn = document.createElement('button');
+    okBtn.className = 'px-4 py-2 bg-blue-600 text-white rounded';
+    okBtn.textContent = 'Confirm';
+    okBtn.onclick = function(){
+      document.body.removeChild(overlay);
+      try { onConfirm && onConfirm(); } catch(e) { console.error(e); }
+    };
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(okBtn);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // close on Escape
+    function onKey(e){ if (e.key === 'Escape') { if (document.body.contains(overlay)) document.body.removeChild(overlay); document.removeEventListener('keydown', onKey); onCancel && onCancel(); } }
+    document.addEventListener('keydown', onKey);
+  }
 
 
   // Change plan
@@ -1410,38 +1567,43 @@
         const amount = Number(preview.amount_due_dollars || 0);
         const billingDate = preview.billing_date || null;
 
-        // If trialing, still ask whether to start immediately or wait
+        // If trialing, ask whether to start immediately or wait using a modal
+        // instead of the native confirm dialog so we can style it consistently.
         if (subscriptionStatus.toLowerCase() === 'trialing') {
-          const startImmediately = confirm('You are currently on a trial. Click OK to end the trial and start the selected plan immediately (you will be billed), or Cancel to wait until the trial ends to begin the new plan.');
-          if (!startImmediately) {
-            return fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-              body: JSON.stringify({ start_immediately: false })
-            }).then(r => { if (!r.ok) throw new Error('Schedule failed'); return r.json(); }).then(p => { if (p && p.message) showToast(p.message,'info'); setTimeout(()=>window.location.reload(),500); });
-          }
+          openTrialConfirmModal(
+            // onConfirm -> start immediately
+            function() {
+              // mark that the user requested immediate start from trial
+              window.__ccTrialImmediate = true;
+              // Request preview that includes start_immediately to show full price now.
+              const query = new URLSearchParams();
+              query.set('start_immediately', 'true');
+              fetch(`/billing/api/bus/${orgSlug}/subscription/preview_change/${planId}/?` + query.toString(), {
+                method: 'GET',
+                headers: { 'X-CSRFToken': csrftoken }
+              })
+                .then(async r => { if (!r.ok) { const txt = await r.text().catch(()=>'server error'); throw new Error(txt||'preview failed'); } return r.json(); })
+                .then(preview2 => openPreviewModal(preview2, planId))
+                .catch(err => showToast('Preview failed: ' + err.message, 'error'));
+            },
+            // onCancel -> schedule change after trial
+            function() {
+              window.__ccTrialImmediate = false;
+              return fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                body: JSON.stringify({ start_immediately: false })
+              }).then(r => { if (!r.ok) throw new Error('Schedule failed'); return r.json(); }).then(p => { if (p && p.message) showToast(p.message,'info'); setTimeout(()=>window.location.reload(),500); });
+            }
+          );
+          return; // we've handled the trial flow via the modal
         }
 
         // If the preview indicates an immediate charge, show a confirmation
         // If user chose to start immediately from trial, request a preview
         // that includes start_immediately so server simulates the first charge.
-        if (subscriptionStatus.toLowerCase() === 'trialing') {
-          // already handled startImmediately prompt above; if user chose to
-          // start immediately we should have set startImmediately = true.
-          // Request the preview with start_immediately to show full price now.
-          const query = new URLSearchParams();
-          query.set('start_immediately', 'true');
-          fetch(`/billing/api/bus/${orgSlug}/subscription/preview_change/${planId}/?` + query.toString(), {
-            method: 'GET',
-            headers: { 'X-CSRFToken': csrftoken }
-          })
-            .then(async r => { if (!r.ok) { const txt = await r.text().catch(()=>'server error'); throw new Error(txt||'preview failed'); } return r.json(); })
-            .then(preview2 => openPreviewModal(preview2, planId))
-            .catch(err => showToast('Preview failed: ' + err.message, 'error'));
-        } else {
-          // Populate and open modal with preview breakdown. Confirm button will proceed.
-          openPreviewModal(preview, planId);
-        }
+        // Populate and open modal with preview breakdown. Confirm button will proceed.
+        openPreviewModal(preview, planId);
       })
         .catch(err => showToast('Preview failed: ' + err.message, 'error'));
   });
@@ -1495,6 +1657,10 @@ function openPreviewModal(preview, planId) {
   const orgSlug = "{{ org.slug }}";
 
   const modal = document.getElementById('cc-preview-modal');
+  // Track whether this preview was requested as an immediate trial conversion
+  modal.dataset.fromTrialImmediate = window.__ccTrialImmediate ? 'true' : 'false';
+  // clear the transient flag so subsequent actions are not affected
+  window.__ccTrialImmediate = false;
   const linesContainer = document.getElementById('cc-preview-lines');
   linesContainer.innerHTML = '';
 
@@ -1565,6 +1731,23 @@ function openPreviewModal(preview, planId) {
   linesContainer.appendChild(billingRow);
 
   modal.dataset.planId = planId;
+  // Populate the subscription-change fields live so the modal shows current preview info
+  try {
+    // Attempt to derive plan name from the select if available
+    let planName = '';
+    try { const sel = document.getElementById('changePlanSelect'); if (sel) planName = sel.querySelector(`option[value="${planId}"]`)?.textContent || ''; } catch(e) {}
+    const changeData = {
+      changeType: 'preview',
+      newPlanName: planName || '',
+      effectiveAt: preview.billing_date || null,
+      amountCents: Math.round((Number(preview.amount_due_dollars || 0) || 0) * 100),
+      cardBrand: null,
+      cardLast4: null,
+      stripeInvoiceId: (preview.raw && preview.raw.id) || null,
+      status: 'preview'
+    };
+    populateSubscriptionChangeFields(changeData);
+  } catch (e) { console.error('populate sc from preview', e); }
   modal.classList.remove('hidden');
   modal.classList.add('flex');
 
@@ -1600,7 +1783,10 @@ function openPreviewModal(preview, planId) {
             // ignore presentation errors
           }
         } else if (payload && payload.message) {
-          showToast(payload.message, 'info');
+          // Suppress the info toast when this change was initiated by a
+          // trial-user choosing to start immediately (one-off behavior).
+          const fromTrial = modal.dataset.fromTrialImmediate === 'true';
+          if (!fromTrial) showToast(payload.message, 'info');
         }
         setTimeout(()=>window.location.reload(), 500);
       })

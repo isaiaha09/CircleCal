@@ -191,3 +191,42 @@ class ServiceSettingFreeze(models.Model):
 
     def __str__(self):
         return f"Freeze for {self.service} on {self.date}"
+
+
+class AuditBooking(models.Model):
+    """Immutable audit log of booking deletions/cancellations.
+
+    Records a JSON snapshot of the booking and some indexed fields to
+    support quick queries in the UI. This is an append-only record; the
+    application will write entries here when bookings are deleted or
+    cancelled so owners can review historical changes.
+    """
+    EVENT_DELETED = 'deleted'
+    EVENT_CANCELLED = 'cancelled'
+    EVENT_CHOICES = [
+        (EVENT_DELETED, 'deleted'),
+        (EVENT_CANCELLED, 'cancelled'),
+    ]
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='audit_bookings')
+    booking_id = models.IntegerField(null=True, blank=True, help_text='Original Booking.id when available')
+    event_type = models.CharField(max_length=32, choices=EVENT_CHOICES)
+    booking_snapshot = models.JSONField(default=dict)
+    service = models.ForeignKey('Service', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    start = models.DateTimeField(null=True, blank=True)
+    end = models.DateTimeField(null=True, blank=True)
+    client_name = models.CharField(max_length=200, blank=True)
+    client_email = models.EmailField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    extra = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['organization', 'created_at']),
+            models.Index(fields=['service', 'start']),
+        ]
+
+    def __str__(self):
+        return f"Audit {self.event_type} booking {self.booking_id or 'unknown'} @ {self.start or 'unknown'}"

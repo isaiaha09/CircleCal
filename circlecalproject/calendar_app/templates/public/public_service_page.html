@@ -189,6 +189,7 @@
 </style>
 
 <div class="calendar-container" style="position:relative;">
+  
   {% if trialing_active %}
     <div class="mb-4 p-3 rounded-md bg-amber-50 border-l-4 border-amber-400 text-amber-800" role="status" aria-live="polite">
       <span style="font-size:1.2rem; margin-right:8px;">⚠️</span>
@@ -533,11 +534,31 @@ document.addEventListener("DOMContentLoaded", async function () {
     dayHasSlots = {};
     try {
       const resp = await fetch(batchUrl);
-        if (resp.ok) {
+      if (resp.ok) {
         dayHasSlots = await resp.json();
       }
     } catch(e) {
       console.error('Batch availability fetch failed', e);
+    }
+
+    // Prefetch server-effective settings for this service/date so month rendering
+    // and the per-day detailed calls use the same (saved) increment/fixed flags.
+    let svcForLoop = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+    try {
+      const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + '?date=' + encodeURIComponent(toIsoLocal(monthStart).split('T')[0]);
+      const effResp = await fetch(effUrl);
+      if (effResp.ok) {
+        const eff = await effResp.json();
+        if (eff && typeof eff.use_fixed_increment === 'boolean') {
+          svcForLoop = Object.assign({}, svcForLoop, {
+            use_fixed_increment: eff.use_fixed_increment,
+            time_increment_minutes: eff.time_increment_minutes,
+            allow_ends_after_availability: eff.allow_ends_after_availability
+          });
+        }
+      }
+    } catch (e) {
+      
     }
 
     // Strict availability checker: only treat clearly positive values as available
@@ -595,20 +616,21 @@ document.addEventListener("DOMContentLoaded", async function () {
             if (raw === '1' || raw === 'true') return 1;
             if (raw === '0' || raw === 'false') return 0;
           } catch (e) {}
-          try {
-            const s = SERVICE_MAP[slug] || {};
-            return s.allow_ends_after_availability ? 1 : 0;
-          } catch (e) { return 0; }
+          // Do NOT default to the service's `allow_ends_after_availability` here.
+          // Edge buffer behavior should only be controlled via explicit local override.
+          return 0;
         }
         const edgeVal = getEdgeBuffersForService(window.selectedServiceSlug || '{{ service.slug }}');
         // If the service is configured to use fixed increments, do NOT force an `inc` param
         // so the server can apply duration+buffer spacing. Otherwise include the preview tick.
-        const svcForLoop = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+        // use `svcForLoop` prefetched above (may contain server effective settings)
         let incQuery = '';
+        
         if (!svcForLoop.use_fixed_increment) {
           const incVal = Math.max(5, Number(svcForLoop.time_increment_minutes || 30));
           incQuery = `&inc=${incVal}`;
         }
+        
         const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
         fetches.push(
           fetch(availUrl)
@@ -736,17 +758,33 @@ document.addEventListener("DOMContentLoaded", async function () {
       // Add cache-busting timestamp to always fetch fresh data
       const cacheBuster = `&_t=${Date.now()}`;
       // Fetch ONLY availability - include increment override so backend can adjust slot stepping
-      // Start with the service's server-side configured increment, but allow local override
+      // Prefer server-side effective settings (this reflects saved changes). Fall back
+      // to localStorage/client override when server call fails.
       let previewIncrement = 30;
+      let eff = null; // effective settings from server
       try {
-        const svc = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
-        if (typeof svc.time_increment_minutes === 'number') previewIncrement = svc.time_increment_minutes;
-      } catch (e) {}
+        const svcSlugLocal = window.selectedServiceSlug || '{{ service.slug }}';
+        const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', svcSlugLocal) + '?date=' + encodeURIComponent(toIsoLocal(rangeStartDate).split('T')[0]);
+        const effResp = await fetch(effUrl);
+        if (effResp.ok) {
+            eff = await effResp.json();
+            if (eff && typeof eff.time_increment_minutes === 'number') previewIncrement = eff.time_increment_minutes;
+            
+          } else {
+            
+          }
+      } catch (e) {
+        
+      }
       try {
-        const rawPreview = localStorage.getItem('client_view_settings');
-        if (rawPreview) {
-          const parsed = JSON.parse(rawPreview);
-          if (typeof parsed.increment === 'number') previewIncrement = parsed.increment;
+        if (!eff) {
+          const svc = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+          if (typeof svc.time_increment_minutes === 'number') previewIncrement = svc.time_increment_minutes;
+          const rawPreview = localStorage.getItem('client_view_settings');
+          if (rawPreview) {
+            const parsed = JSON.parse(rawPreview);
+            if (typeof parsed.increment === 'number') previewIncrement = parsed.increment;
+          }
         }
       } catch (e) {}
 
@@ -823,21 +861,21 @@ document.addEventListener("DOMContentLoaded", async function () {
           if (raw === '1' || raw === 'true') return 1;
           if (raw === '0' || raw === 'false') return 0;
         } catch (e) {}
-        try {
-          const s = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
-          return s.allow_ends_after_availability ? 1 : 0;
-        } catch (e) { return 0; }
+        // Default to 0 (do not apply edge buffers) unless explicitly overridden.
+        return 0;
       })();
       // If service enforces fixed increments, don't send `inc` so server uses duration+buffer
+      // Determine whether server indicates use_fixed_increment; prefer eff if present
       const svcPreview = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
-      const previewIncQuery = (svcPreview.use_fixed_increment ? '' : `&inc=${previewIncrement}`);
+      const useFixed = (eff && typeof eff.use_fixed_increment === 'boolean') ? eff.use_fixed_increment : !!svcPreview.use_fixed_increment;
+      const previewIncQuery = (useFixed ? '' : `&inc=${previewIncrement}`);
       const svcSlug = serviceSelect.value || window.selectedServiceSlug || '{{ service.slug }}';
       let allowEndsForAvail = false;
       try {
-        allowEndsForAvail = (typeof eff === 'object' && eff !== null && ('allow_ends_after_availability' in eff)) ? !!eff.allow_ends_after_availability : !!svcPreview.allow_ends_after_availability;
+        allowEndsForAvail = (eff && typeof eff.allow_ends_after_availability === 'boolean') ? !!eff.allow_ends_after_availability : !!svcPreview.allow_ends_after_availability;
       } catch (err) { /* ignore */ }
       const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', svcSlug) + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}${previewIncQuery}&edge_buffers=${edgeVal2}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
-      console.debug('Fetching availability for modal:', availUrl);
+      
       const availResp = await fetch(availUrl);
       if (!availResp.ok) throw new Error("Failed to load availability");
       const slots = await availResp.json();
@@ -850,7 +888,8 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
 
       // Read client view settings (saved from internal calendar)
-      let clientSettings = { block: 1, increment: 30, startHour: 9 };
+      // Default increment starts as the previewIncrement (which prefers server eff when available)
+      let clientSettings = { block: 1, increment: previewIncrement, startHour: 9 };
       try {
         const raw = localStorage.getItem('client_view_settings');
         if (raw) {
@@ -858,6 +897,13 @@ document.addEventListener("DOMContentLoaded", async function () {
           if (typeof parsed.block === 'number') clientSettings.block = parsed.block;
           if (typeof parsed.increment === 'number') clientSettings.increment = parsed.increment;
           if (typeof parsed.startHour === 'number') clientSettings.startHour = parsed.startHour;
+        }
+      } catch (e) {}
+
+      // If we fetched effective server settings, prefer them for the public display
+      try {
+        if (eff && typeof eff.time_increment_minutes === 'number') {
+          clientSettings.increment = eff.time_increment_minutes;
         }
       } catch (e) {}
 

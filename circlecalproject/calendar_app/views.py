@@ -8,7 +8,7 @@ import json
 from django.utils.text import slugify
 from django.middleware.csrf import get_token
 from accounts.models import Business as Organization, Membership, Invite
-from bookings.models import Booking, Service, ServiceSettingFreeze
+from bookings.models import Booking, Service, ServiceSettingFreeze, AuditBooking
 from bookings.models import WeeklyAvailability, ServiceWeeklyAvailability
 from django.db import transaction
 from django.http import HttpResponseForbidden
@@ -27,16 +27,10 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from datetime import timedelta
 
+
 @require_http_methods(['POST'])
 @require_roles(['owner', 'admin', 'manager'])
 def update_service_settings(request, org_slug, service_id):
-    """API: update per-service slot settings from the calendar modal.
-
-    Expects JSON body with any of: time_increment_minutes (int), use_fixed_increment (bool),
-    allow_squished_bookings (bool), and optional apply_to_conflicts (bool).
-    If apply_to_conflicts is true, identical settings will be applied to conflicting services
-    that share overlapping service weekly availability windows.
-    """
     org = request.organization
     if not org:
         return HttpResponseBadRequest('Organization required')
@@ -267,6 +261,23 @@ def apply_service_update(request, org_slug, service_id):
     try:
         from django.db.utils import OperationalError
         for d in booked_dates:
+            # Snapshot weekly windows for the specific weekday so that changes
+            # to weekly availability made later do not affect dates that already
+            # have bookings. Format: list of {'start': 'HH:MM', 'end': 'HH:MM'}
+            weekly_windows = []
+            try:
+                wd = d.weekday()
+                svc_rows = svc.weekly_availability.filter(is_active=True, weekday=wd)
+                if svc_rows.exists():
+                    for rw in svc_rows.order_by('start_time'):
+                        weekly_windows.append({'start': rw.start_time.strftime('%H:%M'), 'end': rw.end_time.strftime('%H:%M')})
+                else:
+                    org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=wd)
+                    for rw in org_rows:
+                        weekly_windows.append({'start': rw.start_time.strftime('%H:%M'), 'end': rw.end_time.strftime('%H:%M')})
+            except Exception:
+                weekly_windows = []
+
             frozen = {
                 'duration': svc.duration,
                 'buffer_after': svc.buffer_after,
@@ -274,6 +285,7 @@ def apply_service_update(request, org_slug, service_id):
                 'use_fixed_increment': bool(svc.use_fixed_increment),
                 'allow_ends_after_availability': bool(getattr(svc, 'allow_ends_after_availability', False)),
                 'allow_squished_bookings': bool(getattr(svc, 'allow_squished_bookings', False)),
+                'weekly_windows': weekly_windows,
             }
             try:
                 obj, created = ServiceSettingFreeze.objects.update_or_create(
@@ -465,6 +477,7 @@ def calendar_view(request, org_slug):
         'services_json': services_json,
         'auto_open_service': auto_open_service,
         'auto_open_date': auto_open_date,
+        'audit_entries': AuditBooking.objects.filter(organization=org).order_by('-created_at')[:10],
     })
 
 def demo_calendar_view(request):
@@ -951,12 +964,20 @@ def dashboard(request, org_slug):
     trialing_active = False
     if subscription and subscription.status == "trialing" and subscription.trial_end and subscription.trial_end > timezone.now():
         trialing_active = True
+    # Determine whether the org has weekly availability configured so we can
+    # disable access to Services until the calendar schedule is set up.
+    try:
+        from bookings.models import WeeklyAvailability
+        has_availability = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    except Exception:
+        has_availability = True
 
     return render(request, "calendar_app/dashboard.html", {
         "memberships": memberships,
         "org": org,
         "subscription": subscription,
         "trialing_active": trialing_active,
+        "has_availability": has_availability,
     })
 
 
@@ -1097,6 +1118,16 @@ def edit_service(request, org_slug, service_id):
         service.refund_cutoff_hours = _set_int("refund_cutoff_hours", service.refund_cutoff_hours)
         service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
 
+        # Prevent deactivating the last active service for the org
+        try:
+            if not service.is_active:
+                other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
+                if other_active == 0:
+                    messages.error(request, "At least one service must remain active for your public booking page. Activate another service first.")
+                    return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
+        except Exception:
+            pass
+
         service.save()
         service.refresh_from_db()
         # Store a short debug payload in session so PRG redirect can display raw POST state
@@ -1134,7 +1165,22 @@ def edit_service(request, org_slug, service_id):
     except Exception:
         debug_post = None
 
-    return render(request, "calendar_app/edit_service.html", { "org": org, "service": service, 'needs_migration': not field_present, 'cc_debug_post': debug_post })
+    # Determine whether the slug may be edited: allow edits only when the service
+    # has no real bookings (to avoid breaking existing public booking links).
+    try:
+        now = timezone.now()
+        has_bookings = Booking.objects.filter(service=service, is_blocking=False, end__gte=now).exists()
+    except Exception:
+        has_bookings = False
+    can_edit_slug = not has_bookings
+
+    return render(request, "calendar_app/edit_service.html", {
+        "org": org,
+        "service": service,
+        'needs_migration': not field_present,
+        'cc_debug_post': debug_post,
+        'can_edit_slug': can_edit_slug,
+    })
 
 
 
@@ -1533,6 +1579,22 @@ def edit_service(request, org_slug, service_id):
 
                 service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
 
+                # Allow slug update only when there are no bookings for this service.
+                try:
+                    has_bookings = Booking.objects.filter(service=service).exists()
+                except Exception:
+                    has_bookings = False
+                if not has_bookings:
+                    new_slug_input = (request.POST.get('slug') or '').strip()
+                    if new_slug_input:
+                        base_slug = slugify(new_slug_input) or slugify(service.name) or get_random_string(6)
+                        slug_candidate = base_slug
+                        counter = 1
+                        while Service.objects.filter(organization=org, slug=slug_candidate).exclude(id=service.id).exists():
+                            slug_candidate = f"{base_slug}-{counter}"
+                            counter += 1
+                        service.slug = slug_candidate
+
                 # Gather proposed slot settings (do not persist yet)
                 try:
                     new_time_increment = int(request.POST.get('time_increment_minutes', service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30))
@@ -1623,6 +1685,16 @@ def edit_service(request, org_slug, service_id):
                                 break
                 except Exception:
                     # Defensive: don't block saving if freeze creation fails
+                    pass
+
+                # Prevent deactivating the last active service for the org
+                try:
+                    if not service.is_active:
+                        other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
+                        if other_active == 0:
+                            messages.error(request, "At least one service must remain active for your public booking page. Activate another service first.")
+                            return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
+                except Exception:
                     pass
 
                 service.save()
@@ -1717,10 +1789,25 @@ def edit_service(request, org_slug, service_id):
             'svc_ranges': svc_ranges,
         })
 
+    try:
+        now = timezone.now()
+        has_bookings = Booking.objects.filter(service=service, is_blocking=False, end__gte=now).exists()
+    except Exception:
+        has_bookings = False
+    can_edit_slug = not has_bookings
+
+    try:
+        other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
+    except Exception:
+        other_active = 0
+    is_only_active_service = (other_active == 0)
+
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
         "weekly_edit_rows": weekly_edit_rows,
+        "can_edit_slug": can_edit_slug,
+        "is_only_active_service": is_only_active_service,
     })
 
 
@@ -1765,6 +1852,7 @@ def bookings_list(request, org_slug):
         "services": services,
         "now": now,
         "today": today,
+        "audit_entries": AuditBooking.objects.filter(organization=org).order_by('-created_at')[:50],
     })
 
 
@@ -1781,3 +1869,66 @@ def delete_booking(request, org_slug, booking_id):
     booking.delete()
     
     return JsonResponse({'status': 'ok'})
+
+
+@login_required
+@require_roles(['owner', 'admin', 'manager', 'staff'])
+def bookings_audit_list(request, org_slug):
+    """Return a paginated JSON list of audit entries for the organization.
+
+    Query params:
+      - page (int)
+      - per_page (int)
+    """
+    org = request.organization
+    page = int(request.GET.get('page', 1))
+    per_page = int(request.GET.get('per_page', 25))
+    qs = AuditBooking.objects.filter(organization=org).order_by('-created_at')
+    total = qs.count()
+    start = (page - 1) * per_page
+    end = start + per_page
+    items = qs[start:end]
+    data = []
+    for a in items:
+        data.append({
+            'id': a.id,
+            'booking_id': a.booking_id,
+            'event_type': a.event_type,
+            'service': a.service.name if a.service else None,
+            'start': a.start.isoformat() if a.start else None,
+            'client_name': a.client_name,
+            'client_email': a.client_email,
+            'created_at': a.created_at.isoformat(),
+            'snapshot': a.booking_snapshot,
+        })
+    return JsonResponse({'total': total, 'page': page, 'per_page': per_page, 'items': data})
+
+
+@login_required
+@require_roles(['owner', 'admin', 'manager', 'staff'])
+def bookings_audit_export(request, org_slug):
+    """Export selected audit entries as JSON. Accepts POST with {'ids': [1,2,3]}"""
+    org = request.organization
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+        ids = payload.get('ids', [])
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    qs = AuditBooking.objects.filter(organization=org, id__in=ids).order_by('-created_at')
+    export = []
+    for a in qs:
+        export.append({
+            'id': a.id,
+            'booking_id': a.booking_id,
+            'event_type': a.event_type,
+            'service': a.service.name if a.service else None,
+            'start': a.start.isoformat() if a.start else None,
+            'client_name': a.client_name,
+            'client_email': a.client_email,
+            'created_at': a.created_at.isoformat(),
+            'snapshot': a.booking_snapshot,
+        })
+    resp = JsonResponse({'items': export})
+    resp['Content-Disposition'] = 'attachment; filename="audit_export.json"'
+    return resp

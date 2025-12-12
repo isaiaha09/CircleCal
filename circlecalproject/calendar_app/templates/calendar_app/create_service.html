@@ -33,6 +33,23 @@
   <div class="grid md:grid-cols-3 gap-8">
     <!-- Form -->
     <div class="md:col-span-2 bg-white border rounded-xl shadow-sm p-8 cc-form">
+            <script>
+              function slugify(str){
+                return str.toString().trim().toLowerCase()
+                  .replace(/[^a-z0-9\s-]/g,'')
+                  .replace(/\s+/g,'-')
+                  .replace(/-+/g,'-');
+              }
+              const nameInput = document.getElementById('svcName');
+              const slugPreview = document.getElementById('slugPreview');
+              nameInput && nameInput.addEventListener('input', () => {
+                const v = nameInput.value.trim();
+                const full = v ? slugify(v) : 'preview';
+                // Shorten visually to ~18 chars; underlying generation still full server-side
+                slugPreview.textContent = full.length > 18 ? full.slice(0,18) + '…' : full;
+                slugPreview.setAttribute('title', full); // hover shows full slug
+              });
+            </script>
       {% if messages %}
         <div class="mb-6 space-y-2">
           {% for message in messages %}
@@ -41,7 +58,7 @@
         </div>
       {% endif %}
 
-      <form method="post" class="space-y-8" novalidate>
+      <form method="post" class="space-y-8 cc-form" novalidate>
         {% csrf_token %}
 
         <div class="space-y-4">
@@ -57,21 +74,127 @@
               <span class="text-gray-500 select-none">/service/</span>
               <span id="slugPreview" class="font-mono bg-gray-100 border rounded text-gray-700 cc-field slug-preview" style="border-width:1px">preview</span>
             </div>
-            <p class="mt-2 text-xs text-gray-500">We generate this from the name. You can edit later.</p>
+            <p class="mt-2 text-xs text-gray-500">We generate this from the name. You can change it later only before the first booking; once bookings exist the URL becomes fixed to avoid breaking booking links.</p>
           </div>
         </div>
 
+              <script>
+                // Run wiring after DOM is ready so inputs exist when we attach handlers.
+                document.addEventListener('DOMContentLoaded', function(){
+                  try {
+                    const fixed = document.getElementById('use_fixed_increment');
+                    const squish = document.getElementById('allow_squished_bookings');
+                    const incInput = document.getElementById('time_increment_minutes');
+                    const form = document.querySelector('form.cc-form');
+                    if (!incInput) return;
+
+                    // Visual helper class
+                    const style = document.createElement('style');
+                    style.innerHTML = '.squish-disabled-label { opacity: 0.6; } .inc-disabled { opacity: 0.55; }';
+                    document.head.appendChild(style);
+
+                    const parentLabel = squish ? (squish.closest('label') || squish.parentNode) : null;
+
+                    const initialIncVal = Number(incInput.value) || 30;
+
+                    function setClientIncrementFromInput(val) {
+                      try {
+                        const raw = localStorage.getItem('client_view_settings') || '{}';
+                        let parsed = {};
+                        try { parsed = JSON.parse(raw); } catch(_) { parsed = {}; }
+                        parsed.increment = Number(val) || 30;
+                        localStorage.setItem('client_view_settings', JSON.stringify(parsed));
+                        try { showToast('success', 'Client increment updated for Day Schedule modal.'); } catch(e){}
+                      } catch (e) { console.warn('setClientIncrement failed', e); }
+                    }
+
+                    function updateState() {
+                      const disabled = fixed && fixed.checked;
+                      if (squish) {
+                        try { squish.disabled = disabled; } catch(e){}
+                        if (parentLabel) parentLabel.classList.toggle('squish-disabled-label', disabled);
+                      }
+                      if (incInput) {
+                        try { incInput.disabled = disabled; } catch(e){}
+                        incInput.classList.toggle('inc-disabled', disabled);
+                      }
+                    }
+
+                    // attach handlers
+                    if (incInput) {
+                      incInput.addEventListener('change', function(ev){
+                        try {
+                          if (fixed && fixed.checked) {
+                            try { showToast('warning', 'Disable Fixed Increments to change the client increment.'); } catch(e){}
+                            incInput.value = initialIncVal;
+                            return;
+                          }
+                          const newVal = Number(incInput.value);
+                          if (isNaN(newVal) || newVal < 5) {
+                            try { showToast('warning', 'Enter a valid increment (5+ minutes).'); } catch(e){}
+                            incInput.value = initialIncVal;
+                            return;
+                          }
+                          const confirmMsg = `Change client increment to ${newVal} minutes? This will update the Day Schedule modal's client view settings.`;
+                          if (!confirm(confirmMsg)) {
+                            incInput.value = initialIncVal;
+                            return;
+                          }
+                          setClientIncrementFromInput(newVal);
+                        } catch (e) { console.warn('inc change handler failed', e); }
+                      });
+                    }
+
+                    if (form && incInput) {
+                      form.addEventListener('submit', function(ev){
+                        try {
+                          const cur = Number(incInput.value);
+                          if (!isNaN(initialIncVal) && cur !== Number(initialIncVal)) {
+                            const ok = confirm(`You changed the slot increment from ${initialIncVal} to ${cur} minutes. Save this change to the service?`);
+                            if (!ok) {
+                              ev.preventDefault();
+                              return false;
+                            }
+                            setClientIncrementFromInput(cur);
+                          }
+                        } catch (e) { /* allow submit on error */ }
+                      });
+                    }
+
+                    // reflect localStorage changes into input
+                    window.addEventListener('storage', function(e){
+                      if (e.key === 'client_view_settings') {
+                        try {
+                          const parsed = JSON.parse(e.newValue || '{}');
+                          if (parsed && typeof parsed.increment === 'number' && incInput && !(fixed && fixed.checked)) {
+                            incInput.value = String(parsed.increment);
+                          }
+                        } catch (err) { /* ignore */ }
+                      }
+                    });
+
+                    updateState();
+                    try {
+                      const raw = localStorage.getItem('client_view_settings');
+                      if (raw && incInput && !(fixed && fixed.checked)) {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && typeof parsed.increment === 'number') {
+                          incInput.value = String(parsed.increment);
+                        }
+                      }
+                    } catch (e) { /* ignore parse errors */ }
+
+                    if (fixed) fixed.addEventListener('change', updateState);
+                  } catch (e) { console.warn('create_service increment wiring failed', e); }
+                });
+              </script>
         <div>
           <label class="block text-sm font-medium text-gray-700">Description</label>
           <textarea name="description" rows="4" placeholder="Outline goals, structure, who it's for." class="cc-field mt-1 w-full"></textarea>
           <p class="mt-2 text-xs text-gray-500">Mention outcomes and any prerequisites.</p>
         </div>
 
-        <div class="mt-4 p-3 rounded bg-blue-50 border border-blue-100 text-blue-800">
-          <strong class="block">Configure slot increments</strong>
-          <p class="text-sm">Slot increment stepping (how fine-grained client slots appear) is configured in the Day Schedule on the calendar. After creating the service, open the Day Schedule and apply your preferred increment to this service.</p>
-          <p class="mt-2"><a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm font-medium text-blue-700">Open Day Schedule →</a></p>
-        </div>
+        
 
         <div class="grid sm:grid-cols-2 gap-6">
           <div>
@@ -111,7 +234,37 @@
           </div>
         </div>
 
-        <!-- Slot increment settings moved to Day Schedule modal (calendar). Removed from create service form to avoid duplication. -->
+        <div class="mt-4 p-3 rounded bg-blue-50 border border-blue-100 text-blue-800">
+          <strong class="block">Configure slot increments</strong>
+          <p class="text-sm">Slot increment stepping (how fine-grained client slots appear) is configured in the Day Schedule on the calendar. To preview how increments will appear to clients, open the Day Schedule and select a day on the calendar to inspect the time increments and hour blocks.</p>
+          <p class="mt-2 text-sm text-gray-600">(After creating the service you can open the Calendar to inspect how increments and hour blocks appear for clients.)</p>
+        </div>
+
+        <!-- Per-service slot settings: allow choosing fixed increments or allowing squished bookings -->
+
+        <div class="border rounded-lg p-4 mb-4">
+          <div class="grid grid-cols-1 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Client slot increment (minutes)</label>
+              <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="30" min="5" class="cc-field mt-1 w-40">
+              <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
+            </div>
+            <div>
+              <label class="inline-flex items-center">
+                <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500">When enabled, clients will only see anchors spaced by the service duration plus cleanup buffer.</p>
+            </div>
+            <div>
+              <label class="inline-flex items-center">
+                <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500">When enabled, the system will allow bookings that fit the service duration even if they don't satisfy the configured buffers. Owners will receive a notification when such bookings occur.</p>
+            </div>
+          </div>
+        </div>
 
         <div class="grid sm:grid-cols-2 gap-6">
           <div>
@@ -197,4 +350,5 @@
     slugPreview.setAttribute('title', full); // hover shows full slug
   });
 </script>
+  </script>
 {% endblock %}
