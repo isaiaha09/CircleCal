@@ -277,6 +277,13 @@ def cancel_booking(request, booking_id):
         else:
             refund_info = "No refund (service policy)"
 
+    # Mark this deletion as a client-initiated cancellation so audit records
+    # can reflect 'cancelled' instead of 'deleted'. The post-delete signal
+    # will read this attribute when creating the AuditBooking.
+    try:
+        setattr(booking, '_audit_event_type', 'cancelled')
+    except Exception:
+        pass
     booking.delete()
 
     return render(request, "bookings/booking_cancelled.html", {

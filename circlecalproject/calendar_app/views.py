@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect
-from django.http import JsonResponse, HttpResponseBadRequest
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -9,6 +9,7 @@ from django.utils.text import slugify
 from django.middleware.csrf import get_token
 from accounts.models import Business as Organization, Membership, Invite
 from bookings.models import Booking, Service, ServiceSettingFreeze, AuditBooking
+from bookings.views import _has_overlap
 from bookings.models import WeeklyAvailability, ServiceWeeklyAvailability
 from django.db import transaction
 from django.http import HttpResponseForbidden
@@ -21,11 +22,12 @@ from django.contrib.auth import login
 from django.contrib.auth import logout
 from accounts.models import Profile
 from django.utils import timezone
-from datetime import date
+from datetime import date, datetime
 from bookings.models import OrgSettings
 from zoneinfo import ZoneInfo
 from django.conf import settings
 from datetime import timedelta
+from bookings.emails import send_booking_confirmation
 
 
 @require_http_methods(['POST'])
@@ -1857,6 +1859,82 @@ def bookings_list(request, org_slug):
 
 
 @login_required
+@require_roles(['owner', 'admin', 'manager', 'staff'])
+def bookings_recent(request, org_slug):
+    """Return bookings created after the `since` ISO timestamp query param.
+
+    GET params:
+      since: ISO8601 timestamp (e.g. 2025-12-13T15:00:00Z)
+    """
+    org = request.organization
+    since_raw = request.GET.get('since')
+    try:
+        if since_raw:
+            # support trailing Z by converting to +00:00
+            s = since_raw.strip()
+            if s.endswith('Z'):
+                s = s[:-1] + '+00:00'
+            since_dt = datetime.fromisoformat(s)
+        else:
+            # if none provided, return nothing to avoid large payloads
+            return JsonResponse({'items': []})
+    except Exception:
+        return HttpResponseBadRequest('Invalid since timestamp')
+
+    qs = Booking.objects.filter(organization=org, is_blocking=False, service__isnull=False, created_at__gt=since_dt).select_related('service').order_by('created_at')
+
+    items = []
+    try:
+        org_tz_name = getattr(org, 'timezone', None) or 'UTC'
+        org_tz = ZoneInfo(org_tz_name)
+    except Exception:
+        org_tz = ZoneInfo('UTC')
+
+    def _fmt(dt):
+        if not dt:
+            return None
+        try:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+            d = dt.astimezone(org_tz)
+            return d.strftime('%b %d, %Y'), d.strftime('%I:%M %p')
+        except Exception:
+            return None, None
+
+    for b in qs:
+        start_date = None
+        time_range = None
+        try:
+            sd, st = _fmt(b.start) if b.start else (None, None)
+            if sd:
+                start_date = sd
+                if b.end:
+                    ed, et = _fmt(b.end)
+                    time_range = f"{st} - {et}"
+                else:
+                    time_range = st
+        except Exception:
+            start_date = b.start.date().isoformat() if b.start else ''
+            time_range = ''
+
+        items.append({
+            'id': b.id,
+            'booking_id': b.id,
+            'service_name': b.service.name if b.service else None,
+            'service_id': b.service.id if b.service else None,
+            'start': b.start.isoformat() if b.start else None,
+            'end': b.end.isoformat() if b.end else None,
+            'start_date': start_date,
+            'time_range': time_range,
+            'client_name': b.client_name,
+            'client_email': b.client_email,
+            'created_at': b.created_at.isoformat(),
+        })
+
+    return JsonResponse({'items': items})
+
+
+@login_required
 @require_http_methods(['POST'])
 @require_roles(['owner', 'admin', 'manager'])
 def delete_booking(request, org_slug, booking_id):
@@ -1865,9 +1943,54 @@ def delete_booking(request, org_slug, booking_id):
     """
     org = request.organization
     booking = get_object_or_404(Booking, id=booking_id, organization=org)
-    
+    # Prevent deleting an ongoing appointment (current time between start and end)
+    now = timezone.now()
+    try:
+        if booking.start and booking.end and (booking.start <= now <= booking.end):
+            return HttpResponseBadRequest('Cannot delete ongoing appointment')
+    except Exception:
+        pass
+
     booking.delete()
-    
+
+    # Try to find the audit entry created by the post-delete signal and return it
+    try:
+        ab = AuditBooking.objects.filter(organization=org, booking_id=booking_id).order_by('-created_at').first()
+        if ab:
+            audit_data = {
+                'id': ab.id,
+                'booking_id': ab.booking_id,
+                'event_type': ab.event_type,
+                'service': ab.service.name if ab.service else None,
+                'service_price': float(ab.service.price) if (ab.service and getattr(ab.service, 'price', None) is not None) else None,
+                'business': org.name,
+                'start': ab.start.isoformat() if ab.start else None,
+                'start_display': None,
+                'end': ab.end.isoformat() if ab.end else None,
+                'end_display': None,
+                'client_name': ab.client_name,
+                'client_email': ab.client_email,
+                'created_at': ab.created_at.isoformat(),
+                'snapshot': ab.booking_snapshot,
+            }
+            # compute display strings in org timezone if possible
+            try:
+                org_tz_name = getattr(org, 'timezone', None) or 'UTC'
+                org_tz = ZoneInfo(org_tz_name)
+                def _fmt(dt):
+                    if not dt: return None
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+                    return dt.astimezone(org_tz).strftime('%b %d, %Y %I:%M %p')
+                audit_data['start_display'] = _fmt(ab.start)
+                audit_data['end_display'] = _fmt(ab.end)
+                audit_data['created_display'] = _fmt(ab.created_at)
+            except Exception:
+                pass
+            return JsonResponse({'status': 'ok', 'audit': audit_data})
+    except Exception:
+        pass
+
     return JsonResponse({'status': 'ok'})
 
 
@@ -1883,6 +2006,19 @@ def bookings_audit_list(request, org_slug):
     org = request.organization
     page = int(request.GET.get('page', 1))
     per_page = int(request.GET.get('per_page', 25))
+    # support incremental polling: ?since=ISO8601
+    since_raw = request.GET.get('since')
+    if since_raw:
+        try:
+            s = since_raw.strip()
+            if s.endswith('Z'):
+                s = s[:-1] + '+00:00'
+            from datetime import datetime
+            since_dt = datetime.fromisoformat(s)
+            qs = qs.filter(created_at__gt=since_dt)
+        except Exception:
+            # ignore parsing errors and return full page
+            pass
     qs = AuditBooking.objects.filter(organization=org).order_by('-created_at')
     total = qs.count()
     start = (page - 1) * per_page
@@ -1895,6 +2031,8 @@ def bookings_audit_list(request, org_slug):
             'booking_id': a.booking_id,
             'event_type': a.event_type,
             'service': a.service.name if a.service else None,
+            'service_price': float(a.service.price) if (a.service and getattr(a.service, 'price', None) is not None) else None,
+            'business': org.name,
             'start': a.start.isoformat() if a.start else None,
             'client_name': a.client_name,
             'client_email': a.client_email,
@@ -1906,8 +2044,231 @@ def bookings_audit_list(request, org_slug):
 
 @login_required
 @require_roles(['owner', 'admin', 'manager', 'staff'])
+def bookings_audit_for_booking(request, org_slug, booking_id):
+    """Return audit entries for a specific original booking id."""
+    org = request.organization
+    qs = AuditBooking.objects.filter(organization=org, booking_id=booking_id).order_by('-created_at')
+    items = []
+    try:
+        org_tz_name = getattr(org, 'timezone', None) or 'UTC'
+        org_tz = ZoneInfo(org_tz_name)
+    except Exception:
+        org_tz = ZoneInfo('UTC')
+
+    def _fmt(dt):
+        if not dt: return None
+        try:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+            return dt.astimezone(org_tz).strftime('%b %d, %Y %I:%M %p')
+        except Exception:
+            try: return dt.isoformat()
+            except: return str(dt)
+
+    for a in qs:
+        items.append({
+            'id': a.id,
+            'booking_id': a.booking_id,
+            'event_type': a.event_type,
+            'service': a.service.name if a.service else None,
+            'service_price': float(a.service.price) if (a.service and getattr(a.service, 'price', None) is not None) else None,
+            'business': org.name,
+            'start': a.start.isoformat() if a.start else None,
+            'start_display': _fmt(a.start),
+            'client_name': a.client_name,
+            'client_email': a.client_email,
+            'created_at': a.created_at.isoformat(),
+            'created_display': _fmt(a.created_at),
+            'snapshot': a.booking_snapshot,
+        })
+
+    return JsonResponse({'items': items})
+
+
+@login_required
+@require_roles(['owner', 'admin', 'manager'])
+@require_http_methods(['POST'])
+def bookings_audit_undo(request, org_slug):
+    """Restore a deleted booking from an audit entry. Expects JSON {'audit_id': <id>}.
+
+    Returns created booking details for client-side insertion.
+    """
+    org = request.organization
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+        audit_id = int(payload.get('audit_id'))
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    ab = get_object_or_404(AuditBooking, id=audit_id, organization=org)
+
+    # Only allow undo for deleted or cancelled events and when start is in the future
+    now = timezone.now()
+    if ab.event_type not in (AuditBooking.EVENT_DELETED, AuditBooking.EVENT_CANCELLED):
+        return HttpResponseBadRequest('Only deleted or cancelled bookings can be restored')
+
+    if ab.start and ab.start <= now:
+        return HttpResponseBadRequest('Cannot restore past bookings')
+
+    # Build booking fields from snapshot / audit record
+    svc = ab.service
+    start_dt = ab.start
+    end_dt = ab.end
+    title = None
+    client_name = ab.client_name
+    client_email = ab.client_email
+
+    # snapshot may include additional fields
+    try:
+        snap = ab.booking_snapshot or {}
+        if not title:
+            title = snap.get('title') or ''
+        if not client_name:
+            client_name = snap.get('client_name') or client_name
+        if not client_email:
+            client_email = snap.get('client_email') or client_email
+    except Exception:
+        snap = {}
+
+    # If end not present, try to compute from service.duration
+    if not end_dt and svc and getattr(svc, 'duration', None):
+        end_dt = (start_dt + timedelta(minutes=svc.duration)) if start_dt else None
+
+    # If possible, validate that restoring this booking won't overlap existing bookings.
+    try:
+        if start_dt:
+            # Use the same service when checking overlap so buffers are respected.
+            if _has_overlap(org, start_dt, end_dt, service=svc):
+                return HttpResponseBadRequest('Cannot restore booking: time slot overlaps an existing booking.')
+    except Exception:
+        # If overlap check fails unexpectedly, proceed conservatively (allow restore).
+        pass
+
+    # Create booking
+    # Try to preserve original public_ref from the audit snapshot when available.
+    # This helps client-side deduplication (avoid new public_ref causing duplicate rows)
+    try:
+        snap = snap if 'snap' in locals() else {}
+    except Exception:
+        snap = {}
+    preferred_ref = None
+    try:
+        preferred_ref = (snap.get('public_ref') if isinstance(snap, dict) else None) or (ab.booking_snapshot or {}).get('public_ref')
+    except Exception:
+        preferred_ref = None
+
+    create_kwargs = {
+        'organization': org,
+        'title': title or '',
+        'start': start_dt,
+        'end': end_dt,
+        'client_name': client_name or '',
+        'client_email': client_email or '',
+        'service': svc,
+    }
+    # Only include preferred_ref if it's not already used by another booking
+    try:
+        if preferred_ref and not Booking.objects.filter(public_ref=preferred_ref).exists():
+            create_kwargs['public_ref'] = preferred_ref
+    except Exception:
+        # defensive: if anything goes wrong checking uniqueness, skip prefilling
+        pass
+
+    b = Booking.objects.create(**create_kwargs)
+
+    # Format display strings in org timezone
+    try:
+        org_tz_name = getattr(org, 'timezone', None) or 'UTC'
+        org_tz = ZoneInfo(org_tz_name)
+    except Exception:
+        org_tz = ZoneInfo('UTC')
+
+    def _fmt(dt, date_only=False):
+        if not dt: return None
+        try:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+            d = dt.astimezone(org_tz)
+            if date_only:
+                return d.strftime('%b %d, %Y')
+            return d.strftime('%b %d, %Y'), d.strftime('%I:%M %p')
+        except Exception:
+            return None
+
+    start_date = None
+    time_range = None
+    if b.start:
+        try:
+            local = b.start.astimezone(org_tz)
+            start_date = local.strftime('%b %d, %Y')
+            if b.end:
+                end_local = b.end.astimezone(org_tz)
+                time_range = f"{local.strftime('%I:%M %p')} - {end_local.strftime('%I:%M %p')}"
+            else:
+                time_range = local.strftime('%I:%M %p')
+        except Exception:
+            start_date = b.start.date().isoformat() if b.start else ''
+            time_range = ''
+
+    resp = {
+        'id': b.id,
+        'booking_id': b.id,
+        'public_ref': getattr(b, 'public_ref', None),
+        'service_name': svc.name if svc else None,
+        'service_id': svc.id if svc else None,
+        'start_date': start_date,
+        'time_range': time_range,
+        'client_name': b.client_name,
+        'client_email': b.client_email,
+    }
+
+    # include iso timestamps so client can compute status immediately
+    try:
+        resp['start'] = b.start.isoformat() if getattr(b, 'start', None) else None
+        resp['end'] = b.end.isoformat() if getattr(b, 'end', None) else None
+    except Exception:
+        pass
+
+    # include duration and a booked-at display string so the client can render correctly
+    try:
+        created_display = None
+        if b.created_at:
+            try:
+                cd = b.created_at
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=ZoneInfo('UTC'))
+                created_display = cd.astimezone(org_tz).strftime('%b %d, %Y %I:%M %p')
+            except Exception:
+                created_display = None
+        resp['duration'] = svc.duration if svc and getattr(svc, 'duration', None) is not None else None
+        resp['created_display'] = created_display
+    except Exception:
+        pass
+
+    # Since this undo operation restores the booking from the audit entry,
+    # remove the audit record so it no longer appears in the cancelled/deleted list.
+    # Send confirmation email to the client to notify them the booking is restored.
+    try:
+        send_booking_confirmation(b)
+    except Exception:
+        # don't block the response on email failures
+        pass
+
+    try:
+        ab.delete()
+    except Exception:
+        pass
+
+    return JsonResponse({'status': 'ok', 'booking': resp})
+
+
+@login_required
+@require_roles(['owner', 'admin', 'manager', 'staff'])
 def bookings_audit_export(request, org_slug):
-    """Export selected audit entries as JSON. Accepts POST with {'ids': [1,2,3]}"""
+    """Export selected audit entries. Accepts POST with {'ids': [1,2,3]}
+
+    Attempts to produce a PDF if reportlab is available; otherwise falls back to JSON.
+    """
     org = request.organization
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -1917,18 +2278,133 @@ def bookings_audit_export(request, org_slug):
 
     qs = AuditBooking.objects.filter(organization=org, id__in=ids).order_by('-created_at')
     export = []
+    # Determine organization timezone for display
+    try:
+        org_tz_name = getattr(org, 'timezone', None) or 'UTC'
+        org_tz = ZoneInfo(org_tz_name)
+    except Exception:
+        org_tz = ZoneInfo('UTC')
+
+    def _fmt(dt):
+        if not dt:
+            return None
+        try:
+            if dt.tzinfo is None:
+                # assume UTC for naive datetimes
+                dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+            dt_local = dt.astimezone(org_tz)
+            return dt_local.strftime('%b %d, %Y %I:%M %p')
+        except Exception:
+            try:
+                return dt.isoformat()
+            except Exception:
+                return str(dt)
+
     for a in qs:
         export.append({
             'id': a.id,
             'booking_id': a.booking_id,
             'event_type': a.event_type,
             'service': a.service.name if a.service else None,
+            'service_price': float(a.service.price) if (a.service and getattr(a.service, 'price', None) is not None) else None,
+            'business': org.name,
             'start': a.start.isoformat() if a.start else None,
+            'start_display': _fmt(a.start),
+            'end': a.end.isoformat() if a.end else None,
+            'end_display': _fmt(a.end),
             'client_name': a.client_name,
             'client_email': a.client_email,
             'created_at': a.created_at.isoformat(),
             'snapshot': a.booking_snapshot,
         })
-    resp = JsonResponse({'items': export})
-    resp['Content-Disposition'] = 'attachment; filename="audit_export.json"'
-    return resp
+
+    # Try to generate a simple PDF if reportlab is installed
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import letter
+        from io import BytesIO
+
+        packet = BytesIO()
+        c = canvas.Canvas(packet, pagesize=letter)
+        width, height = letter
+        y = height - 40
+        line_h = 14
+        c.setFont('Helvetica', 11)
+        c.drawString(40, y, f'Audit export for {org.name}')
+        y -= (line_h * 2)
+        for item in export:
+            if y < 60:
+                c.showPage()
+                c.setFont('Helvetica', 11)
+                y = height - 40
+            ev = item.get('event_type', '')
+            c.drawString(40, y, f"Event: {ev.capitalize()}  ID: {item.get('booking_id') or '-'}")
+            y -= line_h
+            c.drawString(60, y, f"Service: {item.get('service') or '-'}")
+            y -= line_h
+            # Business (already available)
+            c.drawString(60, y, f"Business: {item.get('business') or org.name}")
+            y -= line_h
+            # Client
+            c.drawString(60, y, f"Client: {item.get('client_name') or '-'} <{item.get('client_email') or '-'}>")
+            y -= line_h
+            # Charge (placed between Client and Start/End)
+            price = item.get('service_price')
+            if price is not None:
+                try:
+                    c.drawString(60, y, f"Charge: ${price:.2f}")
+                except Exception:
+                    c.drawString(60, y, f"Charge: {price}")
+                y -= line_h
+            # Prefer the human-readable display computed above
+            start_disp = item.get('start_display') or item.get('start') or '-'
+            end_disp = item.get('end_display') or item.get('end') or None
+            if end_disp:
+                c.drawString(60, y, f"Start: {start_disp}  —  End: {end_disp}")
+                y -= line_h
+            else:
+                c.drawString(60, y, f"Start: {start_disp}")
+                y -= line_h
+            y -= (line_h * 1.5)
+        c.save()
+        packet.seek(0)
+        resp = HttpResponse(packet.read(), content_type='application/pdf')
+        resp['Content-Disposition'] = 'attachment; filename="audit_export.pdf"'
+        return resp
+    except Exception as e:
+        # If reportlab isn't installed, fall back to JSON export.
+        # For other errors during PDF generation, log the exception and
+        # return a 500 during DEBUG so it's visible while developing.
+        import logging
+        logger = logging.getLogger(__name__)
+        from django.conf import settings
+        # Module import errors indicate reportlab isn't available
+        if isinstance(e, (ImportError, ModuleNotFoundError)):
+            resp = JsonResponse({'items': export})
+            resp['Content-Disposition'] = 'attachment; filename="audit_export.json"'
+            return resp
+        # Log the PDF generation failure
+        logger.exception('Error generating PDF audit export')
+        if getattr(settings, 'DEBUG', False):
+            import traceback
+            tb = traceback.format_exc()
+            return HttpResponse(tb, status=500, content_type='text/plain')
+        return HttpResponse('PDF generation failed', status=500)
+
+
+@login_required
+@require_roles(['owner', 'admin', 'manager'])
+@require_http_methods(['POST'])
+def bookings_audit_delete(request, org_slug):
+    """Permanently delete selected audit entries. Accepts POST with {'ids': [1,2,3]}"""
+    org = request.organization
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+        ids = payload.get('ids', [])
+    except Exception:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    qs = AuditBooking.objects.filter(organization=org, id__in=ids)
+    count = qs.count()
+    qs.delete()
+    return JsonResponse({'status': 'ok', 'deleted': count})

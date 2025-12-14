@@ -52,6 +52,10 @@ urlpatterns = [
     # Audit endpoints for owner-facing audit snippets
     path('bus/<slug:org_slug>/bookings/audit/', views.bookings_audit_list, name='bookings_audit_list'),
     path('bus/<slug:org_slug>/bookings/audit/export/', views.bookings_audit_export, name='bookings_audit_export'),
+    path('bus/<slug:org_slug>/bookings/audit/delete/', views.bookings_audit_delete, name='bookings_audit_delete'),
+    path('bus/<slug:org_slug>/bookings/audit/undo/', views.bookings_audit_undo, name='bookings_audit_undo'),
+    path('bus/<slug:org_slug>/bookings/<int:booking_id>/audit/', views.bookings_audit_for_booking, name='bookings_audit_for_booking'),
+    path('bus/<slug:org_slug>/bookings/recent/', views.bookings_recent, name='bookings_recent'),
 
     # Dashboard (org-specific)
     path('bus/<slug:org_slug>/dashboard/', views.dashboard, name="dashboard"),

@@ -19,6 +19,7 @@ def send_booking_confirmation(booking):
     cancel_url = f"{base_url}{cancel_path}?token={token}"
     context = {
         'booking': booking,
+        'public_ref': getattr(booking, 'public_ref', None),
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
         'cancel_url': cancel_url,
     }
@@ -46,6 +47,7 @@ def send_booking_cancellation(booking):
     
     context = {
         'booking': booking,
+        'public_ref': getattr(booking, 'public_ref', None),
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
     }
     

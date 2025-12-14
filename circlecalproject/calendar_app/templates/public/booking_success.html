@@ -12,8 +12,10 @@
   <div class="space-y-2 text-gray-800">
     <div><strong>Business:</strong> {{ org.name }}</div>
     <div><strong>Service:</strong> {{ service.name }}</div>
-    <div><strong>Date:</strong> {{ booking.start|timezone:org.timezone|date:"D, M j, Y" }}</div>
-    <div><strong>Time:</strong> {{ booking.start|timezone:org.timezone|time:"g:i A" }} – {{ booking.end|timezone:org.timezone|time:"g:i A" }}</div>
+    {% timezone org.timezone %}
+      <div><strong>Date:</strong> {{ booking.start|date:"D, M j, Y" }}</div>
+      <div><strong>Time:</strong> {{ booking.start|time:"g:i A" }} – {{ booking.end|time:"g:i A" }}</div>
+    {% endtimezone %}
     <div><strong>Email:</strong> {{ booking.client_email }}</div>
   </div>
 

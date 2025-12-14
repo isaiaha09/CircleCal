@@ -94,6 +94,7 @@ def booking_post_delete_audit(sender, instance, **kwargs):
         try:
             snapshot = {
                 'id': instance.id,
+                'public_ref': getattr(instance, 'public_ref', None),
                 'title': getattr(instance, 'title', None),
                 'start': instance.start.isoformat() if getattr(instance, 'start', None) else None,
                 'end': instance.end.isoformat() if getattr(instance, 'end', None) else None,
@@ -105,10 +106,18 @@ def booking_post_delete_audit(sender, instance, **kwargs):
                 'created_at': instance.created_at.isoformat() if getattr(instance, 'created_at', None) else None,
             }
 
+            # Allow callers to mark the deletion as a client cancellation by
+            # setting `instance._audit_event_type = 'cancelled'` prior to delete.
+            et = getattr(instance, '_audit_event_type', None)
+            if et == 'cancelled':
+                event_type = AuditBooking.EVENT_CANCELLED
+            else:
+                event_type = AuditBooking.EVENT_DELETED
+
             AuditBooking.objects.create(
                 organization=instance.organization,
                 booking_id=instance.id,
-                event_type=AuditBooking.EVENT_DELETED,
+                event_type=event_type,
                 booking_snapshot=snapshot,
                 service=instance.service if getattr(instance, 'service', None) else None,
                 start=instance.start if getattr(instance, 'start', None) else None,

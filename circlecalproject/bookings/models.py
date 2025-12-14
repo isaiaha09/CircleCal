@@ -3,6 +3,12 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.contrib.auth.models import User
 from accounts.models import Business as Organization, Membership
+import secrets
+
+_PUBLIC_REF_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+def generate_public_ref(n=8):
+    return ''.join(secrets.choice(_PUBLIC_REF_ALPHABET) for _ in range(n))
 
 class Service(models.Model):
     organization = models.ForeignKey(
@@ -59,32 +65,45 @@ class Service(models.Model):
         ]
 
 
+
 class Booking(models.Model):
-	"""Simple booking/event model used by the calendar frontend.
+    """Simple booking/event model used by the calendar frontend.
 
-	- `is_blocking` can be used for coach-side full-day blocks or unavailable markers.
-	"""
-	organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='bookings')
-	title = models.CharField(max_length=200, blank=True)
-	start = models.DateTimeField()
-	end = models.DateTimeField()
-	client_name = models.CharField(max_length=200, blank=True)
-	client_email = models.EmailField(blank=True)
-	is_blocking = models.BooleanField(default=False)
-	service = models.ForeignKey(
-		Service, on_delete=models.SET_NULL, null=True, blank=True, related_name="bookings"
-	)
-	created_at = models.DateTimeField(default=timezone.now)
+    - `is_blocking` can be used for coach-side full-day blocks or unavailable markers.
+    """
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='bookings')
+    title = models.CharField(max_length=200, blank=True)
+    start = models.DateTimeField()
+    end = models.DateTimeField()
+    client_name = models.CharField(max_length=200, blank=True)
+    client_email = models.EmailField(blank=True)
+    is_blocking = models.BooleanField(default=False)
+    service = models.ForeignKey(
+        Service, on_delete=models.SET_NULL, null=True, blank=True, related_name="bookings"
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    public_ref = models.CharField(max_length=16, unique=True, null=True, blank=True, db_index=True, help_text='Public booking reference shown to clients')
 
-	def __str__(self):
-		return f"{self.title or 'Booking'} ({self.start.date()})"
+    def __str__(self):
+        return f"{self.title or 'Booking'} ({self.start.date()})"
 
-	class Meta:
-		indexes = [
-			models.Index(fields=["organization", "start"]),
-			models.Index(fields=["service", "start"]),
-		]
-	
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "start"]),
+            models.Index(fields=["service", "start"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Ensure a short public reference exists for external use
+        if not getattr(self, 'public_ref', None):
+            # try a few times to avoid collisions
+            for _ in range(8):
+                candidate = generate_public_ref(8)
+                if not Booking.objects.filter(public_ref=candidate).exists():
+                    self.public_ref = candidate
+                    break
+        super().save(*args, **kwargs)
+
 
 class OrgSettings(models.Model):
     organization = models.OneToOneField(

@@ -1,4 +1,5 @@
 {% extends 'calendar_app/base.html' %}
+{% load tz %}
 {% block title %}Calendar{% endblock %}
 {% block extra_head %}
 <!-- Select2 Styles + JS -->
@@ -27,7 +28,7 @@
             <div style="background: white; padding: 18px; border-radius: 10px; max-width: 640px; width: 100%;">
                 <button onclick="closeInlineAudit()" style="position: absolute; right: 18px; top: 14px; border: none; background: none; font-size: 22px; cursor: pointer;">×</button>
                 <h4 style="margin:0 0 10px 0;">Audit Details</h4>
-                <pre id="inlineAuditContent" style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:6px; max-height:60vh; overflow:auto;"></pre>
+                <div id="inlineAuditContent" style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:6px; max-height:60vh; overflow:auto;"></div>
                 <div style="display:flex; justify-content:flex-end; margin-top:12px;"><button onclick="closeInlineAudit()" style="padding:8px 12px; background:#6c757d; color:white; border:none; border-radius:6px;">Close</button></div>
             </div>
         </div>
@@ -1442,15 +1443,15 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                 {% if audit_entries %}
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
                     <label style="font-size:13px;"><input type="checkbox" id="auditInlineSelectAll"> Select all</label>
-                    <div><button class="btn-sm btn-view" id="exportAuditInlineBtn">Export Selected</button></div>
+                    <div style="display:flex;gap:8px;"><button class="btn-sm btn-view" id="exportAuditInlineBtn">Export Selected (PDF)</button><button class="btn-sm btn-delete" id="deleteAuditInlineBtn">Delete Selected</button></div>
                 </div>
                 <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px;">
                 {% for a in audit_entries %}
                     <li style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px; border-radius:8px; background:var(--gray-50);">
                         <input type="checkbox" class="auditRowCbInline" value="{{ a.id }}" style="margin-right:8px;">
                     <div style="flex:1;">
-                        <div style="font-weight:600;">{{ a.get_event_type_display }}{% if a.booking_id %} — #{{ a.booking_id }}{% endif %}</div>
-                        <div style="font-size:13px; color:var(--gray-600);">{{ a.service.name|default:'-' }} &middot; {% if a.start %}{{ a.start|timezone:organization.timezone|date:'M d, Y g:i A' }}{% else %}-{% endif %}</div>
+                        <div style="font-weight:600;">{{ a.get_event_type_display|capfirst }}{% if a.booking_id %} — #{{ a.booking_id }}{% endif %}</div>
+                        <div style="font-size:13px; color:var(--gray-600);">{{ a.service.name|default:'-' }} &middot; {% if a.start %}{% timezone organization.timezone %}{{ a.start|date:'M d, Y g:i A' }}{% endtimezone %}{% else %}-{% endif %}</div>
                     </div>
                     <div style="display:flex; gap:8px; align-items:center;">
                         <button class="btn-sm btn-view" onclick="openAuditInline(this)" data-snapshot='{{ a.booking_snapshot|escapejs }}'>View</button>
@@ -2609,16 +2610,45 @@ document.addEventListener('DOMContentLoaded', function() {
     })();
 
     // Audit modal for inline feed
-    function openAuditInline(btn) {
+    function tryParseSnapshot(raw){
+        if(!raw) return null;
+        try{
+            // unescape unicode sequences like \u0027 -> '
+            raw = String(raw).replace(/\\u([0-9a-fA-F]{4})/g, function(_, g){ return String.fromCharCode(parseInt(g,16)); });
+        }catch(e){}
+        try { return JSON.parse(raw); } catch(e){}
+        try {
+            let alt = String(raw).replace(/\\'/g, "'");
+            alt = alt.replace(/'/g, '"');
+            alt = alt.replace(/\bNone\b/g, 'null').replace(/\bTrue\b/g,'true').replace(/\bFalse\b/g,'false');
+            return JSON.parse(alt);
+        } catch(e){}
+        try { return (new Function('return ' + raw))(); } catch(e){}
+        return null;
+    }
+    window.openAuditInline = function(btn) {
         try {
             const raw = btn.getAttribute('data-snapshot');
-            let parsed = raw || '';
-            try { parsed = JSON.parse(raw); document.getElementById('inlineAuditContent').textContent = JSON.stringify(parsed, null, 2); }
-            catch(e) { document.getElementById('inlineAuditContent').textContent = raw || 'No detail'; }
+            let parsed = tryParseSnapshot(raw);
+            const out = document.getElementById('inlineAuditContent');
+            if (parsed && typeof parsed === 'object'){
+                // Build friendly HTML
+                const parts = [];
+                if (parsed.title) parts.push(`<div><strong>Title:</strong> ${parsed.title}</div>`);
+                if (parsed.start) parts.push(`<div><strong>Start:</strong> ${new Date(parsed.start).toLocaleString()}</div>`);
+                if (parsed.end) parts.push(`<div><strong>End:</strong> ${new Date(parsed.end).toLocaleString()}</div>`);
+                if (parsed.client_name) parts.push(`<div><strong>Client:</strong> ${parsed.client_name} <span style="color:#666">&lt;${parsed.client_email || parsed.clientEmail || '-'}&gt;</span></div>`);
+                const svc = parsed.service_slug || parsed.service || parsed.service_name || (parsed.snapshot && parsed.snapshot.service_slug);
+                if (svc) parts.push(`<div><strong>Service:</strong> ${svc}</div>`);
+                if (parsed.created_at) parts.push(`<div><strong>Booked At:</strong> ${new Date(parsed.created_at).toLocaleString()}</div>`);
+                out.innerHTML = parts.join('\n') || (raw || 'No detail');
+            } else {
+                out.textContent = raw || 'No detail';
+            }
             document.getElementById('inlineAuditModal').style.display = 'flex';
         } catch (e) { console.error(e); }
     }
-    function closeInlineAudit() { document.getElementById('inlineAuditModal').style.display = 'none'; }
+    window.closeInlineAudit = function() { document.getElementById('inlineAuditModal').style.display = 'none'; }
 
     // Inline audit select-all + export
     const auditInlineSelectAll = document.getElementById('auditInlineSelectAll');
@@ -2641,10 +2671,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 if (!resp.ok) { alert('Export failed'); return; }
                 const blob = await resp.blob();
+                const contentType = resp.headers.get('Content-Type') || '';
                 const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = 'audit_export.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                const a = document.createElement('a'); a.href = url;
+                if (contentType === 'application/pdf') a.download = 'audit_export.pdf'; else a.download = 'audit_export.json';
+                document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
             } catch (e) { console.error(e); alert('Export error'); }
         });
+        const deleteAuditInlineBtn = document.getElementById('deleteAuditInlineBtn');
+        if (deleteAuditInlineBtn){
+            deleteAuditInlineBtn.addEventListener('click', async () => {
+                const ids = Array.from(document.querySelectorAll('.auditRowCbInline:checked')).map(cb => Number(cb.value));
+                if (!ids.length) { alert('No audit rows selected'); return; }
+                if (!confirm('Permanently delete selected audit records? This cannot be undone.')) return;
+                try {
+                    const resp = await fetch(`/bus/{{ organization.slug }}/bookings/audit/delete/`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+                        body: JSON.stringify({ ids })
+                    });
+                    if (!resp.ok) { alert('Delete failed'); return; }
+                    const data = await resp.json();
+                    showToast('success', `Deleted ${data.deleted || 0} audit rows.`);
+                    document.querySelectorAll('.auditRowCbInline:checked').forEach(cb => { const li = cb.closest('li'); if (li) li.remove(); });
+                } catch (e) { console.error(e); alert('Delete error'); }
+            });
+        }
     }
 
     // Save client-facing view settings to localStorage so public profile can read them.

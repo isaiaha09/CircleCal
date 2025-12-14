@@ -4,10 +4,11 @@
 
 {% block content %}
 <style>
+  :root { --row-height: 64px; }
   .bookings-container { max-width: 1200px; margin: 40px auto; padding: 20px; }
   .bookings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
   .filter-controls { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-  .filter-btn { padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .filter-btn { padding: 6px 10px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; transition: all .15s; font-size: 12px; }
   .filter-btn.active { background: #007bff; color: white; border-color: #007bff; }
   .filter-btn:hover { border-color: #007bff; }
   .bookings-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
@@ -18,6 +19,7 @@
   .status-upcoming { background: #d1ecf1; color: #0c5460; }
   .status-past { background: #d6d8db; color: #383d41; }
   .status-today { background: #d4edda; color: #155724; }
+  .status-ongoing { background: #d4edda; color: #155724; }
   .booking-actions { display: flex; gap: 8px; }
   .btn-sm { padding: 4px 12px; font-size: 13px; border: none; border-radius: 4px; cursor: pointer; transition: all .2s; }
   .btn-view { background: #007bff; color: white; }
@@ -25,7 +27,11 @@
   .btn-delete { background: #dc3545; color: white; }
   .btn-delete:hover { background: #c82333; }
   .no-bookings { text-align: center; padding: 60px 20px; color: #6c757d; }
-  .search-box { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; width: 250px; }
+  .search-box { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; width: 200px; font-size: 13px; }
+  /* Wrapper to constrain visible rows to ~10 and enable scrolling for overflow */
+  .table-wrapper { max-height: calc(var(--row-height) * 10); overflow: auto; }
+  /* Small visual tweak so scroller area shows rounded corners consistently */
+  .table-wrapper .bookings-table { margin: 0; }
 </style>
 
 <div class="bookings-container">
@@ -50,12 +56,27 @@
         <option value="{{ service.id }}">{{ service.name }}</option>
       {% endfor %}
     </select>
+    <div style="margin-left:8px; display:flex; gap:6px; align-items:center;">
+      <button class="filter-btn" id="selectAllBookingsBtn" style="padding:6px 10px;">Select All</button>
+      <label for="selectStatusMenu" style="margin:0 6px 0 8px; font-size:13px; color:#333;">Select:</label>
+      <select id="selectStatusMenu" class="filter-btn" style="padding:6px 10px;">
+        <option value="">Choose...</option>
+        <option value="all">All</option>
+        <option value="upcoming">Upcoming</option>
+        <option value="ongoing">Ongoing</option>
+        <option value="past">Past</option>
+        <option value="deselect">Deselect</option>
+      </select>
+      <button id="bulkDeleteBtn" class="filter-btn btn-delete" style="display:none; margin-left:8px; padding:6px 10px;">Delete Selected</button>
+    </div>
   </div>
 
   <!-- Bookings Table -->
-  <table class="bookings-table">
+  <div class="table-wrapper">
+    <table class="bookings-table">
     <thead>
       <tr>
+        <th style="padding:8px; width:36px;"><input type="checkbox" id="bookingsSelectAll"></th>
         <th>Date & Time</th>
         <th>Client</th>
         <th>Service</th>
@@ -68,13 +89,17 @@
     <tbody id="bookingsTableBody">
       {% if bookings %}
         {% for booking in bookings %}
-        <tr data-booking-id="{{ booking.id }}" 
-            data-status="{% if booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
-            data-service-id="{{ booking.service.id|default:'' }}"
-            data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }}">
+        <tr data-booking-id="{{ booking.id }}" data-public-ref="{{ booking.public_ref|default:'' }}" 
+          data-status="{% if booking.start <= now and booking.end >= now %}ongoing{% elif booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
+          data-service-id="{{ booking.service.id|default:'' }}"
+          data-service-price="{{ booking.service.price|default:'' }}"
+          data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }}">
+          <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="{{ booking.id }}"></td>
           <td>
-            <div style="font-weight: 600;">{{ booking.start|timezone:organization.timezone|date:"M d, Y" }}</div>
-            <div style="font-size: 13px; color: #6c757d;">{{ booking.start|timezone:organization.timezone|time:"g:i A" }} - {{ booking.end|timezone:organization.timezone|time:"g:i A" }}</div>
+            {% timezone organization.timezone %}
+              <div style="font-weight: 600;">{{ booking.start|date:"M d, Y" }}</div>
+              <div style="font-size: 13px; color: #6c757d;">{{ booking.start|time:"g:i A" }} - {{ booking.end|time:"g:i A" }}</div>
+            {% endtimezone %}
           </td>
           <td>
             <div style="font-weight: 600;">{{ booking.client_name|default:"No name" }}</div>
@@ -83,22 +108,30 @@
           <td>{{ booking.service.name|default:"N/A" }}</td>
           <td>{{ booking.service.duration|default:"-" }} min</td>
           <td>
-            {% if booking.start|timezone:organization.timezone|date == today %}
-              <span class="status-badge status-today">Today</span>
-            {% elif booking.start|timezone:organization.timezone < now %}
-              <span class="status-badge status-past">Past</span>
-            {% else %}
-              <span class="status-badge status-upcoming">Upcoming</span>
-            {% endif %}
+            {% timezone organization.timezone %}
+                {% if booking.start and booking.end and booking.start <= now and booking.end >= now %}
+                  <span class="status-badge status-ongoing">Ongoing</span>
+                {% elif booking.start|date == today %}
+                  <span class="status-badge status-today">Today</span>
+                {% elif booking.start < now %}
+                  <span class="status-badge status-past">Past</span>
+                {% else %}
+                  <span class="status-badge status-upcoming">Upcoming</span>
+                {% endif %}
+            {% endtimezone %}
           </td>
           <td>
-            <div style="font-weight: 600;">{{ booking.created_at|timezone:organization.timezone|date:"M d, Y" }}</div>
-            <div style="font-size: 13px; color: #6c757d;">{{ booking.created_at|timezone:organization.timezone|time:"g:i A" }}</div>
+            {% timezone organization.timezone %}
+              <div style="font-weight: 600;">{{ booking.created_at|date:"M d, Y" }}</div>
+              <div style="font-size: 13px; color: #6c757d;">{{ booking.created_at|time:"g:i A" }}</div>
+            {% endtimezone %}
           </td>
           <td>
-            <div class="booking-actions">
+              <div class="booking-actions">
               <button class="btn-sm btn-view" onclick="viewBooking({{ booking.id }})">View</button>
-              <button class="btn-sm btn-delete" onclick="deleteBooking({{ booking.id }}, '{{ booking.start|date:"M d, Y" }}', '{{ booking.client_name }}')">Delete</button>
+              {% if booking.start > now or booking.end < now %}
+                <button class="btn-sm btn-delete" onclick="deleteBooking({{ booking.id }}, '{{ booking.start|date:"M d, Y" }}', '{{ booking.client_name }}')">Delete</button>
+              {% endif %}
             </div>
           </td>
         </tr>
@@ -112,49 +145,88 @@
         </tr>
       {% endif %}
     </tbody>
-  </table>
+    </table>
+  </div>
   
   <!-- Audit: Cancelled / Deleted Bookings -->
   <div style="margin-top:28px;">
     <h2 style="font-size:1.25rem; margin-bottom:8px;">Recently Cancelled / Deleted</h2>
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
-      <label style="font-size:14px;"><input type="checkbox" id="auditSelectAll"> Select all</label>
-      <div>
-        <button class="btn-sm btn-view" id="exportAuditBtn">Export Selected</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <label style="font-size:14px; margin-right:8px;"><input type="checkbox" id="auditSelectAll"> Select all</label>
+        <input type="text" id="auditSearch" class="search-box" placeholder="Search audit (client, ref, email...)" style="width:260px;">
+        <select id="auditEventFilter" class="filter-btn" style="padding:6px 10px;">
+          <option value="all">All events</option>
+          <option value="deleted">Deleted</option>
+          <option value="successful">Successful</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select id="auditServiceFilter" class="filter-btn" style="padding:6px 10px;">
+          <option value="">All Services</option>
+          {% for service in services %}
+            <option value="{{ service.name|escapejs }}">{{ service.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-sm btn-view" id="exportAuditBtn">Export Selected (PDF)</button>
+        <button class="btn-sm btn-delete" id="deleteAuditBtn">Delete Selected</button>
       </div>
     </div>
-    <table style="width:100%; border-collapse:collapse; background:white;">
+    <div class="table-wrapper">
+      <table class="bookings-table" style="width:100%;">
       <thead>
-        <tr style="background:#f8f9fa;">
-          <th style="padding:8px; text-align:left; font-weight:600; width:36px;"><!-- checkbox col --></th>
-          <th style="padding:8px; text-align:left; font-weight:600;">Event</th>
-          <th style="padding:8px; text-align:left; font-weight:600;">Booking ID</th>
-          <th style="padding:8px; text-align:left; font-weight:600;">Service</th>
-          <th style="padding:8px; text-align:left; font-weight:600;">Start</th>
-          <th style="padding:8px; text-align:left; font-weight:600;">Client</th>
-          <th style="padding:8px; text-align:left; font-weight:600;">When</th>
-          <th style="padding:8px; text-align:left; font-weight:600;">Details</th>
-        </tr>
+          <tr style="background:#f8f9fa;">
+            <th style="padding:8px; text-align:left; font-weight:600; width:36px;"><!-- checkbox col --></th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Event</th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Date &amp; Time</th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Booking ID</th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Client</th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Service</th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Booked At</th>
+            <th style="padding:8px; text-align:left; font-weight:600;">Details</th>
+          </tr>
       </thead>
-      <tbody>
+      <tbody id="auditTableBody">
         {% if audit_entries %}
           {% for a in audit_entries %}
-            <tr>
-              <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="{{ a.id }}"></td>
-              <td style="padding:8px;">{{ a.get_event_type_display }}</td>
-              <td style="padding:8px;">{{ a.booking_id|default:'-' }}</td>
-              <td style="padding:8px;">{{ a.service.name|default:'-' }}</td>
-              <td style="padding:8px;">{% if a.start %}{{ a.start|timezone:organization.timezone|date:'M d, Y g:i A' }}{% else %}-{% endif %}</td>
-              <td style="padding:8px;">{{ a.client_name|default:'-' }}<div style="font-size:12px; color:#666">{{ a.client_email }}</div></td>
-              <td style="padding:8px;">{{ a.created_at|timezone:organization.timezone|date:'M d, Y g:i A' }}</td>
-              <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit({{ a.id }})" data-snapshot='{{ a.booking_snapshot|escapejs }}'>View</button></td>
-            </tr>
+              {% comment %}Compute a compact label for dataset (mirror displayed label){% endcomment %}
+              <tr data-audit-id="{{ a.id }}" data-event-type="{{ a.event_type|default:''|escapejs }}" data-label="{% if a.event_type == 'deleted' and a.start and a.start < now %}successful{% else %}{{ a.event_type|default:''|escapejs }}{% endif %}" data-service-name="{{ a.service.name|default:''|escapejs }}" data-client="{{ a.client_name|default:''|lower|escapejs }}" data-public-ref="{% with ref=a.booking_snapshot.public_ref %}{{ ref|default:a.booking_id }}{% endwith %}">
+                <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="{{ a.id }}"></td>
+                <td style="padding:8px;">
+                  {% if a.event_type == 'deleted' and a.start and a.start < now %}
+                    Successful
+                  {% else %}
+                    {{ a.get_event_type_display|capfirst }}
+                  {% endif %}
+                </td>
+                <td style="padding:8px;">{% if a.start %}{% timezone organization.timezone %}
+                    <div style="font-weight:600;">{{ a.start|date:'M d, Y' }}</div>
+                    <div style="font-size:13px; color:#6c757d;">{% if a.end %}{{ a.start|time:'g:i A' }} - {{ a.end|time:'g:i A' }}{% else %}{{ a.start|time:'g:i A' }}{% endif %}</div>
+                  {% endtimezone %}{% else %}-{% endif %}</td>
+                <td style="padding:8px;">{% with ref=a.booking_snapshot.public_ref %}{{ ref|default:a.booking_id }}{% endwith %}</td>
+                <td style="padding:8px;">{{ a.client_name|default:'-' }}<div style="font-size:12px; color:#666">{{ a.client_email }}</div></td>
+                <td style="padding:8px;">{{ a.service.name|default:'-' }}</td>
+                <td style="padding:8px;">{% timezone organization.timezone %}
+                    <div style="font-weight:600;">{{ a.created_at|date:'M d, Y' }}</div>
+                    <div style="font-size:13px; color:#6c757d;">{{ a.created_at|time:'g:i A' }}</div>
+                  {% endtimezone %}</td>
+                <td style="padding:8px;">
+                  <button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='{{ a.booking_snapshot|escapejs }}'>View</button>
+                  {% if a.start and a.start > now %}
+                    {% if a.event_type == 'deleted' or a.event_type == 'cancelled' %}
+                      <button class="btn-sm" style="margin-left:6px; background:#28a745; color:white;" onclick="undoAudit(this)" data-audit-id="{{ a.id }}">Undo</button>
+                    {% endif %}
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
-        {% else %}
-          <tr><td colspan="7" style="padding:16px; text-align:center; color:#6c757d;">No recent audited deletions or cancellations.</td></tr>
+            {% else %}
+          <tr id="noAuditRow"><td colspan="8" style="padding:16px; text-align:center; color:#6c757d;">No recent audited deletions or cancellations.</td></tr>
         {% endif %}
       </tbody>
-    </table>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -194,6 +266,10 @@
         <strong>Duration:</strong>
         <div id="modalDuration" style="color: #666; margin-top: 4px;"></div>
       </div>
+      <div>
+        <strong>Charge:</strong>
+        <div id="modalCharge" style="color: #666; margin-top: 4px;"></div>
+      </div>
     </div>
 
     <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px;">
@@ -207,7 +283,7 @@
   <div style="background: white; padding: 24px; border-radius: 12px; max-width: 700px; width: 100%; position: relative;">
     <button onclick="closeAuditModal()" style="position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">×</button>
     <h2 style="margin-bottom:12px;">Audit Details</h2>
-    <pre id="auditContent" style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:8px; max-height:60vh; overflow:auto;"></pre>
+    <div id="auditContent" style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:8px; max-height:60vh; overflow:auto;"></div>
     <div style="display:flex; justify-content:flex-end; margin-top:12px;"><button onclick="closeAuditModal()" style="padding:8px 14px; background:#6c757d; color:white; border:none; border-radius:6px;">Close</button></div>
   </div>
 </div>
@@ -215,14 +291,104 @@
 <script>
 const orgSlug = "{{ organization.slug }}";
 const csrftoken = '{{ csrf_token }}';
+const ORG_NAME = "{{ organization.name|escapejs }}";
+// Polling: track last-seen server time to fetch new bookings
+let lastSeen = "{{ now|date:'c' }}";
+const POLL_INTERVAL_MS = 15000; // 15 seconds
+// Audit polling: track last seen audit created_at
+let lastAuditSeen = "{% if audit_entries and audit_entries.0 %}{{ audit_entries.0.created_at|date:'c' }}{% else %}{{ now|date:'c' }}{% endif %}";
 
-function viewAudit(id) {
-  const btn = event.currentTarget;
+// Pending optimistic undo requests keyed by tempId
+const pendingUndoTemp = new Set();
+
+// Normalize time strings to remove leading zero on hour (e.g. '09:00 AM' -> '9:00 AM')
+function stripLeadingZeroFromTime(s){
+  try{ return String(s).replace(/\b0(?=\d{1,2}:\d{2})/g,''); }catch(e){ return s; }
+}
+
+// Queue an optimistic undo while delete is in-flight. When server returns
+// the authoritative audit id we will execute the undo automatically.
+function queueUndoTemp(tempId, bookingId, btn){
+  try{
+    pendingUndoTemp.add(tempId);
+    if (btn){ btn.disabled = true; btn.textContent = 'Undo (waiting)'; }
+  }catch(e){ console.error('queueUndoTemp error', e); }
+}
+
+// Undo by audit id (used when server returns authoritative id for a queued undo)
+async function undoAuditById(auditId){
+  try{
+    const resp = await fetch(`/bus/${orgSlug}/bookings/audit/undo/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ audit_id: Number(auditId) })
+    });
+    if (!resp.ok){ const txt = await resp.text(); console.error('undoAuditById failed', txt); return; }
+    const j = await resp.json();
+    if (j && j.booking){
+      // Remove any audit rows for this booking id or public_ref using dataset attributes
+      try{
+        document.querySelectorAll('.auditRowCb').forEach(cb => {
+          try{
+            const tr = cb.closest('tr'); if (!tr) return;
+            const tempBookingId = tr.dataset.bookingId;
+            const tempPublicRef = tr.dataset.publicRef;
+            const bookRef = (j.booking && (j.booking.public_ref || (j.booking.booking_id !== undefined ? String(j.booking.booking_id) : '')));
+            if ((tempBookingId && String(tempBookingId) === String(j.booking.booking_id)) || (tempPublicRef && String(tempPublicRef) === String(bookRef))) {
+              tr.remove();
+            }
+          }catch(e){}
+        });
+      }catch(e){}
+      insertBookingRow(j.booking, true);
+      showToast('success', 'Booking restored');
+    }
+  }catch(e){ console.error('undoAuditById error', e); }
+}
+
+function tryParseSnapshot(raw){
+  if (!raw) return null;
+  // unescape common JS unicode escapes (e.g. \u0027 -> ')
+  try{
+    raw = String(raw).replace(/\\u([0-9a-fA-F]{4})/g, function(_, g){ return String.fromCharCode(parseInt(g,16)); });
+  }catch(e){}
+  try { return JSON.parse(raw); } catch(e){}
+  try {
+    // Try convert Python-like repr to JSON-ish: single -> double quotes, True/False/None
+    let alt = String(raw).replace(/\\'/g, "'");
+    alt = alt.replace(/'/g, '"');
+    alt = alt.replace(/\bNone\b/g, 'null').replace(/\bTrue\b/g,'true').replace(/\bFalse\b/g,'false');
+    return JSON.parse(alt);
+  } catch(e){}
+  try {
+    // Last resort: evaluate (controlled environment assumed)
+    // eslint-disable-next-line no-new-func
+    return (new Function('return ' + raw))();
+  } catch(e){}
+  return null;
+}
+
+function viewAudit(btn) {
   if (!btn) return;
   const raw = btn.getAttribute('data-snapshot');
   try {
-    const parsed = JSON.parse(raw);
-    document.getElementById('auditContent').textContent = JSON.stringify(parsed, null, 2);
+    const parsed = tryParseSnapshot(raw);
+    const parts = [];
+    if (parsed && typeof parsed === 'object'){
+      if (parsed.title) parts.push(`<div><strong>Title:</strong> ${parsed.title}</div>`);
+      // Business name (prefers parsed business, falls back to page org)
+      parts.push(`<div><strong>Business:</strong> ${parsed.business || ORG_NAME}</div>`);
+      if (parsed.service_slug) parts.push(`<div><strong>Service:</strong> ${parsed.service_slug}</div>`);
+      // Charge
+      if (parsed.service_price !== undefined && parsed.service_price !== null) parts.push(`<div><strong>Charge:</strong> $${Number(parsed.service_price).toFixed(2)}</div>`);
+      if (parsed.start) parts.push(`<div><strong>Start:</strong> ${new Date(parsed.start).toLocaleString()}</div>`);
+      if (parsed.end) parts.push(`<div><strong>End:</strong> ${new Date(parsed.end).toLocaleString()}</div>`);
+      if (parsed.client_name) parts.push(`<div><strong>Client:</strong> ${parsed.client_name} <span style="color:#666">&lt;${parsed.client_email || '-'}&gt;</span></div>`);
+      if (parsed.created_at) parts.push(`<div><strong>Booked At:</strong> ${new Date(parsed.created_at).toLocaleString()}</div>`);
+      document.getElementById('auditContent').innerHTML = parts.join('\n') || JSON.stringify(parsed, null, 2);
+    } else {
+      document.getElementById('auditContent').textContent = raw || 'No detail available';
+    }
   } catch (e) {
     document.getElementById('auditContent').textContent = raw || 'No detail available';
   }
@@ -274,19 +440,48 @@ function viewBooking(id) {
   if (!row) return;
 
   const cells = row.querySelectorAll('td');
-  document.getElementById('modalDate').textContent = cells[0].querySelector('div').textContent;
-  document.getElementById('modalTime').textContent = cells[0].querySelectorAll('div')[1].textContent;
-  // Booked At is the 6th column (index 5): two divs like the Date & Time column
-  const bookedAtDivs = cells[5].querySelectorAll('div');
+  // Adjusted indexes because a leading checkbox column was added:
+  // 0: checkbox, 1: date/time, 2: client, 3: service, 4: duration, 5: status, 6: bookedAt, 7: actions
+  const dateCell = cells[1] || null;
+  if (dateCell) {
+    const d0 = dateCell.querySelector('div');
+    const d1 = dateCell.querySelectorAll('div')[1];
+    document.getElementById('modalDate').textContent = d0 ? d0.textContent : '';
+    document.getElementById('modalTime').textContent = d1 ? d1.textContent : '';
+  } else {
+    document.getElementById('modalDate').textContent = '';
+    document.getElementById('modalTime').textContent = '';
+  }
+
+  const bookedAtCell = cells[6] || null;
+  const bookedAtDivs = bookedAtCell ? bookedAtCell.querySelectorAll('div') : [];
   if (bookedAtDivs.length >= 2) {
     document.getElementById('modalBookedAt').textContent = `${bookedAtDivs[0].textContent} ${bookedAtDivs[1].textContent}`;
   } else {
     document.getElementById('modalBookedAt').textContent = '';
   }
-  document.getElementById('modalClientName').textContent = cells[1].querySelector('div').textContent;
-  document.getElementById('modalClientEmail').textContent = cells[1].querySelectorAll('div')[1].textContent;
-  document.getElementById('modalService').textContent = cells[2].textContent;
-  document.getElementById('modalDuration').textContent = cells[3].textContent;
+
+  const clientCell = cells[2] || null;
+  if (clientCell) {
+    const c0 = clientCell.querySelector('div');
+    const c1 = clientCell.querySelectorAll('div')[1];
+    document.getElementById('modalClientName').textContent = c0 ? c0.textContent : '';
+    document.getElementById('modalClientEmail').textContent = c1 ? c1.textContent : '';
+  } else {
+    document.getElementById('modalClientName').textContent = '';
+    document.getElementById('modalClientEmail').textContent = '';
+  }
+
+  document.getElementById('modalService').textContent = (cells[3] ? cells[3].textContent : '') || '';
+  document.getElementById('modalDuration').textContent = (cells[4] ? cells[4].textContent : '') || '';
+  // Show service price if available (data attribute on row)
+  const priceVal = row.dataset.servicePrice;
+  let priceText = '-';
+  if (priceVal !== undefined && priceVal !== null && priceVal !== '') {
+    const n = Number(priceVal);
+    if (isFinite(n)) priceText = `$${n.toFixed(2)}`;
+  }
+  document.getElementById('modalCharge').textContent = priceText;
 
   document.getElementById('bookingModal').style.display = 'flex';
 }
@@ -295,11 +490,364 @@ function closeModal() {
   document.getElementById('bookingModal').style.display = 'none';
 }
 
-async function deleteBooking(id, date, clientName) {
-  if (!confirm(`Delete booking for ${clientName} on ${date}?`)) return;
-
+  // Insert a booking row (used by poll and undo)
+function insertBookingRow(b, toTop=true) {
+  if (!b) return;
+  // Normalize booking identifiers - accept `booking_id` or `id`
+  const bidPrimary = (b.booking_id !== undefined && b.booking_id !== null) ? String(b.booking_id) : '';
+  const bidAlt = (b.id !== undefined && b.id !== null) ? String(b.id) : '';
+  const bid = bidPrimary || bidAlt;
+  if (!bid) return;
+  // Remove any existing row for this booking id (primary or alt) to avoid duplicates
+  // But preserve existing duration text if the incoming payload lacks it.
+  let preservedDurationText = null;
+  try{
+    const existing = document.querySelectorAll(`#bookingsTableBody tr[data-booking-id]`);
+    for (const ex of existing){
+      const exId = String(ex.getAttribute('data-booking-id'));
+      const exPub = String(ex.getAttribute('data-public-ref') || '');
+      if (exId === bid || (bidPrimary && exId === bidPrimary) || (bidAlt && exId === bidAlt) || (b.public_ref && exPub === String(b.public_ref))) {
+        try{
+          const td = ex.querySelectorAll('td')[4]; // duration cell
+          if (td && (!preservedDurationText || preservedDurationText === null)){
+            const txt = (td.textContent || '').trim();
+            if (txt && txt !== '- min') preservedDurationText = txt;
+          }
+        }catch(e){}
+        ex.remove();
+      }
+    }
+  }catch(e){ /* defensive */ }
+  const tbody = document.getElementById('bookingsTableBody');
+  const newTr = document.createElement('tr');
+  // determine status
+  let status = 'upcoming';
   try {
-    // You'll need to add a delete endpoint
+    if (b.start) {
+      const s = new Date(b.start);
+      const n = new Date();
+      if (s.toDateString() === n.toDateString()) status = 'today';
+      else if (s <= n && b.end && new Date(b.end) >= n) status = 'ongoing';
+      else if (s < n) status = 'past';
+      else status = 'upcoming';
+    }
+  } catch(e){}
+  newTr.setAttribute('data-booking-id', bid);
+  newTr.setAttribute('data-public-ref', b.public_ref || '');
+  newTr.setAttribute('data-status', status);
+  newTr.setAttribute('data-service-id', b.service_id || '');
+  newTr.setAttribute('data-search', (b.client_name || '').toLowerCase() + ' ' + (b.client_email || '').toLowerCase());
+  newTr.innerHTML = `
+    <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${b.booking_id}"></td>
+    <td>
+      <div style="font-weight:600;">${b.start_date || ''}</div>
+      <div style="font-size:13px; color:#6c757d;">${stripLeadingZeroFromTime(b.time_range || '')}</div>
+    </td>
+    <td>
+      <div style="font-weight:600;">${b.client_name || ''}</div>
+      <div style="font-size:13px; color:#6c757d;">${b.client_email || ''}</div>
+    </td>
+    <td>${b.service_name || 'N/A'}</td>
+    <td>${(b.duration ? (b.duration + ' min') : (preservedDurationText || '- min'))}</td>
+    <td><span class="status-badge ${status==='past'?'status-past':(status==='today'?'status-today':'status-upcoming')}">${status.charAt(0).toUpperCase()+status.slice(1)}</span></td>
+    <td>${(function(){
+        try{
+          // Prefer ISO timestamp `created_at` if present
+          if (b.created_at){
+            const cd = new Date(b.created_at);
+            if (!isNaN(cd)){
+              let createdTime = cd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+              createdTime = stripLeadingZeroFromTime(createdTime);
+              return `<div style="font-weight:600;">${cd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
+            }
+          }
+          if (b.created_display){
+            const pd = new Date(b.created_display);
+            if (!isNaN(pd)){
+              let createdTime = pd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+              createdTime = stripLeadingZeroFromTime(createdTime);
+              return `<div style="font-weight:600;">${pd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
+            }
+            // Fallback: try to extract a time like "9:00 AM" at end of string
+            const m = String(b.created_display).match(/^(.*?\b\d{1,2}[:\d]{0,5}\s*(?:AM|PM|am|pm))$/);
+            if (m){
+              // split last token as time
+              const parts = m[1].trim().split(/\s+(?=\d{1,2}:)/);
+              if (parts.length >= 2){
+                const datePart = parts[0];
+                const timePart = stripLeadingZeroFromTime(parts.slice(1).join(' '));
+                return `<div style="font-weight:600;">${datePart}</div><div style="font-size:13px;color:#6c757d;">${timePart}</div>`;
+              }
+            }
+          }
+        }catch(e){}
+        // last resort: show raw string on first line
+        return `<div style="font-weight:600;">${b.created_display || ''}</div><div style="font-size:13px;color:#6c757d;">${''}</div>`;
+      })()}</td>
+    <td>
+      <div class="booking-actions">
+        <button class="btn-sm btn-view" onclick="viewBooking(${b.booking_id})">View</button>
+        <button class="btn-sm btn-delete" onclick="deleteBooking(${b.booking_id}, '${b.start_date || ''}', '${b.client_name || ''}')">Delete</button>
+      </div>
+    </td>
+  `;
+  if (toTop && tbody.firstChild) tbody.insertBefore(newTr, tbody.firstChild); else tbody.appendChild(newTr);
+}
+
+async function pollNewBookings(){
+  try{
+    const url = `/bus/${orgSlug}/bookings/recent/?since=${encodeURIComponent(lastSeen)}`;
+    const resp = await fetch(url, { method: 'GET' });
+    if (!resp.ok) return;
+    const j = await resp.json();
+    if (!j || !Array.isArray(j.items)) return;
+    for (const it of j.items){
+      insertBookingRow(it, true);
+      // update lastSeen to the latest created_at
+      if (it.created_at) lastSeen = it.created_at;
+    }
+  }catch(e){ console.error('Poll error', e); }
+}
+
+// start polling
+setInterval(pollNewBookings, POLL_INTERVAL_MS);
+// Also trigger an initial poll shortly after load
+setTimeout(pollNewBookings, 2000);
+
+// Poll audit entries for recent cancellations/deletions
+async function pollNewAudits(){
+  try{
+    const url = `/bus/${orgSlug}/bookings/audit/?since=${encodeURIComponent(lastAuditSeen)}`;
+    const resp = await fetch(url, { method: 'GET' });
+    if (!resp.ok) return;
+    const j = await resp.json();
+    if (!j || !Array.isArray(j.items)) return;
+    for (const item of j.items){
+      insertAuditRow(item);
+      if (item.created_at) lastAuditSeen = item.created_at;
+    }
+  }catch(e){ console.error('Audit poll error', e); }
+}
+setInterval(pollNewAudits, POLL_INTERVAL_MS);
+setTimeout(pollNewAudits, 2500);
+
+function insertAuditRow(item){
+  try{
+    // Avoid inserting duplicates if row for this audit id already exists
+    if (document.querySelector(`.auditRowCb[value="${item.id}"]`)) return;
+    // Remove any optimistic temp rows for the same booking_id (prevent dupes)
+    try{
+      const tempCbs = Array.from(document.querySelectorAll('.auditRowCb')).filter(cb => cb && String(cb.value).startsWith('tmp-'));
+      for (const cb of tempCbs){
+        try{
+          const tr = cb.closest('tr'); if (!tr) continue;
+          // Prefer dataset attributes (set on optimistic rows) for reconciliation
+          const tempBookingId = tr.dataset.bookingId;
+          const tempPublicRef = tr.dataset.publicRef;
+          const itemRef = (item.public_ref || (item.snapshot && item.snapshot.public_ref) || (item.booking_id !== undefined ? String(item.booking_id) : ''));
+          if ((tempBookingId && String(tempBookingId) === String(item.booking_id)) || (tempPublicRef && String(tempPublicRef) === String(itemRef))) {
+            tr.remove();
+          }
+        }catch(e){}
+      }
+    }catch(e){}
+    // Also remove any existing booking row in the main bookings table that matches this audit
+    try{
+      const bookingIdStr = (item.booking_id !== undefined && item.booking_id !== null) ? String(item.booking_id) : '';
+      const bookingRef = (item.public_ref || (item.snapshot && item.snapshot.public_ref) || '') || '';
+      if (bookingIdStr) {
+        const bRow = document.querySelector(`#bookingsTableBody tr[data-booking-id="${bookingIdStr}"]`);
+        if (bRow) try{ bRow.remove(); }catch(e){}
+      }
+      if (bookingRef) {
+        const bRow2 = Array.from(document.querySelectorAll('#bookingsTableBody tr')).find(r => (r.dataset && String(r.dataset.publicRef) === String(bookingRef)));
+        if (bRow2) try{ bRow2.remove(); }catch(e){}
+      }
+    }catch(e){}
+    const tbody = document.getElementById('auditTableBody');
+    const noRow = document.getElementById('noAuditRow'); if (noRow) noRow.remove();
+    const tr = document.createElement('tr');
+    let startHtml = '-';
+    if (item.start) {
+      try {
+        const sd = new Date(item.start);
+        const startDateStr = sd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+        let startTimeStr = sd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        startTimeStr = stripLeadingZeroFromTime(startTimeStr);
+        let timeLine = startTimeStr;
+        if (item.end) {
+          try {
+            const ed = new Date(item.end);
+            let endTimeStr = ed.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+            endTimeStr = stripLeadingZeroFromTime(endTimeStr);
+            timeLine = `${startTimeStr} - ${endTimeStr}`;
+          } catch (e) { /* ignore end formatting */ }
+        }
+        startHtml = `<div style="font-weight:600;">${startDateStr}</div><div style="font-size:13px;color:#6c757d;">${timeLine}</div>`;
+      } catch (e) { startHtml = '-'; }
+    }
+    let createdHtml = '';
+    if (item.created_at) {
+      try{
+        const cd = new Date(item.created_at);
+        let createdTime = cd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        createdTime = stripLeadingZeroFromTime(createdTime);
+        createdHtml = `<div style="font-weight:600;">${cd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
+      }catch(e){ createdHtml = ''; }
+    }
+    let label = '';
+    try{ if (item.event_type === 'deleted' && item.start && (new Date(item.start) < new Date())) label = 'Successful'; }catch(e){}
+    if (!label) label = item.event_type ? (item.event_type.charAt(0).toUpperCase() + item.event_type.slice(1)) : '';
+    let bookingDisplay = (item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || item.booking_id || '-');
+    tr.innerHTML = `
+      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}"></td>
+      <td style="padding:8px;">${label}</td>
+      <td style="padding:8px;">${startHtml}</td>
+      <td style="padding:8px;">${bookingDisplay}</td>
+      <td style="padding:8px;">${item.client_name || '-'}<div style="font-size:12px; color:#666">${item.client_email || ''}</div></td>
+      <td style="padding:8px;">${item.service || '-'}</td>
+      <td style="padding:8px;">${createdHtml}</td>
+      <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(item.snapshot).replace(/'/g, "\\'") }'>View</button>` +
+      ((item.start && (new Date(item.start) > new Date()) && (item.event_type === 'deleted' || item.event_type === 'cancelled')) ? ` <button class="btn-sm" style="margin-left:6px; background:#28a745; color:white;" onclick="undoAudit(this)" data-audit-id="${item.id}">Undo</button>` : '') +
+      `</td>`;
+    // Set dataset attributes for filtering/search
+    try{
+      tr.dataset.auditId = item.id;
+      tr.dataset.eventType = (item.event_type || '').toLowerCase();
+      // store displayed label too (e.g. 'Successful') for fine-grained filtering
+      const dispLabel = (function(){ try{ if (item.event_type === 'deleted' && item.start && (new Date(item.start) < new Date())) return 'successful'; }catch(e){} return (item.event_type || '').toLowerCase(); })();
+      tr.dataset.label = dispLabel;
+      tr.dataset.serviceName = (item.service || '').toLowerCase();
+      tr.dataset.client = (item.client_name || '').toLowerCase();
+      tr.dataset.publicRef = (((item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || (item.booking_id !== undefined ? String(item.booking_id) : ''))) || '').toLowerCase();
+    }catch(e){}
+
+    if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild); else tbody.appendChild(tr);
+  }catch(e){ console.error('insertAuditRow error', e); }
+}
+
+// Audit filters: event type, service, and search
+function filterAudits(){
+  try{
+    const evt = (document.getElementById('auditEventFilter') && document.getElementById('auditEventFilter').value) ? String(document.getElementById('auditEventFilter').value).toLowerCase() : 'all';
+    const svc = (document.getElementById('auditServiceFilter') && document.getElementById('auditServiceFilter').value) ? String(document.getElementById('auditServiceFilter').value).toLowerCase() : '';
+    const searchTerm = (document.getElementById('auditSearch') && document.getElementById('auditSearch').value) ? document.getElementById('auditSearch').value.toLowerCase().trim() : '';
+
+    document.querySelectorAll('#auditTableBody tr').forEach(row => {
+      // skip placeholder rows without checkbox
+      const cb = row.querySelector('.auditRowCb');
+      if (!cb) return;
+      let show = true;
+      const rowEvt = (row.dataset.eventType || '').toLowerCase();
+      const rowLabel = (row.dataset.label || '').toLowerCase();
+      const rowSvc = (row.dataset.servicename || row.dataset.serviceName || '').toLowerCase();
+      const rowClient = (row.dataset.client || '').toLowerCase();
+      const rowRef = (row.dataset.publicref || row.dataset.publicRef || '').toLowerCase();
+
+      // Event filter: 'deleted' should include all deletions (including 'successful'),
+      // 'successful' matches only the successful label, 'cancelled' matches cancelled.
+      if (evt && evt !== 'all'){
+        if (evt === 'successful'){
+          if (rowLabel !== 'successful') show = false;
+        } else if (evt === 'deleted'){
+          if (rowEvt !== 'deleted') show = false;
+        } else {
+          if (rowEvt !== evt) show = false;
+        }
+      }
+
+      // Service filter (normalize both sides)
+      if (svc && svc !== ''){
+        if (!rowSvc || rowSvc !== svc) show = false;
+      }
+
+      if (searchTerm){
+        if (!(rowClient.includes(searchTerm) || rowRef.includes(searchTerm) || (row.querySelector('td:nth-child(5)') && row.querySelector('td:nth-child(5)').textContent.toLowerCase().includes(searchTerm)))){
+          show = false;
+        }
+      }
+
+      row.style.display = show ? '' : 'none';
+    });
+  }catch(e){ console.error('filterAudits error', e); }
+}
+
+// Wire audit filter controls
+try{
+  const aSearch = document.getElementById('auditSearch'); if (aSearch) aSearch.addEventListener('input', filterAudits);
+  const aEvt = document.getElementById('auditEventFilter'); if (aEvt) aEvt.addEventListener('change', filterAudits);
+  const aSvc = document.getElementById('auditServiceFilter'); if (aSvc) aSvc.addEventListener('change', filterAudits);
+}catch(e){}
+
+async function deleteBooking(id, date, clientName, skipConfirm = false) {
+  if (!skipConfirm) {
+    if (!confirm(`Delete booking for ${clientName} on ${date}?`)) return;
+  }
+  // Capture row details to show immediately in the audit list
+  const row = document.querySelector(`tr[data-booking-id="${id}"]`);
+  let svcText = '';
+  let startDateText = '';
+  let startTimeText = '';
+  let clientEmail = '';
+  if (row) {
+    const cells = row.querySelectorAll('td');
+    // columns: 0=checkbox, 1=date/time, 2=client, 3=service, ...
+    svcText = cells[3] ? cells[3].textContent.trim() : '';
+    // extract both date and time lines from the booking date cell so optimistic audit shows both
+    try{
+      const dateCellDivs = cells[1] ? cells[1].querySelectorAll('div') : [];
+      startDateText = dateCellDivs[0] ? dateCellDivs[0].textContent.trim() : '';
+      startTimeText = dateCellDivs[1] ? dateCellDivs[1].textContent.trim() : '';
+    }catch(e){ }
+    const clientDivs = cells[2] ? cells[2].querySelectorAll('div') : [];
+    clientEmail = clientDivs[1] ? clientDivs[1].textContent.trim() : '';
+  }
+
+  // Remove booking row immediately
+  try { if (row) row.remove(); } catch (e) {}
+
+  // Insert optimistic audit row
+  const tempId = 'tmp-' + Date.now();
+  try {
+    const tbody = document.getElementById('auditTableBody');
+    const noRow = document.getElementById('noAuditRow'); if (noRow) noRow.remove();
+    const tempTr = document.createElement('tr');
+    tempTr.id = 'audit-temp-' + tempId;
+    tempTr.dataset.tempId = tempId;
+    // Attach identifiers so reconciliation doesn't rely on rendered text (prevents flicker/dupes)
+    try { tempTr.dataset.bookingId = String(id); } catch(e) { tempTr.dataset.bookingId = ''; }
+    try { tempTr.dataset.publicRef = (row && row.dataset && row.dataset.publicRef) ? row.dataset.publicRef : ''; } catch(e) { tempTr.dataset.publicRef = ''; }
+    const createdNowDate = new Date();
+    const createdNowDateStr = createdNowDate.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    const createdNowTimeStr = createdNowDate.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+    const createdHtml = `<div style="font-weight:600;">${createdNowDateStr}</div><div style="font-size:13px;color:#6c757d;">${createdNowTimeStr}</div>`;
+    const snapshot = { title: clientName || '', start: null, end: null, client_name: clientName || '', client_email: clientEmail || '', service_slug: svcText || '', service_price: null, business: ORG_NAME };
+    // Determine optimistic event label: show 'Successful' for past bookings
+    let optimisticLabel = 'Deleted';
+    try {
+      if (row && row.dataset && row.dataset.status === 'past') optimisticLabel = 'Successful';
+    } catch(e){}
+    // build optimistic row in new column order: Event, Date & Time, Booking ID, Client, Service, Booked At, Details
+    const normalizedDate = startDateText || '';
+    const normalizedTime = startTimeText ? stripLeadingZeroFromTime(startTimeText) : '';
+    const startHtmlOpt = (normalizedDate || normalizedTime) ? (`<div style="font-weight:600;">${normalizedDate}</div><div style="font-size:13px;color:#6c757d;">${normalizedTime || '&nbsp;'}</div>`) : '-';
+    tempTr.innerHTML = `
+      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${tempId}"></td>
+      <td style="padding:8px;">${optimisticLabel}</td>
+      <td style="padding:8px;">${startHtmlOpt}</td>
+      <td style="padding:8px;">${(row && row.dataset && row.dataset.publicRef) ? row.dataset.publicRef : '-'}</td>
+      <td style="padding:8px;">${clientName || '-'}<div style="font-size:12px; color:#666">${clientEmail || ''}</div></td>
+      <td style="padding:8px;">${svcText || '-'}</td>
+      <td style="padding:8px;">${createdHtml}</td>
+      <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(snapshot).replace(/'/g, "\\'") }'>View</button>` +
+      ((row && row.dataset && row.dataset.status !== 'past') ? ` <button class="btn-sm" data-temp-undo onclick="queueUndoTemp('${tempId}', ${id}, this)" style="margin-left:6px; background:#28a745; color:white;">Undo</button>` : '') +
+      `</td>
+    `;
+    if (tbody.firstChild) tbody.insertBefore(tempTr, tbody.firstChild); else tbody.appendChild(tempTr);
+  } catch (e) { console.error('Error inserting optimistic audit row', e); }
+
+  // Now call delete endpoint; on success replace temp row with authoritative audit data
+  try {
     const response = await fetch(`/bus/${orgSlug}/bookings/${id}/delete/`, {
       method: 'POST',
       headers: {
@@ -309,27 +857,114 @@ async function deleteBooking(id, date, clientName) {
     });
 
     if (response.ok) {
-      document.querySelector(`tr[data-booking-id="${id}"]`).remove();
-      
-      // Check if table is empty
-      const remaining = document.querySelectorAll('#bookingsTableBody tr:not([style*="display: none"])').length;
-      if (remaining === 0) {
-        document.getElementById('bookingsTableBody').innerHTML = `
-          <tr>
-            <td colspan="6" class="no-bookings">
-              <div style="font-size: 18px; margin-bottom: 10px;">📅</div>
-              No bookings found
-            </td>
-          </tr>
-        `;
-      }
+      try {
+        const j = await response.json();
+            if (j && j.audit) {
+          const item = j.audit;
+          const tempTr = document.getElementById('audit-temp-' + tempId);
+          if (tempTr) {
+            // Choose display label: show 'Successful' for deleted events whose start is in the past
+            let dispLabel = (item.event_type||'');
+            try {
+              if (item.event_type === 'deleted' && item.start && (new Date(item.start) < new Date())) dispLabel = 'Successful';
+            } catch(e){}
+            dispLabel = dispLabel ? (dispLabel.charAt(0).toUpperCase() + dispLabel.slice(1)) : '';
+            let startHtml = '-';
+            if (item.start) {
+              try {
+                const sd = new Date(item.start);
+                const startDateStr = sd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+                const startTimeStr = sd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+                let timeLine = startTimeStr;
+                if (item.end) {
+                  try { const ed = new Date(item.end); const endTimeStr = ed.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); timeLine = `${startTimeStr} - ${endTimeStr}`; } catch(e){}
+                }
+                startHtml = `<div style="font-weight:600;">${startDateStr}</div><div style="font-size:13px;color:#6c757d;">${timeLine}</div>`;
+              } catch (e) { startHtml = '-'; }
+            }
+            let createdHtml = '';
+            if (item.created_at) {
+              try{
+                const cd = new Date(item.created_at);
+                let createdTime = cd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+                createdTime = stripLeadingZeroFromTime(createdTime);
+                createdHtml = `<div style="font-weight:600;">${cd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
+              }catch(e){ createdHtml = ''; }
+            }
+            let bookingDisplay = (item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || item.booking_id || '-');
+            tempTr.innerHTML = `
+              <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}"></td>
+              <td style="padding:8px;">${dispLabel}</td>
+              <td style="padding:8px;">${startHtml}</td>
+              <td style="padding:8px;">${bookingDisplay}</td>
+              <td style="padding:8px;">${item.client_name || '-'}<div style="font-size:12px; color:#666">${item.client_email || ''}</div></td>
+              <td style="padding:8px;">${item.service || '-'}</td>
+              <td style="padding:8px;">${createdHtml}</td>
+              <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(item.snapshot).replace(/'/g, "\\'") }'>View</button>` +
+              ((item.start && (new Date(item.start) > new Date()) && (item.event_type === 'deleted' || item.event_type === 'cancelled')) ? ` <button class="btn-sm" style="margin-left:6px; background:#28a745; color:white;" onclick="undoAudit(this)" data-audit-id="${item.id}">Undo</button>` : '') +
+              `</td>`;
+            // If the user queued an optimistic undo while delete was in-flight,
+            // perform the undo now using the authoritative audit id.
+            try{
+              if (pendingUndoTemp.has(tempId)){
+                pendingUndoTemp.delete(tempId);
+                setTimeout(function(){ try{ undoAuditById(item.id); }catch(e){console.error(e);} }, 50);
+              }
+            }catch(e){}
+          }
+        } else {
+          // No audit returned - remove optimistic row
+          const tempTr = document.getElementById('audit-temp-' + tempId); if (tempTr) tempTr.remove();
+          showToast('error', 'Delete succeeded but no audit record was created');
+        }
+      } catch (e) { console.error('Error reading delete response', e); showToast('error','Error reading server response'); }
     } else {
+      // remove optimistic row on failure
+      const tempTr = document.getElementById('audit-temp-' + tempId); if (tempTr) tempTr.remove();
       showToast('error', 'Failed to delete booking');
     }
   } catch (error) {
     console.error('Error:', error);
+    const tempTr = document.getElementById('audit-temp-' + tempId); if (tempTr) tempTr.remove();
     showToast('error', 'Error deleting booking');
   }
+}
+
+async function undoAudit(btn) {
+  if (!btn) return;
+  const auditId = btn.dataset.auditId;
+  if (!auditId) return;
+  if (!confirm('Restore this booking back to the bookings list?')) return;
+
+  try {
+    const resp = await fetch(`/bus/${orgSlug}/bookings/audit/undo/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ audit_id: Number(auditId) })
+    });
+    if (!resp.ok) { const txt = await resp.text(); alert('Restore failed: ' + txt); return; }
+    const j = await resp.json();
+    if (j && j.booking) {
+      const b = j.booking;
+      // remove audit row
+      const tr = btn.closest('tr'); if (tr) tr.remove();
+      // also remove any other audit rows for the same booking_id or public_ref (defensive)
+      try{
+        document.querySelectorAll('.auditRowCb').forEach(cb => {
+          try{
+            const ct = cb.closest('tr'); if (!ct) return;
+            const tempBookingId = ct.dataset.bookingId;
+            const tempPublicRef = ct.dataset.publicRef;
+            const bookRef = (b && (b.public_ref || (b.booking_id !== undefined ? String(b.booking_id) : '')));
+            if ((tempBookingId && String(tempBookingId) === String(b.booking_id)) || (tempPublicRef && String(tempPublicRef) === String(bookRef))) ct.remove();
+          }catch(e){}
+        });
+      }catch(e){}
+      // Insert booking row using helper
+      insertBookingRow(b, true);
+      showToast('success', 'Booking restored');
+    }
+  } catch (e) { console.error(e); alert('Error restoring booking'); }
 }
 
 // Audit select-all and export
@@ -337,6 +972,81 @@ const auditSelectAll = document.getElementById('auditSelectAll');
 if (auditSelectAll) {
   auditSelectAll.addEventListener('change', (e) => {
     document.querySelectorAll('.auditRowCb').forEach(cb => cb.checked = e.target.checked);
+  });
+}
+
+// Bookings select-all and select-by-status handlers
+const bookingsSelectAll = document.getElementById('bookingsSelectAll');
+if (bookingsSelectAll) {
+  bookingsSelectAll.addEventListener('change', (e) => {
+    // only affect visible rows
+    document.querySelectorAll('#bookingsTableBody tr').forEach(row => {
+      if (row.style.display === 'none') return;
+      const cb = row.querySelector('.bookingRowCb'); if (cb) cb.checked = e.target.checked;
+    });
+    updateBulkDeleteVisibility();
+  });
+}
+
+function deselectAllBookings(){ document.querySelectorAll('.bookingRowCb').forEach(cb => cb.checked = false); if (bookingsSelectAll) bookingsSelectAll.checked = false; updateBulkDeleteVisibility(); }
+function selectByStatus(status){ document.querySelectorAll('#bookingsTableBody tr').forEach(row => { const cb = row.querySelector('.bookingRowCb'); if (!cb) return; if (row.style.display === 'none') return; if (status === 'all') cb.checked = true; else if (row.dataset.status === status) cb.checked = true; else cb.checked = false; }); if (bookingsSelectAll) bookingsSelectAll.checked = false; updateBulkDeleteVisibility(); }
+
+const selectAllBookingsBtn = document.getElementById('selectAllBookingsBtn'); if (selectAllBookingsBtn) selectAllBookingsBtn.addEventListener('click', () => selectByStatus('all'));
+const selectStatusMenu = document.getElementById('selectStatusMenu');
+if (selectStatusMenu) {
+  selectStatusMenu.addEventListener('change', (e) => {
+    const v = e.target.value;
+    if (v === 'deselect') {
+      deselectAllBookings();
+    } else if (v) {
+      selectByStatus(v);
+    }
+    // reset menu back to placeholder
+    setTimeout(() => { selectStatusMenu.value = ''; }, 150);
+  });
+}
+
+// Bulk delete UI wiring
+const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+function updateBulkDeleteVisibility(){
+  const any = Array.from(document.querySelectorAll('.bookingRowCb')).some(cb => cb.checked && cb.closest('tr') && cb.closest('tr').style.display !== 'none');
+  if (bulkDeleteBtn) bulkDeleteBtn.style.display = any ? 'inline-block' : 'none';
+}
+
+// Update visibility when individual checkboxes change (delegated)
+const bookingsTbody = document.getElementById('bookingsTableBody');
+if (bookingsTbody){
+  bookingsTbody.addEventListener('change', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('bookingRowCb')){
+      updateBulkDeleteVisibility();
+    }
+  });
+}
+
+if (bulkDeleteBtn){
+  bulkDeleteBtn.addEventListener('click', async () => {
+    const checked = Array.from(document.querySelectorAll('.bookingRowCb:checked')).filter(cb => cb.closest('tr') && cb.closest('tr').style.display !== 'none');
+    if (!checked.length) return;
+    // Prevent deleting ongoing
+    const ongoing = checked.some(cb => cb.closest('tr').dataset.status === 'ongoing');
+    if (ongoing){ alert('Cannot delete ongoing bookings'); return; }
+    if (!confirm(`Permanently delete ${checked.length} selected bookings? This cannot be undone.`)) return;
+    // Call deleteBooking for each selected row without per-call confirmation
+    for (const cb of checked){
+      try{
+        const tr = cb.closest('tr');
+        const id = Number(cb.value);
+        // gather date and client for UI friendly messages
+        const dateCell = tr.querySelectorAll('td')[1];
+        const dateText = dateCell ? (dateCell.querySelector('div') ? dateCell.querySelector('div').textContent : '') : '';
+        const clientCell = tr.querySelectorAll('td')[2];
+        const clientName = clientCell ? (clientCell.querySelector('div') ? clientCell.querySelector('div').textContent : '') : '';
+        // call deleteBooking with skipConfirm = true
+        deleteBooking(id, dateText, clientName, true);
+      }catch(e){ console.error('Bulk delete item error', e); }
+    }
+    // After initiating deletes, hide bulk button until state updates
+    updateBulkDeleteVisibility();
   });
 }
 
@@ -353,16 +1063,41 @@ if (exportAuditBtn) {
       });
       if (!resp.ok) { alert('Export failed'); return; }
       const blob = await resp.blob();
+      const contentType = resp.headers.get('Content-Type') || '';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'audit_export.json';
+      if (contentType === 'application/pdf') a.download = 'audit_export.pdf';
+      else a.download = 'audit_export.json';
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) { console.error(e); alert('Export error'); }
   });
+
+  const deleteAuditBtn = document.getElementById('deleteAuditBtn');
+  if (deleteAuditBtn){
+    deleteAuditBtn.addEventListener('click', async () => {
+      const ids = Array.from(document.querySelectorAll('.auditRowCb:checked')).map(cb => Number(cb.value));
+      if (!ids.length) { alert('No audit rows selected'); return; }
+      if (!confirm('Permanently delete selected audit records? This cannot be undone.')) return;
+      try {
+        const resp = await fetch(`/bus/${orgSlug}/bookings/audit/delete/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+          body: JSON.stringify({ ids })
+        });
+        if (!resp.ok) { alert('Delete failed'); return; }
+        const data = await resp.json();
+        showToast('success', `Deleted ${data.deleted || 0} audit rows.`);
+        // remove rows from DOM
+        document.querySelectorAll('.auditRowCb:checked').forEach(cb => {
+          const tr = cb.closest('tr'); if (tr) tr.remove();
+        });
+      } catch (e) { console.error(e); alert('Delete error'); }
+    });
+  }
 }
 </script>
 {% endblock %}

@@ -41,6 +41,10 @@
                     <span class="detail-label">Organization:</span>
                     <span class="detail-value">{{ booking.organization.name }}</span>
                 </div>
+                <div class="detail-row">
+                    <span class="detail-label">Booking ref:</span>
+                    <span class="detail-value">{{ public_ref|default:booking.id }}</span>
+                </div>
             </div>
 
             <p>If this cancellation was made in error or if you have any questions, please contact us as soon as possible.</p>
