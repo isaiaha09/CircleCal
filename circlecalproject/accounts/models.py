@@ -6,7 +6,7 @@ User = settings.AUTH_USER_MODEL
 
 class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
-    # Avatar/profile picture removed — no file stored on server
+    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
     timezone = models.CharField(max_length=63, default='UTC', help_text="User's timezone (e.g., America/Los_Angeles)")
     email_alerts = models.BooleanField(default=True)
     booking_reminders = models.BooleanField(default=True)
@@ -20,10 +20,6 @@ class Business(models.Model):
     slug = models.SlugField(unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     owner = models.ForeignKey(User, related_name="owned_businesses", on_delete=models.SET_NULL, null=True)
-    # Soft-archive flag: when True the business is considered archived and
-    # hidden from normal admin/app listings. Used when users choose to
-    # delete their account but we retain business data.
-    is_archived = models.BooleanField(default=False)
     # Add billing fields if needed (stripe_customer_id etc.)
     stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
     # Timezone for the organization (e.g., 'America/Los_Angeles', 'America/New_York')

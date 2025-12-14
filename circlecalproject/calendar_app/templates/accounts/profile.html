@@ -13,7 +13,12 @@
         {{ form.non_field_errors }}
       </div>
     {% endif %}
-    {# Profile pictures removed — no preview shown #}
+    {% if user.profile.avatar %}
+      <div class="flex flex-col items-center mb-6">
+        <img id="avatar-preview" src="{{ user.profile.avatar.url }}?v={{ user.profile.avatar.name|urlencode }}" alt="Avatar" class="w-32 h-32 rounded-full object-cover border-4 border-blue-300 mb-2" />
+        <span class="text-xs text-gray-500">Current Avatar</span>
+      </div>
+    {% endif %}
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-semibold text-blue-800 mb-2">Username</label>
@@ -48,7 +53,14 @@
         </label>
       </div>
     </div>
-    {# Profile picture upload removed #}
+    <div class="col-span-2 mt-4">
+      <label class="block text-sm font-semibold text-blue-800 mb-2">Avatar</label>
+      {{ form.avatar }}
+      {% if form.avatar.errors %}
+        <div class="text-xs text-red-700 mt-1">{{ form.avatar.errors }}</div>
+      {% endif %}
+      <p class="text-xs text-gray-500 mt-1">Upload a clear photo (any orientation). Explicit images are not allowed.</p>
+    </div>
     <div class="mt-6 flex justify-end">
       <button id="save-btn" type="submit" class="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-700">Save Changes</button>
     </div>
@@ -67,12 +79,11 @@
         <a href="{% url 'two_factor:profile' %}" class="inline-block px-4 py-2 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">Enable 2FA</a>
       {% endif %}
     </div>
-    <div class="mt-4 flex items-center gap-3">
+    <div class="mt-4">
       <form action="{% url 'accounts:delete_account' %}" method="post" onsubmit="return confirm('This will permanently delete your account. Continue?');">
         {% csrf_token %}
         <button type="submit" class="mt-2 inline-flex items-center px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Delete Account</button>
       </form>
-      <a href="{% url 'accounts:deactivate_account' %}" class="mt-2 inline-flex items-center px-4 py-2 border border-yellow-300 text-yellow-700 rounded-lg hover:bg-yellow-50">Deactivate Account</a>
     </div>
   </div>
 
@@ -147,26 +158,6 @@
       const saveBtn = document.getElementById('save-btn');
       const avatarPreview = document.getElementById('avatar-preview');
       if (!fileInput) return;
-
-      // Hide the native file input UI and replace with a custom chooser
-      try {
-        fileInput.style.position = 'absolute';
-        fileInput.style.left = '-9999px';
-      } catch (e) {}
-
-      const chooseBtn = document.getElementById('choose-profile-pic');
-      const filenameSpan = document.getElementById('profile-pic-filename');
-      if (chooseBtn) {
-        chooseBtn.addEventListener('click', () => fileInput.click());
-      }
-      // Always show 'profile_pic.jpg' when a file is selected or existing
-      fileInput.addEventListener('change', function() {
-        if (fileInput.files && fileInput.files.length) {
-          filenameSpan.textContent = 'profile_pic.jpg';
-        } else {
-          filenameSpan.textContent = 'No file chosen';
-        }
-      });
 
       // Create a lightweight modal for cropping
       const modal = document.createElement('div');
