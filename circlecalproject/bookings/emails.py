@@ -40,8 +40,8 @@ def send_booking_confirmation(booking):
         return False
 
 
-def send_booking_cancellation(booking):
-    """Send booking cancellation email to client."""
+def send_booking_cancellation(booking, refund_info=None):
+    """Send booking cancellation email to client. Accept optional refund_info string."""
     if not booking.client_email:
         return False
     
@@ -49,6 +49,7 @@ def send_booking_cancellation(booking):
         'booking': booking,
         'public_ref': getattr(booking, 'public_ref', None),
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'refund_info': refund_info,
     }
     
     subject = f"Booking Cancelled - {booking.organization.name}"

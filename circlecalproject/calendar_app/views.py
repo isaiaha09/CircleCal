@@ -2026,6 +2026,24 @@ def bookings_audit_list(request, org_slug):
     items = qs[start:end]
     data = []
     for a in items:
+        # Determine refund-related flags for cancelled events so the UI can
+        # display whether the cancellation occurred within the refund cutoff
+        non_refunded = False
+        refund_within_cutoff = False
+        try:
+            if a.event_type == AuditBooking.EVENT_CANCELLED and a.service and a.start and a.created_at:
+                hrs = (a.start - a.created_at).total_seconds() / 3600.0
+                if getattr(a.service, 'refunds_allowed', False):
+                    cutoff = float(getattr(a.service, 'refund_cutoff_hours', 0) or 0)
+                    refundable = (hrs >= cutoff)
+                    refund_within_cutoff = (hrs < cutoff)
+                else:
+                    refundable = False
+                non_refunded = not refundable
+        except Exception:
+            non_refunded = False
+            refund_within_cutoff = False
+
         data.append({
             'id': a.id,
             'booking_id': a.booking_id,
@@ -2038,6 +2056,8 @@ def bookings_audit_list(request, org_slug):
             'client_email': a.client_email,
             'created_at': a.created_at.isoformat(),
             'snapshot': a.booking_snapshot,
+            'non_refunded': non_refunded,
+            'refund_within_cutoff': refund_within_cutoff,
         })
     return JsonResponse({'total': total, 'page': page, 'per_page': per_page, 'items': data})
 
@@ -2301,10 +2321,48 @@ def bookings_audit_export(request, org_slug):
                 return str(dt)
 
     for a in qs:
+        # Determine booking reference to show (prefer snapshot.public_ref when available)
+        try:
+            snap = a.booking_snapshot or {}
+            snap_ref = snap.get('public_ref') if isinstance(snap, dict) else None
+        except Exception:
+            snap = {}
+            snap_ref = None
+        booking_ref = snap_ref or getattr(a, 'public_ref', None) or a.booking_id
+
+        # Compute display label: treat past deleted events as 'Successful'
+        display_event = a.event_type or ''
+        try:
+            if a.event_type == AuditBooking.EVENT_DELETED and a.start and (a.start < timezone.now()):
+                display_event = 'successful'
+        except Exception:
+            pass
+
+        # Determine whether a client cancellation was refundable per service policy
+        non_refunded = False
+        try:
+            if a.event_type == AuditBooking.EVENT_CANCELLED and a.service and a.start and a.created_at:
+                # cancellation occurred at a.created_at; compare to start to decide refund eligibility
+                try:
+                    # compute hours between cancellation time and appointment start
+                    hrs = (a.start - a.created_at).total_seconds() / 3600.0
+                    if getattr(a.service, 'refunds_allowed', False):
+                        cutoff = float(getattr(a.service, 'refund_cutoff_hours', 0) or 0)
+                        refundable = (hrs >= cutoff)
+                    else:
+                        refundable = False
+                except Exception:
+                    refundable = False
+                non_refunded = not refundable
+        except Exception:
+            non_refunded = False
+
         export.append({
             'id': a.id,
             'booking_id': a.booking_id,
+            'booking_ref': booking_ref,
             'event_type': a.event_type,
+            'display_event': display_event,
             'service': a.service.name if a.service else None,
             'service_price': float(a.service.price) if (a.service and getattr(a.service, 'price', None) is not None) else None,
             'business': org.name,
@@ -2314,9 +2372,78 @@ def bookings_audit_export(request, org_slug):
             'end_display': _fmt(a.end),
             'client_name': a.client_name,
             'client_email': a.client_email,
+            'non_refunded': non_refunded,
             'created_at': a.created_at.isoformat(),
             'snapshot': a.booking_snapshot,
         })
+
+    # Compute earnings summary: counts for successful/cancelled/deleted and
+    # total gross and per-service subtotals only for successful appointments
+    try:
+        total_count = len(export)
+        successful_count = 0
+        cancelled_count = 0
+        deleted_count = 0
+        total_gross = 0.0
+        potential_gross = 0.0
+        per_service = {}
+        now_dt = timezone.now()
+        for it in export:
+            ev = (it.get('display_event') or it.get('event_type') or '').lower()
+            # Treat previously computed 'successful' display_event as successful
+            is_successful = (ev == 'successful')
+            if is_successful:
+                successful_count += 1
+            else:
+                # Cancelled vs deleted based on raw event_type
+                raw = (it.get('event_type') or '').lower()
+                if raw == AuditBooking.EVENT_CANCELLED:
+                    cancelled_count += 1
+                elif raw == AuditBooking.EVENT_DELETED:
+                    deleted_count += 1
+                else:
+                    # Fallback: count non-successful items as deleted for totals
+                    deleted_count += 1
+
+            # Parse price (safe) and add to potential total always
+            price = it.get('service_price')
+            try:
+                p = float(price) if price is not None else 0.0
+            except Exception:
+                p = 0.0
+            potential_gross += p
+
+            # Determine whether this item contributes to earned totals:
+            # earned if successful OR cancelled but non_refunded
+            contributes = False
+            if is_successful:
+                contributes = True
+            else:
+                try:
+                    if (it.get('event_type') or '').lower() == AuditBooking.EVENT_CANCELLED and it.get('non_refunded'):
+                        contributes = True
+                except Exception:
+                    contributes = False
+
+            if contributes:
+                total_gross += p
+                svc = it.get('service') or 'Unspecified'
+                entry = per_service.get(svc) or {'count': 0, 'subtotal': 0.0}
+                entry['count'] += 1
+                entry['subtotal'] += p
+                per_service[svc] = entry
+
+        export_summary = {
+            'count': total_count,
+            'successful_count': successful_count,
+            'cancelled_count': cancelled_count,
+            'deleted_count': deleted_count,
+            'total_gross': round(total_gross, 2),
+            'potential_gross': round(potential_gross, 2),
+            'per_service': {k: {'count': v['count'], 'subtotal': round(v['subtotal'], 2)} for k, v in per_service.items()}
+        }
+    except Exception:
+        export_summary = {'count': len(export), 'successful_count': 0, 'cancelled_count': 0, 'deleted_count': 0, 'total_gross': 0.0, 'per_service': {}}
 
     # Try to generate a simple PDF if reportlab is installed
     try:
@@ -2329,16 +2456,62 @@ def bookings_audit_export(request, org_slug):
         width, height = letter
         y = height - 40
         line_h = 14
-        c.setFont('Helvetica', 11)
-        c.drawString(40, y, f'Audit export for {org.name}')
+        # Centered title
+        try:
+            c.setFont('Helvetica-Bold', 14)
+            c.drawCentredString(width / 2.0, y, f'Audit export for {org.name}')
+        except Exception:
+            c.setFont('Helvetica', 11)
+            c.drawString(40, y, f'Audit export for {org.name}')
         y -= (line_h * 2)
+        # Draw counts and earnings summary: only successful appointments contribute to earnings
+        try:
+            c.setFont('Helvetica-Bold', 12)
+            summary_line = (f"Selected: {export_summary.get('count', 0)}  "
+                            f"Successful: {export_summary.get('successful_count', 0)}  "
+                            f"Cancelled: {export_summary.get('cancelled_count', 0)}  "
+                            f"Deleted: {export_summary.get('deleted_count', 0)}")
+            c.drawString(40, y, summary_line)
+            y -= (line_h * 1.2)
+            total_line = f"Total Earned (successful + non-refunded cancellations): ${export_summary.get('total_gross', 0.0):.2f}"
+            c.setFont('Helvetica', 11)
+            c.drawString(40, y, total_line)
+            y -= (line_h * 1.2)
+            # Potential total: includes all appointments (successful, cancelled, deleted)
+            try:
+                potential_line = f"Potential Total (all appointments): ${export_summary.get('potential_gross', 0.0):.2f}"
+                c.setFont('Helvetica', 11)
+                c.drawString(40, y, potential_line)
+                y -= (line_h * 1.2)
+            except Exception:
+                pass
+
+            # Per-service breakdown only for successful appointments
+            if export_summary.get('per_service'):
+                c.setFont('Helvetica', 10)
+                for svc_name, data in export_summary.get('per_service').items():
+                    if y < 60:
+                        c.showPage()
+                        c.setFont('Helvetica', 11)
+                        y = height - 40
+                    c.drawString(40, y, f"{svc_name}: {data.get('count',0)} — ${data.get('subtotal',0.0):.2f}")
+                    y -= line_h
+            y -= (line_h * 0.5)
+        except Exception:
+            try:
+                y -= (line_h * 0.5)
+            except Exception:
+                pass
+
         for item in export:
             if y < 60:
                 c.showPage()
                 c.setFont('Helvetica', 11)
                 y = height - 40
-            ev = item.get('event_type', '')
-            c.drawString(40, y, f"Event: {ev.capitalize()}  ID: {item.get('booking_id') or '-'}")
+            ev = item.get('display_event') or item.get('event_type', '')
+            # prefer booking_ref which may be the public_ref from snapshot
+            bid = item.get('booking_ref') or item.get('booking_id') or '-'
+            c.drawString(40, y, f"Event: {str(ev).capitalize()}  ID: {bid}")
             y -= line_h
             c.drawString(60, y, f"Service: {item.get('service') or '-'}")
             y -= line_h
@@ -2356,6 +2529,13 @@ def bookings_audit_export(request, org_slug):
                 except Exception:
                     c.drawString(60, y, f"Charge: {price}")
                 y -= line_h
+            # Indicate retained charge for non-refunded cancellations
+            try:
+                if (item.get('event_type') or '').lower() == AuditBooking.EVENT_CANCELLED and item.get('non_refunded'):
+                    c.drawString(60, y, "Note: Cancellation charge retained (no refund)")
+                    y -= line_h
+            except Exception:
+                pass
             # Prefer the human-readable display computed above
             start_disp = item.get('start_display') or item.get('start') or '-'
             end_disp = item.get('end_display') or item.get('end') or None
@@ -2380,7 +2560,7 @@ def bookings_audit_export(request, org_slug):
         from django.conf import settings
         # Module import errors indicate reportlab isn't available
         if isinstance(e, (ImportError, ModuleNotFoundError)):
-            resp = JsonResponse({'items': export})
+            resp = JsonResponse({'items': export, 'summary': export_summary})
             resp['Content-Disposition'] = 'attachment; filename="audit_export.json"'
             return resp
         # Log the PDF generation failure

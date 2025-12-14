@@ -277,20 +277,47 @@ def cancel_booking(request, booking_id):
         else:
             refund_info = "No refund (service policy)"
 
-    # Mark this deletion as a client-initiated cancellation so audit records
-    # can reflect 'cancelled' instead of 'deleted'. The post-delete signal
-    # will read this attribute when creating the AuditBooking.
-    try:
-        setattr(booking, '_audit_event_type', 'cancelled')
-    except Exception:
-        pass
-    booking.delete()
+    # If the request is GET, render a confirmation page giving the client
+    # the option to proceed or keep the appointment. The confirmation form
+    # will POST back to this same URL with the same token.
+    if request.method == 'GET':
+        return render(request, "bookings/booking_cancel_confirm.html", {
+            "org": booking.organization,
+            "service": booking.service,
+            "booking": booking,
+            "refund_info": refund_info,
+            "token": token,
+        })
 
-    return render(request, "bookings/booking_cancelled.html", {
-        "org_slug": org_slug,
-        "service_slug": service_slug,
-        "refund_info": refund_info,
-    })
+    # POST -> perform the cancellation
+    if request.method == 'POST':
+        # Mark this deletion as a client-initiated cancellation so audit records
+        # can reflect 'cancelled' instead of 'deleted'. The post-delete signal
+        # will read this attribute when creating the AuditBooking.
+        try:
+            setattr(booking, '_audit_event_type', 'cancelled')
+        except Exception:
+            pass
+
+        # Send cancellation email (include refund_info in context) and then delete
+        try:
+            from .emails import send_booking_cancellation
+            # send_booking_cancellation will return False on failure but we don't block
+            send_booking_cancellation(booking, refund_info=refund_info)
+        except Exception:
+            pass
+
+        try:
+            booking.delete()
+        except Exception:
+            # If delete fails for DB reasons, still render the page with refund_info
+            pass
+
+        return render(request, "bookings/booking_cancelled.html", {
+            "org_slug": org_slug,
+            "service_slug": service_slug,
+            "refund_info": refund_info,
+        })
 
 
 def is_within_availability(org, start_dt, end_dt, service=None):
@@ -1264,14 +1291,14 @@ def service_availability(request, org_slug, service_slug):
                     slot_start += slot_increment
                     continue
 
-                # Min notice handling (only for same-day slots)
+                # Min notice handling: skip any slot earlier than the earliest allowed time
                 try:
-                    is_same_day = slot_start.date() == now_org.date()
+                    if slot_start < earliest_allowed:
+                        slot_start += slot_increment
+                        continue
                 except Exception:
-                    is_same_day = False
-                if is_same_day and slot_start < earliest_allowed:
-                    slot_start += slot_increment
-                    continue
+                    # If comparison fails for any reason, skip enforcing and proceed
+                    pass
 
                 # Determine whether to mark buffer violations. Only expose this
                 # information to authenticated org members (owners/admins/managers).

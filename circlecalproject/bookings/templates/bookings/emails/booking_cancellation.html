@@ -47,7 +47,13 @@
                 </div>
             </div>
 
-            <p>If this cancellation was made in error or if you have any questions, please contact us as soon as possible.</p>
+                        {% if refund_info %}
+                            <div style="margin:16px 0;padding:12px;border-left:4px solid #f0ad4e;background:#fff8e6;border-radius:4px;">
+                                <strong>Refund:</strong> {{ refund_info }}
+                            </div>
+                        {% endif %}
+
+                        <p>If this cancellation was made in error or if you have any questions, please contact us as soon as possible.</p>
             
             <p style="margin-top: 30px;">Thank you,<br>
             <strong>{{ booking.organization.name }} Team</strong></p>

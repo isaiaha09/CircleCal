@@ -1,0 +1,31 @@
+﻿{% extends "calendar_app/base.html" %}
+
+{% block content %}
+<div style="max-width:760px;margin:48px auto;padding:0 16px;">
+  <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 6px 20px rgba(18,38,63,0.06);">
+    <div style="display:flex;gap:16px;align-items:flex-start;">
+      <div style="flex:0 0 56px; height:56px; border-radius:8px; background:#fff0f0; display:flex; align-items:center; justify-content:center; font-size:22px; color:#b02a37;">⚠️</div>
+      <div style="flex:1;">
+        <h2 style="margin:0 0 8px 0; font-size:1.25rem;">Confirm cancellation</h2>
+        <p style="margin:0 0 12px;color:#444;">You're about to cancel the appointment for
+          <strong>{{ booking.service.name }}</strong> on
+          <strong>{{ booking.start|date:"D, j M Y" }}</strong> at
+          <strong>{{ booking.start|time:"g:i a" }}</strong>.</p>
+
+        {% if refund_info %}
+          <div style="margin-bottom:12px; padding:10px 12px; border-radius:6px; background:#e9f7ff; color:#055160;">{{ refund_info }}</div>
+        {% else %}
+          <div style="margin-bottom:12px; padding:10px 12px; border-radius:6px; background:#fff4e5; color:#7a4b00;">No refund is available for this cancellation.</div>
+        {% endif %}
+
+        <form method="post" style="display:flex; gap:10px; align-items:center;">
+          {% csrf_token %}
+          <input type="hidden" name="token" value="{{ token }}">
+          <button type="submit" class="btn-sm btn-delete" style="background:#d9534f; color:white; padding:10px 16px; border-radius:6px; border:none;">Proceed with cancellation</button>
+          <a href="{{ booking.get_absolute_url }}" role="button" class="btn-sm btn-view" style="background:#6c757d; color:white; padding:10px 14px; border-radius:6px; text-decoration:none;">Keep appointment</a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -200,10 +200,10 @@
                     {{ a.get_event_type_display|capfirst }}
                   {% endif %}
                 </td>
-                <td style="padding:8px;">{% if a.start %}{% timezone organization.timezone %}
-                    <div style="font-weight:600;">{{ a.start|date:'M d, Y' }}</div>
-                    <div style="font-size:13px; color:#6c757d;">{% if a.end %}{{ a.start|time:'g:i A' }} - {{ a.end|time:'g:i A' }}{% else %}{{ a.start|time:'g:i A' }}{% endif %}</div>
-                  {% endtimezone %}{% else %}-{% endif %}</td>
+                <td style="padding:8px;">{% with snap=a.booking_snapshot %}{% if a.start or snap.start %}{% timezone organization.timezone %}
+                    <div style="font-weight:600;">{{ a.start|default:snap.start|date:'M d, Y' }}</div>
+                    <div style="font-size:13px; color:#6c757d;">{% if a.end or snap.end %}{{ a.start|default:snap.start|time:'g:i A' }} - {{ a.end|default:snap.end|time:'g:i A' }}{% else %}{{ a.start|default:snap.start|time:'g:i A' }}{% endif %}</div>
+                  {% endtimezone %}{% else %}-{% endif %}{% endwith %}</td>
                 <td style="padding:8px;">{% with ref=a.booking_snapshot.public_ref %}{{ ref|default:a.booking_id }}{% endwith %}</td>
                 <td style="padding:8px;">{{ a.client_name|default:'-' }}<div style="font-size:12px; color:#666">{{ a.client_email }}</div></td>
                 <td style="padding:8px;">{{ a.service.name|default:'-' }}</td>
@@ -374,7 +374,28 @@ function viewAudit(btn) {
   try {
     const parsed = tryParseSnapshot(raw);
     const parts = [];
-    if (parsed && typeof parsed === 'object'){
+      // Determine event label from the surrounding row if available
+      try{
+        const row = btn.closest && btn.closest('tr');
+        if (row){
+          const rowLabel = (row.dataset && (row.dataset.label || row.dataset.eventType)) || null;
+          const nonRefundFlag = (row.dataset && (row.dataset.nonRefunded || row.dataset.non_refunded || '')) || '';
+          const refundWithin = (row.dataset && (row.dataset.refundWithinCutoff || row.dataset.refund_within_cutoff || '')) || '';
+          if (rowLabel){
+            let displayEvent = rowLabel.charAt(0).toUpperCase() + rowLabel.slice(1);
+            if (rowLabel.toLowerCase() === 'cancelled' && (nonRefundFlag === '1' || nonRefundFlag === 'true')){
+              if (refundWithin === '1' || refundWithin === 'true'){
+                displayEvent = 'Cancelled (within refund rule for service) - non refunded for client';
+              } else {
+                displayEvent = 'Cancelled - non-refunded for client';
+              }
+            }
+            parts.push(`<div><strong>Event:</strong> ${displayEvent}</div>`);
+          }
+        }
+      }catch(e){}
+
+      if (parsed && typeof parsed === 'object'){
       if (parsed.title) parts.push(`<div><strong>Title:</strong> ${parsed.title}</div>`);
       // Business name (prefers parsed business, falls back to page org)
       parts.push(`<div><strong>Business:</strong> ${parsed.business || ORG_NAME}</div>`);
@@ -536,6 +557,11 @@ function insertBookingRow(b, toTop=true) {
   newTr.setAttribute('data-public-ref', b.public_ref || '');
   newTr.setAttribute('data-status', status);
   newTr.setAttribute('data-service-id', b.service_id || '');
+  // Expose service price on the row so the "View" modal can show the charge
+  try{
+    const svcPrice = (b.service_price !== undefined && b.service_price !== null) ? String(b.service_price) : (b.price !== undefined && b.price !== null ? String(b.price) : '');
+    newTr.setAttribute('data-service-price', svcPrice);
+  }catch(e){ newTr.setAttribute('data-service-price',''); }
   newTr.setAttribute('data-search', (b.client_name || '').toLowerCase() + ' ' + (b.client_email || '').toLowerCase());
   newTr.innerHTML = `
     <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${b.booking_id}"></td>
@@ -667,17 +693,22 @@ function insertAuditRow(item){
     const tbody = document.getElementById('auditTableBody');
     const noRow = document.getElementById('noAuditRow'); if (noRow) noRow.remove();
     const tr = document.createElement('tr');
+    // Prefer item.start/end but fall back to snapshot.start/end so the UI
+    // shows both start and end immediately after client-initiated cancellations
+    // where the server may only include those values inside snapshot.
     let startHtml = '-';
-    if (item.start) {
+    const srcStart = item.start || (item.snapshot && item.snapshot.start);
+    const srcEnd = item.end || (item.snapshot && item.snapshot.end);
+    if (srcStart) {
       try {
-        const sd = new Date(item.start);
+        const sd = new Date(srcStart);
         const startDateStr = sd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
         let startTimeStr = sd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
         startTimeStr = stripLeadingZeroFromTime(startTimeStr);
         let timeLine = startTimeStr;
-        if (item.end) {
+        if (srcEnd) {
           try {
-            const ed = new Date(item.end);
+            const ed = new Date(srcEnd);
             let endTimeStr = ed.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
             endTimeStr = stripLeadingZeroFromTime(endTimeStr);
             timeLine = `${startTimeStr} - ${endTimeStr}`;
@@ -686,13 +717,22 @@ function insertAuditRow(item){
         startHtml = `<div style="font-weight:600;">${startDateStr}</div><div style="font-size:13px;color:#6c757d;">${timeLine}</div>`;
       } catch (e) { startHtml = '-'; }
     }
+    // The "Booked At" should reflect the original booking time. Prefer
+    // snapshot.created_at / created_display when present so cancelling/deleting
+    // does not change the displayed booked-at value.
     let createdHtml = '';
-    if (item.created_at) {
+    const srcCreated = (item.snapshot && (item.snapshot.created_at || item.snapshot.created_display)) || item.created_at || item.created_display;
+    if (srcCreated) {
       try{
-        const cd = new Date(item.created_at);
-        let createdTime = cd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
-        createdTime = stripLeadingZeroFromTime(createdTime);
-        createdHtml = `<div style="font-weight:600;">${cd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
+        const cd = new Date(srcCreated);
+        if (!isNaN(cd)){
+          let createdTime = cd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+          createdTime = stripLeadingZeroFromTime(createdTime);
+          createdHtml = `<div style="font-weight:600;">${cd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
+        } else {
+          // fallback: display raw string
+          createdHtml = `<div style="font-weight:600;">${srcCreated}</div><div style="font-size:13px;color:#6c757d;">${''}</div>`;
+        }
       }catch(e){ createdHtml = ''; }
     }
     let label = '';
@@ -717,6 +757,8 @@ function insertAuditRow(item){
       // store displayed label too (e.g. 'Successful') for fine-grained filtering
       const dispLabel = (function(){ try{ if (item.event_type === 'deleted' && item.start && (new Date(item.start) < new Date())) return 'successful'; }catch(e){} return (item.event_type || '').toLowerCase(); })();
       tr.dataset.label = dispLabel;
+      // Mark whether this cancelled audit retained a non-refunded charge
+      try{ tr.dataset.nonRefunded = item.non_refunded ? '1' : ''; tr.dataset.refundWithinCutoff = item.refund_within_cutoff ? '1' : ''; }catch(e){ tr.dataset.nonRefunded = ''; tr.dataset.refundWithinCutoff = ''; }
       tr.dataset.serviceName = (item.service || '').toLowerCase();
       tr.dataset.client = (item.client_name || '').toLowerCase();
       tr.dataset.publicRef = (((item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || (item.booking_id !== undefined ? String(item.booking_id) : ''))) || '').toLowerCase();
