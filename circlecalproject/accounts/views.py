@@ -5,7 +5,7 @@ from django.contrib import messages
 from .forms import ProfileForm
 from .models import LoginActivity, Membership, Invite
 from billing.models import Subscription
-from django.views.decorators.http import require_POST
+
 from django.contrib.auth import logout
 from django.urls import reverse
 from two_factor.views import LoginView as TwoFactorLoginView
@@ -117,16 +117,67 @@ class CustomLoginView(TwoFactorLoginView):
 
 
 @login_required
-@require_POST
 def delete_account_view(request):
-	# Capture the user before logout
+	# For backward compatibility the old endpoint performed a hard delete.
+	# New behavior: archive owned businesses then delete the user row.
 	u = request.user
-	# Log the user out first to drop session
+	# Show a confirmation page listing businesses owned by the user
+	from .models import Business
+	owned = Business.objects.filter(owner=u, is_archived=False)
+
+	if request.method == 'GET':
+		return render(request, 'accounts/account_confirm_delete.html', {'owned': owned})
+
+	# POST -> perform archive of businesses and delete account after password check
+	password = request.POST.get('password', '')
+	if not u.check_password(password):
+		# Render the confirmation page with an inline error (do not set a site-wide message)
+		return render(request, 'accounts/account_confirm_delete.html', {
+			'owned': owned,
+			'error': 'Password incorrect. Please try again.'
+		}, status=400)
+
+	# Archive businesses owned by this user to preserve business data
+	try:
+		Business.objects.filter(owner=u).update(is_archived=True)
+	except Exception:
+		return render(request, 'accounts/account_confirm_delete.html', {
+			'owned': owned,
+			'error': "We couldn't archive your businesses. Please try again later."
+		}, status=500)
+
+	# Logout and delete the user
 	logout(request)
-	# Delete the account
 	try:
 		u.delete()
-		messages.success(request, "Your account has been deleted.")
 	except Exception:
-		messages.error(request, "We couldn't delete your account right now. Please try again.")
-	return redirect("calendar_app:home")
+		# If deletion failed, render confirmation with error rather than setting messages
+		return render(request, 'accounts/account_confirm_delete.html', {
+			'owned': owned,
+			'error': "We couldn't delete your account right now. Please try again."
+		}, status=500)
+
+	# Successful deletion: redirect to home without a site-wide message
+	return redirect('calendar_app:home')
+
+
+@login_required
+def deactivate_account_view(request):
+	u = request.user
+	if request.method == 'GET':
+		return render(request, 'accounts/account_confirm_deactivate.html')
+
+	# POST -> require password then deactivate
+	password = request.POST.get('password', '')
+	if not u.check_password(password):
+		# Render confirmation with inline error
+		return render(request, 'accounts/account_confirm_deactivate.html', {
+			'error': 'Password incorrect. Please try again.'
+		}, status=400)
+
+	u.is_active = False
+	u.save()
+	logout(request)
+
+	# Redirect to home without a site-wide message
+	return redirect('calendar_app:home')

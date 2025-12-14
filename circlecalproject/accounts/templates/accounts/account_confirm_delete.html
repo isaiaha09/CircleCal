@@ -1,0 +1,51 @@
+{% extends 'calendar_app/base.html' %}
+
+{% block content %}
+  <div class="max-w-xl mx-auto px-4 py-12">
+    <div class="bg-white border border-red-100 rounded-2xl shadow-md p-6">
+      <div class="flex items-start gap-4">
+        <div class="flex-shrink-0">
+          <div class="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 9v2m0 4v.01M6.34 6.34a9 9 0 1111.32 11.32A9 9 0 016.34 6.34z" />
+            </svg>
+          </div>
+        </div>
+        <div class="flex-1">
+          <h2 class="text-xl font-semibold text-red-700">Delete your account</h2>
+          <p class="mt-2 text-sm text-gray-600">Deleting your account will archive any businesses you own and remove your user row. This action cannot be undone.</p>
+
+          {% if owned %}
+            <div class="mt-4">
+              <div class="text-sm font-semibold text-gray-800">Businesses that will be archived</div>
+              <ul class="mt-2 list-disc list-inside text-sm text-gray-700">
+                {% for b in owned %}
+                  <li class="truncate">{{ b.name }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          <form method="post" class="mt-6">
+            {% csrf_token %}
+            <div class="mb-4">
+              <label for="password" class="block text-sm font-medium text-gray-700">Confirm with your password</label>
+              <input type="password" name="password" id="password" class="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-100" required />
+            </div>
+
+            <div class="mt-4 flex gap-3">
+              <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"> 
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h14a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 7a1 1 0 00-2 0v6a1 1 0 102 0V9zm6 0a1 1 0 10-2 0v6a1 1 0 102 0V9z" clip-rule="evenodd" />
+                </svg>
+                Delete account
+              </button>
+
+              <a href="{% url 'accounts:profile' %}" class="inline-flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm">Keep my account</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,7 +1,7 @@
 from django.urls import path
 from django.contrib.auth import views as auth_views
 from two_factor.views import LoginView as TwoFactorLoginView
-from .views import profile_view, delete_account_view, CustomLoginView
+from .views import profile_view, delete_account_view, deactivate_account_view, CustomLoginView
 app_name = 'accounts'
 
 # Use our custom templates under registration/
@@ -11,6 +11,7 @@ urlpatterns = [
     
     # Delete account
     path('delete/', delete_account_view, name='delete_account'),
+    path('deactivate/', deactivate_account_view, name='deactivate_account'),
 
     # Login / Logout (use our styled template)
     # Use our custom login view so we can honor a post-login redirect cookie
