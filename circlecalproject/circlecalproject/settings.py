@@ -37,10 +37,20 @@ LOGOUT_REDIRECT_URL = '/'
 
 # Application definition
 
+# Optionally include the AdminLTE theme packages when available.
+# In CI/build environments these packages may not be installed; avoid
+# failing import errors by checking availability at runtime.
+import importlib
+_adminlte_apps = []
+try:
+    if importlib.util.find_spec('adminlte3') is not None:
+        _adminlte_apps = ['adminlte3', 'adminlte3_theme']
+except Exception:
+    _adminlte_apps = []
+
 INSTALLED_APPS = [
-    # Admin LTE theme
-    'adminlte3',
-    'adminlte3_theme',
+    # Admin LTE theme (only if installed)
+    *_adminlte_apps,
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
