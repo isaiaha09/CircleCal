@@ -10,6 +10,12 @@ from django.contrib.auth import logout
 from django.urls import reverse
 from two_factor.views import LoginView as TwoFactorLoginView
 from django.http import HttpResponseRedirect
+from django.contrib.auth import get_user_model
+from django.shortcuts import redirect
+from django.template.response import TemplateResponse
+from django.contrib.auth import authenticate, login
+from django.contrib.auth import get_user_model
+from django.conf import settings
 
 # Create your views here.
 @login_required
@@ -119,8 +125,28 @@ class CustomLoginView(TwoFactorLoginView):
 @login_required
 @require_POST
 def delete_account_view(request):
-	# Capture the user before logout
+	# Verify password was provided and matches
+	password = request.POST.get('password')
 	u = request.user
+	if not password or not u.check_password(password):
+		messages.error(request, "Password incorrect. Account not deleted.")
+		return redirect('accounts:profile')
+
+	# Log the user out first to drop session
+	# Delete businesses owned by the user (cascades to related bookings, billing, invites, etc.)
+	try:
+		from .models import Business
+		owned = Business.objects.filter(owner=u)
+		for b in owned:
+			try:
+				b.delete()
+			except Exception:
+				# Continue deleting others even if one fails
+				pass
+	except Exception:
+		# If import or deletion fails, continue to attempt user deletion
+		pass
+
 	# Log the user out first to drop session
 	logout(request)
 	# Delete the account
@@ -130,3 +156,155 @@ def delete_account_view(request):
 	except Exception:
 		messages.error(request, "We couldn't delete your account right now. Please try again.")
 	return redirect("calendar_app:home")
+
+
+@login_required
+@require_POST
+def deactivate_account_view(request):
+	# Require current password to confirm
+	password = request.POST.get('password')
+	u = request.user
+	if not password or not u.check_password(password):
+		messages.error(request, "Password incorrect. Account not deactivated.")
+		return redirect('accounts:profile')
+
+	# Soft-deactivate: set is_active to False and logout
+	try:
+		u.is_active = False
+		u.save()
+		logout(request)
+		messages.success(request, "Your account has been deactivated. To reactivate it, go to the reactivate page to reactivate your account.")
+	except Exception:
+		messages.error(request, "We couldn't deactivate your account right now. Please try again.")
+	return redirect('calendar_app:home')
+
+
+@login_required
+def deactivate_confirm_view(request):
+	# Render a confirmation page explaining consequences and a password form
+	return TemplateResponse(request, 'accounts/deactivate_confirm.html', {})
+
+
+@login_required
+def delete_confirm_view(request):
+	# Compute counts of items that will be removed to provide clearer messaging
+	u = request.user
+	deletable_items = []
+	try:
+		from .models import Business, Membership, Invite, Profile, LoginActivity
+		from bookings.models import Booking, Service
+		from billing.models import InvoiceMeta, PaymentMethod
+
+		owned_businesses = Business.objects.filter(owner=u)
+		owned_business_count = owned_businesses.count()
+		services_count = Service.objects.filter(organization__in=owned_businesses).count() if owned_business_count else 0
+		bookings_count = Booking.objects.filter(organization__in=owned_businesses).count() if owned_business_count else 0
+		memberships_count = Membership.objects.filter(user=u).count()
+		invites_count = Invite.objects.filter(email__iexact=u.email).count() if u.email else 0
+		invoices_count = InvoiceMeta.objects.filter(organization__in=owned_businesses).count() if owned_business_count else 0
+		payment_methods_count = PaymentMethod.objects.filter(organization__in=owned_businesses).count() if owned_business_count else 0
+		audit_count = LoginActivity.objects.filter(user=u).count()
+		profile = None
+		try:
+			profile = Profile.objects.filter(user=u).first()
+		except Exception:
+			profile = None
+
+		# Build list of (description, count or None)
+		deletable_items = [
+			("Your user account and profile", None),
+			("Profile picture and uploaded media", 1 if getattr(profile, 'avatar', None) else 0),
+			("Businesses you own (includes services, availability and settings)", owned_business_count),
+			("Services under your businesses", services_count),
+			("Bookings and calendar events tied to your businesses", bookings_count),
+			("Team memberships and invites", memberships_count + invites_count),
+			("Invoices, subscriptions and payment methods tied to your businesses", invoices_count + payment_methods_count),
+			("Audit logs and login activity", audit_count),
+			("Any local cached billing metadata (applied discounts, invoice metadata)", None),
+		]
+	except Exception:
+		# If anything fails, fall back to a generic list
+		deletable_items = [
+			("Your user account and profile", None),
+			("Profile picture and uploaded media", None),
+			("Any Businesses you own (and their services, bookings, availability and settings)", None),
+			("Team memberships and invites", None),
+			("Bookings and calendar events tied to your businesses", None),
+			("Invoices, subscriptions and payment methods tied to your businesses", None),
+			("Audit logs and login activity", None),
+		]
+
+	return TemplateResponse(request, 'accounts/delete_confirm.html', {"deletable_items": deletable_items})
+
+
+@require_POST
+def reactivate_account_action(request):
+	# Accepts POST with `email` and `password` and reactivates the account if credentials valid
+	email = request.POST.get('email') or request.POST.get('username')
+	password = request.POST.get('password')
+	if not email or not password:
+		# Render page with inline error so user sees it immediately
+		return TemplateResponse(request, 'accounts/reactivate.html', {
+			'error': 'Please provide email and password to reactivate your account.',
+			'email': email or '',
+		})
+
+	User = get_user_model()
+	try:
+		user = User.objects.filter(email__iexact=email).first()
+	except Exception:
+		user = None
+
+	if not user or not user.check_password(password):
+		# Render with inline error and preserve entered email
+		return TemplateResponse(request, 'accounts/reactivate.html', {
+			'error': 'Invalid email or password. Please try again.',
+			'email': email,
+		})
+
+	# Reactivate and log the user in.
+	# Prefer using `authenticate()` so the returned user has a `backend` set.
+	auth_user = None
+	try:
+		# First try authenticating directly with the provided email value
+		auth_user = authenticate(request, username=email, password=password)
+	except Exception:
+		auth_user = None
+
+	if not auth_user:
+		# If the app uses username internally, try authenticating with that
+		try:
+			User = get_user_model()
+			lookup = User.objects.filter(email__iexact=email).first()
+			if lookup:
+				try:
+					auth_user = authenticate(request, username=lookup.username, password=password)
+				except Exception:
+					auth_user = None
+		except Exception:
+			auth_user = None
+
+	# If authenticate() didn't return a user (multiple backends may require explicit backend),
+	# fall back to setting the first configured backend on the retrieved user object.
+	if not auth_user:
+		backend_path = None
+		try:
+			backend_path = settings.AUTHENTICATION_BACKENDS[0]
+		except Exception:
+			backend_path = None
+		if backend_path:
+			user.backend = backend_path
+			auth_user = user
+		else:
+			auth_user = user
+
+	user.is_active = True
+	user.save()
+	login(request, auth_user)
+	messages.success(request, 'Your account has been reactivated.')
+	return redirect('accounts:profile')
+
+
+def reactivate_account_view(request):
+	# Show form to submit email + password to self-reactivate
+	return TemplateResponse(request, 'accounts/reactivate.html', {})

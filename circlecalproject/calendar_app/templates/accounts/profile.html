@@ -15,8 +15,9 @@
     {% endif %}
     {% if user.profile.avatar %}
       <div class="flex flex-col items-center mb-6">
-        <img id="avatar-preview" src="{{ user.profile.avatar.url }}?v={{ user.profile.avatar.name|urlencode }}" alt="Avatar" class="w-32 h-32 rounded-full object-cover border-4 border-blue-300 mb-2" />
-        <span class="text-xs text-gray-500">Current Avatar</span>
+        <img id="avatar-preview" src="{{ user.profile.avatar.url }}?v={{ user.profile.avatar.name|urlencode }}" alt="Profile Picture" class="w-32 h-32 rounded-full object-cover border-4 border-blue-300 mb-2" />
+        <span class="text-xs text-gray-500">Profile Picture</span>
+        <span id="avatar-filename" class="text-xs text-gray-400 mt-1" {% if user.profile.avatar %}{% endif %}></span>
       </div>
     {% endif %}
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -54,7 +55,7 @@
       </div>
     </div>
     <div class="col-span-2 mt-4">
-      <label class="block text-sm font-semibold text-blue-800 mb-2">Avatar</label>
+      <label class="block text-sm font-semibold text-blue-800 mb-2">Profile Picture</label>
       {{ form.avatar }}
       {% if form.avatar.errors %}
         <div class="text-xs text-red-700 mt-1">{{ form.avatar.errors }}</div>
@@ -80,10 +81,14 @@
       {% endif %}
     </div>
     <div class="mt-4">
-      <form action="{% url 'accounts:delete_account' %}" method="post" onsubmit="return confirm('This will permanently delete your account. Continue?');">
-        {% csrf_token %}
-        <button type="submit" class="mt-2 inline-flex items-center px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Delete Account</button>
-      </form>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <a href="{% url 'accounts:deactivate_confirm' %}" class="inline-flex w-full items-center justify-center px-4 py-2 border border-yellow-300 text-yellow-700 rounded-lg hover:bg-yellow-50">Deactivate Account</a>
+        </div>
+        <div>
+          <a href="{% url 'accounts:delete_confirm' %}" class="inline-flex w-full items-center justify-center px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Delete Account</a>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -147,6 +152,10 @@
 
 {% block extra_head %}
   <link rel="stylesheet" href="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.css" />
+  <style>
+    /* Ensure the clear anchor inherits muted color if we don't override via JS */
+    .clearable-file-input a { color: inherit; }
+  </style>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -157,6 +166,114 @@
       const form = document.getElementById('profile-form');
       const saveBtn = document.getElementById('save-btn');
       const avatarPreview = document.getElementById('avatar-preview');
+      const avatarFilenameEl = document.getElementById('avatar-filename');
+
+      // Normalize any server-rendered path to basename by reading the data-fullname attribute
+      if (avatarFilenameEl) {
+        const dataFull = avatarFilenameEl.dataset && avatarFilenameEl.dataset.fullname;
+        let basename = '';
+        if (dataFull) {
+          const txt = dataFull.trim();
+          const lastSlash = Math.max(txt.lastIndexOf('/'), txt.lastIndexOf('\\'));
+          basename = lastSlash !== -1 ? txt.slice(lastSlash + 1) : txt;
+          avatarFilenameEl.textContent = basename;
+        } else if (avatarFilenameEl.textContent) {
+          const txt2 = avatarFilenameEl.textContent.trim();
+          const lastSlash2 = Math.max(txt2.lastIndexOf('/'), txt2.lastIndexOf('\\'));
+          basename = lastSlash2 !== -1 ? txt2.slice(lastSlash2 + 1) : txt2;
+          avatarFilenameEl.textContent = basename;
+        }
+        // Also update the ClearableFileInput "Currently" anchor text if present
+        if (basename) {
+          try {
+            const clearable = fileInput.closest('.clearable-file-input');
+            if (clearable) {
+              const anchor = clearable.querySelector('a');
+              if (anchor) anchor.textContent = basename;
+            }
+          } catch (e) {}
+        }
+
+          // Force-replace ClearableFileInput anchor with a grey basename span
+          (function fixClearableDisplay() {
+            try {
+              document.querySelectorAll('.clearable-file-input').forEach(span => {
+                // If we've already inserted our replacement, skip
+                if (span.querySelector('.cc-basename')) return;
+                // Determine basename from data attribute if available, else from anchor text
+                let basename = '';
+                const anchor = span.querySelector('a');
+                if (anchor && anchor.textContent) {
+                  const txt = anchor.textContent.trim();
+                  const lastSlash = Math.max(txt.lastIndexOf('/'), txt.lastIndexOf('\\'));
+                  basename = lastSlash !== -1 ? txt.slice(lastSlash + 1) : txt;
+                  // remove the anchor so path disappears entirely
+                  anchor.remove();
+                } else if (avatarFilenameEl && avatarFilenameEl.textContent) {
+                  basename = avatarFilenameEl.textContent.trim();
+                } else {
+                  // fallback to profile_pic.jpg
+                  basename = 'profile_pic.jpg';
+                }
+
+                // Create replacement span and insert before the clear checkbox if present
+                const repl = document.createElement('span');
+                repl.className = 'cc-basename text-xs';
+                repl.textContent = basename;
+                repl.style.color = '#94a3b8';
+                repl.style.marginLeft = '4px';
+                // Find checkbox or other control to insert before, otherwise append
+                const checkbox = span.querySelector('input[type=checkbox], input[type=radio]');
+                if (checkbox) {
+                  span.insertBefore(repl, checkbox);
+                } else {
+                  span.appendChild(repl);
+                }
+              });
+            } catch (e) {}
+          })();
+      }
+      // Robustly update ClearableFileInput anchors so they show only the basename and are greyed,
+      // while preserving the Clear checkbox functionality. Uses MutationObserver as a fallback.
+      (function updateClearableAnchors() {
+        function setAnchorText(a) {
+          if (!a) return;
+          const txt = (a.textContent || '').trim();
+          let bn = txt;
+          // If anchor contains a path, extract basename
+          const lastSlash = Math.max(txt.lastIndexOf('/'), txt.lastIndexOf('\\'));
+          if (lastSlash !== -1) bn = txt.slice(lastSlash + 1);
+          // If anchor is an href to media, prefer basename from href
+          try {
+            if (a.href) {
+              const hrefParts = a.getAttribute('href').split('/');
+              const last = hrefParts[hrefParts.length-1];
+              if (last) bn = last;
+            }
+          } catch (e) {}
+          a.textContent = bn;
+          a.style.color = '#94a3b8';
+        }
+
+        function walkAndUpdate() {
+          document.querySelectorAll('.clearable-file-input').forEach(span => {
+            const a = span.querySelector('a');
+            if (a) setAnchorText(a);
+          });
+        }
+
+        walkAndUpdate();
+        // run again shortly after load in case widget renders later
+        setTimeout(walkAndUpdate, 150);
+
+        // Observe DOM changes to update anchors injected later
+        try {
+          const mo = new MutationObserver(() => {
+            walkAndUpdate();
+          });
+          mo.observe(document.body, { childList: true, subtree: true });
+        } catch (e) {}
+      })();
       if (!fileInput) return;
 
       // Create a lightweight modal for cropping
@@ -184,8 +301,35 @@
       function closeModal() { modal.classList.add('hidden'); modal.classList.remove('flex'); if (cropper) { cropper.destroy(); cropper = null; } }
 
       fileInput.addEventListener('change', function(e) {
-        const file = e.target.files && e.target.files[0];
+        const originalFile = e.target.files && e.target.files[0];
+        if (!originalFile) return;
+        // Rename the selected file immediately to profile_pic.jpg so the input shows the desired name
+        try {
+          const dtReplace = new DataTransfer();
+          const renamed = new File([originalFile], 'profile_pic.jpg', { type: originalFile.type });
+          dtReplace.items.add(renamed);
+          fileInput.files = dtReplace.files;
+        } catch (err) {
+          // If DataTransfer isn't available, fall back to the original file
+        }
+        const file = fileInput.files && fileInput.files[0];
         if (!file) return;
+        // Update visible filename caption (show basename only)
+        let newBasename = '';
+        if (avatarFilenameEl) {
+          const name = file.name || '';
+          const lastSlash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+          newBasename = lastSlash !== -1 ? name.slice(lastSlash + 1) : name;
+          avatarFilenameEl.textContent = newBasename;
+        }
+        // Update the widget's "Currently:" anchor text
+        try {
+          const clearable = fileInput.closest('.clearable-file-input');
+          if (clearable) {
+            const anchor = clearable.querySelector('a');
+            if (anchor && newBasename) anchor.textContent = newBasename;
+          }
+        } catch (e) {}
         const url = URL.createObjectURL(file);
         imgEl.src = url;
         openModal();
@@ -228,11 +372,25 @@
         if (!canvas) return;
         canvas.toBlob((blob) => {
           if (!blob) return;
-          const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+          const file = new File([blob], 'profile_pic.jpg', { type: 'image/jpeg' });
           // Assign cropped file back to the file input via DataTransfer
           const dt = new DataTransfer();
           dt.items.add(file);
           fileInput.files = dt.files;
+          // Update visible filename caption after crop (basename) and widget anchor
+          if (avatarFilenameEl) {
+            const name2 = file.name || '';
+            const lastSlash2 = Math.max(name2.lastIndexOf('/'), name2.lastIndexOf('\\'));
+            const bn = lastSlash2 !== -1 ? name2.slice(lastSlash2 + 1) : name2;
+            avatarFilenameEl.textContent = bn;
+            try {
+              const clearable2 = fileInput.closest('.clearable-file-input');
+              if (clearable2) {
+                const anchor2 = clearable2.querySelector('a');
+                if (anchor2) anchor2.textContent = bn;
+              }
+            } catch (e) {}
+          }
           // Update on-page preview immediately
           try {
             const previewUrl = URL.createObjectURL(file);
@@ -252,6 +410,29 @@
           saveBtn.textContent = 'Saving...';
         });
       }
+
+      // Require password on delete and show explicit confirmation
+      try {
+        const deleteForm = document.getElementById('delete-account-form');
+        const deleteBtn = document.getElementById('delete-account-button');
+        const deletePassword = document.getElementById('delete-password');
+        if (deleteForm && deleteBtn && deletePassword) {
+          deleteForm.addEventListener('submit', function(e) {
+            if (!deletePassword.value || deletePassword.value.trim().length === 0) {
+              e.preventDefault();
+              alert('Please enter your password to confirm account deletion.');
+              deletePassword.focus();
+              return false;
+            }
+            const ok = confirm('This will permanently delete your account and all associated data. This action cannot be undone. Continue?');
+            if (!ok) {
+              e.preventDefault();
+              return false;
+            }
+            // allow submit
+          });
+        }
+      } catch (e) {}
     })();
   </script>
 {% endblock %}

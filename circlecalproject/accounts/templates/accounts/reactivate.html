@@ -1,0 +1,43 @@
+{% extends 'calendar_app/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-12">
+    <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6">
+        <h1 class="text-2xl font-semibold text-gray-800 mb-2">Reactivate your account</h1>
+        <p class="text-gray-600 mb-4">Enter your email and password to reactivate your account. You will be signed in automatically after reactivation.</p>
+
+        <form action="{% url 'accounts:reactivate_action' %}" method="post" class="space-y-4">
+            {% csrf_token %}
+            {% if error %}
+                <div class="px-3 py-2 rounded bg-red-50 border border-red-200 text-red-700">{{ error }}</div>
+            {% endif %}
+            <div>
+                <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
+                <input id="email" name="email" type="email" required autofocus
+                    value="{{ email|default_if_none:'' }}"
+                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-3 py-2"/>
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                <input id="password" name="password" type="password" required
+                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-3 py-2"/>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <a href="{% url 'accounts:login' %}" class="text-sm text-gray-600 underline">Back to login</a>
+                    <a href="{% url 'calendar_app:home' %}" class="text-sm text-gray-500">Return home</a>
+                </div>
+                <div>
+                    <button type="submit" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Reactivate account</button>
+                </div>
+            </div>
+        </form>
+
+        <hr class="my-4" />
+        <p class="text-sm text-gray-600">If you no longer remember your password, use the <a href="{% url 'accounts:password_reset' %}" class="text-blue-600 underline">password reset</a> to regain access.</p>
+    </div>
+</div>
+{% endblock %}

@@ -15,7 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, reverse_lazy
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import re_path
@@ -45,7 +45,8 @@ urlpatterns = [
          auth_views.PasswordResetView.as_view(
              template_name='calendar_app/password_reset_form.html',
              email_template_name='calendar_app/password_reset_email.txt',
-             subject_template_name='calendar_app/password_reset_subject.txt'
+             subject_template_name='calendar_app/password_reset_subject.txt',
+             success_url=reverse_lazy('password_reset_done_root')
          ),
          name='password_reset_root'),
     path('password_reset/',
@@ -62,7 +63,8 @@ urlpatterns = [
          name='password_reset_done_root'),
     path('reset/<uidb64>/<token>/',
          auth_views.PasswordResetConfirmView.as_view(
-             template_name='calendar_app/password_reset_confirm.html'
+             template_name='calendar_app/password_reset_confirm.html',
+             success_url=reverse_lazy('password_reset_complete_root')
          ),
          name='password_reset_confirm_root'),
     path('reset/complete/',

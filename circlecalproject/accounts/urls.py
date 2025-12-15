@@ -1,7 +1,17 @@
-from django.urls import path
+from django.urls import path, reverse_lazy
 from django.contrib.auth import views as auth_views
 from two_factor.views import LoginView as TwoFactorLoginView
-from .views import profile_view, delete_account_view, CustomLoginView
+from .views import (
+    profile_view,
+    delete_account_view,
+    deactivate_account_view,
+    deactivate_confirm_view,
+    delete_confirm_view,
+    reactivate_account_view,
+    reactivate_account_action,
+    CustomLoginView,
+)
+from .forms import PasswordResetIncludeInactiveForm
 app_name = 'accounts'
 
 # Use our custom templates under registration/
@@ -11,6 +21,15 @@ urlpatterns = [
     
     # Delete account
     path('delete/', delete_account_view, name='delete_account'),
+    # Deactivate account (soft)
+    path('deactivate/', deactivate_account_view, name='deactivate_account'),
+    # Confirm pages
+    path('deactivate/confirm/', deactivate_confirm_view, name='deactivate_confirm'),
+    path('delete/confirm/', delete_confirm_view, name='delete_confirm'),
+
+    # Reactivate self-serve
+    path('reactivate/', reactivate_account_view, name='reactivate'),
+    path('reactivate/action/', reactivate_account_action, name='reactivate_action'),
 
     # Login / Logout (use our styled template)
     # Use our custom login view so we can honor a post-login redirect cookie
@@ -21,18 +40,22 @@ urlpatterns = [
 
     path('password/reset/',
          auth_views.PasswordResetView.as_view(
-             template_name='calendar_app/password_reset_form.html',
-             email_template_name='calendar_app/password_reset_email.txt',
-             subject_template_name='calendar_app/password_reset_subject.txt'
+                template_name='calendar_app/password_reset_form.html',
+                email_template_name='calendar_app/password_reset_email.txt',
+                subject_template_name='calendar_app/password_reset_subject.txt',
+            form_class=PasswordResetIncludeInactiveForm,
+                success_url=reverse_lazy('accounts:password_reset_done')
          ),
          name='password_reset'),
 
     # Aliases to catch default Django paths and ensure our custom branding is used
     path('password_reset/',
          auth_views.PasswordResetView.as_view(
-             template_name='calendar_app/password_reset_form.html',
-             email_template_name='calendar_app/password_reset_email.txt',
-             subject_template_name='calendar_app/password_reset_subject.txt'
+                template_name='calendar_app/password_reset_form.html',
+                email_template_name='calendar_app/password_reset_email.txt',
+                subject_template_name='calendar_app/password_reset_subject.txt',
+            form_class=PasswordResetIncludeInactiveForm,
+                success_url=reverse_lazy('accounts:password_reset_done')
          ),
          name='password_reset_alias'),
 
@@ -50,7 +73,8 @@ urlpatterns = [
 
     path('reset/<uidb64>/<token>/',
          auth_views.PasswordResetConfirmView.as_view(
-             template_name='calendar_app/password_reset_confirm.html'
+             template_name='calendar_app/password_reset_confirm.html',
+             success_url=reverse_lazy('accounts:password_reset_complete')
          ),
          name='password_reset_confirm'),
 

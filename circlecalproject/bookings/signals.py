@@ -24,7 +24,15 @@ def create_org_settings(sender, instance, created, **kwargs):
 def send_cancellation_email(sender, instance, **kwargs):
     """Send cancellation email when booking is deleted."""
     if instance.client_email and not instance.is_blocking:
-        send_booking_cancellation(instance)
+        try:
+            # Schedule sending after transaction commit to ensure deletion persisted
+            transaction.on_commit(lambda: send_booking_cancellation(instance))
+        except Exception:
+            # Fallback to immediate send if on_commit unavailable
+            try:
+                send_booking_cancellation(instance)
+            except Exception:
+                pass
 
 
 # ------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import logging
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -24,19 +25,26 @@ def send_booking_confirmation(booking):
         'cancel_url': cancel_url,
     }
     
+    logger = logging.getLogger(__name__)
     subject = f"Booking Confirmed - {booking.organization.name}"
     html_content = render_to_string('bookings/emails/booking_confirmation.html', context)
     from_email = settings.DEFAULT_FROM_EMAIL
     recipient_list = [booking.client_email]
     msg = EmailMessage(subject, html_content, from_email, recipient_list)
     msg.content_subtype = "html"  # Send HTML-only (no plain text fallback)
-    
+    # Add a helpful X-header so provider logs can be correlated with our booking id
     try:
-        msg.send()
+        msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking.id)}
+    except Exception:
+        pass
+
+    try:
+        logger.info('Sending booking confirmation for booking=%s to=%s', booking.id, booking.client_email)
+        sent = msg.send()
+        logger.info('booking confirmation send result for booking=%s sent=%s', booking.id, sent)
         return True
     except Exception as e:
-        # Log error but don't raise - booking should still succeed
-        print(f"Failed to send booking confirmation: {e}")
+        logger.exception('Failed to send booking confirmation for booking=%s to=%s', booking.id, booking.client_email)
         return False
 
 
@@ -52,18 +60,25 @@ def send_booking_cancellation(booking, refund_info=None):
         'refund_info': refund_info,
     }
     
+    logger = logging.getLogger(__name__)
     subject = f"Booking Cancelled - {booking.organization.name}"
     html_content = render_to_string('bookings/emails/booking_cancellation.html', context)
     from_email = settings.DEFAULT_FROM_EMAIL
     recipient_list = [booking.client_email]
     msg = EmailMessage(subject, html_content, from_email, recipient_list)
     msg.content_subtype = "html"
-    
     try:
-        msg.send()
+        msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking.id)}
+    except Exception:
+        pass
+
+    try:
+        logger.info('Sending booking cancellation for booking=%s to=%s', booking.id, booking.client_email)
+        sent = msg.send()
+        logger.info('booking cancellation send result for booking=%s sent=%s', booking.id, sent)
         return True
     except Exception as e:
-        print(f"Failed to send booking cancellation: {e}")
+        logger.exception('Failed to send booking cancellation for booking=%s to=%s', booking.id, booking.client_email)
         return False
 
 
@@ -77,18 +92,25 @@ def send_booking_reminder(booking):
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
     }
     
+    logger = logging.getLogger(__name__)
     subject = f"Reminder: Upcoming Booking - {booking.organization.name}"
     html_content = render_to_string('bookings/emails/booking_reminder.html', context)
     from_email = settings.DEFAULT_FROM_EMAIL
     recipient_list = [booking.client_email]
     msg = EmailMessage(subject, html_content, from_email, recipient_list)
     msg.content_subtype = "html"
-    
     try:
-        msg.send()
+        msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking.id)}
+    except Exception:
+        pass
+
+    try:
+        logger.info('Sending booking reminder for booking=%s to=%s', booking.id, booking.client_email)
+        sent = msg.send()
+        logger.info('booking reminder send result for booking=%s sent=%s', booking.id, sent)
         return True
     except Exception as e:
-        print(f"Failed to send booking reminder: {e}")
+        logger.exception('Failed to send booking reminder for booking=%s to=%s', booking.id, booking.client_email)
         return False
 
 def send_owner_booking_notification(booking):
@@ -120,9 +142,18 @@ def send_owner_booking_notification(booking):
         'site_url': getattr(settings, 'SITE_URL', ''),
     }
 
+    logger = logging.getLogger(__name__)
     html_content = render_to_string('bookings/emails/booking_owner_notification.html', context)
     from_email = settings.DEFAULT_FROM_EMAIL
     recipient_list = [org.owner.email]
     msg = EmailMessage(subject, html_content, from_email, recipient_list)
     msg.content_subtype = "html"
-    msg.send(fail_silently=True)
+    try:
+        msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking.id)}
+    except Exception:
+        pass
+    try:
+        logger.info('Sending owner notification for booking=%s to=%s', booking.id, org.owner.email)
+        msg.send(fail_silently=True)
+    except Exception:
+        logger.exception('Failed to send owner notification for booking=%s', booking.id)

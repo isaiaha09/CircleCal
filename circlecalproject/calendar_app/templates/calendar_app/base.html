@@ -61,6 +61,7 @@
                 {% else %}
                 <nav class="hidden md:flex items-center space-x-4">
                     <a href="{% url 'accounts:login' %}" class="text-gray-700 hover:text-blue-600">Login</a>
+                    <a href="{% url 'accounts:reactivate' %}" class="text-gray-700 hover:text-blue-600">Reactivate</a>
                     <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 font-semibold">Sign Up</a>
                 </nav>
                 {% endif %}
@@ -90,6 +91,7 @@
                 {% endif %}
                 {% else %}
                     <a href="{% url 'accounts:login' %}" class="block text-gray-700 hover:text-blue-600 py-2">Login</a>
+                    <a href="{% url 'accounts:reactivate' %}" class="block text-gray-700 hover:text-blue-600 py-2">Reactivate</a>
                     <a href="{% url 'calendar_app:signup' %}" class="block text-blue-600 font-semibold py-2">Sign Up</a>
                 {% endif %}
             </div>

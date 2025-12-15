@@ -1,0 +1,36 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Confirm Deactivate{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-8">
+  <h1 class="text-2xl font-bold text-blue-700 mb-4">Deactivate Account</h1>
+  <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-sm">
+    <p class="mb-4">Deactivating your account will immediately disable your access to the application — you will be logged out and will not be able to sign in until you reactivate.</p>
+
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">What you'll lose access to</h3>
+    <ul class="list-disc list-inside text-gray-700 mb-3">
+      <li>Your dashboard and ability to manage businesses or bookings</li>
+      <li>The ability to schedule, edit or cancel bookings</li>
+      <li>Team/admin interfaces and any admin-only pages</li>
+      <li>Any paid billing or subscription management UI (you won't be able to change payment methods)</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">What will be preserved</h3>
+    <ul class="list-disc list-inside text-gray-700 mb-3">
+      <li>Your account record, profile and profile picture</li>
+      <li>Your businesses, services, bookings and billing metadata will remain in the system</li>
+      <li>Audit logs and historical records are preserved for compliance and support</li>
+    </ul>
+
+    <p class="mb-4">If you change your mind, you can reactivate your account yourself from the <a href="{% url 'accounts:reactivate' %}" class="text-blue-600 underline">Reactivate account</a> page by signing in again. No support ticket is required.</p>
+    <form method="post" action="{% url 'accounts:deactivate_account' %}">
+      {% csrf_token %}
+      <label class="block text-sm font-semibold text-blue-800 mb-2">Confirm your password</label>
+      <input type="password" name="password" required placeholder="Enter your password" class="w-full px-3 py-2 rounded border border-gray-300 mb-3" />
+      <div class="flex gap-3">
+        <button type="submit" class="bg-yellow-500 text-white px-4 py-2 rounded">Deactivate account</button>
+        <a href="{% url 'accounts:profile' %}" class="px-4 py-2 rounded border">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -125,3 +125,27 @@ class ProfileForm(forms.ModelForm):
                     else:
                         raise forms.ValidationError("Image moderation failed. Please try again later.")
         return avatar
+
+from django.contrib.auth.forms import PasswordResetForm
+from django.contrib.auth import get_user_model
+
+
+class PasswordResetIncludeInactiveForm(PasswordResetForm):
+    """PasswordResetForm that includes inactive users when finding accounts by email.
+
+    By default Django's PasswordResetForm filters to `is_active=True`; this subclass
+    yields users regardless of `is_active` so deactivated accounts can still receive
+    reset emails (useful for self-serve reactivation flows).
+    """
+    def get_users(self, email):
+        UserModel = get_user_model()
+        email_field_name = UserModel.get_email_field_name() if hasattr(UserModel, 'get_email_field_name') else 'email'
+        filter_kwargs = {f"{email_field_name}__iexact": email}
+        for user in UserModel._default_manager.filter(**filter_kwargs):
+            # Skip users without usable password
+            if not user.has_usable_password():
+                continue
+            yield user
+
+
+

@@ -1,12 +1,22 @@
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from .storage import OverwriteStorage
+import os
 
 User = settings.AUTH_USER_MODEL
 
 class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
-    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
+    def _profile_upload_to(instance, filename):
+        # Store all profile pictures at MEDIA_ROOT/profile_pictures/profile_pic.jpg
+        # Preserve extension if present
+        _, ext = os.path.splitext(filename)
+        if not ext:
+            ext = '.jpg'
+        return f'profile_pictures/profile_pic{ext}'
+
+    avatar = models.ImageField(upload_to=_profile_upload_to, storage=OverwriteStorage(), blank=True, null=True)
     timezone = models.CharField(max_length=63, default='UTC', help_text="User's timezone (e.g., America/Los_Angeles)")
     email_alerts = models.BooleanField(default=True)
     booking_reminders = models.BooleanField(default=True)
@@ -25,6 +35,9 @@ class Business(models.Model):
     # Timezone for the organization (e.g., 'America/Los_Angeles', 'America/New_York')
     # Defaults to 'UTC' if not set - organizations should update this to their local timezone
     timezone = models.CharField(max_length=63, default='UTC', help_text="Business's timezone (e.g., America/Los_Angeles)")
+    # Soft-delete / archive flag. Database already contains this column in some
+    # environments; keep it here with a default to avoid NOT NULL errors.
+    is_archived = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name

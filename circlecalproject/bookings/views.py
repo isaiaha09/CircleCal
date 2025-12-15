@@ -806,18 +806,30 @@ def public_service_page(request, org_slug, service_slug):
 
         # Email notifications: send a single HTML confirmation to client
         try:
-            from .emails import send_booking_confirmation
+            from django.db import transaction
+            from .emails import send_booking_confirmation, send_owner_booking_notification
+
             if client_email:
-                send_booking_confirmation(booking)
+                # Ensure we send after DB commit so mail servers see the committed state
+                try:
+                    transaction.on_commit(lambda: send_booking_confirmation(booking))
+                except Exception:
+                    # Fallback to immediate send if on_commit not available
+                    try:
+                        send_booking_confirmation(booking)
+                    except Exception:
+                        pass
 
             if getattr(org, "owner", None) and org.owner.email:
-                # Styled HTML owner notification
                 try:
-                    from .emails import send_owner_booking_notification
-                    send_owner_booking_notification(booking)
+                    transaction.on_commit(lambda: send_owner_booking_notification(booking))
                 except Exception:
-                    pass
+                    try:
+                        send_owner_booking_notification(booking)
+                    except Exception:
+                        pass
         except Exception:
+            # Avoid breaking booking flow if email subsystem fails
             pass
 
         return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
