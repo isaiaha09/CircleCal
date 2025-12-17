@@ -793,6 +793,28 @@ def public_service_page(request, org_slug, service_slug):
                 "error": "Sorry, that time was just booked. Please choose another slot.",
             })
 
+        # Determine if this POST is part of a reschedule flow by validating
+        # the provided `reschedule_source`/`reschedule_token` before creating
+        # the new booking so we can mark the booking to suppress the normal
+        # confirmation email when appropriate.
+        reschedule_old_id = None
+        res_src = request.POST.get('reschedule_source') or request.POST.get('source')
+        res_token = request.POST.get('reschedule_token') or request.POST.get('token')
+        try:
+            if res_src and res_token:
+                signer = TimestampSigner()
+                try:
+                    unsigned = signer.unsign(res_token, max_age=60*60*24*30)
+                    if str(unsigned) == str(res_src):
+                        try:
+                            reschedule_old_id = int(res_src)
+                        except Exception:
+                            reschedule_old_id = None
+                except Exception:
+                    reschedule_old_id = None
+        except Exception:
+            reschedule_old_id = None
+
         booking = Booking.objects.create(
             organization=org,
             service=service,
@@ -804,22 +826,42 @@ def public_service_page(request, org_slug, service_slug):
             is_blocking=False,
         )
 
+        # Mark booking to suppress confirmation email when this create
+        # is part of a validated reschedule flow. The confirmation sender
+        # wrapper below will check this flag before sending.
+        try:
+            setattr(booking, '_suppress_confirmation', bool(reschedule_old_id))
+        except Exception:
+            pass
+
         # Email notifications: send a single HTML confirmation to client
+        # Determine if this POST is part of a reschedule flow by validating
+        # the provided `reschedule_source`/`reschedule_token` once and storing
+        # the validated old booking id in `reschedule_old_id`.
+        reschedule_old_id = None
+        res_src = request.POST.get('reschedule_source') or request.POST.get('source')
+        res_token = request.POST.get('reschedule_token') or request.POST.get('token')
+        try:
+            if res_src and res_token:
+                signer = TimestampSigner()
+                try:
+                    unsigned = signer.unsign(res_token, max_age=60*60*24*30)
+                    if str(unsigned) == str(res_src):
+                        try:
+                            reschedule_old_id = int(res_src)
+                        except Exception:
+                            reschedule_old_id = None
+                except Exception:
+                    reschedule_old_id = None
+        except Exception:
+            reschedule_old_id = None
+
+        # Email notifications: owner notification only here. Client notification
+        # for reschedules or normal confirmations will be handled after reschedule
+        # reconciliation below to avoid sending the wrong email when rescheduling.
         try:
             from django.db import transaction
-            from .emails import send_booking_confirmation, send_owner_booking_notification
-
-            if client_email:
-                # Ensure we send after DB commit so mail servers see the committed state
-                try:
-                    transaction.on_commit(lambda: send_booking_confirmation(booking))
-                except Exception:
-                    # Fallback to immediate send if on_commit not available
-                    try:
-                        send_booking_confirmation(booking)
-                    except Exception:
-                        pass
-
+            from .emails import send_owner_booking_notification
             if getattr(org, "owner", None) and org.owner.email:
                 try:
                     transaction.on_commit(lambda: send_owner_booking_notification(booking))
@@ -830,6 +872,70 @@ def public_service_page(request, org_slug, service_slug):
                         pass
         except Exception:
             # Avoid breaking booking flow if email subsystem fails
+            pass
+
+        # (previous reschedule cleanup removed - consolidated below)
+
+        # If this booking was created as part of a reschedule flow, and we
+        # validated an old booking id earlier, attempt to delete/update the
+        # original booking/audit and notify the client via the rescheduled email.
+        try:
+            if reschedule_old_id:
+                try:
+                    old = Booking.objects.filter(id=reschedule_old_id, organization=org).first()
+                    if old:
+                        old.delete()
+                    else:
+                        from .models import AuditBooking
+                        ab = AuditBooking.objects.filter(booking_id=reschedule_old_id, organization=org, event_type=AuditBooking.EVENT_CANCELLED).order_by('-created_at').first()
+                        if ab:
+                            ab.event_type = AuditBooking.EVENT_DELETED
+                            try:
+                                ab.save()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                # Send a rescheduled notification to the client (best-effort)
+                try:
+                    from django.db import transaction
+                    from .emails import send_booking_rescheduled
+                    try:
+                        transaction.on_commit(lambda: send_booking_rescheduled(booking, old_booking_id=reschedule_old_id))
+                    except Exception:
+                        try:
+                            send_booking_rescheduled(booking, old_booking_id=reschedule_old_id)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # After reschedule reconciliation: ensure client receives the correct
+        # email. If this was a reschedule, `send_booking_rescheduled` was already
+        # attempted above; if not, send a normal confirmation now.
+        try:
+            from django.db import transaction
+            from .emails import send_booking_confirmation, send_booking_rescheduled
+            # Only send a normal confirmation when this was NOT a reschedule
+            if not reschedule_old_id:
+                try:
+                    def _maybe_send():
+                        try:
+                            if not getattr(booking, '_suppress_confirmation', False):
+                                send_booking_confirmation(booking)
+                        except Exception:
+                            pass
+                    transaction.on_commit(_maybe_send)
+                except Exception:
+                    try:
+                        if not getattr(booking, '_suppress_confirmation', False):
+                            send_booking_confirmation(booking)
+                    except Exception:
+                        pass
+        except Exception:
             pass
 
         return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
@@ -872,7 +978,12 @@ def public_service_page(request, org_slug, service_slug):
                 for ui in range(7)
             ]
             for s in services
-        })
+        }),
+        # Support reschedule GET params to prefill client info and attach reschedule metadata
+        'reschedule_source': request.GET.get('reschedule_source') or request.GET.get('source'),
+        'reschedule_token': request.GET.get('reschedule_token') or request.GET.get('token'),
+        'prefill_client_name': request.GET.get('client_name') or '',
+        'prefill_client_email': request.GET.get('client_email') or '',
     })
 
 
@@ -885,6 +996,72 @@ def booking_success(request, org_slug, service_slug, booking_id):
         "org": org,
         "service": service,
         "booking": booking,
+    })
+
+
+@require_http_methods(["GET"])
+def reschedule_booking(request, booking_id):
+    """Landing page for reschedule links sent in emails.
+
+    Validates signed token (query param `token`) and displays a button
+    that opens the public booking page for the same service with
+    client info prefilled.
+    """
+    token = request.GET.get('token')
+    if not token:
+        return HttpResponseBadRequest('Missing token')
+
+    signer = TimestampSigner()
+    try:
+        unsigned = signer.unsign(token, max_age=60*60*24*30)  # allow 30 days
+        if str(unsigned) != str(booking_id):
+            return HttpResponseBadRequest('Invalid token')
+    except Exception:
+        return HttpResponseBadRequest('Invalid or expired token')
+
+    # Try to locate booking or audit snapshot (in case booking was deleted)
+    from .models import AuditBooking
+    try:
+        bk = Booking.objects.filter(id=booking_id).first()
+    except Exception:
+        bk = None
+
+    service_slug = None
+    org_slug = None
+    client_name = ''
+    client_email = ''
+    if bk:
+        service_slug = bk.service.slug if bk.service else None
+        org_slug = bk.organization.slug if bk.organization else None
+        client_name = bk.client_name or ''
+        client_email = bk.client_email or ''
+    else:
+        # Try audit snapshot
+        ab = AuditBooking.objects.filter(booking_id=booking_id).order_by('-created_at').first()
+        if ab:
+            service_slug = ab.service.slug if ab.service else None
+            org_slug = ab.organization.slug if ab.organization else None
+            client_name = ab.client_name or ''
+            client_email = ab.client_email or ''
+
+    if not org_slug or not service_slug:
+        return HttpResponseBadRequest('Unable to determine service for this booking')
+
+    # Build a link to the public service page with prefill params
+    from django.utils.http import urlencode
+    base = reverse('bookings:public_service_page', args=[org_slug, service_slug])
+    qs = urlencode({
+        'client_name': client_name,
+        'client_email': client_email,
+        'reschedule_source': booking_id,
+        'reschedule_token': token,
+    })
+    reschedule_link = f"{base}?{qs}"
+
+    return render(request, 'bookings/reschedule_landing.html', {
+        'reschedule_link': reschedule_link,
+        'org_slug': org_slug,
+        'service_slug': service_slug,
     })
 
 

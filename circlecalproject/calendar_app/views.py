@@ -184,20 +184,178 @@ def preview_service_update(request, org_slug, service_id):
         start__lte=horizon
     ).order_by('start')
 
+    # Build the proposed settings map (use current svc values when a key
+    # isn't present in the payload). We'll compare these against any existing
+    # ServiceSettingFreeze for a date to decide whether a freeze would be
+    # redundant and therefore can be omitted from the preview.
+    def _get_proposed(key, caster=lambda x: x):
+        if key in payload:
+            try:
+                return caster(payload.get(key))
+            except Exception:
+                return caster(getattr(svc, key, None))
+        return caster(getattr(svc, key, None))
+
+    proposed = {
+        'duration': _get_proposed('duration', lambda v: int(v) if v is not None else None),
+        'buffer_after': _get_proposed('buffer_after', lambda v: int(v) if v is not None else 0),
+        'time_increment_minutes': _get_proposed('time_increment_minutes', lambda v: int(v) if v is not None else 30),
+        'use_fixed_increment': bool(_get_proposed('use_fixed_increment', lambda v: bool(v))),
+        'allow_ends_after_availability': bool(_get_proposed('allow_ends_after_availability', lambda v: bool(v))),
+        'allow_squished_bookings': bool(_get_proposed('allow_squished_bookings', lambda v: bool(v))),
+    }
+
+    # Keys that define a freeze's relevant fingerprint
+    slot_keys = ['duration', 'buffer_after', 'time_increment_minutes', 'use_fixed_increment', 'allow_ends_after_availability', 'allow_squished_bookings']
+
+    # Helper to test if a freeze's settings match the proposed values
+    def _freeze_matches_proposed(frozen_settings):
+        if not isinstance(frozen_settings, dict):
+            return False
+        for k in slot_keys:
+            fval = frozen_settings.get(k, None)
+            pval = proposed.get(k, None)
+            # normalize booleans/ints for comparison
+            if isinstance(pval, bool):
+                if bool(fval) != pval:
+                    return False
+            else:
+                # allow None/int comparison
+                try:
+                    if fval is None and pval is None:
+                        continue
+                    if fval is None and pval is not None:
+                        return False
+                    if pval is None and fval is not None:
+                        return False
+                    if int(fval) != int(pval):
+                        return False
+                except Exception:
+                    return False
+        return True
+
     conflicts = {}
     for b in b_qs:
         try:
             local_start = b.start.astimezone(org_tz)
         except Exception:
             local_start = b.start
+        # determine local end and duration (minutes) when available so client can render ranges
+        try:
+            local_end = b.end.astimezone(org_tz) if b.end else None
+        except Exception:
+            local_end = b.end
+
+        # Determine booking date and any existing freeze for metadata. We
+        # include all bookings in the preview so owners can inspect them —
+        # even if a per-date freeze exists that matches the proposed values.
+        try:
+            b_date = local_start.date()
+        except Exception:
+            b_date = (b.start.date() if getattr(b, 'start', None) else None)
+
+        try:
+            existing_freeze = ServiceSettingFreeze.objects.filter(service=svc, date=b_date).first()
+        except Exception:
+            existing_freeze = None
+
+        # Compute duration_minutes for this booking (best-effort)
+        duration_minutes = None
+        if b.service and getattr(b.service, 'duration', None) is not None:
+            try:
+                duration_minutes = int(b.service.duration)
+            except Exception:
+                duration_minutes = None
+        elif b.start and b.end:
+            try:
+                duration_minutes = int((b.end - b.start).total_seconds() / 60)
+            except Exception:
+                duration_minutes = None
+
+        # Determine effective per-date increment behaviour: if a freeze exists for
+        # the date, its frozen_settings control the increments; otherwise the
+        # current service settings apply.
+        if existing_freeze and isinstance(existing_freeze.frozen_settings, dict):
+            eff_use_fixed = bool(existing_freeze.frozen_settings.get('use_fixed_increment', False))
+            eff_time_inc = existing_freeze.frozen_settings.get('time_increment_minutes', getattr(svc, 'time_increment_minutes', 30))
+        else:
+            eff_use_fixed = bool(getattr(svc, 'use_fixed_increment', False))
+            eff_time_inc = getattr(svc, 'time_increment_minutes', 30)
+
         day = local_start.date().isoformat()
         conflicts.setdefault(day, []).append({
             'id': b.id,
             'start': local_start.isoformat(),
+            'end': local_end.isoformat() if local_end else None,
             'time': local_start.strftime('%H:%M'),
             'client_name': b.client_name,
             'client_email': b.client_email,
+            'duration': duration_minutes,
+            # Metadata to help client group bookings
+            'uses_fixed_increment': bool(eff_use_fixed),
+            'time_increment_minutes': int(eff_time_inc) if eff_time_inc is not None else None,
         })
+
+    # Defensive UX: if there are bookings but our earlier filtering removed
+    # them all (for example because existing per-date freezes match the
+    # proposed payload), still show the modal when the user explicitly
+    # toggled the `use_fixed_increment` value — owners expect to confirm
+    # such a toggle when bookings exist. Add at least one representative
+    # booking to the payload so the client will render the modal.
+    try:
+        any_bookings = b_qs.exists()
+    except Exception:
+        any_bookings = False
+
+    # If the user posted a change to `use_fixed_increment` and it differs
+    # from the current service setting, ensure we show the modal when there
+    # are bookings even if conflicts is empty.
+    try:
+        toggled_use_fixed = None
+        if 'use_fixed_increment' in payload:
+            toggled_use_fixed = bool(payload.get('use_fixed_increment'))
+    except Exception:
+        toggled_use_fixed = None
+
+    if (not conflicts) and any_bookings and (toggled_use_fixed is not None) and (toggled_use_fixed != bool(getattr(svc, 'use_fixed_increment', False))):
+        # Pick the earliest booking and include it so the modal appears.
+        try:
+            sample = b_qs.first()
+            if sample:
+                try:
+                    sample_start = sample.start.astimezone(org_tz)
+                except Exception:
+                    sample_start = sample.start
+                try:
+                    sample_end = sample.end.astimezone(org_tz) if sample.end else None
+                except Exception:
+                    sample_end = sample.end
+                sample_duration = None
+                if sample.service and getattr(sample.service, 'duration', None) is not None:
+                    try:
+                        sample_duration = int(sample.service.duration)
+                    except Exception:
+                        sample_duration = None
+                elif sample.start and sample.end:
+                    try:
+                        sample_duration = int((sample.end - sample.start).total_seconds() / 60)
+                    except Exception:
+                        sample_duration = None
+
+                day = sample_start.date().isoformat() if sample_start else 'unknown'
+                conflicts.setdefault(day, []).append({
+                    'id': sample.id,
+                    'start': sample_start.isoformat() if sample_start else None,
+                    'end': sample_end.isoformat() if sample_end else None,
+                    'time': sample_start.strftime('%H:%M') if sample_start else '',
+                    'client_name': sample.client_name,
+                    'client_email': sample.client_email,
+                    'duration': sample_duration,
+                    'uses_fixed_increment': bool(getattr(svc, 'use_fixed_increment', False)),
+                    'time_increment_minutes': getattr(svc, 'time_increment_minutes', 30),
+                })
+        except Exception:
+            pass
 
     return JsonResponse({'status': 'ok', 'conflicts': conflicts})
 
@@ -1920,8 +2078,11 @@ def bookings_recent(request, org_slug):
         items.append({
             'id': b.id,
             'booking_id': b.id,
+            'public_ref': getattr(b, 'public_ref', None),
             'service_name': b.service.name if b.service else None,
             'service_id': b.service.id if b.service else None,
+            'duration': (int(b.service.duration) if (b.service and getattr(b.service, 'duration', None) is not None) else (None if not (b.start and b.end) else int((b.end - b.start).total_seconds()/60))),
+            'service_price': (float(b.service.price) if (b.service and getattr(b.service, 'price', None) is not None) else None),
             'start': b.start.isoformat() if b.start else None,
             'end': b.end.isoformat() if b.end else None,
             'start_date': start_date,

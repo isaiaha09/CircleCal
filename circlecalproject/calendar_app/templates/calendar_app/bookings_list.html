@@ -5,7 +5,7 @@
 {% block content %}
 <style>
   :root { --row-height: 64px; }
-  .bookings-container { max-width: 1200px; margin: 40px auto; padding: 20px; }
+  .bookings-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
   .bookings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
   .filter-controls { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
   .filter-btn { padding: 6px 10px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; transition: all .15s; font-size: 12px; }
@@ -48,6 +48,7 @@
     <input type="text" id="searchBox" class="search-box" placeholder="Search by name or email...">
     <button class="filter-btn active" data-filter="all">All</button>
     <button class="filter-btn" data-filter="upcoming">Upcoming</button>
+    <button class="filter-btn" data-filter="ongoing">Ongoing</button>
     <button class="filter-btn" data-filter="today">Today</button>
     <button class="filter-btn" data-filter="past">Past</button>
     <select id="serviceFilter" class="filter-btn" style="padding: 8px 12px;">
@@ -56,18 +57,7 @@
         <option value="{{ service.id }}">{{ service.name }}</option>
       {% endfor %}
     </select>
-    <div style="margin-left:8px; display:flex; gap:6px; align-items:center;">
-      <button class="filter-btn" id="selectAllBookingsBtn" style="padding:6px 10px;">Select All</button>
-      <label for="selectStatusMenu" style="margin:0 6px 0 8px; font-size:13px; color:#333;">Select:</label>
-      <select id="selectStatusMenu" class="filter-btn" style="padding:6px 10px;">
-        <option value="">Choose...</option>
-        <option value="all">All</option>
-        <option value="upcoming">Upcoming</option>
-        <option value="ongoing">Ongoing</option>
-        <option value="past">Past</option>
-        <option value="deselect">Deselect</option>
-      </select>
-      <button id="bulkDeleteBtn" class="filter-btn btn-delete" style="display:none; margin-left:8px; padding:6px 10px;">Delete Selected</button>
+    <button id="deleteSelectedBtn" class="btn-sm btn-delete" onclick="deleteSelected()" style="display:none; margin-left:8px;">Delete selected</button>
     </div>
   </div>
 
@@ -76,8 +66,9 @@
     <table class="bookings-table">
     <thead>
       <tr>
-        <th style="padding:8px; width:36px;"><input type="checkbox" id="bookingsSelectAll"></th>
+        <th style="padding:8px; text-align:left; font-weight:600;"><input type="checkbox" id="selectAllBookings"/></th>
         <th>Date & Time</th>
+        <th>Booking ID</th>
         <th>Client</th>
         <th>Service</th>
         <th>Duration</th>
@@ -93,13 +84,16 @@
           data-status="{% if booking.start <= now and booking.end >= now %}ongoing{% elif booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
           data-service-id="{{ booking.service.id|default:'' }}"
           data-service-price="{{ booking.service.price|default:'' }}"
-          data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }}">
-          <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="{{ booking.id }}"></td>
+          data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }} {{ booking.public_ref|default:''|lower }} {{ booking.id }}">
+          <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="{{ booking.id }}" style="margin-right:8px;"/></td>
           <td>
             {% timezone organization.timezone %}
               <div style="font-weight: 600;">{{ booking.start|date:"M d, Y" }}</div>
               <div style="font-size: 13px; color: #6c757d;">{{ booking.start|time:"g:i A" }} - {{ booking.end|time:"g:i A" }}</div>
             {% endtimezone %}
+          </td>
+          <td>
+            <div>{{ booking.public_ref|default:booking.id }}</div>
           </td>
           <td>
             <div style="font-weight: 600;">{{ booking.client_name|default:"No name" }}</div>
@@ -129,16 +123,13 @@
           <td>
               <div class="booking-actions">
               <button class="btn-sm btn-view" onclick="viewBooking({{ booking.id }})">View</button>
-              {% if booking.start > now or booking.end < now %}
-                <button class="btn-sm btn-delete" onclick="deleteBooking({{ booking.id }}, '{{ booking.start|date:"M d, Y" }}', '{{ booking.client_name }}')">Delete</button>
-              {% endif %}
             </div>
           </td>
         </tr>
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="7" class="no-bookings">
+          <td colspan="9" class="no-bookings">
             <div style="font-size: 18px; margin-bottom: 10px;">📅</div>
             No bookings found
           </td>
@@ -153,8 +144,7 @@
     <h2 style="font-size:1.25rem; margin-bottom:8px;">Recently Cancelled / Deleted</h2>
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
       <div style="display:flex; gap:8px; align-items:center;">
-        <label style="font-size:14px; margin-right:8px;"><input type="checkbox" id="auditSelectAll"> Select all</label>
-        <input type="text" id="auditSearch" class="search-box" placeholder="Search audit (client, ref, email...)" style="width:260px;">
+          <input type="text" id="auditSearch" class="search-box" placeholder="Search audit (client, ref, email...)" style="width:260px;">
         <select id="auditEventFilter" class="filter-btn" style="padding:6px 10px;">
           <option value="all">All events</option>
           <option value="deleted">Deleted</option>
@@ -168,31 +158,31 @@
           {% endfor %}
         </select>
       </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn-sm btn-view" id="exportAuditBtn">Export Selected (PDF)</button>
-        <button class="btn-sm btn-delete" id="deleteAuditBtn">Delete Selected</button>
+      <div style="display:flex;gap:8px; align-items:center;">
+        <button class="btn-sm btn-view" id="exportAuditBtn">Export (PDF)</button>
+        <button class="btn-sm btn-delete" id="deleteAuditBtn">Delete selected</button>
       </div>
     </div>
     <div class="table-wrapper">
       <table class="bookings-table" style="width:100%;">
       <thead>
-          <tr style="background:#f8f9fa;">
-            <th style="padding:8px; text-align:left; font-weight:600; width:36px;"><!-- checkbox col --></th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Event</th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Date &amp; Time</th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Booking ID</th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Client</th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Service</th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Booked At</th>
-            <th style="padding:8px; text-align:left; font-weight:600;">Details</th>
-          </tr>
+            <tr style="background:#f8f9fa;">
+              <th style="padding:8px; text-align:left; font-weight:600;"><input type="checkbox" id="auditSelectAll" /></th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Event</th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Date &amp; Time</th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Booking ID</th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Client</th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Service</th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Booked At</th>
+              <th style="padding:8px; text-align:left; font-weight:600;">Details</th>
+            </tr>
       </thead>
       <tbody id="auditTableBody">
         {% if audit_entries %}
           {% for a in audit_entries %}
               {% comment %}Compute a compact label for dataset (mirror displayed label){% endcomment %}
               <tr data-audit-id="{{ a.id }}" data-event-type="{{ a.event_type|default:''|escapejs }}" data-label="{% if a.event_type == 'deleted' and a.start and a.start < now %}successful{% else %}{{ a.event_type|default:''|escapejs }}{% endif %}" data-service-name="{{ a.service.name|default:''|escapejs }}" data-client="{{ a.client_name|default:''|lower|escapejs }}" data-public-ref="{% with ref=a.booking_snapshot.public_ref %}{{ ref|default:a.booking_id }}{% endwith %}">
-                <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="{{ a.id }}"></td>
+                <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="{{ a.id }}" style="margin-right:8px;" /></td>
                 <td style="padding:8px;">
                   {% if a.event_type == 'deleted' and a.start and a.start < now %}
                     Successful
@@ -213,11 +203,6 @@
                   {% endtimezone %}</td>
                 <td style="padding:8px;">
                   <button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='{{ a.booking_snapshot|escapejs }}'>View</button>
-                  {% if a.start and a.start > now %}
-                    {% if a.event_type == 'deleted' or a.event_type == 'cancelled' %}
-                      <button class="btn-sm" style="margin-left:6px; background:#28a745; color:white;" onclick="undoAudit(this)" data-audit-id="{{ a.id }}">Undo</button>
-                    {% endif %}
-                  {% endif %}
                 </td>
               </tr>
             {% endfor %}
@@ -298,52 +283,18 @@ const POLL_INTERVAL_MS = 15000; // 15 seconds
 // Audit polling: track last seen audit created_at
 let lastAuditSeen = "{% if audit_entries and audit_entries.0 %}{{ audit_entries.0.created_at|date:'c' }}{% else %}{{ now|date:'c' }}{% endif %}";
 
-// Pending optimistic undo requests keyed by tempId
-const pendingUndoTemp = new Set();
+// Performance caches
+const _bookingsTbody = document.getElementById('bookingsTableBody');
+const _auditTbody = document.getElementById('auditTableBody');
+const _selectAllBookings = document.getElementById('selectAllBookings');
+const _auditSelectAll = document.getElementById('auditSelectAll');
+// Track inserted authoritative audit ids to avoid expensive DOM queries
+const _seenAuditIds = new Set();
+try { document.querySelectorAll('#auditTableBody tr[data-audit-id]').forEach(r => { if (r.dataset && r.dataset.auditId) _seenAuditIds.add(String(r.dataset.auditId)); }); } catch(e) {}
 
 // Normalize time strings to remove leading zero on hour (e.g. '09:00 AM' -> '9:00 AM')
 function stripLeadingZeroFromTime(s){
   try{ return String(s).replace(/\b0(?=\d{1,2}:\d{2})/g,''); }catch(e){ return s; }
-}
-
-// Queue an optimistic undo while delete is in-flight. When server returns
-// the authoritative audit id we will execute the undo automatically.
-function queueUndoTemp(tempId, bookingId, btn){
-  try{
-    pendingUndoTemp.add(tempId);
-    if (btn){ btn.disabled = true; btn.textContent = 'Undo (waiting)'; }
-  }catch(e){ console.error('queueUndoTemp error', e); }
-}
-
-// Undo by audit id (used when server returns authoritative id for a queued undo)
-async function undoAuditById(auditId){
-  try{
-    const resp = await fetch(`/bus/${orgSlug}/bookings/audit/undo/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-      body: JSON.stringify({ audit_id: Number(auditId) })
-    });
-    if (!resp.ok){ const txt = await resp.text(); console.error('undoAuditById failed', txt); return; }
-    const j = await resp.json();
-    if (j && j.booking){
-      // Remove any audit rows for this booking id or public_ref using dataset attributes
-      try{
-        document.querySelectorAll('.auditRowCb').forEach(cb => {
-          try{
-            const tr = cb.closest('tr'); if (!tr) return;
-            const tempBookingId = tr.dataset.bookingId;
-            const tempPublicRef = tr.dataset.publicRef;
-            const bookRef = (j.booking && (j.booking.public_ref || (j.booking.booking_id !== undefined ? String(j.booking.booking_id) : '')));
-            if ((tempBookingId && String(tempBookingId) === String(j.booking.booking_id)) || (tempPublicRef && String(tempPublicRef) === String(bookRef))) {
-              tr.remove();
-            }
-          }catch(e){}
-        });
-      }catch(e){}
-      insertBookingRow(j.booking, true);
-      showToast('success', 'Booking restored');
-    }
-  }catch(e){ console.error('undoAuditById error', e); }
 }
 
 function tryParseSnapshot(raw){
@@ -474,7 +425,7 @@ function viewBooking(id) {
     document.getElementById('modalTime').textContent = '';
   }
 
-  const bookedAtCell = cells[6] || null;
+  const bookedAtCell = cells[7] || null;
   const bookedAtDivs = bookedAtCell ? bookedAtCell.querySelectorAll('div') : [];
   if (bookedAtDivs.length >= 2) {
     document.getElementById('modalBookedAt').textContent = `${bookedAtDivs[0].textContent} ${bookedAtDivs[1].textContent}`;
@@ -482,7 +433,7 @@ function viewBooking(id) {
     document.getElementById('modalBookedAt').textContent = '';
   }
 
-  const clientCell = cells[2] || null;
+  const clientCell = cells[3] || null;
   if (clientCell) {
     const c0 = clientCell.querySelector('div');
     const c1 = clientCell.querySelectorAll('div')[1];
@@ -493,8 +444,8 @@ function viewBooking(id) {
     document.getElementById('modalClientEmail').textContent = '';
   }
 
-  document.getElementById('modalService').textContent = (cells[3] ? cells[3].textContent : '') || '';
-  document.getElementById('modalDuration').textContent = (cells[4] ? cells[4].textContent : '') || '';
+  document.getElementById('modalService').textContent = (cells[4] ? cells[4].textContent : '') || '';
+  document.getElementById('modalDuration').textContent = (cells[5] ? cells[5].textContent : '') || '';
   // Show service price if available (data attribute on row)
   const priceVal = row.dataset.servicePrice;
   let priceText = '-';
@@ -562,19 +513,25 @@ function insertBookingRow(b, toTop=true) {
     const svcPrice = (b.service_price !== undefined && b.service_price !== null) ? String(b.service_price) : (b.price !== undefined && b.price !== null ? String(b.price) : '');
     newTr.setAttribute('data-service-price', svcPrice);
   }catch(e){ newTr.setAttribute('data-service-price',''); }
+  try{
+    if (b.duration !== undefined && b.duration !== null) newTr.setAttribute('data-duration', String(b.duration));
+  }catch(e){}
   newTr.setAttribute('data-search', (b.client_name || '').toLowerCase() + ' ' + (b.client_email || '').toLowerCase());
   newTr.innerHTML = `
-    <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${b.booking_id}"></td>
+    <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${bid}" style="margin-right:8px;"/></td>
     <td>
       <div style="font-weight:600;">${b.start_date || ''}</div>
       <div style="font-size:13px; color:#6c757d;">${stripLeadingZeroFromTime(b.time_range || '')}</div>
+    </td>
+    <td>
+      <div style="font-weight:600;">${b.public_ref || b.booking_id || ''}</div>
     </td>
     <td>
       <div style="font-weight:600;">${b.client_name || ''}</div>
       <div style="font-size:13px; color:#6c757d;">${b.client_email || ''}</div>
     </td>
     <td>${b.service_name || 'N/A'}</td>
-    <td>${(b.duration ? (b.duration + ' min') : (preservedDurationText || '- min'))}</td>
+    <td>${(b.duration !== undefined && b.duration !== null ? (b.duration + ' min') : (preservedDurationText || '- min'))}</td>
     <td><span class="status-badge ${status==='past'?'status-past':(status==='today'?'status-today':'status-upcoming')}">${status.charAt(0).toUpperCase()+status.slice(1)}</span></td>
     <td>${(function(){
         try{
@@ -612,8 +569,7 @@ function insertBookingRow(b, toTop=true) {
       })()}</td>
     <td>
       <div class="booking-actions">
-        <button class="btn-sm btn-view" onclick="viewBooking(${b.booking_id})">View</button>
-        <button class="btn-sm btn-delete" onclick="deleteBooking(${b.booking_id}, '${b.start_date || ''}', '${b.client_name || ''}')">Delete</button>
+          <button class="btn-sm btn-view" onclick="viewBooking(${b.booking_id})">View</button>
       </div>
     </td>
   `;
@@ -657,10 +613,73 @@ async function pollNewAudits(){
 setInterval(pollNewAudits, POLL_INTERVAL_MS);
 setTimeout(pollNewAudits, 2500);
 
+// Selection / bulk-delete UI
+function updateSelectionState(){
+  const selected = Array.from(document.querySelectorAll('.bookingRowCb')).filter(cb => cb.checked).map(cb => cb.value);
+  const btn = document.getElementById('deleteSelectedBtn');
+  if (btn) {
+    if (selected.length > 0) { btn.style.display = 'inline-block'; btn.textContent = `Delete selected (${selected.length})`; }
+    else { btn.style.display = 'none'; }
+  }
+}
+
+// Wire up select-all and per-row checkboxes
+try{
+  const selectAll = document.getElementById('selectAllBookings');
+  if (selectAll){
+    selectAll.addEventListener('change', function(){
+      const all = Array.from(document.querySelectorAll('.bookingRowCb'));
+      all.forEach(cb => { try{ cb.checked = selectAll.checked; }catch(e){} });
+      updateSelectionState();
+    });
+  }
+  document.addEventListener('change', function(e){
+    if (e.target && e.target.classList && e.target.classList.contains('bookingRowCb')) updateSelectionState();
+  });
+}catch(e){ }
+
+function deleteSelected(){
+  const selected = Array.from(document.querySelectorAll('.bookingRowCb')).filter(cb => cb.checked).map(cb => cb.value);
+  if (!selected || selected.length === 0) return;
+  if (!confirm(`Delete ${selected.length} selected booking(s)?`)) return;
+  for (const id of selected){
+    // attempt to extract date/client for nicer confirm UI in deleteBooking
+    const row = document.querySelector(`tr[data-booking-id="${id}"]`);
+    let dateTxt = '';
+    let clientTxt = '';
+    try{ const cells = row.querySelectorAll('td'); dateTxt = cells[1] ? cells[1].textContent.trim() : ''; clientTxt = cells[3] ? (cells[3].querySelector('div') ? cells[3].querySelector('div').textContent.trim() : cells[3].textContent.trim()) : ''; }catch(e){}
+    // call existing deleteBooking with skipConfirm true
+    try{ deleteBooking(id, dateTxt, clientTxt, true); }catch(e){ console.error('deleteSelected error', e); }
+  }
+  // clear selection UI
+  try{ document.getElementById('selectAllBookings').checked = false; }catch(e){}
+  updateSelectionState();
+}
+
+
 function insertAuditRow(item){
   try{
-    // Avoid inserting duplicates if row for this audit id already exists
-    if (document.querySelector(`.auditRowCb[value="${item.id}"]`)) return;
+    // Avoid inserting duplicates: check fast in-memory set before DOM queries
+    try { if (item.id && _seenAuditIds.has(String(item.id))) return; } catch(e) {}
+    // Also avoid duplicates by checking existing DOM rows for the same
+    // authoritative identifiers (audit id, booking id, public_ref).
+    try{
+      const auditIdStr = (item.id !== undefined && item.id !== null) ? String(item.id) : null;
+      const bookingIdStr = (item.booking_id !== undefined && item.booking_id !== null) ? String(item.booking_id) : null;
+      const itemRef = (item.public_ref || (item.snapshot && item.snapshot.public_ref) || '') || '';
+      if (auditIdStr) {
+        const existingByAudit = document.querySelector(`#auditTableBody tr[data-audit-id="${auditIdStr}"]`);
+        if (existingByAudit) return;
+      }
+      if (bookingIdStr) {
+        const existingByBooking = document.querySelector(`#auditTableBody tr[data-booking-id="${bookingIdStr}"]`);
+        if (existingByBooking) return;
+      }
+      if (itemRef) {
+        const existingByRef = Array.from(document.querySelectorAll('#auditTableBody tr')).find(r => (r.dataset && String(r.dataset.publicRef || '').toLowerCase()) === String(itemRef).toLowerCase());
+        if (existingByRef) return;
+      }
+    }catch(e){}
     // Remove any optimistic temp rows for the same booking_id (prevent dupes)
     try{
       const tempCbs = Array.from(document.querySelectorAll('.auditRowCb')).filter(cb => cb && String(cb.value).startsWith('tmp-'));
@@ -740,16 +759,14 @@ function insertAuditRow(item){
     if (!label) label = item.event_type ? (item.event_type.charAt(0).toUpperCase() + item.event_type.slice(1)) : '';
     let bookingDisplay = (item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || item.booking_id || '-');
     tr.innerHTML = `
-      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}"></td>
+      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}" style="margin-right:8px;" /></td>
       <td style="padding:8px;">${label}</td>
       <td style="padding:8px;">${startHtml}</td>
       <td style="padding:8px;">${bookingDisplay}</td>
       <td style="padding:8px;">${item.client_name || '-'}<div style="font-size:12px; color:#666">${item.client_email || ''}</div></td>
       <td style="padding:8px;">${item.service || '-'}</td>
       <td style="padding:8px;">${createdHtml}</td>
-      <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(item.snapshot).replace(/'/g, "\\'") }'>View</button>` +
-      ((item.start && (new Date(item.start) > new Date()) && (item.event_type === 'deleted' || item.event_type === 'cancelled')) ? ` <button class="btn-sm" style="margin-left:6px; background:#28a745; color:white;" onclick="undoAudit(this)" data-audit-id="${item.id}">Undo</button>` : '') +
-      `</td>`;
+      <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(item.snapshot).replace(/'/g, "\\'") }'>View</button></td>`;
     // Set dataset attributes for filtering/search
     try{
       tr.dataset.auditId = item.id;
@@ -765,6 +782,7 @@ function insertAuditRow(item){
     }catch(e){}
 
     if (tbody.firstChild) tbody.insertBefore(tr, tbody.firstChild); else tbody.appendChild(tr);
+    try { if (item.id !== undefined && item.id !== null) { tr.dataset.auditId = String(item.id); _seenAuditIds.add(String(item.id)); } } catch(e) {}
   }catch(e){ console.error('insertAuditRow error', e); }
 }
 
@@ -776,9 +794,9 @@ function filterAudits(){
     const searchTerm = (document.getElementById('auditSearch') && document.getElementById('auditSearch').value) ? document.getElementById('auditSearch').value.toLowerCase().trim() : '';
 
     document.querySelectorAll('#auditTableBody tr').forEach(row => {
-      // skip placeholder rows without checkbox
-      const cb = row.querySelector('.auditRowCb');
-      if (!cb) return;
+      // skip placeholder rows without an audit id (e.g. 'no recent' placeholder)
+      const auditIdAttr = row.dataset && row.dataset.auditId;
+      if (!auditIdAttr) return;
       let show = true;
       const rowEvt = (row.dataset.eventType || '').toLowerCase();
       const rowLabel = (row.dataset.label || '').toLowerCase();
@@ -816,9 +834,14 @@ function filterAudits(){
 
 // Wire audit filter controls
 try{
-  const aSearch = document.getElementById('auditSearch'); if (aSearch) aSearch.addEventListener('input', filterAudits);
-  const aEvt = document.getElementById('auditEventFilter'); if (aEvt) aEvt.addEventListener('change', filterAudits);
-  const aSvc = document.getElementById('auditServiceFilter'); if (aSvc) aSvc.addEventListener('change', filterAudits);
+  const aSearch = document.getElementById('auditSearch');
+  const aEvt = document.getElementById('auditEventFilter');
+  const aSvc = document.getElementById('auditServiceFilter');
+  // debounce input to avoid re-filtering on every keystroke
+  function _debounce(fn, wait){ let t = null; return function(){ const args = arguments; clearTimeout(t); t = setTimeout(() => fn.apply(this, args), wait); }; }
+  if (aSearch) aSearch.addEventListener('input', _debounce(filterAudits, 200));
+  if (aEvt) aEvt.addEventListener('change', filterAudits);
+  if (aSvc) aSvc.addEventListener('change', filterAudits);
 }catch(e){}
 
 async function deleteBooking(id, date, clientName, skipConfirm = false) {
@@ -833,30 +856,31 @@ async function deleteBooking(id, date, clientName, skipConfirm = false) {
   let clientEmail = '';
   if (row) {
     const cells = row.querySelectorAll('td');
-    // columns: 0=checkbox, 1=date/time, 2=client, 3=service, ...
-    svcText = cells[3] ? cells[3].textContent.trim() : '';
+    // columns: 0=checkbox, 1=date/time, 2=booking id, 3=client, 4=service, ...
+    svcText = cells[4] ? cells[4].textContent.trim() : '';
     // extract both date and time lines from the booking date cell so optimistic audit shows both
     try{
       const dateCellDivs = cells[1] ? cells[1].querySelectorAll('div') : [];
       startDateText = dateCellDivs[0] ? dateCellDivs[0].textContent.trim() : '';
       startTimeText = dateCellDivs[1] ? dateCellDivs[1].textContent.trim() : '';
     }catch(e){ }
-    const clientDivs = cells[2] ? cells[2].querySelectorAll('div') : [];
+    const clientDivs = cells[3] ? cells[3].querySelectorAll('div') : [];
     clientEmail = clientDivs[1] ? clientDivs[1].textContent.trim() : '';
   }
 
   // Remove booking row immediately
   try { if (row) row.remove(); } catch (e) {}
 
-  // Insert optimistic audit row
-  const tempId = 'tmp-' + Date.now();
+  // Insert an optimistic (temporary) audit row immediately so the UI updates instantly.
+  // The optimistic row includes dataset.bookingId and dataset.publicRef so the
+  // authoritative insertion (from poll or server response) can detect and remove it.
   try {
+    const tempId = 'tmp-' + Date.now();
     const tbody = document.getElementById('auditTableBody');
     const noRow = document.getElementById('noAuditRow'); if (noRow) noRow.remove();
     const tempTr = document.createElement('tr');
     tempTr.id = 'audit-temp-' + tempId;
     tempTr.dataset.tempId = tempId;
-    // Attach identifiers so reconciliation doesn't rely on rendered text (prevents flicker/dupes)
     try { tempTr.dataset.bookingId = String(id); } catch(e) { tempTr.dataset.bookingId = ''; }
     try { tempTr.dataset.publicRef = (row && row.dataset && row.dataset.publicRef) ? row.dataset.publicRef : ''; } catch(e) { tempTr.dataset.publicRef = ''; }
     const createdNowDate = new Date();
@@ -864,31 +888,25 @@ async function deleteBooking(id, date, clientName, skipConfirm = false) {
     const createdNowTimeStr = createdNowDate.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
     const createdHtml = `<div style="font-weight:600;">${createdNowDateStr}</div><div style="font-size:13px;color:#6c757d;">${createdNowTimeStr}</div>`;
     const snapshot = { title: clientName || '', start: null, end: null, client_name: clientName || '', client_email: clientEmail || '', service_slug: svcText || '', service_price: null, business: ORG_NAME };
-    // Determine optimistic event label: show 'Successful' for past bookings
     let optimisticLabel = 'Deleted';
-    try {
-      if (row && row.dataset && row.dataset.status === 'past') optimisticLabel = 'Successful';
-    } catch(e){}
-    // build optimistic row in new column order: Event, Date & Time, Booking ID, Client, Service, Booked At, Details
+    try { if (row && row.dataset && row.dataset.status === 'past') optimisticLabel = 'Successful'; } catch(e){}
     const normalizedDate = startDateText || '';
     const normalizedTime = startTimeText ? stripLeadingZeroFromTime(startTimeText) : '';
     const startHtmlOpt = (normalizedDate || normalizedTime) ? (`<div style="font-weight:600;">${normalizedDate}</div><div style="font-size:13px;color:#6c757d;">${normalizedTime || '&nbsp;'}</div>`) : '-';
     tempTr.innerHTML = `
-      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${tempId}"></td>
+      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${tempId}" style="margin-right:8px;" /></td>
       <td style="padding:8px;">${optimisticLabel}</td>
       <td style="padding:8px;">${startHtmlOpt}</td>
       <td style="padding:8px;">${(row && row.dataset && row.dataset.publicRef) ? row.dataset.publicRef : '-'}</td>
       <td style="padding:8px;">${clientName || '-'}<div style="font-size:12px; color:#666">${clientEmail || ''}</div></td>
       <td style="padding:8px;">${svcText || '-'}</td>
       <td style="padding:8px;">${createdHtml}</td>
-      <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(snapshot).replace(/'/g, "\\'") }'>View</button>` +
-      ((row && row.dataset && row.dataset.status !== 'past') ? ` <button class="btn-sm" data-temp-undo onclick="queueUndoTemp('${tempId}', ${id}, this)" style="margin-left:6px; background:#28a745; color:white;">Undo</button>` : '') +
-      `</td>
+      <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(snapshot).replace(/'/g, "\\'") }'>View</button></td>
     `;
     if (tbody.firstChild) tbody.insertBefore(tempTr, tbody.firstChild); else tbody.appendChild(tempTr);
-  } catch (e) { console.error('Error inserting optimistic audit row', e); }
+  } catch(e) { console.error('Error inserting optimistic audit row', e); }
 
-  // Now call delete endpoint; on success replace temp row with authoritative audit data
+  // Now call delete endpoint; on success insert authoritative audit row
   try {
     const response = await fetch(`/bus/${orgSlug}/bookings/${id}/delete/`, {
       method: 'POST',
@@ -901,73 +919,17 @@ async function deleteBooking(id, date, clientName, skipConfirm = false) {
     if (response.ok) {
       try {
         const j = await response.json();
-            if (j && j.audit) {
-          const item = j.audit;
-          const tempTr = document.getElementById('audit-temp-' + tempId);
-          if (tempTr) {
-            // Choose display label: show 'Successful' for deleted events whose start is in the past
-            let dispLabel = (item.event_type||'');
-            try {
-              if (item.event_type === 'deleted' && item.start && (new Date(item.start) < new Date())) dispLabel = 'Successful';
-            } catch(e){}
-            dispLabel = dispLabel ? (dispLabel.charAt(0).toUpperCase() + dispLabel.slice(1)) : '';
-            let startHtml = '-';
-            if (item.start) {
-              try {
-                const sd = new Date(item.start);
-                const startDateStr = sd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
-                const startTimeStr = sd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
-                let timeLine = startTimeStr;
-                if (item.end) {
-                  try { const ed = new Date(item.end); const endTimeStr = ed.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); timeLine = `${startTimeStr} - ${endTimeStr}`; } catch(e){}
-                }
-                startHtml = `<div style="font-weight:600;">${startDateStr}</div><div style="font-size:13px;color:#6c757d;">${timeLine}</div>`;
-              } catch (e) { startHtml = '-'; }
-            }
-            let createdHtml = '';
-            if (item.created_at) {
-              try{
-                const cd = new Date(item.created_at);
-                let createdTime = cd.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
-                createdTime = stripLeadingZeroFromTime(createdTime);
-                createdHtml = `<div style="font-weight:600;">${cd.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div><div style="font-size:13px;color:#6c757d;">${createdTime}</div>`;
-              }catch(e){ createdHtml = ''; }
-            }
-            let bookingDisplay = (item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || item.booking_id || '-');
-            tempTr.innerHTML = `
-              <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}"></td>
-              <td style="padding:8px;">${dispLabel}</td>
-              <td style="padding:8px;">${startHtml}</td>
-              <td style="padding:8px;">${bookingDisplay}</td>
-              <td style="padding:8px;">${item.client_name || '-'}<div style="font-size:12px; color:#666">${item.client_email || ''}</div></td>
-              <td style="padding:8px;">${item.service || '-'}</td>
-              <td style="padding:8px;">${createdHtml}</td>
-              <td style="padding:8px;"><button class="btn-sm btn-view" onclick="viewAudit(this)" data-snapshot='${JSON.stringify(item.snapshot).replace(/'/g, "\\'") }'>View</button>` +
-              ((item.start && (new Date(item.start) > new Date()) && (item.event_type === 'deleted' || item.event_type === 'cancelled')) ? ` <button class="btn-sm" style="margin-left:6px; background:#28a745; color:white;" onclick="undoAudit(this)" data-audit-id="${item.id}">Undo</button>` : '') +
-              `</td>`;
-            // If the user queued an optimistic undo while delete was in-flight,
-            // perform the undo now using the authoritative audit id.
-            try{
-              if (pendingUndoTemp.has(tempId)){
-                pendingUndoTemp.delete(tempId);
-                setTimeout(function(){ try{ undoAuditById(item.id); }catch(e){console.error(e);} }, 50);
-              }
-            }catch(e){}
-          }
+        if (j && j.audit) {
+          try { insertAuditRow(j.audit); } catch(e) { console.error('Error inserting audit row after delete', e); }
         } else {
-          // No audit returned - remove optimistic row
-          const tempTr = document.getElementById('audit-temp-' + tempId); if (tempTr) tempTr.remove();
           showToast('error', 'Delete succeeded but no audit record was created');
         }
       } catch (e) { console.error('Error reading delete response', e); showToast('error','Error reading server response'); }
     } else {
-      // remove optimistic row on failure
-      const tempTr = document.getElementById('audit-temp-' + tempId); if (tempTr) tempTr.remove();
       showToast('error', 'Failed to delete booking');
     }
   } catch (error) {
     console.error('Error:', error);
-    const tempTr = document.getElementById('audit-temp-' + tempId); if (tempTr) tempTr.remove();
     showToast('error', 'Error deleting booking');
   }
 }
@@ -989,7 +951,7 @@ async function undoAudit(btn) {
     if (j && j.booking) {
       const b = j.booking;
       // remove audit row
-      const tr = btn.closest('tr'); if (tr) tr.remove();
+      const tr = btn.closest('tr'); if (tr) { try { if (tr.dataset && tr.dataset.auditId) _seenAuditIds.delete(String(tr.dataset.auditId)); } catch(e){} tr.remove(); }
       // also remove any other audit rows for the same booking_id or public_ref (defensive)
       try{
         document.querySelectorAll('.auditRowCb').forEach(cb => {
@@ -998,7 +960,10 @@ async function undoAudit(btn) {
             const tempBookingId = ct.dataset.bookingId;
             const tempPublicRef = ct.dataset.publicRef;
             const bookRef = (b && (b.public_ref || (b.booking_id !== undefined ? String(b.booking_id) : '')));
-            if ((tempBookingId && String(tempBookingId) === String(b.booking_id)) || (tempPublicRef && String(tempPublicRef) === String(bookRef))) ct.remove();
+            if ((tempBookingId && String(tempBookingId) === String(b.booking_id)) || (tempPublicRef && String(tempPublicRef) === String(bookRef))) {
+              try { if (ct.dataset && ct.dataset.auditId) _seenAuditIds.delete(String(ct.dataset.auditId)); } catch(e){}
+              ct.remove();
+            }
           }catch(e){}
         });
       }catch(e){}
@@ -1051,8 +1016,7 @@ if (selectStatusMenu) {
 // Bulk delete UI wiring
 const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
 function updateBulkDeleteVisibility(){
-  const any = Array.from(document.querySelectorAll('.bookingRowCb')).some(cb => cb.checked && cb.closest('tr') && cb.closest('tr').style.display !== 'none');
-  if (bulkDeleteBtn) bulkDeleteBtn.style.display = any ? 'inline-block' : 'none';
+  if (bulkDeleteBtn) bulkDeleteBtn.style.display = 'none';
 }
 
 // Update visibility when individual checkboxes change (delegated)
@@ -1061,6 +1025,20 @@ if (bookingsTbody){
   bookingsTbody.addEventListener('change', (e) => {
     if (e.target && e.target.classList && e.target.classList.contains('bookingRowCb')){
       updateBulkDeleteVisibility();
+    }
+  });
+}
+
+// Audit tbody delegated change handler: keep select-all in sync when individual boxes change
+const auditTbody = document.getElementById('auditTableBody');
+if (auditTbody){
+  auditTbody.addEventListener('change', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('auditRowCb')){
+      try{
+        const all = Array.from(document.querySelectorAll('#auditTableBody .auditRowCb')).filter(cb => cb.closest('tr') && cb.closest('tr').style.display !== 'none');
+        const checked = all.filter(cb => cb.checked);
+        if (auditSelectAll) auditSelectAll.checked = (all.length > 0 && checked.length === all.length);
+      }catch(e){ }
     }
   });
 }
@@ -1095,8 +1073,9 @@ if (bulkDeleteBtn){
 const exportAuditBtn = document.getElementById('exportAuditBtn');
 if (exportAuditBtn) {
   exportAuditBtn.addEventListener('click', async () => {
-    const ids = Array.from(document.querySelectorAll('.auditRowCb:checked')).map(cb => Number(cb.value));
-    if (!ids.length) { alert('No audit rows selected'); return; }
+    // Export selected audit rows
+    const ids = Array.from(document.querySelectorAll('#auditTableBody .auditRowCb:checked')).filter(cb => cb.closest('tr') && cb.closest('tr').style.display !== 'none').map(cb => Number(cb.value));
+    if (!ids.length) { alert('No audit rows selected to export'); return; }
     try {
       const resp = await fetch(`/bus/${orgSlug}/bookings/audit/export/`, {
         method: 'POST',
@@ -1121,23 +1100,50 @@ if (exportAuditBtn) {
   const deleteAuditBtn = document.getElementById('deleteAuditBtn');
   if (deleteAuditBtn){
     deleteAuditBtn.addEventListener('click', async () => {
-      const ids = Array.from(document.querySelectorAll('.auditRowCb:checked')).map(cb => Number(cb.value));
-      if (!ids.length) { alert('No audit rows selected'); return; }
-      if (!confirm('Permanently delete selected audit records? This cannot be undone.')) return;
+      // Delete selected audit rows (optimistic removal for instant UX)
+      const checked = Array.from(document.querySelectorAll('#auditTableBody .auditRowCb:checked')).filter(cb => cb.closest('tr') && cb.closest('tr').style.display !== 'none');
+      if (!checked.length) { alert('No audit rows selected to delete'); return; }
+      if (!confirm('Permanently delete the selected audit records? This cannot be undone.')) return;
+
+      const tbody = document.getElementById('auditTableBody');
+      const removed = checked.map(cb => {
+        const tr = cb.closest('tr');
+        const idx = tr && tbody ? Array.prototype.indexOf.call(tbody.children, tr) : -1;
+        const auditId = (tr && tr.dataset && tr.dataset.auditId) ? String(tr.dataset.auditId) : null;
+        const val = cb.value;
+        const html = tr ? tr.outerHTML : '';
+        return { tr, idx, auditId, val, html };
+      });
+
+      // Optimistically remove rows & update cache
+      try { for (const r of removed){ if (r.tr) { try { if (r.auditId) _seenAuditIds.delete(String(r.auditId)); r.tr.remove(); } catch(e){} } } } catch(e){ console.error('optimistic remove error', e); }
+
+      // Send numeric ids to server (ignore tmp-* values)
+      const ids = removed.map(r => Number(r.val)).filter(n => Number.isFinite(n));
+
+      deleteAuditBtn.disabled = true;
       try {
         const resp = await fetch(`/bus/${orgSlug}/bookings/audit/delete/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
           body: JSON.stringify({ ids })
         });
-        if (!resp.ok) { alert('Delete failed'); return; }
+        if (!resp.ok) {
+          // restore removed rows on failure
+          try{
+            for (const r of removed){ if (tbody){ const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild; if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node); if (r.auditId) _seenAuditIds.add(String(r.auditId)); } }
+          }catch(er){ console.error('restore on failed resp', er); }
+          alert('Delete failed');
+          return;
+        }
         const data = await resp.json();
         showToast('success', `Deleted ${data.deleted || 0} audit rows.`);
-        // remove rows from DOM
-        document.querySelectorAll('.auditRowCb:checked').forEach(cb => {
-          const tr = cb.closest('tr'); if (tr) tr.remove();
-        });
-      } catch (e) { console.error(e); alert('Delete error'); }
+      } catch (e) {
+        console.error(e);
+        // network/error: restore removed rows
+        try{ for (const r of removed){ if (tbody){ const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild; if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node); if (r.auditId) _seenAuditIds.add(String(r.auditId)); } } }catch(er){ console.error('restore after error', er); }
+        alert('Delete error');
+      } finally { deleteAuditBtn.disabled = false; }
     });
   }
 }

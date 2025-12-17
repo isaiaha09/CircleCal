@@ -12,17 +12,31 @@ def send_booking_confirmation(booking):
     """Send booking confirmation email to client."""
     if not booking.client_email:
         return False
+    # Defensive: if booking was marked to suppress confirmation (e.g. part
+    # of a reschedule flow), avoid sending the normal confirmation.
+    try:
+        if getattr(booking, '_suppress_confirmation', False):
+            logger = logging.getLogger(__name__)
+            logger.info('Skipping booking confirmation due to suppress flag for booking=%s', getattr(booking, 'id', None))
+            return False
+    except Exception:
+        pass
     
     signer = TimestampSigner()
     token = signer.sign(str(booking.id))
     cancel_path = reverse('bookings:cancel_booking', args=[booking.id])
+    reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
     base_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
     cancel_url = f"{base_url}{cancel_path}?token={token}"
+    # Make the reschedule button in the confirmation email behave like the cancel button
+    # so clients must cancel first before rescheduling. Point reschedule_url to cancel_url.
+    reschedule_url = cancel_url
     context = {
         'booking': booking,
         'public_ref': getattr(booking, 'public_ref', None),
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
         'cancel_url': cancel_url,
+        'reschedule_url': reschedule_url,
     }
     
     logger = logging.getLogger(__name__)
@@ -53,11 +67,18 @@ def send_booking_cancellation(booking, refund_info=None):
     if not booking.client_email:
         return False
     
+    signer = TimestampSigner()
+    token = signer.sign(str(booking.id))
+    reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
+    base_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
+    reschedule_url = f"{base_url}{reschedule_path}?token={token}"
+
     context = {
         'booking': booking,
         'public_ref': getattr(booking, 'public_ref', None),
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
         'refund_info': refund_info,
+        'reschedule_url': reschedule_url,
     }
     
     logger = logging.getLogger(__name__)
@@ -157,3 +178,136 @@ def send_owner_booking_notification(booking):
         msg.send(fail_silently=True)
     except Exception:
         logger.exception('Failed to send owner notification for booking=%s', booking.id)
+
+
+def send_booking_rescheduled(new_booking, old_booking_id=None):
+    """Notify client that their booking was rescheduled. Uses a combined/reschedule template."""
+    booking = new_booking
+    if not booking.client_email:
+        return False
+
+    # Determine a human-friendly identifier for the old booking: prefer public_ref if available
+    old_booking_display = None
+    try:
+        if old_booking_id:
+            from .models import AuditBooking, Booking as BookingModel
+            try:
+                old = BookingModel.objects.filter(id=old_booking_id).first()
+                if old and getattr(old, 'public_ref', None):
+                    old_booking_display = old.public_ref
+                elif old:
+                    old_booking_display = str(old.id)
+                else:
+                    ab = AuditBooking.objects.filter(booking_id=old_booking_id).order_by('-created_at').first()
+                    if ab and getattr(ab, 'booking_snapshot', None):
+                        snap = ab.booking_snapshot
+                        try:
+                            # booking_snapshot is typically a dict
+                            if isinstance(snap, dict):
+                                old_booking_display = snap.get('public_ref') or snap.get('booking_ref') or str(old_booking_id)
+                            else:
+                                old_booking_display = str(old_booking_id)
+                        except Exception:
+                            old_booking_display = str(old_booking_id)
+            except Exception:
+                old_booking_display = str(old_booking_id)
+    except Exception:
+        old_booking_display = None
+
+    context = {
+        'booking': booking,
+        'public_ref': getattr(booking, 'public_ref', None),
+        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'old_booking_id': old_booking_id,
+        'old_booking_display': old_booking_display,
+    }
+
+    # Compute organization-localized display strings for start/end and duration
+    try:
+        org_tz_name = getattr(booking.organization, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC'))
+        org_tz = ZoneInfo(org_tz_name)
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+
+    try:
+        start_local = booking.start.astimezone(org_tz)
+        end_local = booking.end.astimezone(org_tz)
+        start_display = start_local.strftime('%A, %B %d, %Y at %I:%M %p')
+        end_display = end_local.strftime('%A, %B %d, %Y at %I:%M %p')
+    except Exception:
+        start_display = None
+        end_display = None
+
+    # Duration: prefer service.duration, fallback to computation
+    try:
+        if booking.service and getattr(booking.service, 'duration', None) is not None:
+            duration_minutes = int(booking.service.duration)
+        else:
+            duration_minutes = int((booking.end - booking.start).total_seconds() / 60)
+    except Exception:
+        duration_minutes = None
+
+    context.update({
+        'start_display': start_display,
+        'end_display': end_display,
+        'duration_minutes': duration_minutes,
+    })
+
+    # If we couldn't determine a friendly old booking id earlier, try audit snapshots
+    if not old_booking_display and old_booking_id:
+        try:
+            from .models import AuditBooking
+            ab = AuditBooking.objects.filter(booking_id=old_booking_id).order_by('-created_at').first()
+            if ab and isinstance(ab.booking_snapshot, dict):
+                snap = ab.booking_snapshot
+                # prefer explicit public_ref key
+                candidate = snap.get('public_ref') or snap.get('booking_ref') or snap.get('publicRef')
+                if not candidate:
+                    # scan values for plausible public_ref pattern
+                    import re
+                    for v in snap.values():
+                        if isinstance(v, str) and re.match(r'^[0-9A-Z]{6,12}$', v):
+                            candidate = v
+                            break
+                if candidate:
+                    old_booking_display = candidate
+                    context['old_booking_display'] = old_booking_display
+        except Exception:
+            pass
+    # No deterministic fallback: only present a previous booking id when
+    # we can resolve a `public_ref`-style value from the booking or audit snapshot.
+
+    # Add cancel/reschedule links (mirror confirmation email behavior)
+    try:
+        signer = TimestampSigner()
+        token = signer.sign(str(booking.id))
+        cancel_path = reverse('bookings:cancel_booking', args=[booking.id])
+        reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
+        base_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
+        cancel_url = f"{base_url}{cancel_path}?token={token}"
+        # For consistency, make reschedule button point to cancel flow (require cancel first)
+        reschedule_url = cancel_url
+        context.update({'cancel_url': cancel_url, 'reschedule_url': reschedule_url})
+    except Exception:
+        pass
+
+    logger = logging.getLogger(__name__)
+    subject = f"Booking Rescheduled - {booking.organization.name}"
+    html_content = render_to_string('bookings/emails/booking_rescheduled.html', context)
+    from_email = settings.DEFAULT_FROM_EMAIL
+    recipient_list = [booking.client_email]
+    msg = EmailMessage(subject, html_content, from_email, recipient_list)
+    msg.content_subtype = 'html'
+    try:
+        msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking.id)}
+    except Exception:
+        pass
+
+    try:
+        logger.info('Sending booking rescheduled for booking=%s to=%s', booking.id, booking.client_email)
+        sent = msg.send()
+        logger.info('booking rescheduled send result for booking=%s sent=%s', booking.id, sent)
+        return True
+    except Exception:
+        logger.exception('Failed to send booking rescheduled for booking=%s to=%s', booking.id, booking.client_email)
+        return False

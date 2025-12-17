@@ -403,6 +403,8 @@
       {% csrf_token %}
       <input type="hidden" name="start" id="startInput">
       <input type="hidden" name="end" id="endInput">
+      <input type="hidden" name="reschedule_source" id="rescheduleSourceInput" value="{{ reschedule_source|default:'' }}">
+      <input type="hidden" name="reschedule_token" id="rescheduleTokenInput" value="{{ reschedule_token|default:'' }}">
 
       <label class="block text-sm text-gray-700 mb-1">Select service</label>
       <select id="serviceSelect" name="service_slug" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
@@ -439,10 +441,10 @@
       </div>
 
       <label class="block text-sm text-gray-700 mb-1">Your name</label>
-      <input type="text" name="client_name" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="John Doe">
+      <input type="text" name="client_name" required value="{{ prefill_client_name|default:'' }}" class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="John Doe">
 
       <label class="block text-sm text-gray-700 mb-1">Email</label>
-      <input type="email" name="client_email" required class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
+      <input type="email" name="client_email" required value="{{ prefill_client_email|default:'' }}" class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
 
       <div class="modal-actions">
         <button type="button" id="backToSlotsBtn" class="px-4 py-2 text-sm md:text-base rounded border border-gray-300 text-gray-700 hover:bg-gray-100 flex-1 md:flex-none">Back</button>

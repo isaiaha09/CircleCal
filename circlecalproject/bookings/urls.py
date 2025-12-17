@@ -56,5 +56,7 @@ urlpatterns = [
 
     # Public booking cancellation via signed token
     path("cancel/<int:booking_id>/", views.cancel_booking, name="cancel_booking"),
+    # Public reschedule flow (displays reschedule landing page with link to booking UI)
+    path("reschedule/<int:booking_id>/", views.reschedule_booking, name="reschedule_booking"),
 
 ]

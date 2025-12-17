@@ -532,10 +532,22 @@
 </div>
 <template id="svc-conflict-modal-tpl">
   <div class="cc-modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1200">
-    <div style="background:#fff;padding:1rem;border-radius:8px;max-width:760px;width:95%;box-shadow:0 6px 24px rgba(0,0,0,0.2);">
+    <div style="background:#fff;padding:1rem;border-radius:8px;max-width:760px;width:95%;box-shadow:0 6px 24px rgba(0,0,0,0.2);display:flex;flex-direction:column;max-height:80vh;">
       <h3 style="margin:0 0 0.5rem 0;font-weight:700">Conflicting bookings detected</h3>
       <p style="margin:0 0 0.75rem 0;color:#444">The following booked days will keep the previous settings. Confirm to freeze old settings for these dates and apply your changes to all other days.</p>
-      <div id="svc-conflict-list" style="max-height:320px;overflow:auto;border:1px solid #eee;padding:8px;border-radius:4px;margin-bottom:10px;font-family:monospace;font-size:0.9rem"></div>
+      <div id="svc-conflict-list" style="flex:1;overflow:auto;border-radius:8px;margin-bottom:12px;padding:6px 6px 0 6px">
+        <!-- Booking rows will be injected here as individual stacked items -->
+      </div>
+      <style>
+        #svc-conflict-list { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size:0.95rem; }
+        .conflict-item { display:block; padding:10px 12px; border-radius:8px; background:#ffffff; border:1px solid #eef3f8; box-shadow:0 1px 2px rgba(16,24,40,0.03); margin-bottom:8px; }
+        .conflict-item.empty { text-align:center; color:#6b7280; background:transparent; border:none; box-shadow:none; padding:8px; }
+        .conflict-main { display:block; color:#0f172a; }
+        .conflict-line { display:flex; justify-content:space-between; gap:12px; align-items:center; font-weight:600; color:#111827; }
+        .conflict-client { color:#374151; font-weight:400; margin-left:12px; }
+        .conflict-email { color:#6b7280; font-weight:400; margin-left:6px; }
+        @media (max-width:720px){ .conflict-line{flex-direction:column;align-items:flex-start} }
+      </style>
       <div style="text-align:right">
         <button id="svc-conflict-cancel" style="margin-right:8px;padding:6px 10px;border-radius:6px;border:1px solid #ccc;background:#fafafa">Cancel</button>
         <button id="svc-conflict-confirm" style="padding:6px 10px;border-radius:6px;background:#2563eb;color:#fff;border:none">Confirm and Apply</button>
@@ -595,19 +607,91 @@
       return out;
     }
 
-    function buildConflictText(conflicts){
-      const lines = [];
+    function buildConflictNodes(conflicts){
+      const nodes = [];
       const days = Object.keys(conflicts).sort();
+
+      // Collect items into groups by whether they use fixed increments
+      const fixedGroup = [];
+      const customGroup = [];
+
       for (const d of days){
         const items = conflicts[d];
         for (const it of items){
           const name = it.client_name || '(no name)';
-          const email = it.client_email ? ` <${it.client_email}>` : '';
-          const time = it.time || (new Date(it.start)).toLocaleTimeString();
-          lines.push(`${d} ${time} — ${name}${email}`);
+          const email = it.client_email || '';
+          // build formatted date/time range
+          const start = it.start ? new Date(it.start) : null;
+          let end = it.end ? new Date(it.end) : null;
+          if (!end && start){
+            let dur = null;
+            if (it.duration !== undefined && it.duration !== null) dur = Number(it.duration);
+            else if (it.duration_minutes !== undefined && it.duration_minutes !== null) dur = Number(it.duration_minutes);
+            else if (it.durationMinutes !== undefined && it.durationMinutes !== null) dur = Number(it.durationMinutes);
+            else if (it.duration_mins !== undefined && it.duration_mins !== null) dur = Number(it.duration_mins);
+            else if (it.duration_seconds !== undefined && it.duration_seconds !== null) dur = Number(it.duration_seconds) / 60;
+            if (dur) end = new Date(start.getTime() + (Number(dur) || 0) * 60000);
+          }
+
+          function ordinalSuffix(n){
+            const s = ["th","st","nd","rd"], v = n % 100;
+            return (s[(v-20)%10] || s[v] || s[0]);
+          }
+
+          function fmtTime(d){
+            try{ return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return '' }
+          }
+
+          function fmtDateRange(startD, endD){
+            if (!startD) return '';
+            try{
+              const weekday = startD.toLocaleDateString('en-US',{weekday:'long'});
+              const month = startD.toLocaleDateString('en-US',{month:'long'});
+              const day = startD.getDate();
+              const year = startD.getFullYear();
+              const startT = fmtTime(startD);
+              const endT = endD ? fmtTime(endD) : '';
+              const dayWithOrd = `${day}${ordinalSuffix(day)}`;
+              return `${weekday}, ${month} ${dayWithOrd}, ${year}, at ${startT}${endT ? ' - ' + endT : ''}`;
+            }catch(e){ return '' }
+          }
+
+          const desc = fmtDateRange(start, end);
+
+          const row = document.createElement('div');
+          row.className = 'conflict-item';
+          const main = document.createElement('div');
+          main.className = 'conflict-main';
+          main.innerHTML = `\
+            <div class="conflict-line">${escapeHtml(desc)}&nbsp;&nbsp;&nbsp;&nbsp;Client: ${escapeHtml(name)}${email ? ' &lt;' + escapeHtml(email) + '&gt;' : ''}</div>\
+          `;
+          row.appendChild(main);
+
+          // group by `uses_fixed_increment` flag (default false => custom)
+          const usesFixed = !!it.uses_fixed_increment;
+          if (usesFixed) fixedGroup.push(row);
+          else customGroup.push(row);
         }
       }
-      return lines.join('\n');
+
+      // Helper to append a heading + rows for a group
+      function pushGroup(title, items){
+        const heading = document.createElement('div');
+        heading.className = 'conflict-group-heading';
+        heading.textContent = `${title} (${items.length})`;
+        nodes.push(heading);
+        for (const r of items) nodes.push(r);
+      }
+
+      if (fixedGroup.length) pushGroup('Using fixed increments', fixedGroup);
+      if (customGroup.length) pushGroup('Using Custom Increments', customGroup);
+
+      return nodes;
+    }
+
+    // Basic escaping helper used only for small text pieces
+    function escapeHtml(s){
+      try{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }catch(e){ return '' }
     }
 
     function showModal(conflicts, onConfirm){
@@ -615,7 +699,17 @@
       const clone = tpl.content.cloneNode(true);
       const backdrop = clone.querySelector('.cc-modal-backdrop');
       const list = clone.querySelector('#svc-conflict-list');
-      list.textContent = buildConflictText(conflicts) || 'No bookings found.';
+      // clear and populate with structured rows (one booking per stacked row)
+      list.textContent = '';
+      const nodes = buildConflictNodes(conflicts || {});
+      if (!nodes.length){
+        const empty = document.createElement('div');
+        empty.className = 'conflict-item empty';
+        empty.textContent = 'No bookings found.';
+        list.appendChild(empty);
+      } else {
+        for (const n of nodes) list.appendChild(n);
+      }
       document.body.appendChild(backdrop);
       backdrop.querySelector('#svc-conflict-cancel').addEventListener('click', function(){ backdrop.remove(); });
       backdrop.querySelector('#svc-conflict-confirm').addEventListener('click', async function(){
