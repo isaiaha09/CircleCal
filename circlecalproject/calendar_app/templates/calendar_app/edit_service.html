@@ -97,6 +97,9 @@
       <div class="flex items-center justify-between">
         <div>
           <label for="is_active" class="inline-flex items-center">
+            {% if is_only_active_service %}
+              <input type="hidden" name="is_active" value="on">
+            {% endif %}
             <input type="checkbox" name="is_active" id="is_active" {% if service.is_active %}checked{% endif %}
                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if is_only_active_service %}opacity-60 cursor-not-allowed{% endif %}"
                    {% if is_only_active_service %}disabled aria-disabled="true"{% endif %}>
@@ -540,6 +543,8 @@
       </div>
       <style>
         #svc-conflict-list { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size:0.95rem; }
+        .conflict-group-heading { font-weight:700; margin:8px 0 6px; color:#111827; display:flex; align-items:center; justify-content:space-between; }
+        .conflict-status { font-size:0.85rem; color:#6b7280; font-weight:500; margin-left:8px; }
         .conflict-item { display:block; padding:10px 12px; border-radius:8px; background:#ffffff; border:1px solid #eef3f8; box-shadow:0 1px 2px rgba(16,24,40,0.03); margin-bottom:8px; }
         .conflict-item.empty { text-align:center; color:#6b7280; background:transparent; border:none; box-shadow:none; padding:8px; }
         .conflict-main { display:block; color:#0f172a; }
@@ -598,7 +603,12 @@
         try{
           // Prefer the checkbox input (if present) over any hidden fallback input
           let el = form.querySelector(`[name="${name}"][type="checkbox"]`) || form.querySelector(`[name="${name}"]`);
-          out[name] = !!(el && (el.type === 'checkbox' ? el.checked : (el.value === '1' || el.value === 'true')));
+          if (!el) { out[name] = false; }
+          else if (el.type === 'checkbox') { out[name] = !!el.checked; }
+          else {
+            const v = String(el.value || '').toLowerCase();
+            out[name] = (v === '1' || v === 'true' || v === 'on');
+          }
         } catch (e) {
           out[name] = false;
         }
@@ -608,6 +618,7 @@
     }
 
     function buildConflictNodes(conflicts){
+      // Accept optional flags via outer-scope defaults (will be passed by showModal)
       const nodes = [];
       const days = Object.keys(conflicts).sort();
 
@@ -675,16 +686,36 @@
       }
 
       // Helper to append a heading + rows for a group
-      function pushGroup(title, items){
+      // `groupUsesFixed` is boolean indicating whether this group uses fixed increments
+      function pushGroup(title, items, groupUsesFixed){
         const heading = document.createElement('div');
         heading.className = 'conflict-group-heading';
-        heading.textContent = `${title} (${items.length})`;
+        const left = document.createElement('div');
+        left.textContent = `${title} (${items.length})`;
+        heading.appendChild(left);
+        // Determine status label based on current vs proposed use_fixed_increment
+        try{
+          const statusSpan = document.createElement('div');
+          statusSpan.className = 'conflict-status';
+          // `__conflict_ctx` may be set by showModal to pass flags
+          const ctx = window.__conflict_ctx || {};
+          const current = !!ctx.currentUseFixed;
+          const proposed = (typeof ctx.proposedUseFixed === 'boolean') ? !!ctx.proposedUseFixed : current;
+          let status = '';
+          if (groupUsesFixed === current) {
+            status = 'currently applied';
+          } else if (groupUsesFixed === proposed) {
+            status = 'Will apply after saving new changes';
+          }
+          if (status) statusSpan.textContent = status;
+          heading.appendChild(statusSpan);
+        }catch(e){}
         nodes.push(heading);
         for (const r of items) nodes.push(r);
       }
 
-      if (fixedGroup.length) pushGroup('Using fixed increments', fixedGroup);
-      if (customGroup.length) pushGroup('Using Custom Increments', customGroup);
+      if (fixedGroup.length) pushGroup('Using fixed increments', fixedGroup, true);
+      if (customGroup.length) pushGroup('Using Custom Increments', customGroup, false);
 
       return nodes;
     }
@@ -694,11 +725,13 @@
       try{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }catch(e){ return '' }
     }
 
-    function showModal(conflicts, onConfirm){
+    function showModal(conflicts, proposedUseFixed, currentUseFixed, onConfirm){
       const tpl = document.getElementById('svc-conflict-modal-tpl');
       const clone = tpl.content.cloneNode(true);
       const backdrop = clone.querySelector('.cc-modal-backdrop');
       const list = clone.querySelector('#svc-conflict-list');
+      // store small context so buildConflictNodes can show applied/will apply labels
+      try{ window.__conflict_ctx = { proposedUseFixed: !!proposedUseFixed, currentUseFixed: !!currentUseFixed }; }catch(e){}
       // clear and populate with structured rows (one booking per stacked row)
       list.textContent = '';
       const nodes = buildConflictNodes(conflicts || {});
