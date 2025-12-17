@@ -29,7 +29,7 @@
                                                                                                     <div class="card-inner opacity-60">
             {# Trial badge for Basic when organization is currently in trial #}
             {% if subscription and subscription.status == 'trialing' and plan.slug == 'basic' and current_plan and current_plan.slug == 'basic' %}
-            <div class="absolute right-4 -top-3">
+            <div class="absolute right-4 top-2">
                 <div class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200">Trial</div>
             </div>
             {% endif %}
