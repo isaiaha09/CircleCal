@@ -448,12 +448,16 @@ def apply_service_update(request, org_slug, service_id):
                 'weekly_windows': weekly_windows,
             }
             try:
-                obj, created = ServiceSettingFreeze.objects.update_or_create(
+                obj, created = ServiceSettingFreeze.objects.get_or_create(
                     service=svc, date=d, defaults={'frozen_settings': frozen}
                 )
+                # Do not overwrite an existing freeze; only count newly created ones.
                 if created:
                     freezes_created += 1
-                frozen_dates.append(d.isoformat())
+                    frozen_dates.append(d.isoformat())
+                else:
+                    # preserve existing freeze; report its date but do not modify
+                    frozen_dates.append(d.isoformat())
             except OperationalError as oe:
                 # Likely missing table (migrations not applied) — record and continue
                 freeze_error = str(oe)
@@ -1835,11 +1839,12 @@ def edit_service(request, org_slug, service_id):
                         from django.db.utils import OperationalError
                         for d in booked_dates:
                             try:
-                                ServiceSettingFreeze.objects.update_or_create(
+                                obj, created = ServiceSettingFreeze.objects.get_or_create(
                                     service=service,
                                     date=d,
                                     defaults={'frozen_settings': current_settings_snapshot}
                                 )
+                                # Do not overwrite existing freezes; leave prior frozen settings intact
                             except OperationalError:
                                 # If migrations missing or DB error, skip freezes but continue
                                 break

@@ -562,9 +562,11 @@
 </template>
 
 <script>
-(function(){
-  try{
-    const btns = Array.from(document.querySelectorAll('.svc-save-btn'));
+    (function(){
+    try{
+      const btns = Array.from(document.querySelectorAll('.svc-save-btn'));
+      // expose current service flags for modal status labels
+      try{ window.__svc_current = { use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }} }; }catch(e){}
     const form = document.querySelector('form.cc-form');
     if (!btns.length || !form) return;
 
@@ -615,6 +617,35 @@
       }
 
       return out;
+    }
+
+    // Shared detector for whether an item uses fixed increments. Placed at
+    // top-level so debug code and node builder both call the same logic.
+    function detectUsesFixed(item){
+      try{
+        if (!item) return false;
+        function norm(v){
+          if (v === true || v === 1 || v === '1') return true;
+          if (v === false || v === 0 || v === '0') return false;
+          if (typeof v === 'string'){
+            const low = v.trim().toLowerCase();
+            if (low === 'true' || low === 'yes' || low === 'y') return true;
+            if (low === 'false' || low === 'no' || low === 'n') return false;
+            if (!isNaN(Number(low))) return Number(low) !== 0;
+          }
+          return !!v;
+        }
+
+        if (item.use_fixed_increment !== undefined) return !!norm(item.use_fixed_increment);
+        if (item.uses_fixed_increment !== undefined) return !!norm(item.uses_fixed_increment);
+        if (item.service && item.service.use_fixed_increment !== undefined) return !!norm(item.service.use_fixed_increment);
+        if (item.service && item.service.uses_fixed_increment !== undefined) return !!norm(item.service.uses_fixed_increment);
+        if (item.snapshot && item.snapshot.use_fixed_increment !== undefined) return !!norm(item.snapshot.use_fixed_increment);
+        if (item.snapshot && item.snapshot.uses_fixed_increment !== undefined) return !!norm(item.snapshot.uses_fixed_increment);
+        if (item.service_snapshot && item.service_snapshot.use_fixed_increment !== undefined) return !!norm(item.service_snapshot.use_fixed_increment);
+        if (item.service_snapshot && item.service_snapshot.uses_fixed_increment !== undefined) return !!norm(item.service_snapshot.uses_fixed_increment);
+        return false;
+      } catch(e){ return false; }
     }
 
     function buildConflictNodes(conflicts){
@@ -678,8 +709,10 @@
           `;
           row.appendChild(main);
 
-          // group by `uses_fixed_increment` flag (default false => custom)
-          const usesFixed = !!it.uses_fixed_increment;
+          
+
+          // group by fixed-increment flag (server may send several possible shapes)
+          const usesFixed = !!detectUsesFixed(it);
           if (usesFixed) fixedGroup.push(row);
           else customGroup.push(row);
         }
@@ -735,6 +768,7 @@
       // clear and populate with structured rows (one booking per stacked row)
       list.textContent = '';
       const nodes = buildConflictNodes(conflicts || {});
+      
       if (!nodes.length){
         const empty = document.createElement('div');
         empty.className = 'conflict-item empty';
@@ -791,7 +825,7 @@
           return;
         }
 
-        showModal(conflicts, async function(){
+        showModal(conflicts, payload.use_fixed_increment, window.__svc_current && !!window.__svc_current.use_fixed_increment, async function(){
           const ok = await applyAndRedirect(payload);
           if (!ok) {
             try { form.submit(); } catch(e){ window.location.reload(); }
