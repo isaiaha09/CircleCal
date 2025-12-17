@@ -290,6 +290,13 @@ const _selectAllBookings = document.getElementById('selectAllBookings');
 const _auditSelectAll = document.getElementById('auditSelectAll');
 // Track inserted authoritative audit ids to avoid expensive DOM queries
 const _seenAuditIds = new Set();
+// Timestamped suppression maps for optimistic deletions. Keys map to
+// milliseconds-since-epoch when the optimistic delete occurred. We only
+// suppress re-insertion of an audit if the incoming audit's created_at is
+// older-or-equal to the suppression timestamp (i.e. it's the same record).
+const _recentlyDeletedAuditTimestamps = Object.create(null);
+const _recentlyDeletedBookingTimestamps = Object.create(null);
+const _recentlyDeletedPublicRefTimestamps = Object.create(null);
 try { document.querySelectorAll('#auditTableBody tr[data-audit-id]').forEach(r => { if (r.dataset && r.dataset.auditId) _seenAuditIds.add(String(r.dataset.auditId)); }); } catch(e) {}
 
 // Normalize time strings to remove leading zero on hour (e.g. '09:00 AM' -> '9:00 AM')
@@ -667,6 +674,35 @@ function insertAuditRow(item){
       const auditIdStr = (item.id !== undefined && item.id !== null) ? String(item.id) : null;
       const bookingIdStr = (item.booking_id !== undefined && item.booking_id !== null) ? String(item.booking_id) : null;
       const itemRef = (item.public_ref || (item.snapshot && item.snapshot.public_ref) || '') || '';
+      // Determine created_at for the incoming audit (if available)
+      let itemCreatedMs = null;
+      try {
+        const src = item.created_at || (item.snapshot && (item.snapshot.created_at || item.snapshot.created_display)) || null;
+        if (src) {
+          const parsed = Date.parse(src);
+          if (!Number.isNaN(parsed)) itemCreatedMs = parsed;
+        }
+      } catch(e) { itemCreatedMs = null; }
+      // If this audit/booking/public_ref was optimistically deleted recently,
+      // only suppress re-insertion when the incoming record is not newer than
+      // the optimistic deletion (i.e. it's the same record being re-polled).
+      try {
+        if (auditIdStr && _recentlyDeletedAuditTimestamps[auditIdStr]){
+          const ts = Number(_recentlyDeletedAuditTimestamps[auditIdStr]);
+          if (itemCreatedMs === null || itemCreatedMs <= ts) return;
+        }
+        if (bookingIdStr && _recentlyDeletedBookingTimestamps[bookingIdStr]){
+          const ts = Number(_recentlyDeletedBookingTimestamps[bookingIdStr]);
+          if (itemCreatedMs === null || itemCreatedMs <= ts) return;
+        }
+        if (itemRef){
+          const key = String(itemRef).toLowerCase();
+          if (_recentlyDeletedPublicRefTimestamps[key]){
+            const ts = Number(_recentlyDeletedPublicRefTimestamps[key]);
+            if (itemCreatedMs === null || itemCreatedMs <= ts) return;
+          }
+        }
+      } catch(e) {}
       if (auditIdStr) {
         const existingByAudit = document.querySelector(`#auditTableBody tr[data-audit-id="${auditIdStr}"]`);
         if (existingByAudit) return;
@@ -1115,33 +1151,195 @@ if (exportAuditBtn) {
         return { tr, idx, auditId, val, html };
       });
 
-      // Optimistically remove rows & update cache
-      try { for (const r of removed){ if (r.tr) { try { if (r.auditId) _seenAuditIds.delete(String(r.auditId)); r.tr.remove(); } catch(e){} } } } catch(e){ console.error('optimistic remove error', e); }
+      // Optimistically remove rows & update cache. Record deletion timestamps
+      // so that subsequent poll results for the same record (same created_at)
+      // can be suppressed briefly without impacting genuinely new audits.
+      try {
+        for (const r of removed){
+          if (!r.tr) continue;
+          try {
+            const tr = r.tr;
+            const aId = (tr.dataset && tr.dataset.auditId) ? String(tr.dataset.auditId) : null;
+            const bId = (tr.dataset && tr.dataset.bookingId) ? String(tr.dataset.bookingId) : null;
+            const pref = (tr.dataset && tr.dataset.publicRef) ? String(tr.dataset.publicRef) : null;
+            const ts = Date.now();
+            // record timestamps for suppression decisions
+            if (aId) {
+              try{ _seenAuditIds.delete(String(aId)); }catch(e){}
+              try{ _recentlyDeletedAuditTimestamps[aId] = ts; }catch(e){}
+              setTimeout(() => { try{ delete _recentlyDeletedAuditTimestamps[aId]; }catch(e){} }, 30000);
+            }
+            if (bId) {
+              try{ _recentlyDeletedBookingTimestamps[bId] = ts; }catch(e){}
+              setTimeout(() => { try{ delete _recentlyDeletedBookingTimestamps[bId]; }catch(e){} }, 30000);
+            }
+            if (pref) {
+              try{ _recentlyDeletedPublicRefTimestamps[String(pref).toLowerCase()] = ts; }catch(e){}
+              setTimeout(() => { try{ delete _recentlyDeletedPublicRefTimestamps[String(pref).toLowerCase()]; }catch(e){} }, 30000);
+            }
+            // Instead of removing the row from the DOM (which allows the poll
+            // to re-insert it), hide it and mark as deleting. This lets
+            // insertAuditRow detect the existing row and avoid re-insertion.
+            try{ tr.dataset.deleting = '1'; tr.style.display = 'none'; }catch(e){}
+          } catch(e){}
+        }
+      } catch(e){ console.error('optimistic remove error', e); }
 
-      // Send numeric ids to server (ignore tmp-* values)
-      const ids = removed.map(r => Number(r.val)).filter(n => Number.isFinite(n));
+      // Build numeric ids to send to server. Prefer the checkbox value when
+      // it's numeric (covers server-rendered rows), otherwise fall back to
+      // dataset.auditId (covers some cases where value may be 'tmp-...').
+      let ids = removed.map(r => {
+        const fromCheckbox = Number(r.val);
+        if (Number.isFinite(fromCheckbox)) return fromCheckbox;
+        const fromDataset = (r.auditId !== null && r.auditId !== undefined) ? Number(r.auditId) : null;
+        return Number.isFinite(fromDataset) ? fromDataset : null;
+      }).filter(n => n !== null);
+
+      // If we couldn't derive any numeric ids locally (e.g. optimistic rows
+      // used tmp-* values), query the server audit list and map rows by
+      // booking id or public_ref to find canonical audit ids to delete.
+      if (!ids || ids.length === 0) {
+        try{
+          const listResp = await fetch(`/bus/${orgSlug}/bookings/audit/?since=${encodeURIComponent('1970-01-01T00:00:00Z')}`);
+          if (listResp && listResp.ok){
+            const j = await listResp.json();
+            const serverItems = Array.isArray(j.items) ? j.items : (j && j.items) || [];
+            const mapped = [];
+            for (const r of removed){
+              try{
+                const tr = r.tr;
+                if (!tr) continue;
+                const bid = tr.dataset && tr.dataset.bookingId ? String(tr.dataset.bookingId) : null;
+                const pref = tr.dataset && tr.dataset.publicRef ? String(tr.dataset.publicRef).toLowerCase() : null;
+                const found = serverItems.find(it => {
+                  try{
+                    if (it && it.id && (bid && String(it.booking_id) === String(bid))) return true;
+                    const itPref = (it.public_ref || (it.snapshot && it.snapshot.public_ref) || '');
+                    if (pref && itPref && String(itPref).toLowerCase() === pref) return true;
+                  }catch(e){}
+                  return false;
+                });
+                if (found && found.id) mapped.push(Number(found.id));
+              }catch(e){}
+            }
+            if (mapped.length) {
+              ids = Array.from(new Set(mapped));
+            }
+          }
+        }catch(e){ console.error('Error mapping audit ids from server list', e); }
+      }
 
       deleteAuditBtn.disabled = true;
       try {
+        // debug logging removed
         const resp = await fetch(`/bus/${orgSlug}/bookings/audit/delete/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
           body: JSON.stringify({ ids })
         });
+        let rawText = '';
+        try { rawText = await resp.clone().text(); } catch(e) { rawText = '<could not read response text>'; }
         if (!resp.ok) {
           // restore removed rows on failure
           try{
-            for (const r of removed){ if (tbody){ const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild; if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node); if (r.auditId) _seenAuditIds.add(String(r.auditId)); } }
+            for (const r of removed){
+              try{
+                // If we hid the original row, simply un-hide it; otherwise re-insert
+                if (r.tr && tbody.contains(r.tr)){
+                  try{ r.tr.style.display = ''; delete r.tr.dataset.deleting; }catch(e){}
+                  if (r.auditId) try{ _seenAuditIds.add(String(r.auditId)); }catch(e){}
+                } else if (tbody) {
+                  const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild;
+                  if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node);
+                  if (r.auditId) try{ _seenAuditIds.add(String(r.auditId)); }catch(e){}
+                }
+              }catch(ignore){}
+            }
           }catch(er){ console.error('restore on failed resp', er); }
           alert('Delete failed');
           return;
         }
         const data = await resp.json();
-        showToast('success', `Deleted ${data.deleted || 0} audit rows.`);
+        const deletedCount = (data && Number(data.deleted)) ? Number(data.deleted) : 0;
+        if (deletedCount <= 0) {
+          // Server reported 0 removed — try one automatic retry after short delay
+          try{
+            await new Promise(res => setTimeout(res, 1000));
+            // Fetch latest audits to reconcile canonical IDs in case temporary
+            // values were sent earlier or the client-side ID disagrees with server.
+            // initial ids logging removed
+            const listResp = await fetch(`/bus/${orgSlug}/bookings/audit/?since=${encodeURIComponent('1970-01-01T00:00:00Z')}`);
+            if (listResp && listResp.ok){
+              const listJson = await listResp.json();
+              const serverItems = Array.isArray(listJson.items) ? listJson.items : (listJson && listJson.items) || [];
+              const serverIds = new Set(serverItems.map(it => (it && it.id) ? Number(it.id) : null).filter(n => Number.isFinite(n)));
+              // Find any intersection between requested ids and server ids
+              const intersect = ids.filter(i => serverIds.has(i));
+              if (intersect.length > 0){
+                const retryResp = await fetch(`/bus/${orgSlug}/bookings/audit/delete/`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                  body: JSON.stringify({ ids: intersect })
+                });
+                if (retryResp && retryResp.ok){
+                  const retryData = await retryResp.json();
+                  const retryDeleted = (retryData && Number(retryData.deleted)) ? Number(retryData.deleted) : 0;
+                  if (retryDeleted > 0){
+                    try{ for (const r of removed){ if (r.tr && tbody && tbody.contains(r.tr)){ try{ r.tr.remove(); }catch(e){} } } }catch(e){}
+                    showToast('success', `Deleted ${retryDeleted} audit rows.`);
+                    deleteAuditBtn.disabled = false;
+                    return;
+                  }
+                }
+              }
+            }
+          }catch(retryErr){ console.error('retry delete error', retryErr); }
+          // Retry didn't remove anything — restore hidden rows and surface error
+          try{
+            for (const r of removed){
+              try{
+                if (r.tr && tbody && tbody.contains(r.tr)){
+                  try{ r.tr.style.display = ''; delete r.tr.dataset.deleting; }catch(e){}
+                  if (r.auditId) try{ _seenAuditIds.add(String(r.auditId)); }catch(e){}
+                } else if (tbody) {
+                  const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild;
+                  if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node);
+                  if (r.auditId) try{ _seenAuditIds.add(String(r.auditId)); }catch(e){}
+                }
+              }catch(ignore){}
+            }
+          }catch(er){ console.error('restore on zero-deleted resp', er); }
+          showToast('error', 'Delete failed (server reported 0 rows removed)');
+        } else {
+          // Server removed some rows: permanently remove the hidden rows we tracked
+          try{
+            for (const r of removed){
+              try{
+                if (r.tr && tbody && tbody.contains(r.tr)){
+                  try{ r.tr.remove(); }catch(e){}
+                }
+              }catch(ignore){}
+            }
+          }catch(er){ console.error('cleanup after success', er); }
+          showToast('success', `Deleted ${deletedCount} audit rows.`);
+        }
       } catch (e) {
         console.error(e);
-        // network/error: restore removed rows
-        try{ for (const r of removed){ if (tbody){ const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild; if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node); if (r.auditId) _seenAuditIds.add(String(r.auditId)); } } }catch(er){ console.error('restore after error', er); }
+        // network/error: restore hidden rows (un-hide) or re-insert if missing
+        try{
+          for (const r of removed){
+            try{
+              if (r.tr && tbody && tbody.contains(r.tr)){
+                try{ r.tr.style.display = ''; delete r.tr.dataset.deleting; }catch(e){}
+                if (r.auditId) try{ _seenAuditIds.add(String(r.auditId)); }catch(e){}
+              } else if (tbody) {
+                const wrapper = document.createElement('tbody'); wrapper.innerHTML = r.html; const node = wrapper.firstChild;
+                if (r.idx >= 0 && r.idx < tbody.children.length) tbody.insertBefore(node, tbody.children[r.idx]); else tbody.appendChild(node);
+                if (r.auditId) try{ _seenAuditIds.add(String(r.auditId)); }catch(e){}
+              }
+            }catch(ignore){}
+          }
+        }catch(er){ console.error('restore after error', er); }
         alert('Delete error');
       } finally { deleteAuditBtn.disabled = false; }
     });
