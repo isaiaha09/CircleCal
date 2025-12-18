@@ -536,26 +536,47 @@
 <template id="svc-conflict-modal-tpl">
   <div class="cc-modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1200">
     <div style="background:#fff;padding:1rem;border-radius:8px;max-width:760px;width:95%;box-shadow:0 6px 24px rgba(0,0,0,0.2);display:flex;flex-direction:column;max-height:80vh;">
-      <h3 style="margin:0 0 0.5rem 0;font-weight:700">Conflicting bookings detected</h3>
-      <p style="margin:0 0 0.75rem 0;color:#444">The following booked days will keep the previous settings. Confirm to freeze old settings for these dates and apply your changes to all other days.</p>
+        <h3 style="margin:0 0 0.5rem 0;font-weight:700">Conflicting bookings detected</h3>
+        <p style="margin:0 0 0.75rem 0;color:#374151">Some booked days already use previous settings. When you confirm, those dates will keep their frozen settings — the new settings will only apply to days without bookings. Review the preserved settings listed under each affected date before confirming.</p>
       <div id="svc-conflict-list" style="flex:1;overflow:auto;border-radius:8px;margin-bottom:12px;padding:6px 6px 0 6px">
         <!-- Booking rows will be injected here as individual stacked items -->
       </div>
       <style>
+        /* Modal list layout */
         #svc-conflict-list { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size:0.95rem; }
-        .conflict-group-heading { font-weight:700; margin:8px 0 6px; color:#111827; display:flex; align-items:center; justify-content:space-between; }
+
+        /* Date heading */
+        .conflict-group-heading { font-weight:700; margin:12px 0 8px; color:#0f172a; display:flex; align-items:center; justify-content:space-between; background:#f8fafc; padding:8px 10px; border-radius:8px; border:1px solid #e6eef6 }
+        .conflict-group-heading .date-left { font-size:0.98rem; }
+        .conflict-group-heading .date-count { font-size:0.88rem; color:#475569; margin-left:8px }
+
+        /* Status pill */
         .conflict-status { font-size:0.85rem; color:#6b7280; font-weight:500; margin-left:8px; }
-        .conflict-item { display:block; padding:10px 12px; border-radius:8px; background:#ffffff; border:1px solid #eef3f8; box-shadow:0 1px 2px rgba(16,24,40,0.03); margin-bottom:8px; }
+        .status-pill { font-size:0.78rem; padding:4px 8px; border-radius:999px; background:#f1f5f9; color:#0f172a; font-weight:600; border:1px solid #e2e8f0 }
+
+        /* Preserved (frozen) settings block */
+        .changes-wrap { background:#ffffff; border-radius:8px; padding:12px; border:1px solid #e6eef6; margin:10px 6px 14px 6px; box-shadow: 0 1px 2px rgba(16,24,40,0.03) }
+        .changes-title { font-weight:700; margin-bottom:6px; color:#0f172a; font-size:0.95rem }
+        .changes-note { font-size:0.86rem; color:#475569; margin-bottom:8px }
+        .changes-wrap ul { margin:0; padding-left:16px; }
+        .changes-wrap li { margin-bottom:6px; color:#0f172a }
+        .changes-wrap li strong { display:inline-block; width:180px; font-weight:600; color:#111827 }
+        @media (max-width:640px){ .changes-wrap li strong { width: 120px } }
+
+        /* Individual booking rows */
+        .conflict-item { display:block; padding:10px 12px; border-radius:8px; background:#ffffff; border:1px solid #eef3f8; margin-bottom:8px; }
         .conflict-item.empty { text-align:center; color:#6b7280; background:transparent; border:none; box-shadow:none; padding:8px; }
         .conflict-main { display:block; color:#0f172a; }
         .conflict-line { display:flex; justify-content:space-between; gap:12px; align-items:center; font-weight:600; color:#111827; }
-        .conflict-client { color:#374151; font-weight:400; margin-left:12px; }
+        .conflict-meta { font-weight:400; color:#374151; font-size:0.92rem }
+        .conflict-client { color:#374151; font-weight:600; margin-left:0; }
         .conflict-email { color:#6b7280; font-weight:400; margin-left:6px; }
+
         @media (max-width:720px){ .conflict-line{flex-direction:column;align-items:flex-start} }
       </style>
       <div style="text-align:right">
-        <button id="svc-conflict-cancel" style="margin-right:8px;padding:6px 10px;border-radius:6px;border:1px solid #ccc;background:#fafafa">Cancel</button>
-        <button id="svc-conflict-confirm" style="padding:6px 10px;border-radius:6px;background:#2563eb;color:#fff;border:none">Confirm and Apply</button>
+          <button id="svc-conflict-cancel" style="margin-right:8px;padding:8px 12px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;color:#374151">Cancel</button>
+          <button id="svc-conflict-confirm" style="padding:8px 14px;border-radius:6px;background:#0ea5e9;color:#fff;border:none">Confirm and apply changes</button>
       </div>
     </div>
   </div>
@@ -565,8 +586,24 @@
     (function(){
     try{
       const btns = Array.from(document.querySelectorAll('.svc-save-btn'));
-      // expose current service flags for modal status labels
-      try{ window.__svc_current = { use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }} }; }catch(e){}
+      // expose current service fields for modal status labels and changes preview
+      try{ window.__svc_current = {
+        duration: {{ service.duration|default:0 }},
+        buffer_after: {{ service.buffer_after|default:0 }},
+        time_increment_minutes: {{ service.time_increment_minutes|default:30 }},
+        use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }},
+        allow_squished_bookings: {{ service.allow_squished_bookings|yesno:"true,false" }},
+        allow_ends_after_availability: {{ service.allow_ends_after_availability|yesno:"true,false" }},
+        refunds_allowed: {{ service.refunds_allowed|yesno:"true,false" }},
+        refund_cutoff_hours: {{ service.refund_cutoff_hours|default:24 }},
+        refund_policy_text: "{{ service.refund_policy_text|escapejs }}",
+        price: "{{ service.price }}",
+        name: "{{ service.name|escapejs }}",
+        description: "{{ service.description|escapejs }}",
+        min_notice_hours: {{ service.min_notice_hours|default:1 }},
+        max_booking_days: {{ service.max_booking_days|default:30 }},
+        is_active: {{ service.is_active|yesno:"true,false" }}
+      }; }catch(e){}
     const form = document.querySelector('form.cc-form');
     if (!btns.length || !form) return;
 
@@ -649,108 +686,175 @@
     }
 
     function buildConflictNodes(conflicts){
-      // Accept optional flags via outer-scope defaults (will be passed by showModal)
+      // Render per-date blocks: heading, frozen-settings (if present), then bookings
       const nodes = [];
       const days = Object.keys(conflicts).sort();
 
-      // Collect items into groups by whether they use fixed increments
-      const fixedGroup = [];
-      const customGroup = [];
+      function ordinalSuffix(n){
+        const s = ["th","st","nd","rd"], v = n % 100;
+        return (s[(v-20)%10] || s[v] || s[0]);
+      }
+      function fmtTime(d){ try{ return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return '' } }
+      function fmtDateRangeSingle(startD, endD){
+        if (!startD) return '';
+        try{
+          const weekday = startD.toLocaleDateString('en-US',{weekday:'long'});
+          const month = startD.toLocaleDateString('en-US',{month:'long'});
+          const day = startD.getDate();
+          const year = startD.getFullYear();
+          const startT = fmtTime(startD);
+          const endT = endD ? fmtTime(endD) : '';
+          const dayWithOrd = `${day}${ordinalSuffix(day)}`;
+          return `${weekday}, ${month} ${dayWithOrd}, ${year}, at ${startT}${endT ? ' - ' + endT : ''}`;
+        }catch(e){ return '' }
+      }
 
       for (const d of days){
-        const items = conflicts[d];
+        const items = conflicts[d] || [];
+        // create date heading
+        const heading = document.createElement('div');
+        heading.className = 'conflict-group-heading';
+        const left = document.createElement('div'); left.textContent = `${(new Date(d)).toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'})} (${items.length})`;
+        heading.appendChild(left);
+        nodes.push(heading);
+
+        // If a freeze exists for this date, present its preserved settings
+        try{
+          const first = items[0];
+          const freeze = first && first.existing_freeze ? first.existing_freeze : null;
+          if (freeze && typeof freeze === 'object'){
+            const wrap = document.createElement('div'); wrap.className = 'changes-wrap';
+            const title = document.createElement('div'); title.className = 'changes-title'; title.textContent = 'Preserved (frozen) settings for this date:'; wrap.appendChild(title);
+            const note = document.createElement('div'); note.className = 'changes-note'; note.textContent = 'These settings will be kept for the booked date — your new settings will not override them.'; wrap.appendChild(note);
+            const list = document.createElement('ul'); list.style.margin = '0'; list.style.paddingLeft = '14px';
+            const keys = ['use_fixed_increment','time_increment_minutes','allow_squished_bookings','allow_ends_after_availability','duration','buffer_after'];
+            for (const k of keys){
+              if (!(k in freeze)) continue;
+              const li = document.createElement('li'); li.style.marginBottom = '6px';
+              const label = k.replace(/_/g,' ');
+              let val = freeze[k];
+              if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability'){
+                val = (val === true || val === 'true' || val === 1 || val === '1') ? 'Yes' : 'No';
+              } else if (k === 'time_increment_minutes'){
+                val = (val || 0) + ' minutes';
+              } else if (k === 'duration' || k === 'buffer_after'){
+                val = (val || 0) + ' minutes';
+              }
+              const lbl = document.createElement('strong'); lbl.textContent = label + ':';
+              const vspan = document.createElement('span'); vspan.style.marginLeft = '8px'; vspan.textContent = val;
+              li.appendChild(lbl);
+              li.appendChild(vspan);
+              list.appendChild(li);
+            }
+            wrap.appendChild(list);
+            nodes.push(wrap);
+          }
+        }catch(e){}
+
+        // Render each booking row for the date
         for (const it of items){
           const name = it.client_name || '(no name)';
           const email = it.client_email || '';
-          // build formatted date/time range
           const start = it.start ? new Date(it.start) : null;
           let end = it.end ? new Date(it.end) : null;
           if (!end && start){
             let dur = null;
             if (it.duration !== undefined && it.duration !== null) dur = Number(it.duration);
             else if (it.duration_minutes !== undefined && it.duration_minutes !== null) dur = Number(it.duration_minutes);
-            else if (it.durationMinutes !== undefined && it.durationMinutes !== null) dur = Number(it.durationMinutes);
-            else if (it.duration_mins !== undefined && it.duration_mins !== null) dur = Number(it.duration_mins);
-            else if (it.duration_seconds !== undefined && it.duration_seconds !== null) dur = Number(it.duration_seconds) / 60;
             if (dur) end = new Date(start.getTime() + (Number(dur) || 0) * 60000);
           }
-
-          function ordinalSuffix(n){
-            const s = ["th","st","nd","rd"], v = n % 100;
-            return (s[(v-20)%10] || s[v] || s[0]);
-          }
-
-          function fmtTime(d){
-            try{ return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return '' }
-          }
-
-          function fmtDateRange(startD, endD){
-            if (!startD) return '';
-            try{
-              const weekday = startD.toLocaleDateString('en-US',{weekday:'long'});
-              const month = startD.toLocaleDateString('en-US',{month:'long'});
-              const day = startD.getDate();
-              const year = startD.getFullYear();
-              const startT = fmtTime(startD);
-              const endT = endD ? fmtTime(endD) : '';
-              const dayWithOrd = `${day}${ordinalSuffix(day)}`;
-              return `${weekday}, ${month} ${dayWithOrd}, ${year}, at ${startT}${endT ? ' - ' + endT : ''}`;
-            }catch(e){ return '' }
-          }
-
-          const desc = fmtDateRange(start, end);
-
-          const row = document.createElement('div');
-          row.className = 'conflict-item';
-          const main = document.createElement('div');
-          main.className = 'conflict-main';
-          main.innerHTML = `\
-            <div class="conflict-line">${escapeHtml(desc)}&nbsp;&nbsp;&nbsp;&nbsp;Client: ${escapeHtml(name)}${email ? ' &lt;' + escapeHtml(email) + '&gt;' : ''}</div>\
-          `;
+          const desc = fmtDateRangeSingle(start, end);
+          const row = document.createElement('div'); row.className = 'conflict-item';
+          const main = document.createElement('div'); main.className = 'conflict-main';
+          main.innerHTML = `\n+            <div class="conflict-line">${escapeHtml(desc)}&nbsp;&nbsp;&nbsp;&nbsp;Client: ${escapeHtml(name)}${email ? ' &lt;' + escapeHtml(email) + '&gt;' : ''}</div>\n+          `;
           row.appendChild(main);
-
-          
-
-          // group by fixed-increment flag (server may send several possible shapes)
-          const usesFixed = !!detectUsesFixed(it);
-          if (usesFixed) fixedGroup.push(row);
-          else customGroup.push(row);
+          nodes.push(row);
         }
       }
 
-      // Helper to append a heading + rows for a group
-      // `groupUsesFixed` is boolean indicating whether this group uses fixed increments
-      function pushGroup(title, items, groupUsesFixed){
-        const heading = document.createElement('div');
-        heading.className = 'conflict-group-heading';
-        const left = document.createElement('div');
-        left.textContent = `${title} (${items.length})`;
-        heading.appendChild(left);
-        // Determine status label based on current vs proposed use_fixed_increment
-        try{
-          const statusSpan = document.createElement('div');
-          statusSpan.className = 'conflict-status';
-          // `__conflict_ctx` may be set by showModal to pass flags
-          const ctx = window.__conflict_ctx || {};
-          const current = !!ctx.currentUseFixed;
-          const proposed = (typeof ctx.proposedUseFixed === 'boolean') ? !!ctx.proposedUseFixed : current;
-          let status = '';
-          if (groupUsesFixed === current) {
-            status = 'currently applied';
-          } else if (groupUsesFixed === proposed) {
-            status = 'Will apply after saving new changes';
-          }
-          if (status) statusSpan.textContent = status;
-          heading.appendChild(statusSpan);
-        }catch(e){}
-        nodes.push(heading);
-        for (const r of items) nodes.push(r);
-      }
-
-      if (fixedGroup.length) pushGroup('Using fixed increments', fixedGroup, true);
-      if (customGroup.length) pushGroup('Using Custom Increments', customGroup, false);
-
       return nodes;
+    }
+
+    // Build a DOM node listing other setting changes between current and proposed
+    function buildChangesNode(proposed, current){
+      try{
+        if (!proposed || !current) return null;
+        const keys = [
+          'name','description','duration','buffer_after','time_increment_minutes','use_fixed_increment',
+          'allow_squished_bookings','allow_ends_after_availability','refunds_allowed','refund_cutoff_hours','refund_policy_text',
+          'price','min_notice_hours','max_booking_days','is_active'
+        ];
+        function normVal(k,v){
+          if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed' || k === 'is_active'){
+            if (v === true || v === 'true' || v === 1 || v === '1') return true;
+            return false;
+          }
+          if (k === 'duration' || k === 'buffer_after' || k === 'time_increment_minutes' || k === 'refund_cutoff_hours' || k === 'min_notice_hours' || k === 'max_booking_days'){
+            try{ return Number(v) || 0; }catch(e){ return 0; }
+          }
+          if (k === 'price') return String(v || '');
+          return String(v || '');
+        }
+
+        const diffs = [];
+        for (const k of keys){
+          const cur = normVal(k, current[k]);
+          const prop = normVal(k, proposed[k]);
+          const changed = (typeof cur === 'boolean') ? (cur !== prop) : (String(cur) !== String(prop));
+          if (changed) diffs.push({key:k, current:current[k], proposed:proposed[k]});
+        }
+        if (!diffs.length) return null;
+
+        const wrap = document.createElement('div');
+        wrap.style.margin = '8px 6px';
+        wrap.style.padding = '10px';
+        wrap.style.borderTop = '1px solid #eef2f7';
+
+        const title = document.createElement('div');
+        title.style.fontWeight = '700';
+        title.style.marginBottom = '8px';
+        title.textContent = 'Service setting changes:';
+        wrap.appendChild(title);
+
+        const grid = document.createElement('div');
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = '1fr 1fr';
+        grid.style.gap = '12px';
+
+        const curCol = document.createElement('div');
+        const curTitle = document.createElement('div'); curTitle.style.fontWeight='600'; curTitle.textContent='Current:'; curCol.appendChild(curTitle);
+        const curList = document.createElement('ul'); curList.style.marginTop='6px'; curCol.appendChild(curList);
+
+        const propCol = document.createElement('div');
+        const propTitle = document.createElement('div'); propTitle.style.fontWeight='600'; propTitle.textContent='Will be applied:'; propCol.appendChild(propTitle);
+        const propList = document.createElement('ul'); propList.style.marginTop='6px'; propCol.appendChild(propList);
+
+        function renderVal(k,v){
+          if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed' || k === 'is_active'){
+            return (v === true || v === 'true' || v === 1 || v === '1') ? '✓' : '✕';
+          }
+          if (k === 'duration') return (v || 0) + ' minutes';
+          if (k === 'buffer_after') return (v || 0) + ' minutes';
+          if (k === 'price') return (v !== undefined && v !== null) ? '$' + v : '';
+          if (k === 'refund_policy_text') return String(v || '—');
+          return String(v === undefined || v === null ? '' : v);
+        }
+
+        for (const d of diffs){
+          const label = document.createElement('li'); label.style.marginBottom='6px'; label.textContent = (d.key.replace(/_/g,' '));
+          const label2 = document.createElement('li'); label2.style.marginBottom='6px'; label2.textContent = (d.key.replace(/_/g,' '));
+          const curVal = document.createElement('div'); curVal.style.color='#374151'; curVal.style.fontWeight='400'; curVal.textContent = renderVal(d.key, d.current);
+          const propVal = document.createElement('div'); propVal.style.color='#374151'; propVal.style.fontWeight='400'; propVal.textContent = renderVal(d.key, d.proposed);
+          label.appendChild(curVal);
+          label2.appendChild(propVal);
+          curList.appendChild(label);
+          propList.appendChild(label2);
+        }
+
+        grid.appendChild(curCol); grid.appendChild(propCol);
+        wrap.appendChild(grid);
+        return wrap;
+      }catch(e){ return null; }
     }
 
     // Basic escaping helper used only for small text pieces
@@ -758,16 +862,21 @@
       try{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }catch(e){ return '' }
     }
 
-    function showModal(conflicts, proposedUseFixed, currentUseFixed, onConfirm){
+    function showModal(conflicts, proposedPayload, currentUseFixed, onConfirm){
       const tpl = document.getElementById('svc-conflict-modal-tpl');
       const clone = tpl.content.cloneNode(true);
       const backdrop = clone.querySelector('.cc-modal-backdrop');
       const list = clone.querySelector('#svc-conflict-list');
       // store small context so buildConflictNodes can show applied/will apply labels
-      try{ window.__conflict_ctx = { proposedUseFixed: !!proposedUseFixed, currentUseFixed: !!currentUseFixed }; }catch(e){}
+      try{ window.__conflict_ctx = { proposedUseFixed: !!(proposedPayload && proposedPayload.use_fixed_increment), currentUseFixed: !!currentUseFixed, proposedPayload: proposedPayload || {} }; }catch(e){}
       // clear and populate with structured rows (one booking per stacked row)
       list.textContent = '';
       const nodes = buildConflictNodes(conflicts || {});
+      // Render a settings diff node (only when there are changes)
+      try{
+        const changesNode = buildChangesNode(window.__conflict_ctx.proposedPayload, window.__svc_current || {});
+        if (changesNode) nodes.push(changesNode);
+      }catch(e){}
       
       if (!nodes.length){
         const empty = document.createElement('div');
@@ -825,7 +934,7 @@
           return;
         }
 
-        showModal(conflicts, payload.use_fixed_increment, window.__svc_current && !!window.__svc_current.use_fixed_increment, async function(){
+        showModal(conflicts, payload, window.__svc_current && !!window.__svc_current.use_fixed_increment, async function(){
           const ok = await applyAndRedirect(payload);
           if (!ok) {
             try { form.submit(); } catch(e){ window.location.reload(); }

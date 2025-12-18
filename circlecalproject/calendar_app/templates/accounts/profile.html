@@ -1,25 +1,34 @@
 {% extends "calendar_app/base.html" %}
 {% block title %}Profile{% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto px-4 py-8">
-  <h1 class="text-2xl font-bold text-blue-700 mb-4">Your Profile</h1>
+<div class="max-w-5xl mx-auto px-4 py-8">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-bold text-blue-700">Your Profile</h1>
+    <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm">Save Changes</button>
+  </div>
 
   {# Remove local messages block to avoid duplicates; base.html already renders messages #}
 
-  <form id="profile-form" method="post" enctype="multipart/form-data" class="bg-white border border-blue-100 rounded-xl p-6 shadow-sm">
+  <form id="profile-form" method="post" enctype="multipart/form-data" class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg">
     {% csrf_token %}
     {% if form.non_field_errors %}
       <div class="mb-4 text-sm text-red-700 bg-red-100 px-3 py-2 rounded">
         {{ form.non_field_errors }}
       </div>
     {% endif %}
-    {% if user.profile.avatar %}
-      <div class="flex flex-col items-center mb-6">
-        <img id="avatar-preview" src="{{ user.profile.avatar.url }}?v={{ user.profile.avatar.name|urlencode }}" alt="Profile Picture" class="w-32 h-32 rounded-full object-cover border-4 border-blue-300 mb-2" />
-        <span class="text-xs text-gray-500">Profile Picture</span>
-        <span id="avatar-filename" class="text-xs text-gray-400 mt-1" {% if user.profile.avatar %}{% endif %}></span>
+    <div class="flex flex-col items-center mb-6">
+      <div class="w-32 h-32 rounded-full bg-gray-50 border-4 border-blue-300 mb-2 flex items-center justify-center overflow-hidden">
+        {% if user.profile.avatar %}
+          <img id="avatar-preview" src="{{ user.profile.avatar.url }}?v={{ user.profile.avatar.name|urlencode }}" alt="Profile Picture" class="w-full h-full object-cover" />
+        {% else %}
+          <svg class="w-12 h-12 text-blue-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 11c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM4 20c0-3.314 2.686-6 6-6h4c3.314 0 6 2.686 6 6" />
+          </svg>
+        {% endif %}
       </div>
-    {% endif %}
+      <span class="text-sm font-medium text-blue-800">Profile Picture</span>
+      <span id="avatar-filename" class="text-xs text-gray-400 mt-1" {% if user.profile.avatar %}{% endif %}></span>
+    </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-semibold text-blue-800 mb-2">Username</label>
@@ -38,25 +47,30 @@
         <input type="text" name="last_name" value="{{ user.last_name }}" class="w-full px-4 py-3 text-base rounded-xl border-2 border-blue-400 bg-white text-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-200 focus:border-blue-600" />
       </div>
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-      <div>
-        <label class="block text-sm font-semibold text-blue-800 mb-2">Timezone</label>
-        {{ form.timezone }}
-      </div>
-      <div class="flex items-center gap-4">
-        <label class="inline-flex items-center">
-          {{ form.email_alerts }}
-          <span class="ml-2 text-sm text-blue-800">Email Alerts</span>
-        </label>
-        <label class="inline-flex items-center">
-          {{ form.booking_reminders }}
-          <span class="ml-2 text-sm text-blue-800">Booking Reminders</span>
-        </label>
+    <div class="grid grid-cols-1 gap-4 mt-4">
+      <div class="bg-gray-50 border border-gray-100 rounded-lg p-4 timezone-panel">
+        <div class="flex items-center justify-center gap-8">
+          <div class="text-center">
+            <label class="block text-sm font-semibold text-blue-800 mb-1">Your Timezone <span class="text-xs font-medium text-gray-500">(for your account)</span></label>
+            <p class="text-sm text-gray-700 font-medium"><span class="timezone-select">{{ form.timezone }}</span></p>
+          </div>
+          <div>
+            <div class="timezone-info inline-block bg-white border border-gray-100 rounded-lg p-3 flex flex-col gap-2 items-start">
+              <div class="text-sm text-gray-600">Displayed times are adjusted to this timezone. This controls how dates and times are displayed to you in the UI and in notifications.</div>
+              <div class="text-sm text-gray-500">Does not affect the business scheduling timezone. Availability and booked times will be based on the timezone you set for your business</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="col-span-2 mt-4">
       <label class="block text-sm font-semibold text-blue-800 mb-2">Profile Picture</label>
-      {{ form.avatar }}
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-gray-600">Change:</span>
+        <label for="id_avatar" class="btn-ghost inline-flex items-center gap-2">Choose File</label>
+        <span id="cc-current-filename" data-fullname="{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% endif %}" class="text-sm text-gray-700">{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% else %}No file selected{% endif %}</span>
+        <div class="ml-3 clearable-file-inline">{{ form.avatar }}</div>
+      </div>
       {% if form.avatar.errors %}
         <div class="text-xs text-red-700 mt-1">{{ form.avatar.errors }}</div>
       {% endif %}
@@ -65,59 +79,92 @@
     <div class="mt-6 flex justify-end">
       <button id="save-btn" type="submit" class="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-700">Save Changes</button>
     </div>
-  </form>
 
-  <div class="mt-8 bg-white border border-blue-100 rounded-xl p-6 shadow-sm">
+  <div class="mt-8 bg-white border border-blue-100 rounded-xl p-6 shadow-lg max-w-5xl mx-auto">
     <h2 class="text-lg font-bold text-blue-700 mb-2">Security</h2>
-    <p class="text-sm text-gray-600 mb-4">Change your password and manage security settings.</p>
-    <a href="{% url 'accounts:password_change' %}" class="inline-block bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-700">Change Password</a>
-    <div class="mt-3 flex flex-wrap gap-3">
-      {% if request.user.is_verified %}
-        <a href="{% url 'two_factor:profile' %}" class="inline-block px-4 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">2FA Enabled</a>
-        <a href="{% url 'two_factor:backup_tokens' %}" class="inline-block px-4 py-2 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">Backup Codes</a>
-        <a href="{% url 'two_factor:disable' %}" class="inline-block px-4 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-50">Disable 2FA</a>
-      {% else %}
-        <a href="{% url 'two_factor:profile' %}" class="inline-block px-4 py-2 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">Enable 2FA</a>
-      {% endif %}
+    <p class="text-sm text-gray-600 mb-4">Protect your account — change password, enable two-factor authentication, and manage recovery options.</p>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="md:col-span-2 flex flex-col gap-3">
+        <a href="{% url 'accounts:password_change' %}" class="btn-primary inline-flex items-center gap-2 w-60 justify-center py-2">Change Password</a>
+
+        <div>
+          {% if request.user.is_verified %}
+            <div class="flex items-center gap-3">
+              <span class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">2FA Enabled</span>
+              <a href="{% url 'two_factor:backup_tokens' %}" class="btn-ghost">Backup Codes</a>
+              <a href="{% url 'two_factor:disable' %}" class="btn-danger">Disable 2FA</a>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">You have two-factor authentication enabled. Keep your backup codes in a safe place.</p>
+          {% else %}
+            <a href="{% url 'two_factor:profile' %}" class="btn-primary inline-flex items-center gap-2 w-60 justify-center py-2">Enable Two-factor Authentication</a>
+            <p class="text-xs text-gray-500 mt-2">Add an extra layer of security to your account by enabling 2FA (recommended).</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="profile-preferences bg-gray-50 rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-blue-800 mb-3">Preferences</h3>
+        <div class="flex flex-col gap-3">
+          <label class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium text-gray-800">Email Alerts</div>
+              <div class="text-xs text-gray-500">Receive important account emails</div>
+            </div>
+            <div>
+              {{ form.email_alerts }}
+            </div>
+          </label>
+
+          <label class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium text-gray-800">Booking Reminders</div>
+              <div class="text-xs text-gray-500">Get reminders for upcoming bookings</div>
+            </div>
+            <div>
+              {{ form.booking_reminders }}
+            </div>
+          </label>
+        </div>
+      </div>
     </div>
+
     <div class="mt-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <a href="{% url 'accounts:deactivate_confirm' %}" class="inline-flex w-full items-center justify-center px-4 py-2 border border-yellow-300 text-yellow-700 rounded-lg hover:bg-yellow-50">Deactivate Account</a>
-        </div>
-        <div>
-          <a href="{% url 'accounts:delete_confirm' %}" class="inline-flex w-full items-center justify-center px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Delete Account</a>
-        </div>
+        <a href="{% url 'accounts:deactivate_confirm' %}" class="inline-flex w-full items-center justify-center px-4 py-2 border border-yellow-300 text-yellow-700 rounded-lg hover:bg-yellow-50">Deactivate Account</a>
+        <a href="{% url 'accounts:delete_confirm' %}" class="inline-flex w-full items-center justify-center px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Delete Account</a>
       </div>
     </div>
   </div>
 
   {% if activities %}
-  <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-sm">
+  <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-lg max-w-5xl mx-auto">
     <h2 class="text-lg font-bold text-blue-700 mb-2">Recent Logins</h2>
-    <ul class="text-sm text-gray-700 space-y-1">
-      {% for a in activities %}
-        <li class="flex justify-between">
-          <span>{{ a.timestamp|date:"Y-m-d H:i" }}</span>
-          <span class="truncate max-w-[60%]" title="{{ a.user_agent }}">{{ a.ip_address|default:"-" }} — {{ a.user_agent|default:"-" }}</span>
-        </li>
-      {% endfor %}
-    </ul>
+    <div class="py-2 max-h-64 overflow-y-auto pr-2">
+      <ul class="space-y-3">
+        {% for a in activities %}
+          <li class="bg-white/50 border border-slate-100 rounded-lg p-3 flex flex-col space-y-2">
+            <div class="text-sm text-gray-700">{{ a.timestamp|date:"l, F jS, Y" }} at {{ a.timestamp|date:"g:iA"|lower }}</div>
+            <div class="text-xs text-gray-500" title="{{ a.user_agent }}">{{ a.ip_address|default:"-" }} — {{ a.user_agent|default:"-" }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
   </div>
   {% endif %}
 
-  <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-sm">
+  <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-lg max-w-5xl mx-auto">
     <h2 class="text-lg font-bold text-blue-700 mb-3">Billing</h2>
     {% if organization and subscription %}
-      <div class="text-sm text-gray-700">
+      <div class="text-base text-gray-800">
         <div><span class="font-semibold">Business:</span> {{ organization.name }}</div>
-        <div><span class="font-semibold">Plan:</span> {{ subscription.plan.name|default:"—" }}</div>
-        <div><span class="font-semibold">Status:</span> {{ subscription.status }}</div>
+        <div><span class="font-semibold">Plan:</span> <span class="text-lg font-semibold text-blue-800">{{ subscription.plan.name|default:"—" }}</span></div>
+        <div><span class="font-semibold">Status:</span> <span class="font-medium">{{ subscription.status }}</span></div>
         {% if subscription.trial_end %}
-          <div><span class="font-semibold">Trial ends:</span> {{ subscription.trial_end|date:"Y-m-d" }}</div>
+          <div><span class="font-semibold">Trial ends:</span> {{ subscription.trial_end|date:"l, F jS, Y" }} at {{ subscription.trial_end|date:"g:iA"|lower }}</div>
         {% endif %}
         {% if subscription.current_period_end %}
-          <div><span class="font-semibold">Current period ends:</span> {{ subscription.current_period_end|date:"Y-m-d" }}</div>
+          <div><span class="font-semibold">Current period ends:</span> {{ subscription.current_period_end|date:"l, F jS, Y" }} at {{ subscription.current_period_end|date:"g:iA"|lower }}</div>
         {% endif %}
       </div>
     {% else %}
@@ -125,7 +172,7 @@
     {% endif %}
   </div>
 
-  <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-sm">
+  <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-lg">
     <h2 class="text-lg font-bold text-blue-700 mb-3">Team & Businesses</h2>
     {% if memberships %}
       <ul class="text-sm text-gray-700 space-y-2">
@@ -147,6 +194,10 @@
       </div>
     {% endif %}
   </div>
+  </form>
+  <div class="max-w-5xl mx-auto px-4 py-4 flex justify-end">
+    <button type="button" class="save-profile-btn btn-primary py-2 px-4">Save Changes</button>
+  </div>
 </div>
 {% endblock %}
 
@@ -155,18 +206,120 @@
   <style>
     /* Ensure the clear anchor inherits muted color if we don't override via JS */
     .clearable-file-input a { color: inherit; }
+    /* Style file input: hide real input and use labeled button */
+    input[type=file] { display: none; }
+    label[for="id_avatar"] { cursor: pointer; }
+    #cc-current-filename { color: #334155; }
+    /* Profile page UI polish */
+    .btn-primary { background: linear-gradient(90deg,#2563eb,#4f46e5); color: white; padding: .45rem .9rem; border-radius: .5rem; display:inline-block; min-width:10rem; text-align:center; transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease; }
+    .btn-ghost { background: transparent; border: 1px solid #e5e7eb; padding: .4rem .6rem; border-radius: .5rem; transition: background 120ms ease, border-color 120ms ease; }
+    .btn-danger { background: white; border: 1px solid #f87171; color: #b91c1c; padding: .4rem .6rem; border-radius: .5rem; transition: transform 120ms ease, box-shadow 120ms ease; }
+    .btn-primary, .btn-ghost, .btn-danger { cursor: pointer; }
+    .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 10px 25px rgba(37,99,235,0.12); filter: brightness(1.03); }
+    .btn-ghost:hover { background: #f8fafc; border-color: #dbeafe; }
+    .btn-danger:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(248,113,113,0.08); }
+
+    /* Toggle-style checkboxes inside profile preferences */
+    .profile-preferences input[type=checkbox] {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      width: 44px;
+      height: 24px;
+      background: #e6eefc;
+      border-radius: 9999px;
+      position: relative;
+      cursor: pointer;
+      outline: none;
+      transition: background 150ms ease-in-out;
+    }
+    .profile-preferences input[type=checkbox]::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      background: white;
+      border-radius: 9999px;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06);
+      transition: transform 150ms ease-in-out;
+    }
+    .profile-preferences input[type=checkbox]:checked { background: linear-gradient(90deg,#34d399,#10b981); }
+    .profile-preferences input[type=checkbox]:checked::after { transform: translateX(20px); }
+
+    /* Avatar clear toggle to match preference toggles and sit inline */
+    .clearable-file-inline .clearable-file-input { display: inline-flex; align-items: center; gap: .5rem; }
+    .clearable-file-inline .clearable-file-input input[type=checkbox] {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      width: 44px;
+      height: 24px;
+      background: #e6eefc;
+      border-radius: 9999px;
+      position: relative;
+      cursor: pointer;
+      outline: none;
+      transition: background 150ms ease-in-out;
+    }
+    .clearable-file-inline .clearable-file-input input[type=checkbox]::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      background: white;
+      border-radius: 9999px;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06);
+      transition: transform 150ms ease-in-out;
+    }
+    .clearable-file-inline .clearable-file-input input[type=checkbox]:checked { background: linear-gradient(90deg,#34d399,#10b981); }
+    .clearable-file-inline .clearable-file-input input[type=checkbox]:checked::after { transform: translateX(20px); }
+    .clearable-file-inline .clearable-file-input a { display: none; }
+
+    /* Slightly stronger section shadows for polish */
+    .shadow-lg { box-shadow: 0 8px 20px rgba(2,6,23,0.06); }
+
+    /* Timezone panel sizing */
+    .timezone-panel { min-height: 10rem; display: flex; align-items: center; }
+
+    /* Make the timezone select visually stand out inside the gray panel */
+    .timezone-select select#id_timezone,
+    .timezone-select select[name="timezone"] {
+      background: #ffffff;
+      border: 1px solid #c7d2fe; /* subtle blue */
+      padding: .5rem .75rem;
+      border-radius: .5rem;
+      box-shadow: 0 8px 22px rgba(79,70,229,0.08);
+      color: #0f172a;
+      font-weight: 600;
+      min-width: 18rem;
+      outline: none;
+    }
+    .timezone-select select#id_timezone:focus,
+    .timezone-select select[name="timezone"]:focus { box-shadow: 0 10px 30px rgba(79,70,229,0.12); border-color:#6366f1; }
+
+    /* Right-side timezone info box tweaks */
+    .timezone-info { max-width: 36ch; }
+
+    /* Ensure the flex row spans full width and push the info box to the right edge */
+    .timezone-panel > .flex { width: 100%; }
+    .timezone-info { margin-left: auto; display: block; }
   </style>
 {% endblock %}
 
 {% block extra_scripts %}
   <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
-  <script>
+      <script>
     (function() {
       const fileInput = document.getElementById('id_avatar');
       const form = document.getElementById('profile-form');
       const saveBtn = document.getElementById('save-btn');
       const avatarPreview = document.getElementById('avatar-preview');
-      const avatarFilenameEl = document.getElementById('avatar-filename');
+      // prefer compact filename element; fallback to legacy id
+      const avatarFilenameEl = document.getElementById('avatar-filename') || document.getElementById('cc-current-filename');
 
       // Normalize any server-rendered path to basename by reading the data-fullname attribute
       if (avatarFilenameEl) {
@@ -192,7 +345,29 @@
               if (anchor) anchor.textContent = basename;
             }
           } catch (e) {}
+            // Extra Save buttons (outside the form) should submit the main profile form
+            try {
+              const extraSaveBtns = document.querySelectorAll('.save-profile-btn');
+              if (extraSaveBtns.length) {
+                extraSaveBtns.forEach(btn => {
+                  btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    if (!form) return;
+                    // disable all save buttons to prevent double submits
+                    document.querySelectorAll('.save-profile-btn, #save-btn').forEach(b => { try { b.disabled = true; } catch (err) {} });
+                    const mainSave = document.getElementById('save-btn');
+                    if (mainSave) mainSave.textContent = 'Saving...';
+                    form.submit();
+                  });
+                });
+              }
+            } catch (e) {}
         }
+        // Mirror filename into our compact display
+        try {
+          const cc = document.getElementById('cc-current-filename');
+          if (cc) cc.textContent = basename || (avatarFilenameEl.textContent || 'No file selected');
+        } catch (e) {}
 
           // Force-replace ClearableFileInput anchor with a grey basename span
           (function fixClearableDisplay() {
@@ -274,7 +449,26 @@
           mo.observe(document.body, { childList: true, subtree: true });
         } catch (e) {}
       })();
-      if (!fileInput) return;
+        // Attach handlers for extra Save buttons even if avatar input isn't present
+        try {
+          const extraSaveBtns = document.querySelectorAll('.save-profile-btn');
+          if (extraSaveBtns.length) {
+            extraSaveBtns.forEach(btn => {
+              btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const mainForm = document.getElementById('profile-form');
+                if (!mainForm) return;
+                // disable all save buttons to prevent double submits
+                document.querySelectorAll('.save-profile-btn, #save-btn').forEach(b => { try { b.disabled = true; } catch (err) {} });
+                const mainSave = document.getElementById('save-btn');
+                if (mainSave) mainSave.textContent = 'Saving...';
+                mainForm.submit();
+              });
+            });
+          }
+        } catch (e) {}
+
+        if (!fileInput) return;
 
       // Create a lightweight modal for cropping
       const modal = document.createElement('div');
@@ -321,6 +515,7 @@
           const lastSlash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
           newBasename = lastSlash !== -1 ? name.slice(lastSlash + 1) : name;
           avatarFilenameEl.textContent = newBasename;
+        try { const cc2 = document.getElementById('cc-current-filename'); if (cc2) cc2.textContent = newBasename || 'No file selected'; } catch (e) {}
         }
         // Update the widget's "Currently:" anchor text
         try {
@@ -390,6 +585,7 @@
                 if (anchor2) anchor2.textContent = bn;
               }
             } catch (e) {}
+            try { const cc3 = document.getElementById('cc-current-filename'); if (cc3) cc3.textContent = bn || 'No file selected'; } catch (e) {}
           }
           // Update on-page preview immediately
           try {

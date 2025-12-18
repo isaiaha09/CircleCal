@@ -25,19 +25,20 @@
         </div>
         
         <div>
-            <label for="timezone" style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Timezone</label>
-            <select 
-                id="timezone" 
-                name="timezone" 
-                required
-                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;"
-                onfocus="this.style.borderColor='#007bff'"
-                onblur="this.style.borderColor='#e0e0e0'"
-            >
+            <label for="timezone" style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Business Timezone (affects scheduling)</label>
+                <select 
+                    id="timezone" 
+                    name="timezone" 
+                    required
+                    style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;"
+                    onfocus="this.style.borderColor='#007bff'"
+                    onblur="this.style.borderColor='#e0e0e0'"
+                >
                 {% for tz in timezones %}
                     <option value="{{ tz }}" {% if tz == org.timezone %}selected{% endif %}>{{ tz }}</option>
                 {% endfor %}
             </select>
+                <p style="margin-top:8px;color:#475569;font-size:0.95rem;">This sets the business's scheduling timezone. All availability, booking times, and public-facing calendars are shown in this timezone.</p>
         </div>
         
         <div style="margin-top: 10px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">

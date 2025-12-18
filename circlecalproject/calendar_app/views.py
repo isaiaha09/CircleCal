@@ -294,6 +294,9 @@ def preview_service_update(request, org_slug, service_id):
             # Metadata to help client group bookings
             'uses_fixed_increment': bool(eff_use_fixed),
             'time_increment_minutes': int(eff_time_inc) if eff_time_inc is not None else None,
+            # Include any existing per-date frozen settings so the modal can show
+            # which settings will be preserved for this date (if a freeze exists)
+            'existing_freeze': existing_freeze.frozen_settings if (existing_freeze and getattr(existing_freeze, 'frozen_settings', None)) else None,
         })
 
     # Defensive UX: if there are bookings but our earlier filtering removed
@@ -438,15 +441,28 @@ def apply_service_update(request, org_slug, service_id):
             except Exception:
                 weekly_windows = []
 
-            frozen = {
-                'duration': svc.duration,
-                'buffer_after': svc.buffer_after,
-                'time_increment_minutes': svc.time_increment_minutes,
-                'use_fixed_increment': bool(svc.use_fixed_increment),
-                'allow_ends_after_availability': bool(getattr(svc, 'allow_ends_after_availability', False)),
-                'allow_squished_bookings': bool(getattr(svc, 'allow_squished_bookings', False)),
-                'weekly_windows': weekly_windows,
-            }
+            # Prefer any existing per-date freeze values when constructing the
+            # frozen snapshot. This ensures fields like `buffer_after` remain
+            # preserved for dates that already have a freeze.
+            try:
+                existing = ServiceSettingFreeze.objects.filter(service=svc, date=d).first()
+            except Exception:
+                existing = None
+
+            if existing and getattr(existing, 'frozen_settings', None):
+                # Use existing frozen settings as-is (do not overwrite)
+                frozen = existing.frozen_settings
+            else:
+                frozen = {
+                    'duration': svc.duration,
+                    'buffer_after': svc.buffer_after,
+                    'time_increment_minutes': svc.time_increment_minutes,
+                    'use_fixed_increment': bool(svc.use_fixed_increment),
+                    'allow_ends_after_availability': bool(getattr(svc, 'allow_ends_after_availability', False)),
+                    'allow_squished_bookings': bool(getattr(svc, 'allow_squished_bookings', False)),
+                    'weekly_windows': weekly_windows,
+                }
+
             try:
                 obj, created = ServiceSettingFreeze.objects.get_or_create(
                     service=svc, date=d, defaults={'frozen_settings': frozen}
