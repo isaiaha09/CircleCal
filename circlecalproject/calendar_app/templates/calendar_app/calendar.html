@@ -2444,6 +2444,23 @@ document.addEventListener('DOMContentLoaded', function() {
         // Visible services after filtering by selected member
         let VISIBLE_SERVICES = [];
 
+        function getAssignedMembersForService(serviceObj) {
+            try {
+                const assigned = (serviceObj && Array.isArray(serviceObj.assigned_members)) ? serviceObj.assigned_members : [];
+                return assigned.map(String);
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function isSingleAssigneeService(serviceObj) {
+            try {
+                return getAssignedMembersForService(serviceObj).length === 1;
+            } catch (e) {
+                return false;
+            }
+        }
+
         function getSelectedUserIdForMembership(membershipId) {
             try {
                 const m = MEMBERS.find(mm => String(mm.id) === String(membershipId));
@@ -2523,7 +2540,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             VISIBLE_SERVICES = SERVICES.filter(s => {
                 try{
-                    const assigned = Array.isArray(s.assigned_members) ? s.assigned_members.map(String) : [];
+                    const assigned = getAssignedMembersForService(s);
                     if (assigned.length === 0) return false; // hide unassigned services when a member is selected
                     return assigned.indexOf(String(SELECTED_MEMBER)) !== -1;
                 }catch(e){ return false; }
@@ -2554,8 +2571,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (IS_TEAM && Array.isArray(SERVICES)){
                         for (const s of SERVICES){
                             try{
-                                            const assigned = Array.isArray(s.assigned_members) ? s.assigned_members : [];
-                                            if (!assigned || assigned.length === 0 || (Array.isArray(assigned) && assigned.length > 1)){
+                                            // Only show service-scoped schedules when the service is either:
+                                            // - unassigned (0 members), OR
+                                            // - shared (2+ members)
+                                            // If the service has exactly 1 member, it is assumed to inherit that member's schedule.
+                                            const assigned = getAssignedMembersForService(s);
+                                            if (assigned.length === 0 || assigned.length > 1){
                                                 const val = 'svc:' + String(s.id);
                                                 if (!sel.querySelector('option[value="' + val + '"]')){
                                                     const opt = document.createElement('option');
@@ -2581,15 +2602,31 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     if (SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')) {
                         const val = String(SELECTED_MEMBER);
-                        if (!sel.querySelector('option[value="' + val + '"]')) {
-                            const svcId = val.slice(4);
-                            const svc = SERVICES.find(s => String(s.id) === String(svcId));
-                            const opt = document.createElement('option');
-                            opt.value = val;
-                            opt.textContent = '[Service] ' + (svc ? (svc.name || ('Service ' + String(svcId))) : ('Service ' + String(svcId)));
-                            sel.appendChild(opt);
+                        const svcId = val.slice(4);
+                        const svc = SERVICES.find(s => String(s.id) === String(svcId));
+
+                        // If the service has exactly 1 assignee, it should not be selectable.
+                        // Switch the selection to that member instead.
+                        if (svc && isSingleAssigneeService(svc)) {
+                            const assigned = getAssignedMembersForService(svc);
+                            const onlyMemberId = assigned.length === 1 ? assigned[0] : null;
+                            if (onlyMemberId) {
+                                SELECTED_MEMBER = String(onlyMemberId);
+                                try { localStorage.setItem('cc_selected_member', SELECTED_MEMBER); } catch (e) {}
+                                const memberOpt = sel.querySelector('option[value="' + SELECTED_MEMBER + '"]');
+                                if (memberOpt) memberOpt.selected = true;
+                                sel.value = SELECTED_MEMBER;
+                            }
+                        } else {
+                            // Otherwise, ensure the service option exists (for unassigned or shared services)
+                            if (!sel.querySelector('option[value="' + val + '"]')) {
+                                const opt = document.createElement('option');
+                                opt.value = val;
+                                opt.textContent = '[Service] ' + (svc ? (svc.name || ('Service ' + String(svcId))) : ('Service ' + String(svcId)));
+                                sel.appendChild(opt);
+                            }
+                            sel.value = val;
                         }
-                        sel.value = val;
                     }
                 } catch (e) {}
 

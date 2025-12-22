@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from datetime import timedelta
 from bookings.emails import send_booking_confirmation
+from django.db.models import Count
 
 
 @require_http_methods(['POST'])
@@ -485,28 +486,71 @@ def apply_service_update(request, org_slug, service_id):
         except Exception:
             freeze_error = 'unknown error while creating freezes'
 
-    # Apply provided fields to service (similar to update_service_settings)
+    # Apply provided fields to service.
+    # Note: The Edit Service page uses this endpoint for saving, so it must
+    # persist the same fields the normal form POST supports.
     fields = {}
+
+    # Text fields
+    if 'name' in payload:
+        try:
+            fields['name'] = (payload.get('name') or '').strip()
+        except Exception:
+            pass
+    if 'description' in payload:
+        try:
+            fields['description'] = (payload.get('description') or '').strip()
+        except Exception:
+            pass
+
+    # Numeric fields
+    if 'price' in payload:
+        try:
+            fields['price'] = float(payload.get('price') or 0)
+        except Exception:
+            pass
+    if 'duration' in payload:
+        try:
+            fields['duration'] = int(payload.get('duration') or 0)
+        except Exception:
+            pass
+    if 'buffer_after' in payload:
+        try:
+            fields['buffer_after'] = int(payload.get('buffer_after') or 0)
+        except Exception:
+            pass
+    if 'min_notice_hours' in payload:
+        try:
+            fields['min_notice_hours'] = int(payload.get('min_notice_hours') or 0)
+        except Exception:
+            pass
+    if 'max_booking_days' in payload:
+        try:
+            fields['max_booking_days'] = int(payload.get('max_booking_days') or 0)
+        except Exception:
+            pass
     if 'time_increment_minutes' in payload:
         try:
             fields['time_increment_minutes'] = int(payload.get('time_increment_minutes') or 0) or 30
         except Exception:
             fields['time_increment_minutes'] = 30
+    if 'refund_cutoff_hours' in payload:
+        try:
+            fields['refund_cutoff_hours'] = int(payload.get('refund_cutoff_hours') or 0)
+        except Exception:
+            pass
+
+    # Boolean fields
     if 'use_fixed_increment' in payload:
-        fields['use_fixed_increment'] = bool(payload.get('use_fixed_increment'))
+        try:
+            fields['use_fixed_increment'] = bool(payload.get('use_fixed_increment'))
+        except Exception:
+            pass
     if 'allow_squished_bookings' in payload:
-        fields['allow_squished_bookings'] = bool(payload.get('allow_squished_bookings'))
-    if 'buffer_after' in payload:
         try:
-            fields['buffer_after'] = int(payload.get('buffer_after'))
+            fields['allow_squished_bookings'] = bool(payload.get('allow_squished_bookings'))
         except Exception:
             pass
-    if 'duration' in payload:
-        try:
-            fields['duration'] = int(payload.get('duration'))
-        except Exception:
-            pass
-    # Additional fields that the edit form may post
     if 'allow_ends_after_availability' in payload:
         try:
             fields['allow_ends_after_availability'] = bool(payload.get('allow_ends_after_availability'))
@@ -517,25 +561,149 @@ def apply_service_update(request, org_slug, service_id):
             fields['is_active'] = bool(payload.get('is_active'))
         except Exception:
             pass
-    if 'min_notice_hours' in payload:
+    if 'refunds_allowed' in payload:
         try:
-            fields['min_notice_hours'] = int(payload.get('min_notice_hours'))
-        except Exception:
-            pass
-    if 'max_booking_days' in payload:
-        try:
-            fields['max_booking_days'] = int(payload.get('max_booking_days'))
-        except Exception:
-            pass
-    if 'time_increment_minutes' in payload and 'time_increment_minutes' not in fields:
-        try:
-            fields['time_increment_minutes'] = int(payload.get('time_increment_minutes'))
+            fields['refunds_allowed'] = bool(payload.get('refunds_allowed'))
         except Exception:
             pass
 
+    # Refund policy text
+    if 'refund_policy_text' in payload:
+        try:
+            fields['refund_policy_text'] = (payload.get('refund_policy_text') or '').strip()
+        except Exception:
+            pass
+
+    # Enforce refund cutoff behavior similar to the form POST.
+    try:
+        refunds_allowed = fields.get('refunds_allowed', getattr(svc, 'refunds_allowed', False))
+        cutoff_val = fields.get('refund_cutoff_hours', getattr(svc, 'refund_cutoff_hours', 0) or 0)
+        if refunds_allowed:
+            try:
+                cutoff_val = int(cutoff_val)
+            except Exception:
+                cutoff_val = int(getattr(svc, 'refund_cutoff_hours', 24) or 24)
+            if cutoff_val < 1:
+                cutoff_val = 1
+            fields['refund_cutoff_hours'] = cutoff_val
+        else:
+            fields['refund_cutoff_hours'] = 0
+    except Exception:
+        pass
+
+    # Prevent deactivating the last active service.
+    try:
+        if 'is_active' in fields and not fields['is_active']:
+            other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=svc.id).count()
+            if other_active == 0:
+                return JsonResponse({'status': 'error', 'error': 'At least one service must remain active.'}, status=400)
+    except Exception:
+        pass
+
+    # Slug update only when there are no bookings for this service.
+    try:
+        if 'slug' in payload:
+            try:
+                has_bookings = Booking.objects.filter(service=svc).exists()
+            except Exception:
+                has_bookings = False
+            if not has_bookings:
+                new_slug_input = (payload.get('slug') or '').strip()
+                if new_slug_input:
+                    base_slug = slugify(new_slug_input) or slugify(fields.get('name') or svc.name) or get_random_string(6)
+                    slug_candidate = base_slug
+                    counter = 1
+                    while Service.objects.filter(organization=org, slug=slug_candidate).exclude(id=svc.id).exists():
+                        slug_candidate = f"{base_slug}-{counter}"
+                        counter += 1
+                    fields['slug'] = slug_candidate
+    except Exception:
+        pass
+
     for k, v in fields.items():
-        setattr(svc, k, v)
+        try:
+            setattr(svc, k, v)
+        except Exception:
+            # Field may not exist if migrations not applied
+            continue
     svc.save()
+
+    # Sync service assignments (assigned_members).
+    try:
+        from bookings.models import ServiceAssignment
+        posted = payload.get('assigned_members', [])
+        if posted is None:
+            posted = []
+        if not isinstance(posted, list):
+            posted = [posted]
+        desired = set()
+        for v in posted:
+            try:
+                iv = int(v)
+                if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
+                    desired.add(iv)
+            except Exception:
+                continue
+
+        existing_ids = set(ServiceAssignment.objects.filter(service=svc).values_list('membership_id', flat=True))
+        to_add = desired - existing_ids
+        to_remove = existing_ids - desired
+
+        for mid in to_add:
+            try:
+                mem = Membership.objects.get(id=mid, organization=org)
+                ServiceAssignment.objects.create(service=svc, membership=mem)
+            except Exception:
+                continue
+        if to_remove:
+            ServiceAssignment.objects.filter(service=svc, membership_id__in=list(to_remove)).delete()
+    except Exception:
+        pass
+
+    # Handle per-service weekly availability fields (svc_avail_0..svc_avail_6).
+    try:
+        can_edit_svc_avail, _reason = _service_availability_applicability(org, svc)
+        if can_edit_svc_avail:
+            svc_windows = []
+            for ui_day in range(7):
+                key = f"svc_avail_{ui_day}"
+                raw = payload.get(key, '') or ''
+                raw = str(raw).strip()
+                if not raw:
+                    continue
+                model_wd = ((ui_day - 1) % 7)  # UI 0=Sun..6=Sat -> model 0=Mon..6=Sun
+                parts = [p.strip() for p in raw.split(',') if p.strip()]
+                for part in parts:
+                    try:
+                        start_s, end_s = [x.strip() for x in part.split('-')]
+                    except Exception:
+                        continue
+                    if len(start_s) != 5 or len(end_s) != 5 or start_s[2] != ':' or end_s[2] != ':':
+                        continue
+                    svc_windows.append((model_wd, start_s, end_s))
+
+            if svc_windows:
+                new_objs = []
+                for (wd, start_s, end_s) in svc_windows:
+                    try:
+                        st = datetime.strptime(start_s, '%H:%M').time()
+                        et = datetime.strptime(end_s, '%H:%M').time()
+                    except Exception:
+                        continue
+                    obj = ServiceWeeklyAvailability(service=svc, weekday=wd, start_time=st, end_time=et, is_active=True)
+                    try:
+                        obj.full_clean()
+                    except Exception:
+                        continue
+                    new_objs.append(obj)
+                if new_objs:
+                    ServiceWeeklyAvailability.objects.filter(service=svc).delete()
+                    ServiceWeeklyAvailability.objects.bulk_create(new_objs)
+            else:
+                # If nothing posted, remove per-service windows.
+                ServiceWeeklyAvailability.objects.filter(service=svc).delete()
+    except Exception:
+        pass
 
     resp = {'status': 'ok', 'freezes_created': freezes_created, 'booked_dates_count': len(booked_dates), 'booked_dates': frozen_dates}
     if freeze_error:
@@ -561,6 +729,99 @@ def _build_service_weekly_map(service):
         ui_idx = (row.weekday + 1) % 7
         svc_map[ui_idx].append(f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}")
     return svc_map
+
+
+def _service_availability_applicability(org, service):
+    """Return (enabled, reason).
+
+    Enabled only when:
+    - The service has exactly one assigned team member, AND
+    - That same member is the sole assignee on at least one other service
+      within the same organization.
+    """
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return False, "Service availability is not available (assignments missing)."
+
+    try:
+        assigned_ids = list(ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True))
+    except Exception:
+        assigned_ids = []
+
+    if len(assigned_ids) != 1:
+        if len(assigned_ids) == 0:
+            return False, "Assign exactly one team member to enable Service availability."
+        return False, "Service availability applies only to services assigned to exactly one team member."
+
+    mid = assigned_ids[0]
+
+    try:
+        service_ids = list(
+            ServiceAssignment.objects.filter(membership_id=mid, service__organization=org)
+            .values_list('service_id', flat=True)
+        )
+    except Exception:
+        service_ids = []
+
+    if not service_ids:
+        return False, "Service availability applies only when the assigned member has multiple solo services."
+
+    try:
+        counts = (
+            ServiceAssignment.objects.filter(service_id__in=service_ids)
+            .values('service_id')
+            .annotate(c=Count('id'))
+        )
+        solo_ids = {row['service_id'] for row in counts if int(row.get('c') or 0) == 1}
+    except Exception:
+        solo_ids = set()
+
+    # Must have at least two solo services (including the current one).
+    if len(solo_ids) < 2:
+        return False, "Service availability applies only when this team member has multiple solo services."
+
+    if service.id not in solo_ids:
+        # Defensive: should not happen if the current service has exactly one assignee.
+        return False, "Service availability is not applicable for this service."
+
+    return True, ""
+
+
+def _get_single_assignee_display_name(org, service):
+    """Return display name/email for a service's single assignee, else ''."""
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return ""
+
+    try:
+        ids = list(
+            ServiceAssignment.objects.filter(service=service)
+            .values_list('membership_id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        ids = []
+
+    if len(ids) != 1:
+        return ""
+
+    try:
+        mid = int(ids[0])
+    except Exception:
+        return ""
+
+    # Prefer following the FK chain (membership -> user) when possible.
+    try:
+        mem = Membership.objects.filter(id=mid, organization=org).select_related('user').first()
+        if mem and mem.user:
+            full = (f"{(mem.user.first_name or '').strip()} {(mem.user.last_name or '').strip()}").strip()
+            return full or (mem.user.email or f"Member #{mid}")
+    except Exception:
+        pass
+
+    return f"Member #{mid}"
 
 
 def _build_member_weekly_map(membership):
@@ -637,6 +898,13 @@ def calendar_view(request, org_slug):
     services_qs = Service.objects.filter(organization=org, is_active=True).order_by('name')
     services = []
     for s in services_qs:
+        assigned_members = []
+        try:
+            # ServiceAssignment has related_name='assignments'
+            assigned_members = list(s.assignments.all().values_list('membership_id', flat=True))
+        except Exception:
+            # If migrations not applied / table missing, fail closed (treat as unassigned)
+            assigned_members = []
         services.append({
             'id': s.id,
             'name': s.name,
@@ -649,7 +917,7 @@ def calendar_view(request, org_slug):
             # Provide a simple weekly availability map for the client to compute next-available dates
             'weekly_map': _build_service_weekly_map(s),
             # assigned_members: list of membership ids allowed to deliver this service
-            'assigned_members': list(s.serviceassignment_set.all().values_list('membership_id', flat=True)) if hasattr(s, 'serviceassignment_set') else [],
+            'assigned_members': assigned_members,
         })
     services_json = json.dumps(services)
     # Guard against raw closing script tags in service names/descriptions
@@ -2223,11 +2491,37 @@ def edit_service(request, org_slug, service_id):
                         org_ranges = ', '.join(org_map[ui]) if org_map and org_map[ui] else ''
                         svc_ranges = ', '.join(svc_map[ui]) if svc_map and svc_map[ui] else ''
                         weekly_edit_rows.append({'ui': ui, 'label': weekday_labels[ui], 'org_ranges': org_ranges, 'svc_ranges': svc_ranges})
+
+                    # Provide the same flags the GET render uses so the template
+                    # can correctly enable/disable sections.
+                    try:
+                        now = timezone.now()
+                        has_bookings = Booking.objects.filter(service=service, is_blocking=False, end__gte=now).exists()
+                    except Exception:
+                        has_bookings = False
+                    can_edit_slug = not has_bookings
+
+                    try:
+                        from bookings.models import ServiceAssignment
+                        assigned_member_ids = [str(x) for x in ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True).distinct()]
+                    except Exception:
+                        assigned_member_ids = []
+
+                    can_edit_service_availability, service_availability_disabled_reason = _service_availability_applicability(org, service)
+
+                    service_availability_member_name = ""
+                    if can_edit_service_availability:
+                        service_availability_member_name = _get_single_assignee_display_name(org, service)
                     return render(request, "calendar_app/edit_service.html", {
                         "org": org,
                         "service": service,
                         "weekly_edit_rows": weekly_edit_rows,
                         "conflict_services": conflict_services,
+                        "can_edit_slug": can_edit_slug,
+                        'assigned_member_ids': assigned_member_ids,
+                        'can_edit_service_availability': can_edit_service_availability,
+                        'service_availability_disabled_reason': service_availability_disabled_reason,
+                        'service_availability_member_name': service_availability_member_name,
                     })
 
                 # Persist changes (and optionally apply to conflicts)
@@ -2337,62 +2631,64 @@ def edit_service(request, org_slug, service_id):
                 # Handle per-service weekly availability fields.
                 # Expect form fields named `svc_avail_0` .. `svc_avail_6` representing UI weekday 0=Sunday..6=Saturday
                 # Each field may contain comma-separated ranges like "09:00-12:00,13:00-17:00" or be empty.
-                svc_windows = []
-                for ui_day in range(7):
-                    key = f"svc_avail_{ui_day}"
-                    raw = request.POST.get(key, "") or ""
-                    raw = raw.strip()
-                    if not raw:
-                        continue
-                    # UI weekday 0=Sunday..6=Saturday -> model weekday 0=Monday..6=Sunday
-                    model_wd = ((ui_day - 1) % 7)
-                    parts = [p.strip() for p in raw.split(',') if p.strip()]
-                    for part in parts:
-                        try:
-                            start_s, end_s = [x.strip() for x in part.split('-')]
-                        except Exception:
-                            messages.error(request, f"Invalid range format for {key}: {part}")
+                can_edit_svc_avail, _reason = _service_availability_applicability(org, service)
+                if can_edit_svc_avail:
+                    svc_windows = []
+                    for ui_day in range(7):
+                        key = f"svc_avail_{ui_day}"
+                        raw = request.POST.get(key, "") or ""
+                        raw = raw.strip()
+                        if not raw:
                             continue
-                        # Basic sanity check
-                        if len(start_s) != 5 or len(end_s) != 5 or start_s[2] != ':' or end_s[2] != ':':
-                            messages.error(request, f"Invalid time format for {key}: {part}")
-                            continue
-                        svc_windows.append((model_wd, start_s, end_s))
+                        # UI weekday 0=Sunday..6=Saturday -> model weekday 0=Monday..6=Sunday
+                        model_wd = ((ui_day - 1) % 7)
+                        parts = [p.strip() for p in raw.split(',') if p.strip()]
+                        for part in parts:
+                            try:
+                                start_s, end_s = [x.strip() for x in part.split('-')]
+                            except Exception:
+                                messages.error(request, f"Invalid range format for {key}: {part}")
+                                continue
+                            # Basic sanity check
+                            if len(start_s) != 5 or len(end_s) != 5 or start_s[2] != ':' or end_s[2] != ':':
+                                messages.error(request, f"Invalid time format for {key}: {part}")
+                                continue
+                            svc_windows.append((model_wd, start_s, end_s))
 
-                # Persist service windows: validate using model.clean() before saving
-                if svc_windows:
-                    # Build instances and validate
-                    new_objs = []
-                    from datetime import datetime
-                    for (wd, start_s, end_s) in svc_windows:
-                        try:
-                            st = datetime.strptime(start_s, '%H:%M').time()
-                            et = datetime.strptime(end_s, '%H:%M').time()
-                        except Exception:
-                            messages.error(request, f"Invalid time values: {start_s}-{end_s}")
-                            continue
-                        obj = ServiceWeeklyAvailability(
-                            service=service,
-                            weekday=wd,
-                            start_time=st,
-                            end_time=et,
-                            is_active=True,
-                        )
-                        try:
-                            obj.full_clean()
-                        except Exception as e:
-                            # Display first validation error
-                            messages.error(request, f"Service availability error: {e}")
-                        else:
-                            new_objs.append(obj)
+                    # Persist service windows: validate using model.clean() before saving
+                    if svc_windows:
+                        # Build instances and validate
+                        new_objs = []
+                        from datetime import datetime
+                        for (wd, start_s, end_s) in svc_windows:
+                            try:
+                                st = datetime.strptime(start_s, '%H:%M').time()
+                                et = datetime.strptime(end_s, '%H:%M').time()
+                            except Exception:
+                                messages.error(request, f"Invalid time values: {start_s}-{end_s}")
+                                continue
+                            obj = ServiceWeeklyAvailability(
+                                service=service,
+                                weekday=wd,
+                                start_time=st,
+                                end_time=et,
+                                is_active=True,
+                            )
+                            try:
+                                obj.full_clean()
+                            except Exception as e:
+                                # Display first validation error
+                                messages.error(request, f"Service availability error: {e}")
+                            else:
+                                new_objs.append(obj)
 
-                    if new_objs:
-                        # Replace existing windows
+                        if new_objs:
+                            # Replace existing windows
+                            ServiceWeeklyAvailability.objects.filter(service=service).delete()
+                            ServiceWeeklyAvailability.objects.bulk_create(new_objs)
+                    else:
+                        # If no posted windows present, remove any existing per-service windows
                         ServiceWeeklyAvailability.objects.filter(service=service).delete()
-                        ServiceWeeklyAvailability.objects.bulk_create(new_objs)
-                else:
-                    # If no posted windows present, remove any existing per-service windows
-                    ServiceWeeklyAvailability.objects.filter(service=service).delete()
                 
                 messages.success(request, "Service updated.")
                 # Return to edit page to reflect saved values immediately
@@ -2429,9 +2725,15 @@ def edit_service(request, org_slug, service_id):
     # Safely compute assigned_member_ids (bookings.models may be unavailable if migrations missing)
     try:
         from bookings.models import ServiceAssignment
-        assigned_member_ids = [str(x) for x in ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True)]
+        assigned_member_ids = [str(x) for x in ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True).distinct()]
     except Exception:
         assigned_member_ids = []
+
+    can_edit_service_availability, service_availability_disabled_reason = _service_availability_applicability(org, service)
+
+    service_availability_member_name = ""
+    if can_edit_service_availability:
+        service_availability_member_name = _get_single_assignee_display_name(org, service)
 
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
@@ -2440,6 +2742,9 @@ def edit_service(request, org_slug, service_id):
         "can_edit_slug": can_edit_slug,
         "is_only_active_service": is_only_active_service,
         'assigned_member_ids': assigned_member_ids,
+        'can_edit_service_availability': can_edit_service_availability,
+        'service_availability_disabled_reason': service_availability_disabled_reason,
+        'service_availability_member_name': service_availability_member_name,
     })
 
 

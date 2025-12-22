@@ -55,6 +55,8 @@
 {% endblock %}
 
 <div class="cc-page">
+  <form class="cc-form" method="post">
+    {% csrf_token %}
   {% if request.GET.saved %}
     <div class="mb-4 p-3 rounded bg-green-50 border-l-4 border-green-400 text-green-800" role="status" aria-live="polite">
       <strong>Changes saved</strong>
@@ -319,7 +321,7 @@
         })();
       </script>
     </div>
-    </div>
+
 
     <!-- Slot increment settings are configured in the Day Schedule modal (calendar). Removed from edit page to avoid duplication. -->
     <!-- Per-service slot settings (single, cleaned block) -->
@@ -632,16 +634,19 @@
         </div>
     </div>
 
-    <div class="section-card {% if is_only_active_service %}availability-disabled{% endif %}">
+    <div class="section-card {% if not can_edit_service_availability %}availability-disabled{% endif %}">
       <!-- Service availability editor -->
       <div class="mt-0">
-        <h2 class="text-base font-semibold">Service availability</h2>
-        <p class="text-sm text-gray-500">Specify which days/times this service is offered. These must be within your organization's default weekly availability shown below. Use comma-separated ranges like <code>09:00-12:00,13:00-17:00</code>.</p>
-        {% if is_only_active_service %}
+        <h2 class="text-base font-semibold text-center">Service availability</h2>
+        {% if can_edit_service_availability and service_availability_member_name %}
+          <div class="text-sm text-gray-600 text-center mt-1">Applies to: <span class="font-medium">{{ service_availability_member_name }}</span></div>
+        {% endif %}
+        <p class="text-sm text-gray-500 mt-3">Specify which days/times this service is offered. These must be within your organization's default weekly availability shown below. Use comma-separated ranges like <code>09:00-12:00,13:00-17:00</code>.</p>
+        {% if not can_edit_service_availability %}
           <div class="availability-overlay" role="status" aria-live="polite">
             <div class="msg">
               <strong class="block mb-1">Service availability disabled</strong>
-              <div class="text-sm">You must have at least two active services to edit per-service availability. Activate another service to enable these controls.</div>
+              <div class="text-sm">{{ service_availability_disabled_reason|default:"Service availability is only available for services assigned to exactly one team member when that team member offers multiple solo services." }}</div>
             </div>
           </div>
         {% endif %}
@@ -654,7 +659,7 @@
             <div>
               <input type="text" name="svc_avail_{{ row.ui }}" value="{{ row.svc_ranges }}"
                      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="e.g. 09:00-12:00,13:00-17:00"
-                     {% if is_only_active_service %}disabled aria-disabled="true"{% endif %}>
+                     {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>
             </div>
           {% endfor %}
         </div>
@@ -765,13 +770,29 @@
     function serializeFormToPayload(){
       const fd = new FormData(form);
       const out = {};
-      for (const [k,v] of fd.entries()){
-        if (k === 'time_increment_minutes' || k === 'duration' || k === 'buffer_after' || k === 'min_notice_hours' || k === 'max_booking_days' || k === 'refund_cutoff_hours'){
-          out[k] = Number(v);
-        } else if (k.startsWith('svc_avail_')){
-          out[k] = v;
+
+      // Collect repeated keys (e.g., assigned_members) as arrays.
+      for (const [k, v] of fd.entries()){
+        if (Object.prototype.hasOwnProperty.call(out, k)){
+          if (!Array.isArray(out[k])) out[k] = [out[k]];
+          out[k].push(v);
         } else {
           out[k] = v;
+        }
+      }
+
+      // Normalize known numeric fields (take last value if repeated).
+      const numericNames = ['time_increment_minutes', 'duration', 'buffer_after', 'min_notice_hours', 'max_booking_days', 'refund_cutoff_hours'];
+      for (const k of numericNames){
+        if (!(k in out)) continue;
+        const raw = Array.isArray(out[k]) ? out[k][out[k].length - 1] : out[k];
+        out[k] = Number(raw);
+      }
+
+      // Stabilize arrays for comparison and predictable payloads.
+      for (const k of Object.keys(out)){
+        if (Array.isArray(out[k])){
+          out[k] = out[k].map(x => String(x)).sort();
         }
       }
 
@@ -1223,12 +1244,24 @@
     function serializeForm(){
       const fd = new FormData(form);
       const out = {};
-      for (const [k,v] of fd.entries()){
+
+      // Collect repeated keys (e.g., assigned_members) as arrays.
+      for (const [k, v] of fd.entries()){
         const el = form.querySelector(`[name="${k}"]`);
-        if (el && el.type === 'checkbox'){
-          out[k] = el.checked ? '1' : '0';
+        const normalized = (el && el.type === 'checkbox') ? (el.checked ? '1' : '0') : v;
+
+        if (Object.prototype.hasOwnProperty.call(out, k)){
+          if (!Array.isArray(out[k])) out[k] = [out[k]];
+          out[k].push(normalized);
         } else {
-          out[k] = v;
+          out[k] = normalized;
+        }
+      }
+
+      // Stabilize arrays (order-independent).
+      for (const k of Object.keys(out)){
+        if (Array.isArray(out[k])){
+          out[k] = out[k].map(x => String(x)).sort();
         }
       }
       // Ensure known boolean fields are present even if unchecked (not in FormData)
@@ -1249,7 +1282,7 @@
       return JSON.stringify(stable);
     }
 
-    const savedSnapshot = serializeForm();
+    let savedSnapshot = serializeForm();
 
     function setViewButtonsEnabled(enabled){
       for (const b of viewBtns){
@@ -1305,6 +1338,28 @@
       c.addEventListener('input', scheduleUpdate);
       c.addEventListener('change', scheduleUpdate);
     });
+
+    // Also attach delegated listeners on the form so dynamically inserted/updated
+    // controls (and some browser edge cases) still trigger dirty-state updates.
+    try {
+      form.addEventListener('input', scheduleUpdate, true);
+      form.addEventListener('change', scheduleUpdate, true);
+    } catch (e) { /* ignore */ }
+
+    // Some controls (notably the team member assignment UI) are not native form
+    // controls; they add/remove hidden inputs programmatically. Observe DOM changes
+    // inside the form so the Save/View buttons still reflect the dirty state.
+    try {
+      const observer = new MutationObserver(function(mutations){
+        try {
+          for (const m of mutations){
+            if (m.type === 'childList') { scheduleUpdate(); return; }
+            if (m.type === 'attributes') { scheduleUpdate(); return; }
+          }
+        } catch (e) { /* ignore */ }
+      });
+      observer.observe(form, { subtree: true, childList: true, attributes: true, attributeFilter: ['value', 'checked', 'disabled', 'name'] });
+    } catch (e) { /* ignore */ }
 
     // If a save happens and the page is not reloaded, we can update the savedSnapshot to match current
     // (some code paths redirect; others may update in-place). Listen for successful submit event that
