@@ -191,12 +191,22 @@ class ServiceWeeklyAvailability(models.Model):
     def clean(self):
         if self.end_time <= self.start_time:
             raise ValidationError("end_time must be after start_time")
-
         # Validate that this service window is within the organization's weekly availability
         try:
             org = self.service.organization
         except Exception:
             org = None
+
+        if org:
+            matches = WeeklyAvailability.objects.filter(
+                organization=org,
+                weekday=self.weekday,
+                is_active=True,
+                start_time__lte=self.start_time,
+                end_time__gte=self.end_time,
+            )
+            if not matches.exists():
+                raise ValidationError("Service availability window must be within the organization's weekly availability. Update the organization's calendar to allow this time.")
 
 
 class MemberWeeklyAvailability(models.Model):
@@ -222,9 +232,13 @@ class MemberWeeklyAvailability(models.Model):
     def clean(self):
         if self.end_time <= self.start_time:
             raise ValidationError("end_time must be after start_time")
+        # Ensure membership is linked and validate against org weekly windows
+        try:
+            org = self.membership.organization
+        except Exception:
+            org = None
 
         if org:
-            # find any org weekly window that fully contains this service window
             matches = WeeklyAvailability.objects.filter(
                 organization=org,
                 weekday=self.weekday,
@@ -233,7 +247,7 @@ class MemberWeeklyAvailability(models.Model):
                 end_time__gte=self.end_time,
             )
             if not matches.exists():
-                raise ValidationError("Service availability window must be within the organization's weekly availability. Update the organization's calendar to allow this time.")
+                raise ValidationError("Member availability window must be within the organization's weekly availability. Update the organization's calendar to allow this time.")
 
 
 class ServiceSettingFreeze(models.Model):
