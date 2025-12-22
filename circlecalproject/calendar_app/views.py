@@ -1588,40 +1588,9 @@ def edit_service(request, org_slug, service_id):
             # If migrations not applied or model missing, fail silently
             pass
         service.refresh_from_db()
-        # Store a short debug payload in session so PRG redirect can display raw POST state
-        try:
-            present = 'allow_ends_after_availability' in request.POST
-            raw_val = request.POST.get('allow_ends_after_availability')
-            request.session['cc_debug_post'] = {
-                'present': bool(present),
-                'raw': raw_val,
-                'saved': bool(service.allow_ends_after_availability)
-            }
-        except Exception:
-            try:
-                request.session['cc_debug_post'] = {'error': 'failed to capture POST debug'}
-            except Exception:
-                pass
         messages.success(request, "Service updated.")
         # Post-Redirect-Get: redirect so the saved state is authoritative and URL/query params propagate
-        # Add temporary query params with debug info to surface POST/DB state immediately (safe, short-lived)
-        try:
-            from urllib.parse import urlencode
-            qs = urlencode({
-                'cc_dbg_present': int(bool(present)),
-                'cc_dbg_raw': raw_val if raw_val is not None else '',
-                'cc_dbg_saved': int(bool(service.allow_ends_after_availability))
-            })
-            return redirect(f"{request.path}?{qs}")
-        except Exception:
-            return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
-
-    # Pop any debug payload saved during the POST redirect so the template can show raw POST info
-    debug_post = None
-    try:
-        debug_post = request.session.pop('cc_debug_post', None)
-    except Exception:
-        debug_post = None
+        return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
 
     # Determine whether the slug may be edited: allow edits only when the service
     # has no real bookings (to avoid breaking existing public booking links).
@@ -1645,7 +1614,6 @@ def edit_service(request, org_slug, service_id):
         "org": org,
         "service": service,
         'needs_migration': not field_present,
-        'cc_debug_post': debug_post,
         'can_edit_slug': can_edit_slug,
         'assigned_member_ids': assigned_member_ids,
     })

@@ -75,29 +75,6 @@
     Update your service details.
   </p>
 
-  {% if cc_debug_post %}
-    <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
-      <strong>DEBUG POST:</strong>
-      <div class="text-sm mt-1">
-        {% if cc_debug_post.error %}
-          {{ cc_debug_post.error }}
-        {% else %}
-          present={{ cc_debug_post.present|yesno:'true,false' }}, raw={{ cc_debug_post.raw }}, saved={{ cc_debug_post.saved|yesno:'true,false' }}
-        {% endif %}
-      </div>
-    </div>
-  {% endif %}
-  {% if request.GET.cc_dbg_present %}
-    <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
-      <strong>DEBUG (from URL):</strong>
-      <div class="text-sm mt-1">present={{ request.GET.cc_dbg_present }}, raw={{ request.GET.cc_dbg_raw }}, saved={{ request.GET.cc_dbg_saved }}</div>
-    </div>
-  {% endif %}
-
-
-  <form method="post" class="space-y-6 cc-form">
-    {% csrf_token %}
-
     <!-- Prominent active toggle: moved to the top for visibility -->
     <div class="section-card mb-4" style="border:1px solid #2563eb;background:#f0f9ff;box-shadow:0 2px 6px rgba(37,99,235,0.06);">
       <div class="flex items-center justify-between">

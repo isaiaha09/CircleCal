@@ -23,6 +23,10 @@ def create_org_settings(sender, instance, created, **kwargs):
 @receiver(post_delete, sender=Booking)
 def send_cancellation_email(sender, instance, **kwargs):
     """Send cancellation email when booking is deleted."""
+    # Per-date overrides (service NULL) are internal schedule annotations.
+    # They should not generate customer cancellation emails.
+    if getattr(instance, 'service', None) is None:
+        return
     if instance.client_email and not instance.is_blocking:
         try:
             # Schedule sending after transaction commit to ensure deletion persisted
@@ -100,6 +104,10 @@ def booking_post_delete_audit(sender, instance, **kwargs):
     """
     def _create_audit():
         try:
+            # Per-date overrides (service NULL) are internal schedule annotations.
+            # Do not show them in the "Deleted bookings" audit trail.
+            if getattr(instance, 'service', None) is None:
+                return
             snapshot = {
                 'id': instance.id,
                 'public_ref': getattr(instance, 'public_ref', None),

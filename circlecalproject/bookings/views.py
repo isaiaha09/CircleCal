@@ -8,6 +8,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from accounts.models import Business as Organization
+from accounts.models import Membership
 from bookings.models import Service
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -667,22 +668,41 @@ def batch_create(request, org_slug):
         if e <= s:
             continue
 
-        # DON'T delete all existing overrides - allow multiple time ranges per date
-        # Only check for exact duplicate (same start/end on same date)
-        existing_duplicate = Booking.objects.filter(
+        # DON'T delete all existing overrides - allow multiple time ranges per date.
+        # Only skip exact duplicates *within the same scope* (target).
+        dup_qs = Booking.objects.filter(
             organization=org,
             start=s,
             end=e,
             service__isnull=True
-        ).exists()
+        )
+        try:
+            if target:
+                if isinstance(target, str) and target.startswith('svc:'):
+                    try:
+                        svc_id = int(str(target).split(':', 1)[1])
+                        dup_qs = dup_qs.filter(client_name=f'scope:svc:{svc_id}')
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        mid = int(target)
+                        mem = Membership.objects.filter(id=mid).first()
+                        if mem and getattr(mem, 'user', None):
+                            dup_qs = dup_qs.filter(assigned_user=mem.user)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        existing_duplicate = dup_qs.exists()
         
         if existing_duplicate:
             # Skip creating duplicate
             continue
 
-        # Optional overlap prevention for real service bookings only
-        if not bool(data.get("is_blocking", False)) and _has_overlap(org, s, e, service=None):
-            continue
+        # Per-date overrides (service NULL) are schedule annotations, not bookings.
+        # They must be allowed to overlap existing bookings.
 
         # Scope the override to the provided target (membership id or svc:<id>)
         create_kwargs = {
@@ -715,8 +735,10 @@ def batch_create(request, org_slug):
                         pass
         except Exception:
             pass
-
-        bk = Booking.objects.create(**create_kwargs)
+        try:
+            bk = Booking.objects.create(**create_kwargs)
+        except Exception as e:
+            continue
         created.append(booking_to_event(bk))
 
     return JsonResponse({'status': 'ok', 'created': created})
@@ -781,8 +803,14 @@ def batch_delete(request, org_slug):
                         pass
         except Exception:
             pass
-        deleted += qs.count()
-        qs.delete()
+        # These are per-date overrides (service NULL), not customer bookings.
+        # Use a raw delete to avoid cancellation emails / audit trail entries.
+        try:
+            deleted += qs._raw_delete(qs.db)
+        except Exception:
+            # Fallback: standard delete (may emit signals)
+            deleted += qs.count()
+            qs.delete()
 
     return JsonResponse({'status': 'ok', 'deleted': deleted})
 

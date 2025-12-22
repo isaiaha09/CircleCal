@@ -33,7 +33,6 @@
                         {% endwith %}
                     {% endfor %}
                 </select>
-                <button id="applyMemberSelectBtn" style="display:inline-block;margin-left:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--gray-200);background:var(--primary-500);color:white;cursor:pointer;vertical-align:middle;font-size:13px;">Apply</button>
                 <div style="margin-top:6px; display:flex; justify-content:center;">
                     <span id="memberScopeBadge" style="font-size:12px;color:var(--gray-600);padding:6px 10px;border-radius:999px;border:1px solid var(--gray-200);background:transparent;">Showing org defaults</span>
                 </div>
@@ -1241,7 +1240,10 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 <!-- Per-date Overrides Table - Modern Card (moved to top) -->
 <div id="overridesContainer" style="margin-top:24px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
     <h3 id="overridesHeader" class="overrides-header" style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">
-        <span class="overrides-base" style="font-weight:600;">Per-date Overrides for </span><span id="overridesHeaderMonth" class="overrides-month" style="color:var(--primary-600);"></span>
+        <span class="overrides-base" style="font-weight:600;">Per-date Overrides for </span>
+        <span id="overridesHeaderSelection" class="overrides-month" style="color:var(--primary-600); font-size:inherit;"></span>
+        <span style="color:var(--gray-600);"> in </span>
+        <span id="overridesHeaderMonth" class="overrides-month" style="color:var(--primary-600);"></span>
     </h3>
     <div id="overridesTableWrapper" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
         <table id="overridesTable" style="width:100%; border-collapse:collapse;">
@@ -1671,8 +1673,6 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 {% block extra_scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-        // Quick debug indicator to confirm the script runs
-        try { console.log('edit_coach_profile: DOMContentLoaded start'); } catch(e){}
         // Helper to read CSRF token from cookie (used by fetch calls)
         function getCookie(name) {
             let cookieValue = null;
@@ -2444,6 +2444,69 @@ document.addEventListener('DOMContentLoaded', function() {
         // Visible services after filtering by selected member
         let VISIBLE_SERVICES = [];
 
+        function getSelectedUserIdForMembership(membershipId) {
+            try {
+                const m = MEMBERS.find(mm => String(mm.id) === String(membershipId));
+                if (!m) return null;
+                const uid = (m.user__id || m.user_id || (m.user && (m.user.id || m.user.pk)) || null);
+                return uid ? Number(uid) : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function getScopePropsForSelection(selection) {
+            try {
+                if (!selection) return {};
+                if (String(selection).startsWith('svc:')) {
+                    return { assigned_scope_service_id: Number(String(selection).slice(4)) };
+                }
+                // membership selection: use assigned_user_id (user id) to match server event feed,
+                // but keep membership id as well for debugging/traceability.
+                const userId = getSelectedUserIdForMembership(selection);
+                const props = { assigned_membership_id: Number(selection) };
+                if (userId) props.assigned_user_id = Number(userId);
+                return props;
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function purgeOptimisticPerDateEvents() {
+            try {
+                if (!calendar || typeof calendar.getEvents !== 'function') return;
+                calendar.getEvents().forEach(ev => {
+                    try {
+                        const xp = ev.extendedProps || {};
+                        if (ev.display === 'background' && xp.is_per_date && xp.optimistic) {
+                            ev.remove();
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+            } catch (e) { /* ignore */ }
+        }
+
+        // Helper: return a human-friendly label for the current selection (member or service)
+        function getSelectionLabel() {
+            try {
+                if (!SELECTED_MEMBER) return 'organization defaults';
+                if (String(SELECTED_MEMBER).startsWith('svc:')) {
+                    const svcId = String(SELECTED_MEMBER).slice(4);
+                    const svc = SERVICES.find(s => String(s.id) === String(svcId));
+                    return svc ? (svc.name || svc.title || `Service ${svcId}`) : `Service ${svcId}`;
+                }
+                const m = MEMBERS.find(mm => String(mm.id) === String(SELECTED_MEMBER));
+                if (!m) return 'selected member';
+                const fname = (m.user__first_name || m.first_name || (m.user && (m.user.first_name || m.user.firstName)) || '');
+                const lname = (m.user__last_name || m.last_name || (m.user && (m.user.last_name || m.user.lastName)) || '');
+                const email = (m.user__email || m.email || (m.user && m.user.email) || '');
+                const display = (m.display_name || m.profile_display_name || m.name || '').trim();
+                const full = ((fname || lname) ? `${(fname||'').trim()} ${(lname||'').trim()}`.trim() : (email || display || 'member'));
+                if (display && display.length && display.toLowerCase() !== full.toLowerCase()) return `${full} (${display})`;
+                return full;
+            } catch (e) { return 'selected member'; }
+        }
+
         function updateVisibleServices(){
             if (!SELECTED_MEMBER){
                 VISIBLE_SERVICES = SERVICES.slice();
@@ -2511,8 +2574,36 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                 }catch(e){}
+
+                // If the stored selection is a service (svc:ID) that wasn't added by the
+                // "unassigned or multi-member" rule, ensure it still exists so reload
+                // correctly reflects the last selected service.
+                try {
+                    if (SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')) {
+                        const val = String(SELECTED_MEMBER);
+                        if (!sel.querySelector('option[value="' + val + '"]')) {
+                            const svcId = val.slice(4);
+                            const svc = SERVICES.find(s => String(s.id) === String(svcId));
+                            const opt = document.createElement('option');
+                            opt.value = val;
+                            opt.textContent = '[Service] ' + (svc ? (svc.name || ('Service ' + String(svcId))) : ('Service ' + String(svcId)));
+                            sel.appendChild(opt);
+                        }
+                        sel.value = val;
+                    }
+                } catch (e) {}
+
                 // Initialize select2 for nicer UX if available
                 try { if (window.$ && $.fn && $.fn.select2) $(sel).select2({ width: 'resolve' }); } catch(e){}
+                // Ensure Select2 reflects the stored/current selection
+                try {
+                    if (SELECTED_MEMBER) {
+                        sel.value = String(SELECTED_MEMBER);
+                        if (window.$ && $.fn && $.fn.select2) {
+                            $(sel).val(String(SELECTED_MEMBER)).trigger('change.select2');
+                        }
+                    }
+                } catch (e) {}
                 function selectDefaultAvailabilityFor(selection){
                     try{
                         if (selection && String(selection).startsWith('svc:')){
@@ -2594,6 +2685,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         SELECTED_MEMBER = selection || null;
                         if (SELECTED_MEMBER) localStorage.setItem('cc_selected_member', SELECTED_MEMBER);
                         else localStorage.removeItem('cc_selected_member');
+
+                        // Prevent optimistic per-date overrides from "carrying over" when switching
+                        // member/service: clear any locally added background events.
+                        try { purgeOptimisticPerDateEvents(); } catch (e) {}
+
                         updateVisibleServices();
                         try { selectDefaultAvailabilityFor(SELECTED_MEMBER); } catch(e){}
                         try { updateSelectionBadge(SELECTED_MEMBER); } catch(e){}
@@ -2601,24 +2697,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         try { displayDefaultAvailability(); } catch(e){}
                         try { syncAvailabilityToCalendar(); } catch(e){}
                     }catch(e){ console.warn('applySelection failed', e); }
-                    // disable apply button until next change
-                    const applyBtn = document.getElementById('applyMemberSelectBtn');
-                    if (applyBtn) {
-                        applyBtn.disabled = true;
-                        applyBtn.style.opacity = '0.6';
-                    }
                 }
-
-                // Wire the Apply button
-                try{
-                    const applyBtn = document.getElementById('applyMemberSelectBtn');
-                    if (applyBtn){
-                        applyBtn.addEventListener('click', function(ev){ ev.preventDefault(); console.log('Apply clicked, pending=', pendingSelection, 'current=', SELECTED_MEMBER); applySelection(pendingSelection || sel.value); });
-                        // start enabled to be responsive; it will be a no-op if nothing changed
-                        applyBtn.disabled = false;
-                        applyBtn.style.opacity = '1';
-                    }
-                }catch(e){}
 
                 // Initialize defaultAvailability for the current selection by applying it once
                 try { applySelection(SELECTED_MEMBER); } catch(e){}
@@ -2704,11 +2783,13 @@ document.addEventListener('DOMContentLoaded', function() {
             try { styleOverridesTable(); } catch(e) { /* ignore */ }
             try { if (typeof renderInlineBookings === 'function') renderInlineBookings(); } catch(e) { console.warn('eventsSet renderInlineBookings failed', e); }
             try {
-                const span = document.getElementById('overridesHeaderMonth');
-                if (span && calendar) {
+                const selSpan = document.getElementById('overridesHeaderSelection');
+                const monthSpan = document.getElementById('overridesHeaderMonth');
+                if (monthSpan && calendar) {
                     const currentDate = calendar.getDate ? calendar.getDate() : new Date();
                     const monthName = currentDate.toLocaleString('default', { month: 'long' });
-                    span.textContent = monthName;
+                    monthSpan.textContent = monthName;
+                    if (selSpan) selSpan.textContent = getSelectionLabel();
                 }
             } catch (e) { /* ignore */ }
         },
@@ -3592,7 +3673,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     end: dateStr + 'T23:59',
                     display: 'background',
                     color: '#e0e0e0',
-                    extendedProps: Object.assign({ is_per_date: true, override_type: 'blocked' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {}))
+                    extendedProps: Object.assign({ is_per_date: true, override_type: 'blocked', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER))
                 });
             } catch (e) { console.warn('applyPerDateUnavailable addEvent failed', e); }
 
@@ -3695,6 +3776,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     if (!ev || ev.display !== 'background') continue;
                     if (!ev.extendedProps || !ev.extendedProps.is_per_date) continue;
+                    // Only consider per-date overrides in the currently selected scope
+                    try {
+                        if (SELECTED_MEMBER) {
+                            const xp = ev.extendedProps || {};
+                            if (String(SELECTED_MEMBER).startsWith('svc:')) {
+                                const svcId = String(SELECTED_MEMBER).slice(4);
+                                const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
+                                if (!assignedSvc || String(assignedSvc) !== String(svcId)) continue;
+                            } else {
+                                const userId = getSelectedUserIdForMembership(SELECTED_MEMBER);
+                                const assignedUserId = xp.assigned_user_id || null;
+                                const assignedMembershipId = xp.assigned_membership_id || null;
+                                if (userId && assignedUserId && String(assignedUserId) !== String(userId)) continue;
+                                if (!userId && assignedMembershipId && String(assignedMembershipId) !== String(SELECTED_MEMBER)) continue;
+                            }
+                        }
+                    } catch (e) { /* ignore scope check errors */ }
                     if (!ev.start || !ev.end) continue;
                     const evDate = formatYMD(ev.start);
                     if (evDate !== dateStr) continue;
@@ -3721,6 +3819,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     if (!ev || ev.display !== 'background') continue;
                     if (!ev.extendedProps || !ev.extendedProps.is_per_date) continue;
+                    // Only include per-date overrides in the currently selected scope
+                    try {
+                        if (SELECTED_MEMBER) {
+                            const xp = ev.extendedProps || {};
+                            if (String(SELECTED_MEMBER).startsWith('svc:')) {
+                                const svcId = String(SELECTED_MEMBER).slice(4);
+                                const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
+                                if (!assignedSvc || String(assignedSvc) !== String(svcId)) continue;
+                            } else {
+                                const userId = getSelectedUserIdForMembership(SELECTED_MEMBER);
+                                const assignedUserId = xp.assigned_user_id || null;
+                                const assignedMembershipId = xp.assigned_membership_id || null;
+                                if (userId && assignedUserId && String(assignedUserId) !== String(userId)) continue;
+                                if (!userId && assignedMembershipId && String(assignedMembershipId) !== String(SELECTED_MEMBER)) continue;
+                            }
+                        }
+                    } catch (e) { /* ignore scope check errors */ }
                     if (!ev.start || !ev.end) continue;
                     const evDate = formatYMD(ev.start);
                     if (evDate !== dateStr) continue;
@@ -3927,11 +4042,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Update month label in header
         try {
-            const span = document.getElementById('overridesHeaderMonth');
-            if (span && calendar) {
+            const selSpan = document.getElementById('overridesHeaderSelection');
+            const monthSpan = document.getElementById('overridesHeaderMonth');
+            if (monthSpan && calendar) {
                 const currentDate = calendar.getDate ? calendar.getDate() : new Date();
                 const monthName = currentDate.toLocaleString('default', { month: 'long' });
-                span.textContent = monthName;
+                monthSpan.textContent = monthName;
+                if (selSpan) selSpan.textContent = getSelectionLabel();
             }
         } catch (e) { /* ignore month label errors */ }
 
@@ -4458,7 +4575,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (!res.ok) console.warn('Error creating per-date range', r, data);
                         else {
                             // On success add event (avoid transient duplicate before server cleanup)
-                            try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) }); } catch(e){}
+                            try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) }); } catch(e){}
                         }
                     } catch (err) { console.error('range create failed', err); }
                 }
@@ -5297,35 +5414,39 @@ document.addEventListener('DOMContentLoaded', function() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
             body: JSON.stringify({ dates: datesArray, target: (SELECTED_MEMBER || null) })
+        }).then(r => {
+            return r.json().catch(() => null);
+        }).then(data => {
         }).catch(err => console.warn('batch_delete pre-clean failed', err)).finally(() => {
             // Optimistically add per-date background events so they override defaults immediately
             try {
                 datesArray.forEach(d => {
                     try {
-                        calendar.addEvent({ start: d + 'T' + selectedStartTime, end: d + 'T' + selectedEndTime, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) });
+                        calendar.addEvent({ start: d + 'T' + selectedStartTime, end: d + 'T' + selectedEndTime, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) });
                     } catch (e) { /* ignore */ }
                 });
             } catch (e) { console.warn('optimistic add failed', e); }
 
+            const _payload = {
+                dates: datesArray,  // e.g. ['2025-11-10', '2025-11-11']
+                start_time: selectedStartTime,
+                end_time: selectedEndTime,
+                target: (SELECTED_MEMBER || null)
+            };
             fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': csrftoken
             },
-            body: JSON.stringify({
-                dates: datesArray,  // e.g. ['2025-11-10', '2025-11-11']
-                start_time: selectedStartTime,
-                end_time: selectedEndTime
-            })
+            body: JSON.stringify(_payload)
         })
         .then(r => r.json())
         .then(data => {
-            console.log('created', data);
             // Refresh events to reconcile with server truth (server may attach ids/changes)
             try { calendar.refetchEvents(); } catch(e) { console.warn('refetchEvents failed', e); }
         })
-        .catch(err => console.error(err));
+        .catch(err => { console.error(err); });
         });
     }
 
@@ -5500,6 +5621,48 @@ document.addEventListener('DOMContentLoaded', function() {
                                 });
                                 const data = await res.json().catch(() => null);
                                 if (res.ok) {
+                                    // Persist a default available range immediately so "Make Available" actually
+                                    // creates a per-date override (otherwise users expect availability to save
+                                    // but nothing is created until they click Save inside the editor).
+                                    let _createdStart = '09:00';
+                                    let _createdEnd = '17:00';
+                                    try {
+                                        const d = parseYMD(dates[0]);
+                                        const dow = d.getDay();
+                                        const info = defaultAvailability[dow] || {};
+                                        let start = '09:00', end = '17:00';
+                                        if (info.ranges && info.ranges.length) {
+                                            const first = info.ranges[0];
+                                            if (first && first.includes('-')) {
+                                                const parts = first.split('-');
+                                                start = (parts[0] || start).trim();
+                                                end = (parts[1] || end).trim();
+                                            }
+                                        } else if (info.start && info.end) {
+                                            start = info.start;
+                                            end = info.end;
+                                        }
+
+                                        _createdStart = start;
+                                        _createdEnd = end;
+
+                                        const createRes = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                                            body: JSON.stringify({ dates: [dates[0]], start_time: start, end_time: end, target: (SELECTED_MEMBER || null) })
+                                        });
+                                        const createData = await createRes.json().catch(() => null);
+                                        if (!createRes.ok) {
+                                            const msg = (createData && (createData.error || createData.message)) || `Server returned ${createRes.status}`;
+                                            alert('Error making available: ' + msg);
+                                            return;
+                                        }
+                                    } catch (e) {
+                                        console.warn('makeAvailable batch_create failed', e);
+                                        alert('Error making available (create step failed).');
+                                        return;
+                                    }
+
                                     // Remove any full-day block for this date
                                     try {
                                         calendar.getEvents().forEach(ev => {
@@ -5513,11 +5676,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                     try {
                                         // Mark this optimistic available background as a per-date override
                                         calendar.addEvent({
-                                            start: dates[0] + 'T09:00',
-                                            end: dates[0] + 'T17:00',
+                                            start: dates[0] + 'T' + _createdStart,
+                                            end: dates[0] + 'T' + _createdEnd,
                                             display: 'background',
                                             color: '#d0f0d0',
-                                            extendedProps: { is_per_date: true, override_type: 'available' }
+                                            extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER))
                                         });
                                     } catch (e) { /* ignore */ }
 
@@ -5635,7 +5798,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                         } else if (info.start && info.end) { s = info.start; e = info.end; }
 
                                         try {
-                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) });
+                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) });
                                         } catch (ee) { /* ignore addEvent errors */ }
 
                                         // Update day cell classes immediately
@@ -5873,7 +6036,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     try {
                         // optimistic UI addition
                         dates.forEach(d => {
-                                            try { calendar.addEvent({ start: d + 'T' + r.start, end: d + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) }); } catch(e) {}
+                                            try { calendar.addEvent({ start: d + 'T' + r.start, end: d + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) }); } catch(e) {}
                         });
 
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
