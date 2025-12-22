@@ -1,0 +1,95 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Accept Invitation{% endblock %}
+
+{% block content %}
+<style>
+/* Reuse login page look-and-feel */
+.invite-container { display:grid; place-items:center; padding:40px 20px; }
+.invite-card { width:100%; max-width:460px; background:#fff; border-radius:14px; box-shadow:0 18px 44px rgba(2,6,23,0.12); border:1px solid #e6eef8; overflow:hidden; }
+.invite-header { padding:22px 22px 0 22px; text-align:center; }
+.invite-title { margin:0; font-size:22px; font-weight:700; color:#1f2937; }
+.invite-sub { margin:6px 0 0 0; color:#64748b; }
+.invite-body { padding:20px; }
+.field { margin-bottom:14px; }
+label { display:block; margin-bottom:8px; font-weight:600; }
+/* Make inputs visually distinct from the card background */
+.invite-body input,
+.invite-body input[readonly],
+.invite-body input[type="password"] {
+    width:100%;
+    padding:12px 14px;
+    border-radius:10px;
+    border:1px solid #3b82f6; /* blue border */
+    background:#eef6ff; /* faded blue/grey */
+    color:#0b5ed7; /* blue text */
+    font-size:15px;
+    box-shadow: 0 1px 0 rgba(16,24,40,0.02) inset;
+}
+.invite-body input[readonly] { background:#eef6ff; }
+.btn { display:block; width:100%; position:relative; background:#4f46e5; color:#ffffff; padding:12px 16px; border-radius:10px; border:none; font-weight:700; overflow:hidden; text-align:center; transition: background-color 150ms ease, transform 60ms ease; }
+.btn:hover { background:#4338ca; }
+.btn:active { transform: translateY(1px); }
+.alt { margin-top:8px; color:#64748b; font-size:13px; }
+</style>
+
+<div class="invite-container">
+    <div class="invite-card">
+        <div class="invite-header">
+            <h2 class="invite-title">You're invited to join <strong>{{ org.name }}</strong></h2>
+            <p class="invite-sub">This form is for staff & managers only. Invited email: <strong>{{ invite_email }}</strong></p>
+        </div>
+        <div class="invite-body">
+            <form method="post" novalidate>
+                {% csrf_token %}
+                <div class="field">
+                    <label>Email</label>
+                    <input type="email" name="email" value="{{ invite_email }}" readonly style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8;">
+                </div>
+
+                <div class="field">
+                    {{ form.password1.label_tag }}
+                    {{ form.password1 }}
+                    {% if form.password1.errors %}
+                        <div style="color:#dc2626">{{ form.password1.errors }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="field">
+                    {{ form.password2.label_tag }}
+                    {{ form.password2 }}
+                    {% if form.password2.errors %}
+                        <div style="color:#dc2626">{{ form.password2.errors }}</div>
+                    {% endif %}
+                </div>
+
+                <div style="margin-top:6px;color:#64748b;font-size:13px;">After creating your account you'll be redirected to the staff login page to sign in.</div>
+                <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+                    <button type="submit" class="btn" id="cc-create-btn"><span>Create account</span></button>
+                </div>
+            </form>
+
+            {% if existing_user %}
+                <div style="margin-top:18px;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e6eef8;">
+                    <p style="margin:0;font-weight:600;color:#0f172a;">It looks like you already have an account with this email.</p>
+                    <p style="margin:6px 0 0;color:#475569;">Sign in to accept the invitation.</p>
+                    <p style="margin-top:10px;"><a href="{% url 'accounts:login_staff' %}?pending_invite={{ invite_token }}" class="btn" style="background:#0ea5e9;">Sign in</a></p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+<script>
+// Trigger the button fill animation after a short delay so it expands left→right
+document.addEventListener('DOMContentLoaded', function(){
+    try{
+        var btn = document.getElementById('cc-create-btn');
+        if(btn){
+            // small timeout to allow paint
+            setTimeout(function(){ btn.classList.add('animate'); }, 180);
+        }
+    }catch(e){/* ignore */}
+});
+</script>

@@ -18,6 +18,7 @@ class Profile(models.Model):
 
     avatar = models.ImageField(upload_to=_profile_upload_to, storage=OverwriteStorage(), blank=True, null=True)
     timezone = models.CharField(max_length=63, default='UTC', help_text="User's timezone (e.g., America/Los_Angeles)")
+    display_name = models.CharField(max_length=255, blank=True, null=True, help_text='Optional display name used for client-facing messages')
     email_alerts = models.BooleanField(default=True)
     booking_reminders = models.BooleanField(default=True)
     # Add more fields as needed
@@ -97,3 +98,39 @@ class LoginActivity(models.Model):
 
     def __str__(self):
         return f"Login by {self.user} at {self.timestamp:%Y-%m-%d %H:%M:%S}"
+
+
+class Team(models.Model):
+    """A logical grouping of staff/manager users within a Business.
+
+    Teams can be used to assign shared schedules and bookings to groups
+    of staff (duos, small teams) or individual staff members.
+    """
+    organization = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="teams")
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('organization', 'slug')
+
+    def __str__(self):
+        return f"{self.name} @ {self.organization.name}"
+
+
+class TeamMembership(models.Model):
+    ROLE_CHOICES = (
+        ('member', 'Member'),
+        ('lead', 'Lead'),
+    )
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='memberships')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='team_memberships')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('team', 'user')
+
+    def __str__(self):
+        return f"{self.user} in {self.team} ({self.role})"

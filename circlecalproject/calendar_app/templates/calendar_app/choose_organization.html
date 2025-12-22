@@ -112,10 +112,12 @@
 
                         <div class="org-name">{{ org.name }}</div>
 
-                        {% if org.memberships.all %}
-                            {% for m in org.memberships.all %}
-                                {% if m.user == request.user %}
-                                    <span class="org-role">{{ m.role|title }}</span>
+                        {% if org.members.all %}
+                            {% for m in org.members.all %}
+                                {% if m.is_active %}
+                                    {% if m.user == request.user %}
+                                        <span class="org-role">{{ m.role|title }}</span>
+                                    {% endif %}
                                 {% endif %}
                             {% endfor %}
                         {% endif %}

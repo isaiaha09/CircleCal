@@ -1,0 +1,9 @@
+{{ org.name }} invited you to join CircleCal
+
+You've been invited to join {{ org.name }} on CircleCal as {{ role }}.
+
+Accept the invitation:
+
+{{ accept_url }}
+
+If you didn't expect this, ignore this email.

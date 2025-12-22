@@ -1,9 +1,181 @@
-{% extends "calendar_app/base.html" %}
-{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Book 60 minutes – beisbol</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-{% block title %}Book {{ service.name }} – {{ org.name }}{% endblock %}
+    
+    <!-- Tailwind CDN (optional, remove if you prefer custom CSS) -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-{% block content %}
+        <style>
+                /* Two-factor specific styles: make token input visible and increase spacing */
+                .twofactor-page input[type="text"],
+                .twofactor-page input[type="tel"],
+                .twofactor-page input[type="password"] {
+                    border: 2px solid rgba(55,65,81,0.15); /* slightly stronger than default */
+                    box-shadow: none;
+                    padding: 0.5rem 0.75rem;
+                    border-radius: 0.375rem;
+                }
+
+                .twofactor-page label.token-label {
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    font-weight: 600;
+                    color: rgba(17,24,39,0.9);
+                }
+
+                .twofactor-page .twofactor-instructions p {
+                    margin-top: 0.75rem;
+                    margin-bottom: 0.75rem;
+                    line-height: 1.5;
+                }
+
+                .twofactor-page .secret-value {
+                    background: #f8fafc;
+                    padding: 0.5rem 0.75rem;
+                    border: 1px dashed rgba(55,65,81,0.12);
+                    border-radius: 0.375rem;
+                    display: inline-block;
+                    margin-top: 0.5rem;
+                }
+
+                /* Disable action: make links/buttons reading 'Disable' more prominent */
+                .twofactor-disable-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 0.5rem 0.9rem;
+                    border-radius: 0.5rem;
+                    background: #ef4444; /* red-500 */
+                    color: #ffffff;
+                    text-decoration: none;
+                    border: none;
+                    font-weight: 600;
+                    box-shadow: 0 6px 18px rgba(239,68,68,0.08);
+                }
+                .twofactor-disable-btn:hover { background: #dc2626; }
+                @media (max-width:640px) {
+                    .twofactor-disable-btn { width:100%; justify-content:center; }
+                }
+
+                /* Extra spacing for pages where 2FA is being disabled */
+                .twofactor-disable-page {
+                    padding: 2.25rem; /* larger container padding for clarity */
+                }
+                @media (max-width:640px) {
+                    .twofactor-disable-page { padding: 1.25rem; }
+                }
+
+                /* Make the numeric generator/token input clearly visible (not blend into white) */
+                .twofactor-page input#id_generator-token,
+                .twofactor-page input[name="generator-token"] {
+                    background: #ffffff; /* ensure pure white to contrast card */
+                    border: 2px solid #cbd5e1; /* gray-300 */
+                    padding: 0.375rem 0.75rem; /* slightly shorter vertically */
+                    border-radius: 0.375rem;
+                    box-shadow: inset 0 1px 2px rgba(2,6,23,0.04);
+                    font-size: 1rem;
+                    color: #0f172a;
+                    display: inline-block;
+                    width: 68%; /* a bit wider but leave room for actions */
+                    max-width: 520px;
+                    margin-right: 0.75rem; /* spacing if button sits inline */
+                    margin-bottom: 0.75rem; /* spacing if stacked */
+                    line-height: 1.4;
+                }
+
+                .twofactor-page input#id_generator-token:focus,
+                .twofactor-page input[name="generator-token"]:focus {
+                    outline: none;
+                    border-color: #3b82f6; /* blue-500 */
+                    box-shadow: 0 0 0 4px rgba(59,130,246,0.12);
+                }
+
+            /* Scoped styles for two-factor pages to make token fields clearer */
+            .twofactor-page .cc-2fa-token,
+            .twofactor-page .cc-2fa-token pre,
+            .twofactor-page .cc-2fa-token textarea,
+            .twofactor-page .cc-2fa-token input[type="text"],
+            .twofactor-page pre,
+            .twofactor-page code,
+            .twofactor-page .token-field,
+            .twofactor-page input[type="text"] {
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Helvetica Neue', monospace;
+                background: #f8fafc; /* light */
+                border: 1px solid #cbd5e1; /* gray-300 */
+                padding: 12px 14px;
+                border-radius: 8px;
+                font-size: 0.95rem;
+                color: #0f172a;
+                width: 100%;
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+                white-space: pre-wrap;
+                word-break: break-word;
+            }
+            .twofactor-page .cc-2fa-token + .cc-2fa-actions { margin-top: 8px; }
+            .twofactor-page .cc-2fa-actions .btn-copy { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; border:1px solid #e2e8f0; background:#fff; color:#0f172a; }
+            .twofactor-page .cc-2fa-help { font-size:0.92rem; color:#475569; margin-top:8px; }
+            /* Add more vertical spacing for paragraphs and list items inside two-factor card */
+            .twofactor-page p,
+            .twofactor-page li,
+            .twofactor-page .help-text {
+                margin-bottom: 0.9rem;
+                line-height: 1.5;
+            }
+            /* Make token label and input stand out */
+            .twofactor-page label[for*="token"], .twofactor-page .token-label {
+                display:block; font-weight:600; margin-bottom:6px; color:#0f172a;
+            }
+        </style>
+
+    
+</head>
+
+<body class="bg-blue-50  text-gray-900">
+
+    <header class="bg-white border-b shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <!-- Left: Logo -->
+                <a href="/" class="font-bold text-xl text-blue-600">
+                    CircleCal
+                </a>
+
+                <!-- Mobile Menu Button -->
+                <button id="mobileMenuBtn" class="md:hidden text-gray-700 focus:outline-none">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+
+                <!-- Desktop Navigation -->
+                
+                <nav class="hidden md:flex items-center space-x-4">
+                    <a href="/accounts/login/" class="text-gray-700 hover:text-blue-600">Login</a>
+                    <a href="/accounts/reactivate/" class="text-gray-700 hover:text-blue-600">Reactivate</a>
+                    <a href="/signup/" class="text-blue-600 font-semibold">Sign Up</a>
+                </nav>
+                
+            </div>
+
+            <!-- Mobile Navigation Dropdown -->
+            <div id="mobileMenu" class="hidden md:hidden mt-4 pb-4 border-t pt-4 space-y-3">
+                
+                    <a href="/accounts/login/" class="block text-gray-700 hover:text-blue-600 py-2">Login</a>
+                    <a href="/accounts/reactivate/" class="block text-gray-700 hover:text-blue-600 py-2">Reactivate</a>
+                    <a href="/signup/" class="block text-blue-600 font-semibold py-2">Sign Up</a>
+                
+            </div>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <main class="max-w-6xl mx-auto px-4 py-6 md:p-6">
+        
+        
 <style>
   .calendar-container { position: relative; max-width: 900px; margin: 20px auto; background: #fafafa; border-radius: 12px; padding: 8px; }
   @media (min-width: 768px) {
@@ -190,34 +362,32 @@
 
 <div class="calendar-container" style="position:relative;">
   
-  {% if trialing_active %}
+  
     <div class="mb-4 p-3 rounded-md bg-amber-50 border-l-4 border-amber-400 text-amber-800" role="status" aria-live="polite">
       <span style="font-size:1.2rem; margin-right:8px;">⚠️</span>
       <span style="font-weight:600;">Trial:</span>
       <span style="margin-left:8px;">The current owner of this business is on a trial run which is why there is only a limited amount of days available to book. Once the trial is over or when the user subscribes, the availability will open up for future days/months.</span>
     </div>
-  {% endif %}
+  
   <div class="month-nav" style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:8px;">
     <button id="prevMonthBtn" class="px-2 md:px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm md:text-base">Prev</button>
     <h1 class="month-header flex-1" id="monthHeader" style="font-size: clamp(1rem, 4vw, 1.7rem);"></h1>
     <button id="nextMonthBtn" class="px-2 md:px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm md:text-base">Next</button>
   </div>
 
-  {% if services or service %}
+  
     <div class="service-dropdown-row" style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:18px; position:relative; z-index:20;">
       <label for="mainServiceSelect" class="font-medium text-gray-700">Service:</label>
       <select id="mainServiceSelect" class="px-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-        {% if services %}
-          {% for s in services %}
-            <option value="{{ s.slug }}" data-assigned-names="{{ s.assigned_names|default:''|escapejs }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
-          {% endfor %}
-        {% else %}
-          <option value="{{ service.slug }}" data-assigned-names="{{ service.assigned_names|default:''|escapejs }}" selected>{{ service.name }}</option>
-        {% endif %}
+        
+          
+            <option value="60-minutes" selected>60 minutes</option>
+          
+        
       </select>
       <span id="serviceInfoIcon" class="ml-2 cursor-pointer" style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#e0e7ff; color:#374151; font-size:18px; border:1px solid #c7d2fe;" title="View service details">&#9432;</span>
     </div>
-  {% endif %}
+  
 
   <div class="weekday-row" id="weekdayRow">
     <div class="weekday-cell">sun</div>
@@ -232,11 +402,9 @@
 
   <div id="mainServiceDetails" class="service-details-fade">
     <div id="mainSvcTitle" class="modal-title" style="margin-bottom:6px;"></div>
-    <div><strong>With:</strong> <span id="mainSvcTeam"></span></div>
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
-    <div><strong>Team:</strong> <span id="mainSvcTeam"></span></div>
     <div><strong>Refunds:</strong>
       <span id="mainSvcRefundLine"></span>
       <div id="mainSvcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
@@ -245,157 +413,116 @@
 </div>
 
 <!-- TIME MODAL -->
-  <script>
-  // Build SERVICE_MAP for info box (outside DOMContentLoaded for global access)
-  const SERVICE_MAP = {};
-  {% for s in services %}
-    SERVICE_MAP["{{ s.slug }}"] = {
-      name: "{{ s.name|escapejs }}",
-      description: "{{ s.description|default:""|escapejs }}",
-      duration: {{ s.duration|default:0 }},
-      price: {{ s.price|default:0 }},
-      assigned_names: "{{ s.assigned_names|default:''|escapejs }}",
-      refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
-      refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
-      refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
-      buffer_after: {{ s.buffer_after|default:0 }},
-      allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
-      time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
-      use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
-      allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
-      weekly_ranges: []
-    };
-  {% endfor %}
+  
+<script>
+if (typeof window.SERVICE_MAP === 'undefined') {
+  window.SERVICE_MAP = {};
+  
+  window.SERVICE_MAP["60-minutes"] = {
+    name: "60 minutes",
+    description: "60 minutes gang",
+    duration: 60,
+    price: 50.00,
+    refunds_allowed: true,
+    refund_cutoff_hours: 24,
+    refund_policy_text: "",
+    buffer_after: 0,
+    allow_ends_after_availability: true,
+    time_increment_minutes: 30,
+    use_fixed_increment: true,
+    allow_squished_bookings: false,
+    weekly_ranges: []
+  };
+  
 
-  // Per-service weekly ranges provided from the backend as JSON
-  const SERVICE_WEEKLY_MAP = {{ service_weekly_map_json|safe }} || {};
-  // Attach weekly ranges to SERVICE_MAP entries
-  Object.keys(SERVICE_WEEKLY_MAP).forEach(function(slug) {
-    if (SERVICE_MAP[slug]) {
-      SERVICE_MAP[slug].weekly_ranges = SERVICE_WEEKLY_MAP[slug];
+  // Weekly ranges provided from backend
+  window.SERVICE_WEEKLY_MAP = {"60-minutes": [[], [], [], [], [], [], []]} || {};
+  Object.keys(window.SERVICE_WEEKLY_MAP).forEach(function(slug){
+    if (window.SERVICE_MAP[slug]) {
+      window.SERVICE_MAP[slug].weekly_ranges = window.SERVICE_WEEKLY_MAP[slug];
     }
   });
+}
+</script>
 
-  document.addEventListener("DOMContentLoaded", function () {
-    // Info box elements
-    const mainServiceSelect = document.getElementById("mainServiceSelect");
-    const mainServiceDetails = document.getElementById("mainServiceDetails");
-    const mainSvcDesc = document.getElementById("mainSvcDesc");
-    const mainSvcDuration = document.getElementById("mainSvcDuration");
-    const mainSvcPrice = document.getElementById("mainSvcPrice");
-    const mainSvcRefundLine = document.getElementById("mainSvcRefundLine");
-    const mainSvcRefundText = document.getElementById("mainSvcRefundText");
-    const serviceInfoIcon = document.getElementById("serviceInfoIcon");
+  
+<script>
+if (!window.__cc_service_helpers_loaded) {
+  window.__cc_service_helpers_loaded = true;
 
+  (function(){
     function updateMainServiceDetails(slug) {
-      const d = SERVICE_MAP[slug];
+      const d = (window.SERVICE_MAP || {})[slug];
       if (!d) return;
-      const mainSvcTitle = document.getElementById('mainSvcTitle');
-      if (mainSvcTitle) mainSvcTitle.textContent = d.name;
-      mainSvcDesc.textContent = d.description || "—";
-      mainSvcDuration.textContent = d.duration || 0;
-      mainSvcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
-      // Populate assigned team members (read from the select option dataset when present)
-      try {
-        const mainSvcTeamEl = document.getElementById('mainSvcTeam');
-        const opt = mainServiceSelect && mainServiceSelect.options ? mainServiceSelect.options[mainServiceSelect.selectedIndex] : null;
-        const assigned = (opt && opt.dataset && opt.dataset.assignedNames) ? opt.dataset.assignedNames : (d.assigned_names || '');
-        if (mainSvcTeamEl) mainSvcTeamEl.textContent = assigned || '—';
-      } catch (err) { /* ignore */ }
-      if (d.refunds_allowed) {
-        mainSvcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
-        if (d.refund_policy_text) {
-          mainSvcRefundText.style.display = '';
-          mainSvcRefundText.textContent = d.refund_policy_text;
-        } else {
-          mainSvcRefundText.style.display = 'none';
-          mainSvcRefundText.textContent = '';
-        }
-      } else {
-        mainSvcRefundLine.textContent = 'Refunds are not permitted for this service.';
-        mainSvcRefundText.style.display = 'none';
-        mainSvcRefundText.textContent = '';
+      const mainSvcTitle = document.getElementById('mainSvcTitle'); if (mainSvcTitle) mainSvcTitle.textContent = d.name;
+      const mainSvcDesc = document.getElementById('mainSvcDesc'); if (mainSvcDesc) mainSvcDesc.textContent = d.description || '—';
+      const mainSvcDuration = document.getElementById('mainSvcDuration'); if (mainSvcDuration) mainSvcDuration.textContent = d.duration || 0;
+      const mainSvcPrice = document.getElementById('mainSvcPrice'); if (mainSvcPrice) mainSvcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+      const mainSvcRefundLine = document.getElementById('mainSvcRefundLine'); if (mainSvcRefundLine) {
+        if (d.refunds_allowed) mainSvcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
+        else mainSvcRefundLine.textContent = 'Refunds are not permitted for this service.';
       }
-      // Show weekly offered days/times
-      const weekly = SERVICE_MAP[slug] && SERVICE_MAP[slug].weekly_ranges ? SERVICE_MAP[slug].weekly_ranges : (SERVICE_WEEKLY_MAP[slug] || []);
+      const mainSvcRefundText = document.getElementById('mainSvcRefundText'); if (mainSvcRefundText) {
+        if (d.refund_policy_text) { mainSvcRefundText.style.display=''; mainSvcRefundText.textContent = d.refund_policy_text; }
+        else { mainSvcRefundText.style.display='none'; mainSvcRefundText.textContent = ''; }
+      }
+      // weekly offered days
       try {
+        const weekly = (d && d.weekly_ranges) ? d.weekly_ranges : (window.SERVICE_WEEKLY_MAP && window.SERVICE_WEEKLY_MAP[slug]) || [];
         const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const offered = [];
         for (let i=0;i<7;i++){
           const ranges = weekly[i] || [];
-          if (ranges.length>0){
-            offered.push(`${dayLabels[i]} ${ranges.join(',')}`);
-          }
+          if (ranges.length>0) offered.push(`${dayLabels[i]} ${ranges.join(',')}`);
         }
-        // Only show weekly offered days if there are specific ranges configured
+        const existing = document.getElementById('mainSvcOffered');
         if (offered.length > 0) {
           const offeredLine = offered.join('; ');
-          const extra = document.getElementById('mainSvcOffered');
-          if (extra) { extra.textContent = offeredLine; }
+          if (existing) existing.textContent = offeredLine;
           else {
-            const div = document.createElement('div');
-            div.id = 'mainSvcOffered';
-            div.style.marginTop='8px';
-            div.textContent = offeredLine;
-            mainSvcRefundText.parentNode.appendChild(div);
+            const div = document.createElement('div'); div.id='mainSvcOffered'; div.style.marginTop='8px'; div.textContent = offeredLine;
+            const parent = document.getElementById('mainSvcRefundText'); if (parent && parent.parentNode) parent.parentNode.appendChild(div);
           }
-        } else {
-          // remove any previously shown element
-          const existing = document.getElementById('mainSvcOffered'); if (existing) existing.remove();
-        }
-      } catch (e){ /* ignore UI failures */ }
-      // (Client-facing info intentionally omits buffer/increment/fixed details)
+        } else if (existing) { existing.remove(); }
+      } catch (e) { /* no-op */ }
     }
 
-    // Show/hide info box on icon hover or click
-    let infoVisible = false;
-    function showInfoBox() {
-      updateMainServiceDetails(mainServiceSelect.value);
-      mainServiceDetails.style.display = '';
-      mainServiceDetails.classList.add('visible');
-      infoVisible = true;
-    }
-    function hideInfoBox() {
-      mainServiceDetails.style.display = 'none';
-      mainServiceDetails.classList.remove('visible');
-      infoVisible = false;
-    }
-    serviceInfoIcon.addEventListener('mouseenter', showInfoBox);
-    serviceInfoIcon.addEventListener('mouseleave', hideInfoBox);
-    serviceInfoIcon.addEventListener('click', function () {
-      if (infoVisible) {
-        hideInfoBox();
-      } else {
-        showInfoBox();
+    document.addEventListener('DOMContentLoaded', function(){
+      const mainServiceSelect = document.getElementById('mainServiceSelect');
+      const serviceInfoIcon = document.getElementById('serviceInfoIcon');
+      const mainServiceDetails = document.getElementById('mainServiceDetails');
+      if (!mainServiceSelect) return; // nothing to wire on pages without a selector
+
+      let infoVisible = false;
+      function showInfoBox(){ updateMainServiceDetails(mainServiceSelect.value); if (mainServiceDetails) { mainServiceDetails.style.display=''; mainServiceDetails.classList.add('visible'); } infoVisible=true; }
+      function hideInfoBox(){ if (mainServiceDetails) { mainServiceDetails.style.display='none'; mainServiceDetails.classList.remove('visible'); } infoVisible=false; }
+
+      if (serviceInfoIcon) {
+        serviceInfoIcon.addEventListener('mouseenter', showInfoBox);
+        serviceInfoIcon.addEventListener('mouseleave', hideInfoBox);
+        serviceInfoIcon.addEventListener('click', function(){ if (infoVisible) hideInfoBox(); else showInfoBox(); });
       }
-    });
 
-    // Update info box when dropdown changes
-    if (mainServiceSelect) {
-      mainServiceSelect.addEventListener('change', function (e) {
+      mainServiceSelect.addEventListener('change', function(e){
         updateMainServiceDetails(e.target.value);
-        if (infoVisible) {
-          mainServiceDetails.style.display = '';
-          mainServiceDetails.classList.add('visible');
-        } else {
-          mainServiceDetails.style.display = 'none';
-          mainServiceDetails.classList.remove('visible');
-        }
-        // Also update calendar to use new service
+        if (infoVisible && mainServiceDetails) { mainServiceDetails.style.display=''; mainServiceDetails.classList.add('visible'); }
+        else if (mainServiceDetails) { mainServiceDetails.style.display='none'; mainServiceDetails.classList.remove('visible'); }
         window.selectedServiceSlug = e.target.value;
-        if (typeof generateCalendar === 'function') {
-          generateCalendar(currentMonth, currentYear);
+        if (typeof window.generateCalendar === 'function') {
+          try { window.generateCalendar(window.currentMonth, window.currentYear); } catch (e) { /* ignore */ }
         }
       });
-      // Initial details
+
+      // initial state
       updateMainServiceDetails(mainServiceSelect.value);
       window.selectedServiceSlug = mainServiceSelect.value;
-      mainServiceDetails.style.display = 'none';
-      mainServiceDetails.classList.remove('visible');
-      infoVisible = false;
-    }
-  });
-  </script>
+      if (mainServiceDetails) { mainServiceDetails.style.display='none'; mainServiceDetails.classList.remove('visible'); }
+      infoVisible=false;
+    });
+  })();
+}
+</script>
+
 <div id="timeModal">
   <!-- Modal View 1: Time Slots -->
   <div class="modal-box" id="timeModalViewSlots">
@@ -410,52 +537,45 @@
     <h3 id="selectedDateTimeLabel" class="modal-title text-gray-900"></h3>
 
     <form method="POST" action="">
-      {% csrf_token %}
+      <input type="hidden" name="csrfmiddlewaretoken" value="UmpHH6ynz7Hv9YOxkzPVILFS5jA5aOTVp7uVtXHwU7J4quYj6KUtxspmPXLi8Zrt">
       <input type="hidden" name="start" id="startInput">
       <input type="hidden" name="end" id="endInput">
-      <input type="hidden" name="reschedule_source" id="rescheduleSourceInput" value="{{ reschedule_source|default:'' }}">
-      <input type="hidden" name="reschedule_token" id="rescheduleTokenInput" value="{{ reschedule_token|default:'' }}">
+      <input type="hidden" name="reschedule_source" id="rescheduleSourceInput" value="">
+      <input type="hidden" name="reschedule_token" id="rescheduleTokenInput" value="">
 
       <label class="block text-sm text-gray-700 mb-1">Select service</label>
       <select id="serviceSelect" name="service_slug" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-        {% if services %}
-          {% for s in services %}
-            <option value="{{ s.slug }}" data-assigned-names="{{ s.assigned_names|default:''|escapejs }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
-          {% endfor %}
-        {% else %}
-          <option value="{{ service.slug }}" data-assigned-names="{{ service.assigned_names|default:''|escapejs }}" selected>{{ service.name }}</option>
-        {% endif %}
+        
+          
+            <option value="60-minutes" selected>60 minutes</option>
+          
+        
       </select>
 
       <!-- Service details preview -->
       <div id="serviceDetails" class="mb-4 p-3 rounded border border-gray-200 bg-gray-50 text-sm">
-        <div><strong>Name:</strong> <span id="svcName">{{ service.name }}</span></div>
-        <div><strong>With:</strong> <span id="svcTeam"></span></div>
-        <div><strong>Description:</strong> <span id="svcDesc">{{ service.description|default:"—" }}</span></div>
-        <div><strong>Duration:</strong> <span id="svcDuration">{{ service.duration }}</span> minutes</div>
-        <div><strong>Price:</strong> $<span id="svcPrice">{{ service.price }}</span></div>
+        <div><strong>Name:</strong> <span id="svcName">60 minutes</span></div>
+        <div><strong>Description:</strong> <span id="svcDesc">60 minutes gang</span></div>
+        <div><strong>Duration:</strong> <span id="svcDuration">60</span> minutes</div>
+        <div><strong>Price:</strong> $<span id="svcPrice">50.00</span></div>
         <!-- Client-facing modal intentionally omits buffer/increment/fixed/allow settings -->
         <div><strong>Refunds:</strong>
           <span id="svcRefundLine">
-            {% if service.refunds_allowed %}
-              Refunds permitted except within {{ service.refund_cutoff_hours }} hours of the appointment.
-            {% else %}
-              Refunds are not permitted for this service.
-            {% endif %}
+            
+              Refunds permitted except within 24 hours of the appointment.
+            
           </span>
-          {% if service.refunds_allowed and service.refund_policy_text %}
-            <div id="svcRefundText" class="mt-1 text-gray-600">{{ service.refund_policy_text }}</div>
-          {% else %}
+          
             <div id="svcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
-          {% endif %}
+          
         </div>
       </div>
 
       <label class="block text-sm text-gray-700 mb-1">Your name</label>
-      <input type="text" name="client_name" required value="{{ prefill_client_name|default:'' }}" class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="John Doe">
+      <input type="text" name="client_name" required value="" class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="John Doe">
 
       <label class="block text-sm text-gray-700 mb-1">Email</label>
-      <input type="email" name="client_email" required value="{{ prefill_client_email|default:'' }}" class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
+      <input type="email" name="client_email" required value="" class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
 
       <div class="modal-actions">
         <button type="button" id="backToSlotsBtn" class="px-4 py-2 text-sm md:text-base rounded border border-gray-300 text-gray-700 hover:bg-gray-100 flex-1 md:flex-none">Back</button>
@@ -542,7 +662,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     const monthStart = new Date(year, month, 1, 0, 0, 0);
     const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
     const cacheBuster = `&_t=${Date.now()}`;
-    const batchUrl = "{% url 'bookings:batch_availability_summary' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(monthStart))}&end=${encodeURIComponent(toIsoLocal(monthEnd))}${cacheBuster}`;
+    const batchUrl = "/bus/beisbol/services/SERVICE_SLUG/availability/batch/".replace('SERVICE_SLUG', window.selectedServiceSlug || '60-minutes') + `?start=${encodeURIComponent(toIsoLocal(monthStart))}&end=${encodeURIComponent(toIsoLocal(monthEnd))}${cacheBuster}`;
     
     dayHasSlots = {};
     try {
@@ -556,9 +676,9 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     // Prefetch server-effective settings for this service/date so month rendering
     // and the per-day detailed calls use the same (saved) increment/fixed flags.
-    let svcForLoop = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+    let svcForLoop = SERVICE_MAP[window.selectedServiceSlug || '60-minutes'] || {};
     try {
-      const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + '?date=' + encodeURIComponent(toIsoLocal(monthStart).split('T')[0]);
+      const effUrl = "/bus/beisbol/services/SERVICE_SLUG/effective/".replace('SERVICE_SLUG', window.selectedServiceSlug || '60-minutes') + '?date=' + encodeURIComponent(toIsoLocal(monthStart).split('T')[0]);
       const effResp = await fetch(effUrl);
       if (effResp.ok) {
         const eff = await effResp.json();
@@ -633,7 +753,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           // Edge buffer behavior should only be controlled via explicit local override.
           return 0;
         }
-        const edgeVal = getEdgeBuffersForService(window.selectedServiceSlug || '{{ service.slug }}');
+        const edgeVal = getEdgeBuffersForService(window.selectedServiceSlug || '60-minutes');
         // If the service is configured to use fixed increments, do NOT force an `inc` param
         // so the server can apply duration+buffer spacing. Otherwise include the preview tick.
         // use `svcForLoop` prefetched above (may contain server effective settings)
@@ -644,7 +764,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           incQuery = `&inc=${incVal}`;
         }
         
-        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
+        const availUrl = "/bus/beisbol/services/SERVICE_SLUG/availability/".replace('SERVICE_SLUG', window.selectedServiceSlug || '60-minutes') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
         fetches.push(
           fetch(availUrl)
             .then(r => r.ok ? r.json() : [])
@@ -776,8 +896,8 @@ document.addEventListener("DOMContentLoaded", async function () {
       let previewIncrement = 30;
       let eff = null; // effective settings from server
       try {
-        const svcSlugLocal = window.selectedServiceSlug || '{{ service.slug }}';
-        const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', svcSlugLocal) + '?date=' + encodeURIComponent(toIsoLocal(rangeStartDate).split('T')[0]);
+        const svcSlugLocal = window.selectedServiceSlug || '60-minutes';
+        const effUrl = "/bus/beisbol/services/SERVICE_SLUG/effective/".replace('SERVICE_SLUG', svcSlugLocal) + '?date=' + encodeURIComponent(toIsoLocal(rangeStartDate).split('T')[0]);
         const effResp = await fetch(effUrl);
         if (effResp.ok) {
             eff = await effResp.json();
@@ -791,7 +911,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
       try {
         if (!eff) {
-          const svc = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+          const svc = SERVICE_MAP[window.selectedServiceSlug || '60-minutes'] || {};
           if (typeof svc.time_increment_minutes === 'number') previewIncrement = svc.time_increment_minutes;
           const rawPreview = localStorage.getItem('client_view_settings');
           if (rawPreview) {
@@ -801,57 +921,14 @@ document.addEventListener("DOMContentLoaded", async function () {
         }
       } catch (e) {}
 
-      // Service data map for quick client-side updates
-      const SERVICE_MAP = {
-        {% if services %}
-          {% for s in services %}
-            "{{ s.slug }}": {
-              name: "{{ s.name|escapejs }}",
-              description: "{{ s.description|default:""|escapejs }}",
-              duration: {{ s.duration|default:0 }},
-              price: {{ s.price|default:0 }},
-              refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
-              refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
-              refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
-              buffer_after: {{ s.buffer_after|default:0 }},
-              allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
-              time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
-              use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
-              allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
-            },
-          {% endfor %}
-        {% else %}
-          "{{ service.slug }}": {
-            name: "{{ service.name|escapejs }}",
-            description: "{{ service.description|default:""|escapejs }}",
-            duration: {{ service.duration|default:0 }},
-            price: {{ service.price|default:0 }},
-            refunds_allowed: {{ service.refunds_allowed|yesno:"true,false" }},
-            refund_cutoff_hours: {{ service.refund_cutoff_hours|default:0 }},
-            refund_policy_text: "{{ service.refund_policy_text|default:""|escapejs }}",
-            buffer_after: {{ service.buffer_after|default:0 }},
-            allow_ends_after_availability: {{ service.allow_ends_after_availability|yesno:"true,false" }},
-            time_increment_minutes: {{ service.time_increment_minutes|default:30 }},
-            use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }},
-            allow_squished_bookings: {{ service.allow_squished_bookings|yesno:"true,false" }},
-          },
-        {% endif %}
-      };
-
+      // Read service metadata from the shared window.SERVICE_MAP
       function updateServiceDetails(slug) {
-        const d = SERVICE_MAP[slug];
+        const d = (window.SERVICE_MAP || {})[slug];
         if (!d) return;
         svcName.textContent = d.name;
         svcDesc.textContent = d.description || "—";
         svcDuration.textContent = d.duration || 0;
         svcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
-        // Populate team members into the booking modal (reads option dataset if available)
-        try {
-          const opt = serviceSelect && serviceSelect.options ? serviceSelect.options[serviceSelect.selectedIndex] : null;
-          const assigned = (opt && opt.dataset && opt.dataset.assignedNames) ? opt.dataset.assignedNames : (d.assigned_names || '');
-          const svcTeamEl = document.getElementById('svcTeam');
-          if (svcTeamEl) svcTeamEl.textContent = assigned || '—';
-        } catch (err) { /* ignore */ }
         if (d.refunds_allowed) {
           svcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
           if (d.refund_policy_text) {
@@ -877,7 +954,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       // Include edge buffer preference (prefer server setting, allow local override)
       const edgeVal2 = (function(){
         try {
-          const raw = localStorage.getItem('edge_buffers_' + (window.selectedServiceSlug || '{{ service.slug }}'));
+          const raw = localStorage.getItem('edge_buffers_' + (window.selectedServiceSlug || '60-minutes'));
           if (raw === '1' || raw === 'true') return 1;
           if (raw === '0' || raw === 'false') return 0;
         } catch (e) {}
@@ -886,15 +963,15 @@ document.addEventListener("DOMContentLoaded", async function () {
       })();
       // If service enforces fixed increments, don't send `inc` so server uses duration+buffer
       // Determine whether server indicates use_fixed_increment; prefer eff if present
-      const svcPreview = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+      const svcPreview = SERVICE_MAP[window.selectedServiceSlug || '60-minutes'] || {};
       const useFixed = (eff && typeof eff.use_fixed_increment === 'boolean') ? eff.use_fixed_increment : !!svcPreview.use_fixed_increment;
       const previewIncQuery = (useFixed ? '' : `&inc=${previewIncrement}`);
-      const svcSlug = serviceSelect.value || window.selectedServiceSlug || '{{ service.slug }}';
+      const svcSlug = serviceSelect.value || window.selectedServiceSlug || '60-minutes';
       let allowEndsForAvail = false;
       try {
         allowEndsForAvail = (eff && typeof eff.allow_ends_after_availability === 'boolean') ? !!eff.allow_ends_after_availability : !!svcPreview.allow_ends_after_availability;
       } catch (err) { /* ignore */ }
-      const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', svcSlug) + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}${previewIncQuery}&edge_buffers=${edgeVal2}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
+      const availUrl = "/bus/beisbol/services/SERVICE_SLUG/availability/".replace('SERVICE_SLUG', svcSlug) + `?start=${encodeURIComponent(toIsoLocal(rangeStartDate))}&end=${encodeURIComponent(toIsoLocal(rangeEndDate))}${previewIncQuery}&edge_buffers=${edgeVal2}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
       
       const availResp = await fetch(availUrl);
       if (!availResp.ok) throw new Error("Failed to load availability");
@@ -1192,4 +1269,261 @@ document.addEventListener("DOMContentLoaded", async function () {
   // No service selection impacts availability at this stage; service is chosen in the booking form
 });
 </script>
-{% endblock %}
+
+    </main>
+
+        <!-- Toast container + helper: used to replace alert() with non-blocking toasts -->
+        <div id="toast-container" style="position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none"></div>
+        <script>
+            function createToastElement(type, msg) {
+                const wrap = document.createElement('div');
+                wrap.style.pointerEvents = 'auto';
+                wrap.style.display = 'flex';
+                wrap.style.alignItems = 'flex-start';
+                wrap.style.gap = '10px';
+                wrap.style.minWidth = '240px';
+                wrap.style.maxWidth = '520px';
+                wrap.style.padding = '10px 12px';
+                wrap.style.borderRadius = '10px';
+                wrap.style.boxShadow = '0 8px 28px rgba(15,23,42,0.12)';
+                wrap.style.color = '#022047';
+                wrap.style.fontSize = '13px';
+                wrap.style.lineHeight = '1.25';
+                wrap.style.opacity = '0';
+                wrap.style.transition = 'opacity 180ms ease, transform 200ms ease';
+                wrap.style.transform = 'translateY(-6px)';
+
+                // color by type
+                if (type === 'success') {
+                    wrap.style.background = '#ECFDF5';
+                    wrap.style.borderLeft = '4px solid #10B981';
+                } else if (type === 'error') {
+                    wrap.style.background = '#FEF2F2';
+                    wrap.style.borderLeft = '4px solid #EF4444';
+                } else if (type === 'warn' || type === 'warning') {
+                    wrap.style.background = '#FFFBEB';
+                    wrap.style.borderLeft = '4px solid #F59E0B';
+                } else {
+                    wrap.style.background = '#EFF6FF';
+                    wrap.style.borderLeft = '4px solid #3B82F6';
+                }
+
+                // icon
+                const icon = document.createElement('div');
+                icon.style.flex = '0 0 20px';
+                icon.style.marginTop = '2px';
+                icon.innerHTML = ({
+                    'success': '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17l-5-5" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                    'error': '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 9v4" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 17h.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0z" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                    'warning': '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="#B45309" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 9v4" stroke="#B45309" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 17h.01" stroke="#B45309" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                    'info': '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 16h-1v-4h-1" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8h.01" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="#2563EB" stroke-width="2"/></svg>'
+                })[type === 'warn' ? 'warning' : (type in {success:1,error:1,warning:1,info:1} ? type : 'info')];
+                wrap.appendChild(icon);
+
+                // content
+                const content = document.createElement('div');
+                content.style.flex = '1 1 auto';
+                content.style.overflow = 'hidden';
+                content.style.maxHeight = '6.5em';
+                content.style.whiteSpace = 'normal';
+                content.style.wordBreak = 'break-word';
+                const text = document.createElement('div');
+                text.textContent = msg;
+                content.appendChild(text);
+                wrap.appendChild(content);
+
+                // close button
+                const closeBtn = document.createElement('button');
+                closeBtn.setAttribute('aria-label', 'Dismiss');
+                closeBtn.style.marginLeft = '8px';
+                closeBtn.style.flex = '0 0 auto';
+                closeBtn.style.background = 'transparent';
+                closeBtn.style.border = 'none';
+                closeBtn.style.cursor = 'pointer';
+                closeBtn.style.padding = '4px';
+                closeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="#374151" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+                wrap.appendChild(closeBtn);
+
+                closeBtn.addEventListener('click', () => {
+                    try { wrap.style.opacity = '0'; wrap.style.transform = 'translateY(-6px)'; setTimeout(() => { wrap.remove(); }, 200); } catch(e){}
+                });
+
+                return wrap;
+            }
+
+            function showToast(type, msg, timeout=4200) {
+                try {
+                    const container = document.getElementById('toast-container');
+                    if (!container) return null;
+                    const el = createToastElement(type, msg);
+                    container.appendChild(el);
+                    // animate in
+                    requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'translateY(0)'; });
+                    const to = setTimeout(() => {
+                        try { el.style.opacity = '0'; el.style.transform = 'translateY(-6px)'; setTimeout(() => { try { el.remove(); } catch(e){} }, 220); } catch(e){}
+                    }, timeout);
+                    // dismiss on click of body also
+                    el.addEventListener('click', () => { clearTimeout(to); try { el.style.opacity = '0'; setTimeout(() => { el.remove(); }, 220); } catch(e){} });
+                    return el;
+                } catch (e) { console.error('showToast failed', e); }
+            }
+
+            // Override window.alert to use non-blocking toasts by default.
+            try { window.alert = function(msg){ try { showToast('info', String(msg)); } catch(e){ /* fallback suppressed */ } }; } catch(e){}
+
+        </script>
+
+        
+
+        <!-- Global loading overlay (site-wide) -->
+        <div id="global-loading-overlay" class="hidden fixed inset-0 z-50 items-center justify-center bg-black bg-opacity-30">
+            <div class="bg-white p-6 rounded-lg flex flex-col items-center shadow-lg">
+                <div class="animate-spin rounded-full border-8 border-t-8 border-gray-200 h-16 w-16 mb-4" style="border-top-color:#2563EB"></div>
+                <div class="text-gray-700">Loading…</div>
+            </div>
+        </div>
+
+        <script>
+            // Global loading overlay helpers
+            function showLoading(msg) {
+                const ov = document.getElementById('global-loading-overlay');
+                if (!ov) return;
+                try {
+                    if (msg) {
+                        const txt = ov.querySelector('div.text-gray-700');
+                        if (txt) txt.textContent = msg;
+                    }
+                } catch(e){}
+                ov.classList.remove('hidden');
+                ov.classList.add('flex');
+            }
+            function hideLoading() {
+                const ov = document.getElementById('global-loading-overlay');
+                if (!ov) return;
+                ov.classList.add('hidden');
+                ov.classList.remove('flex');
+                try { const txt = ov.querySelector('div.text-gray-700'); if (txt) txt.textContent = 'Loading…'; } catch(e){}
+            }
+            try { window.showLoading = showLoading; window.hideLoading = hideLoading; } catch(e){}
+        </script>
+
+        <!-- Loading utilities (site-wide) -->
+        <script src="/static/js/loading.js"></script>
+
+        <!-- Mobile Menu Toggle -->
+    <script>
+        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+        const mobileMenu = document.getElementById('mobileMenu');
+        if (mobileMenuBtn && mobileMenu) {
+            mobileMenuBtn.addEventListener('click', () => {
+                mobileMenu.classList.toggle('hidden');
+            });
+        }
+    </script>
+
+    <script>
+        // If we're on two-factor pages, wrap the page content in a centered card
+        (function(){
+            try{
+                const path = window.location.pathname || '';
+                if (!(path.startsWith('/two_factor') || path.indexOf('/two_factor/') !== -1 || path.indexOf('/accounts/two_factor') !== -1)) return;
+                const main = document.querySelector('main');
+                if (!main) return;
+                // Find existing messages container (leave it above the wrapper)
+                const msgs = main.querySelector('.mb-4.space-y-2');
+                // Create wrapper card
+                const card = document.createElement('div');
+                card.className = 'max-w-3xl mx-auto bg-white border border-blue-100 rounded-xl p-6 shadow-sm twofactor-page relative';
+                card.style.marginTop = '16px';
+                card.style.marginBottom = '16px';
+
+                // Move all children except messages into the card
+                const children = Array.from(main.children);
+                children.forEach(ch => {
+                    if (msgs && ch === msgs) return; // keep messages outside
+                    card.appendChild(ch);
+                });
+
+                // Remove moved children from main (they were moved by appendChild)
+                // Insert card after messages (or at start of main)
+                if (msgs && msgs.parentNode === main) {
+                    main.insertBefore(card, msgs.nextSibling);
+                } else {
+                    main.insertBefore(card, main.firstChild);
+                }
+                // Add a bottom 'Back to profile' link and enhance disable pages
+                try {
+                    const profileUrl = "/accounts/profile/";
+                    // bottom back link for mobile/stacked layouts (kept only)
+                    const bottomLink = document.createElement('div');
+                    bottomLink.className = 'mt-4';
+                    bottomLink.innerHTML = `<a href="${profileUrl}" class="text-sm text-blue-600 hover:underline">← Back to profile</a>`;
+                    card.appendChild(bottomLink);
+
+                    // Find and restyle any 'Disable' actions inside the card to be prominent buttons
+                    try {
+                        const candidates = Array.from(card.querySelectorAll('a, button, input[type="submit"], input[type="button"]'));
+                        const disableEls = candidates.filter(el => {
+                            const txt = (el.textContent || el.value || '').trim();
+                            return /\bdisable\b/i.test(txt);
+                        });
+                        if (disableEls.length > 0) {
+                            card.classList.add('twofactor-disable-page');
+                        }
+                        disableEls.forEach(el => {
+                            el.classList.add('twofactor-disable-btn');
+                            if (el.tagName.toLowerCase() === 'a') el.setAttribute('role', 'button');
+                        });
+                    } catch(e){ console.warn('twofactor: failed to style disable actions', e); }
+                } catch(e){ console.warn('failed adding profile links', e); }
+            }catch(e){ console.warn('two-factor wrapper failed', e); }
+        })();
+    </script>
+
+        
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12 py-8">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- About -->
+                <div>
+                    <h3 class="font-bold text-lg mb-3">CircleCal</h3>
+                    <p class="text-gray-600 text-sm">Your all-in-one scheduling and booking platform. Manage appointments, availability, and teams effortlessly.</p>
+                </div>
+
+                <!-- Quick Links -->
+                <div>
+                    <h3 class="font-bold text-lg mb-3">Quick Links</h3>
+                    <ul class="space-y-2 text-sm">
+                        
+                            <li><a href="/accounts/login/" class="text-gray-600 hover:text-blue-600">Login</a></li>
+                            <li><a href="/signup/" class="text-gray-600 hover:text-blue-600">Sign Up</a></li>
+                        
+                    </ul>
+                </div>
+
+                <!-- Contact -->
+                <div>
+                    <h3 class="font-bold text-lg mb-3">Contact</h3>
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li>Email: support@circlecal.com</li>
+                        <li>Phone: +1 (555) 123-4567</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Copyright -->
+            <div class="mt-8 pt-6 border-t text-center text-sm text-gray-500 space-y-2">
+                <div>
+                    Copyright &copy; 2025 CircleCal - All rights reserved.
+                </div>
+                <div class="text-xs text-gray-500">
+                    <strong>Refund Policy (CircleCal)</strong>: Bookings and payments processed through CircleCal are subject to the platform Terms of Service. Merchants may define their own refund policy per service.
+                </div>
+                
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

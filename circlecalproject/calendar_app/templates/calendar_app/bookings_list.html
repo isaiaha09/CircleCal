@@ -35,10 +35,12 @@
 </style>
 
 <div class="bookings-container">
-  <div class="bookings-header">
+    <div class="bookings-header">
     <h1 style="font-size: 2rem; font-weight: bold; margin: 0;">Bookings</h1>
     <div style="display:flex; gap:8px; align-items:center;">
-      <a href="{% url 'calendar_app:calendar' organization.slug %}" class="btn-sm btn-view">View Calendar</a>
+      {% if user_org_role != 'staff' %}
+        <a href="{% url 'calendar_app:calendar' organization.slug %}" class="btn-sm btn-view">View Calendar</a>
+      {% endif %}
       <a href="{% url 'calendar_app:dashboard' organization.slug %}" class="btn-sm btn-view">Back to Dashboard</a>
     </div>
   </div>

@@ -55,12 +55,42 @@
 </style>
 
 <div class="team-container">
+    <!-- Toast container for showing messages -->
+    <div id="cc-toast-container" aria-live="polite" style="position:fixed;top:20px;right:20px;z-index:9999"></div>
+
+    {% if messages %}
+    <script>
+        (function(){
+            const msgs = [];
+            {% for m in messages %}
+                msgs.push({level: '{{ m.tags }}', text: '{{ m|escapejs }}'});
+            {% endfor %}
+            function showToast(msg){
+                const c = document.getElementById('cc-toast-container');
+                if(!c) return;
+                const el = document.createElement('div');
+                el.className = 'cc-toast ' + (msg.level || 'info');
+                el.textContent = msg.text;
+                el.style.marginTop = '8px';
+                el.style.padding = '12px 16px';
+                el.style.borderRadius = '8px';
+                el.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
+                el.style.background = (msg.level && msg.level.indexOf('error')!==-1) ? '#fee2e2' : '#1f2937';
+                el.style.color = (msg.level && msg.level.indexOf('error')!==-1) ? '#991b1b' : 'white';
+                el.style.minWidth = '220px';
+                c.appendChild(el);
+                setTimeout(()=>{ el.style.opacity = '0'; el.style.transition='opacity 300ms'; setTimeout(()=>c.removeChild(el),350); }, 5000);
+            }
+            document.addEventListener('DOMContentLoaded', function(){ msgs.forEach(showToast); });
+        })();
+    </script>
+    {% endif %}
     <div class="team-header">
-        <h1>{{ org.name }} Team</h1>
-        <p>Manage your team members and their roles</p>
+        <h1>{{ org.name }}</h1>
+        <p>Manage your staff and their roles</p>
     </div>
 
-    <div class="section-title">Team Members</div>
+    <div class="section-title">Staff</div>
     
     {% if members %}
     <div class="members-grid">
@@ -94,11 +124,11 @@
     {% else %}
     <div class="empty-state">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-        <p>No team members yet. Invite someone to get started!</p>
+        <p>No staff yet. Invite someone to get started!</p>
     </div>
     {% endif %}
 
-    <div class="section-title" style="margin-top: 30px;">Invite New Member</div>
+    <div class="section-title" style="margin-top: 30px;">Invite New Staff Member</div>
     
     <div class="invite-section">
         <form action="{% url 'calendar_app:invite_member' org.slug %}" method="POST">

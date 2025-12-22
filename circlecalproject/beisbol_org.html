@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %}CircleCal{% endblock %}</title>
+    <title>beisbol – Book Online</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    {% load static %}
+    
     <!-- Tailwind CDN (optional, remove if you prefer custom CSS) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -131,7 +131,7 @@
             }
         </style>
 
-    {% block extra_head %}{% endblock %}
+    
 </head>
 
 <body class="bg-blue-50  text-gray-900">
@@ -140,7 +140,7 @@
         <div class="max-w-7xl mx-auto px-4 py-4">
             <div class="flex items-center justify-between">
                 <!-- Left: Logo -->
-                <a href="{% url 'calendar_app:home' %}" class="font-bold text-xl text-blue-600">
+                <a href="/" class="font-bold text-xl text-blue-600">
                     CircleCal
                 </a>
 
@@ -152,98 +152,66 @@
                 </button>
 
                 <!-- Desktop Navigation -->
-                {% if request.user.is_authenticated %}
-                    {% if request.organization %}
-                        {# If the current user's role for this org is staff/manager, show a restricted navbar #}
-                        {% if user_org_role == 'staff' or user_org_role == 'manager' %}
-                            <nav class="hidden md:flex items-center space-x-6">
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
-                                <form action="{% url 'accounts:logout' %}" method="post" class="inline">
-                                    {% csrf_token %}
-                                    <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
-                                </form>
-                            </nav>
-                        {% else %}
-                            <nav class="hidden md:flex items-center space-x-6">
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
-                                <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
-                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Team</a>
-                                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
-                                <a href="{% url 'calendar_app:choose_business' %}" class="text-gray-700 hover:text-blue-600">Switch</a>
-                                <form action="{% url 'accounts:logout' %}" method="post" class="inline">
-                                    {% csrf_token %}
-                                    <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
-                                </form>
-                            </nav>
-                        {% endif %}
-                    {% else %}
-                        <nav class="hidden md:flex items-center space-x-4">
-                            <a href="{% url 'calendar_app:choose_business' %}" class="text-blue-600 font-medium">Choose Business</a>
-                            <form action="{% url 'accounts:logout' %}" method="post" class="inline">
-                                {% csrf_token %}
-                                <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
-                            </form>
-                        </nav>
-                    {% endif %}
-                {% else %}
-                    <nav class="hidden md:flex items-center space-x-4">
-                        <a href="{% url 'accounts:login' %}" class="text-gray-700 hover:text-blue-600">Login</a>
-                        <a href="{% url 'accounts:reactivate' %}" class="text-gray-700 hover:text-blue-600">Reactivate</a>
-                        <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 font-semibold">Sign Up</a>
-                    </nav>
-                {% endif %}
+                
+                <nav class="hidden md:flex items-center space-x-4">
+                    <a href="/accounts/login/" class="text-gray-700 hover:text-blue-600">Login</a>
+                    <a href="/accounts/reactivate/" class="text-gray-700 hover:text-blue-600">Reactivate</a>
+                    <a href="/signup/" class="text-blue-600 font-semibold">Sign Up</a>
+                </nav>
+                
             </div>
 
             <!-- Mobile Navigation Dropdown -->
             <div id="mobileMenu" class="hidden md:hidden mt-4 pb-4 border-t pt-4 space-y-3">
-                {% if request.user.is_authenticated %}
-                {% if request.organization %}
-                    {% if user_org_role == 'staff' or user_org_role == 'manager' %}
-                        <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Dashboard</a>
-                        <form action="{% url 'accounts:logout' %}" method="post" class="mt-2">
-                            {% csrf_token %}
-                            <button type="submit" class="w-full text-left px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600">Logout</button>
-                        </form>
-                    {% else %}
-                        <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Dashboard</a>
-                        <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Calendar</a>
-                        <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Team</a>
-                        <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Pricing</a>
-                        <a href="{% url 'calendar_app:choose_business' %}" class="block text-gray-700 hover:text-blue-600 py-2">Switch Business</a>
-                        <form action="{% url 'accounts:logout' %}" method="post" class="mt-2">
-                            {% csrf_token %}
-                            <button type="submit" class="w-full text-left px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600">Logout</button>
-                        </form>
-                    {% endif %}
-                {% else %}
-                    <a href="{% url 'calendar_app:choose_business' %}"
-                        class="block text-blue-600 font-medium py-2">Choose Business</a>
-                {% endif %}
-                {% else %}
-                    <a href="{% url 'accounts:login' %}" class="block text-gray-700 hover:text-blue-600 py-2">Login</a>
-                    <a href="{% url 'accounts:reactivate' %}" class="block text-gray-700 hover:text-blue-600 py-2">Reactivate</a>
-                    <a href="{% url 'calendar_app:signup' %}" class="block text-blue-600 font-semibold py-2">Sign Up</a>
-                {% endif %}
+                
+                    <a href="/accounts/login/" class="block text-gray-700 hover:text-blue-600 py-2">Login</a>
+                    <a href="/accounts/reactivate/" class="block text-gray-700 hover:text-blue-600 py-2">Reactivate</a>
+                    <a href="/signup/" class="block text-blue-600 font-semibold py-2">Sign Up</a>
+                
             </div>
         </div>
     </header>
 
     <!-- Content -->
     <main class="max-w-6xl mx-auto px-4 py-6 md:p-6">
-        {% if messages %}
-        <div class="mb-4 space-y-2">
-            {% for message in messages %}
-                {% if message.tags == 'success' %}
-                    <div class="px-4 py-3 rounded bg-green-100 text-green-800">{{ message }}</div>
-                {% elif message.tags == 'error' %}
-                    <div class="px-4 py-3 rounded bg-red-100 text-red-800">{{ message }}</div>
-                {% else %}
-                    <div class="px-4 py-3 rounded bg-blue-100 text-blue-800">{{ message }}</div>
-                {% endif %}
-            {% endfor %}
+        
+        
+<div class="max-w-4xl mx-auto py-8">
+  <h1 class="text-3xl font-bold text-gray-900 mb-2">beisbol</h1>
+  <p class="text-gray-600 mb-8">
+    Choose a service to see available times and book online.
+  </p>
+
+  
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+        <div class="bg-white border border-gray-200 rounded-lg p-6 shadow-sm hover:shadow-md transition">
+          <h2 class="text-xl font-semibold text-gray-900 mb-2">60 minutes</h2>
+          <p class="text-gray-600 text-sm mb-4">
+            60 minutes gang
+          </p>
+          <div class="text-sm text-gray-700 mb-4">
+            <div class="flex justify-between mb-1">
+              <span class="font-medium">Duration:</span>
+              <span>60 min</span>
+            </div>
+            
+            <div class="flex justify-between">
+              <span class="font-medium">Price:</span>
+              <span>$50.00</span>
+            </div>
+            
+          </div>
+          <a href="/bus/beisbol/service/60-minutes/"
+             class="inline-block w-full text-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+            View availability
+          </a>
         </div>
-        {% endif %}
-        {% block content %}{% endblock %}
+      
+    </div>
+  
+</div>
+
     </main>
 
         <!-- Toast container + helper: used to replace alert() with non-blocking toasts -->
@@ -347,7 +315,7 @@
 
         </script>
 
-        {% block extra_scripts %}{% endblock %}
+        
 
         <!-- Global loading overlay (site-wide) -->
         <div id="global-loading-overlay" class="hidden fixed inset-0 z-50 items-center justify-center bg-black bg-opacity-30">
@@ -382,7 +350,7 @@
         </script>
 
         <!-- Loading utilities (site-wide) -->
-        <script src="{% static 'js/loading.js' %}"></script>
+        <script src="/static/js/loading.js"></script>
 
         <!-- Mobile Menu Toggle -->
     <script>
@@ -427,7 +395,7 @@
                 }
                 // Add a bottom 'Back to profile' link and enhance disable pages
                 try {
-                    const profileUrl = "{% url 'accounts:profile' %}";
+                    const profileUrl = "/accounts/profile/";
                     // bottom back link for mobile/stacked layouts (kept only)
                     const bottomLink = document.createElement('div');
                     bottomLink.className = 'mt-4';
@@ -470,15 +438,10 @@
                 <div>
                     <h3 class="font-bold text-lg mb-3">Quick Links</h3>
                     <ul class="space-y-2 text-sm">
-                        {% if request.user.is_authenticated and request.organization %}
-                            <li><a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Dashboard</a></li>
-                            <li><a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Calendar</a></li>
-                            <li><a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Team</a></li>
-                            <li><a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Pricing</a></li>
-                        {% else %}
-                            <li><a href="{% url 'accounts:login' %}" class="text-gray-600 hover:text-blue-600">Login</a></li>
-                            <li><a href="{% url 'calendar_app:signup' %}" class="text-gray-600 hover:text-blue-600">Sign Up</a></li>
-                        {% endif %}
+                        
+                            <li><a href="/accounts/login/" class="text-gray-600 hover:text-blue-600">Login</a></li>
+                            <li><a href="/signup/" class="text-gray-600 hover:text-blue-600">Sign Up</a></li>
+                        
                     </ul>
                 </div>
 

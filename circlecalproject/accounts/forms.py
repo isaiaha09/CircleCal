@@ -1,11 +1,26 @@
 import logging
 import os
 import tempfile
+import importlib
 from django import forms
 from django.contrib.auth.models import User
 from django.conf import settings
 from .models import Profile
-from PIL import Image, UnidentifiedImageError
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    # Satisfy static type checkers / linters in environments without Pillow
+    from PIL import Image, UnidentifiedImageError  # type: ignore
+try:
+    from PIL import Image, UnidentifiedImageError  # Pillow  # type: ignore
+except Exception:
+    Image = None
+    class UnidentifiedImageError(Exception):
+        pass
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "Pillow (PIL) not available; image validation will be disabled. Install via 'pip install Pillow'."
+    )
+# ...existing code...
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +30,17 @@ def _get_nude_detector():
     global _NUDE_DETECTOR
     if _NUDE_DETECTOR is None:
         try:
-            from nudenet import NudeDetector
+            mod = importlib.import_module('nudenet')
+            NudeDetector = getattr(mod, 'NudeDetector', None)
+            if NudeDetector is None:
+                raise ImportError("nudenet.NudeDetector not found")
             _NUDE_DETECTOR = NudeDetector()
         except Exception as e:
             logger.warning("NudeDetector unavailable: %s", e)
             _NUDE_DETECTOR = False  # sentinel for failure
     return _NUDE_DETECTOR
+
+logger = logging.getLogger(__name__)
 
 from zoneinfo import available_timezones
 
@@ -42,11 +62,13 @@ class ProfileForm(forms.ModelForm):
 
     class Meta:
         model = Profile
-        fields = ["avatar", "timezone", "email_alerts", "booking_reminders"]
+        fields = ["avatar", "timezone", "display_name", "email_alerts", "booking_reminders"]
 
     def clean_avatar(self):
         avatar = self.cleaned_data.get("avatar")
         if avatar:
+            if Image is None:
+                raise forms.ValidationError("Server error: image processing library not installed; please install Pillow.")
             # Validate mime type early
             allowed_types = {"image/jpeg", "image/png", "image/webp"}
             content_type = getattr(avatar, "content_type", None)
@@ -128,6 +150,33 @@ class ProfileForm(forms.ModelForm):
 
 from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import AuthenticationForm
+from django import forms
+
+
+class StaffAuthenticationForm(AuthenticationForm):
+    """Authentication form for staff logins.
+
+    - Shows the username field labeled as 'Email'
+    - Uses a clearer invalid login message referencing 'email'
+    """
+    error_messages = {
+        'invalid_login': (
+            "Please enter a correct email and password."
+            " Note that both fields may be case-sensitive."
+        ),
+        'inactive': "This account is inactive.",
+    }
+
+    def __init__(self, request=None, *args, **kwargs):
+        super().__init__(request=request, *args, **kwargs)
+        # Label username as Email and make it an email input
+        if 'username' in self.fields:
+            self.fields['username'].label = 'Email'
+            try:
+                self.fields['username'].widget.attrs.update({'type': 'email', 'placeholder': 'you@company.com'})
+            except Exception:
+                pass
 
 
 class PasswordResetIncludeInactiveForm(PasswordResetForm):

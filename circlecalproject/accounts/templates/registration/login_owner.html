@@ -1,0 +1,78 @@
+{% extends "calendar_app/base.html" %}
+
+{% block title %}Business Owner{% endblock %}
+
+{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Business Owner</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --primary-600: #0056b3;
+            --bg: #f7f9fc;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --border: #d1d5db;
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+        .container { min-height: auto; display: grid; place-items: center; padding: 24px; padding-top: 80px; }
+        .card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+        .header { padding: 24px 24px 0 24px; text-align: center; }
+        .title { margin: 0; font-size: 24px; font-weight: 700; }
+        .subtitle { margin: 6px 0 0 0; color: var(--muted); font-size: 14px; }
+        .content { padding: 24px; }
+        .form-row { margin-bottom: 16px; }
+        label { display: inline-block; margin-bottom: 8px; font-weight: 600; }
+        .content input[type="text"],
+        .content input[type="password"],
+        .content input[type="number"],
+        .content input[type="tel"],
+        .content input[type="email"] {
+            width: 100%; padding: 12px 14px; border: 2px solid #cfe0ff; border-radius: 10px; font-size: 15px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; background: #fbfdff;
+        }
+        .content input:focus { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0,123,255,0.15); }
+        .helper { color: var(--muted); font-size: 12px; margin-top: 6px; }
+        .actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+        .btn { appearance: none; cursor: pointer; border: none; border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 15px; transition: background-color .15s ease, transform .05s ease; }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: var(--primary-600); }
+        .btn-primary:active { transform: translateY(1px); }
+        .alt { text-align: center; font-size: 13px; color: var(--muted); }
+        .alt a { color: var(--primary); text-decoration: none; }
+        .alt a:hover { text-decoration: underline; }
+        .errorlist { list-style: none; padding: 0; margin: 8px 0 0 0; color: var(--danger); font-size: 13px; }
+    </style>
+    {% load static %}
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1 class="title">Business Owner</h1>
+                <p class="subtitle">Log in to continue</p>
+            </div>
+            <div class="content">
+                <form method="post" novalidate>
+                    {% csrf_token %}
+                    {% include "two_factor/_wizard_forms.html" %}
+
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary">Login</button>
+                        <p class="alt">New here? <a href="{% url 'calendar_app:signup' %}">Create an account</a></p>
+                        <p class="alt" style="margin-top:6px;"><a href="{% url 'accounts:password_reset' %}">Forgot Username / Password?</a></p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+{% endblock %}

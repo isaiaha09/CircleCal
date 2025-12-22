@@ -281,6 +281,159 @@
           </div>
         </div>
 
+        <!-- Assign service to one or more team members (Team plan users) -->
+        <div class="section-card">
+          <div class="section-title">Assign to team members</div>
+          <p class="text-sm text-gray-600 mb-3">Select which team member(s) can deliver this service. Leave empty to make the service unassigned.</p>
+
+          <div class="mb-3">
+            <div id="member-dropdown" class="relative">
+              <button type="button" id="member-dropdown-toggle" class="cc-field text-left w-full flex items-center justify-between" aria-haspopup="listbox" aria-expanded="false">
+                <span id="member-dropdown-label">Select team members...</span>
+                <span style="font-size:0.9rem;color:#6b7280">▾</span>
+              </button>
+
+              <div id="member-dropdown-panel" role="listbox" aria-multiselectable="true" style="display:none;position:absolute;z-index:60;left:0;right:0;margin-top:6px;background:#fff;border:1px solid #e6eef6;border-radius:6px;max-height:320px;overflow:auto;box-shadow:0 6px 18px rgba(16,24,40,0.06);">
+                <div style="padding:8px;border-bottom:1px solid #eef3f8">
+                  <input id="member-search" type="search" placeholder="Search team members..." class="cc-field" style="margin:0;" />
+                </div>
+                <div id="member-list" style="padding:8px;">
+                  {% if org.members.all %}
+                    {% for m in org.members.all %}
+                      {% if m.is_active %}
+                        {% with user=m.user %}
+                          <div class="member-item flex items-center justify-between py-2 px-2 rounded hover:bg-gray-50" data-name="{% if user.first_name or user.last_name %}{{ user.first_name }} {{ user.last_name }}{% else %}{{ user.email }}{% endif %}" data-id="{{ m.id }}">
+                            <div>
+                              <div class="text-sm text-gray-800">{% if user.first_name or user.last_name %}{{ user.first_name }} {{ user.last_name }}{% else %}{{ user.email }}{% endif %}</div>
+                              <div class="text-xs text-gray-500">{{ m.role|title }}</div>
+                            </div>
+                            <div class="select-indicator text-sm text-blue-600" aria-hidden="true">&nbsp;</div>
+                          </div>
+                        {% endwith %}
+                      {% endif %}
+                    {% endfor %}
+                  {% else %}
+                    <div class="text-sm text-gray-500">No team members found for this business.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <script>
+            (function(){
+              try{
+                const toggle = document.getElementById('member-dropdown-toggle');
+                const panel = document.getElementById('member-dropdown-panel');
+                const input = document.getElementById('member-search');
+                const list = document.getElementById('member-list');
+                const label = document.getElementById('member-dropdown-label');
+
+                if (!toggle || !panel || !input || !list) return;
+
+                const selected = new Set();
+                try{
+                  const initial = {{ assigned_member_ids|default:'[]'|safe }};
+                  for (const v of initial){ selected.add(String(v)); }
+                }catch(e){ }
+
+                function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+                function updateLabel(){
+                  if (!selected.size){ label.textContent = 'Select team members...'; return; }
+                  const items = [];
+                  for (const it of list.querySelectorAll('.member-item')){
+                    const id = it.getAttribute('data-id');
+                    if (selected.has(id)) {
+                      const nameEl = it.querySelector('.text-sm');
+                      const name = nameEl ? nameEl.textContent.trim() : (it.getAttribute('data-name')||'');
+                      items.push({id: String(id), name: name});
+                    }
+                  }
+                  if (!items.length){ label.textContent = 'Select team members...'; return; }
+                  label.innerHTML = items.map(function(itm){
+                    return '<span class="member-chip" data-id="' + escapeHtml(itm.id) + '">' + escapeHtml(itm.name) + ' <span class="member-chip-remove" data-id="' + escapeHtml(itm.id) + '" title="Remove" aria-hidden="true">&times;</span></span>';
+                  }).join(' ');
+                }
+
+                function syncHiddenInputs(){
+                  Array.from(document.querySelectorAll('input[name="assigned_members"][data-generated]')).forEach(i => i.remove());
+                  const form = toggle.closest('form');
+                  if (!form) return;
+                  for (const id of selected){
+                    const inp = document.createElement('input');
+                    inp.type = 'hidden';
+                    inp.name = 'assigned_members';
+                    inp.value = id;
+                    inp.setAttribute('data-generated','1');
+                    form.appendChild(inp);
+                  }
+                }
+
+                for (const it of list.querySelectorAll('.member-item')){
+                  const id = it.getAttribute('data-id');
+                  const indicator = it.querySelector('.select-indicator');
+                  if (selected.has(id)) { indicator.textContent = '✓'; it.classList.add('bg-blue-50'); }
+                  it.addEventListener('click', function(){
+                        if (selected.has(id)){
+                          selected.delete(id); indicator.textContent = '\u00A0'; it.classList.remove('bg-blue-50');
+                        }
+                        else { selected.add(id); indicator.textContent = '✓'; it.classList.add('bg-blue-50'); }
+                      updateLabel();
+                      syncHiddenInputs();
+                    });
+                }
+
+                input.addEventListener('input', function(){
+                  const q = (input.value || '').toLowerCase().trim();
+                  for (const it of list.querySelectorAll('.member-item')){
+                    const name = (it.getAttribute('data-name')||'').toLowerCase();
+                    it.style.display = name.indexOf(q) === -1 ? 'none' : '';
+                  }
+                });
+
+                toggle.addEventListener('click', function(){
+                  const open = panel.style.display !== 'none';
+                  panel.style.display = open ? 'none' : 'block';
+                  toggle.setAttribute('aria-expanded', String(!open));
+                  if (!open) input.focus();
+                });
+
+                document.addEventListener('click', function(e){
+                  if (!toggle.contains(e.target) && !panel.contains(e.target)){
+                    panel.style.display = 'none';
+                    toggle.setAttribute('aria-expanded','false');
+                  }
+                });
+
+                label.addEventListener('click', function(e){
+                  try{
+                    const rem = e.target && (e.target.closest ? e.target.closest('.member-chip-remove') : null);
+                    if (!rem) return;
+                    const id = rem.getAttribute('data-id');
+                    if (!id) return;
+                    if (selected.has(id)){
+                      selected.delete(id);
+                      const it = list.querySelector('.member-item[data-id="' + id + '"]');
+                      if (it){
+                        const indicator = it.querySelector('.select-indicator');
+                        if (indicator) indicator.textContent = '\u00A0';
+                        it.classList.remove('bg-blue-50');
+                      }
+                      updateLabel();
+                      syncHiddenInputs();
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }
+                  }catch(err){ }
+                });
+
+                updateLabel();
+                syncHiddenInputs();
+              }catch(e){ console.warn('member dropdown failed', e); }
+            })();
+          </script>
+        </div>
+
         <!-- Refund Policy -->
         <div class="border-t pt-6 space-y-4">
           <h2 class="text-base font-semibold">Refund Policy (Service)</h2>

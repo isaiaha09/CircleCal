@@ -100,6 +100,8 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                # Expose current membership role for the active organization
+                'calendar_app.context_processors.current_membership_role',
             ],
             'builtins': [
                 'calendar_app.templatetags.circlecal_filters',
@@ -163,8 +165,18 @@ STATICFILES_DIRS = [
     BASE_DIR / 'static',
 ]
 
-# Directory where `collectstatic` will gather files for production/static serving
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Also include the project's `staticfiles/` directory (often used as
+# collectstatic output or local assets). This ensures AdminLTE and other
+# pre-built assets placed in `staticfiles/` are served in development.
+try:
+    STATICFILES_DIRS.append(BASE_DIR / 'staticfiles')
+except Exception:
+    pass
+
+# Directory where `collectstatic` will gather files for production/static serving.
+# Use a distinct folder name to avoid colliding with a project-local `staticfiles/`
+# directory that we also want to serve during development.
+STATIC_ROOT = BASE_DIR / 'collected_static'
 
 # Media files (uploaded user content)
 MEDIA_URL = '/media/'
@@ -201,7 +213,9 @@ AXES_LOCKOUT_PARAMETERS = [['username', 'ip_address']]
 AXES_RESET_ON_SUCCESS = True
 AXES_LOCKOUT_TEMPLATE = None
 AUTHENTICATION_BACKENDS = [
-    # Ensure a backend that implements `get_user` is first so `request.user` works correctly.
+    # Custom backend allows login via email or username (preferred first)
+    'accounts.backends.EmailOrUsernameModelBackend',
+    # Ensure a backend that implements `get_user` is available for session
     'django.contrib.auth.backends.ModelBackend',  # Default Django auth
     # Use AxesBackend which delegates get_user properly and wraps authentication.
     'axes.backends.AxesBackend',  # Axes lockout check

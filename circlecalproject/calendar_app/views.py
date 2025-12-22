@@ -10,7 +10,7 @@ from django.middleware.csrf import get_token
 from accounts.models import Business as Organization, Membership, Invite
 from bookings.models import Booking, Service, ServiceSettingFreeze, AuditBooking
 from bookings.views import _has_overlap
-from bookings.models import WeeklyAvailability, ServiceWeeklyAvailability
+from bookings.models import WeeklyAvailability, ServiceWeeklyAvailability, MemberWeeklyAvailability
 from django.db import transaction
 from django.http import HttpResponseForbidden
 from calendar_app.permissions import require_roles
@@ -562,6 +562,15 @@ def _build_service_weekly_map(service):
         svc_map[ui_idx].append(f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}")
     return svc_map
 
+
+def _build_member_weekly_map(membership):
+    rows = MemberWeeklyAvailability.objects.filter(membership=membership, is_active=True).order_by('weekday', 'start_time')
+    mem_map = [[] for _ in range(7)]
+    for row in rows:
+        ui_idx = (row.weekday + 1) % 7
+        mem_map[ui_idx].append(f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}")
+    return mem_map
+
 def home(request):
     return render(request, "calendar_app/index.html")
 
@@ -639,6 +648,8 @@ def calendar_view(request, org_slug):
             'allow_ends_after_availability': bool(getattr(s, 'allow_ends_after_availability', False)),
             # Provide a simple weekly availability map for the client to compute next-available dates
             'weekly_map': _build_service_weekly_map(s),
+            # assigned_members: list of membership ids allowed to deliver this service
+            'assigned_members': list(s.serviceassignment_set.all().values_list('membership_id', flat=True)) if hasattr(s, 'serviceassignment_set') else [],
         })
     services_json = json.dumps(services)
     # Guard against raw closing script tags in service names/descriptions
@@ -649,12 +660,31 @@ def calendar_view(request, org_slug):
     auto_open_service = request.GET.get('open_day_schedule_for', '')
     auto_open_date = request.GET.get('open_day_schedule_date', '')
 
+    # Determine whether org is on a Team plan (allows multi-staff features)
+    is_team = False
+    try:
+        from billing.utils import can_add_staff
+        is_team = bool(can_add_staff(org))
+    except Exception:
+        # Fail closed: assume False if billing unavailable
+        is_team = False
+
     return render(request, "calendar_app/calendar.html", {
         'organization': org,
         'coach_availability_json': coach_availability_json,
+        # Per-membership availability map: membership_id -> availability payload (build from MemberWeeklyAvailability when present)
+            # Build real per-membership weekly maps (use MemberWeeklyAvailability when present)
+            'member_availability_map': json.dumps({
+                str(mid): _build_member_weekly_map(mid)
+                for mid in list(Membership.objects.filter(organization=org, is_active=True).values_list('id', flat=True))
+            }),
         'org_timezone': org.timezone,  # Pass organization's timezone to template
         'services': services_qs,
         'services_json': services_json,
+        'members_list': list(Membership.objects.filter(organization=org, is_active=True).values('id','user__first_name','user__last_name','user__email')),
+        'is_team_plan': is_team,
+        # Default member id for selector: prefer membership row for organization owner, otherwise first active membership id
+        'default_member_id': (lambda org_obj: (lambda owner_mem: owner_mem if owner_mem is not None else (Membership.objects.filter(organization=org_obj, is_active=True).values_list('id', flat=True).first()))(Membership.objects.filter(organization=org_obj, is_active=True, user=getattr(org_obj, 'owner', None)).values_list('id', flat=True).first()))(org),
         'auto_open_service': auto_open_service,
         'auto_open_date': auto_open_date,
         'audit_entries': AuditBooking.objects.filter(organization=org).order_by('-created_at')[:10],
@@ -665,7 +695,6 @@ def demo_calendar_view(request):
 
 
 @require_http_methods(['POST'])
-@require_roles(['owner', 'admin'])
 def save_availability(request, slug):
     """Simple endpoint to accept weekly availability payload from the calendar UI for a given slug.
 
@@ -673,6 +702,13 @@ def save_availability(request, slug):
     returns success. You can extend it to persist availability per-resource later.
     """
     org = request.organization
+    # Reject anonymous requests early to avoid passing SimpleLazyObject into ORM lookups
+    if not getattr(request.user, 'is_authenticated', False):
+        return HttpResponseForbidden('Authentication required')
+    # Permission: owners/admins may save any availability. Managers/staff may
+    # save membership-specific availability for themselves only. We enforce
+    # this below after parsing payload.target because the decorator would
+    # otherwise block staff before we can inspect the target.
     # Enforce plan restriction: Basic cannot modify weekly availability
     try:
         from billing.utils import enforce_weekly_availability
@@ -760,7 +796,179 @@ def save_availability(request, slug):
     else:
         return HttpResponseBadRequest("Missing windows or availability array")
 
-    # Replace existing rows atomically
+    # ----- New: support bulk maps for members and services -----
+    member_map = payload.get('member_map')
+    service_map = payload.get('service_map')
+
+    def _parse_availability_array(av_arr):
+        """Parse an availability array (day/ranges/unavailable) into cleaned tuples."""
+        out = []
+        if not isinstance(av_arr, list):
+            raise ValueError('availability must be a list')
+        for row in av_arr:
+            day = row.get('day')
+            ranges = row.get('ranges') or []
+            unavailable = bool(row.get('unavailable'))
+            try:
+                if isinstance(day, int):
+                    wd = day
+                else:
+                    s = str(day).strip()
+                    wd = weekday_map.get(s.lower()) if s.lower() in weekday_map else int(s)
+            except Exception:
+                raise ValueError('Invalid day value')
+            if wd < 0 or wd > 6:
+                raise ValueError('weekday out of range')
+            if unavailable:
+                continue
+            if not isinstance(ranges, list):
+                raise ValueError('ranges must be a list')
+            for r in ranges:
+                try:
+                    parts = str(r).split('-')
+                    start = parts[0].strip()
+                    end = parts[1].strip()
+                except Exception:
+                    raise ValueError('Invalid range entry')
+                if not (len(start) == 5 and len(end) == 5 and start[2] == ':' and end[2] == ':'):
+                    raise ValueError('Time must be HH:MM')
+                if start >= end:
+                    raise ValueError('Start must be before end')
+                model_wd = ((wd - 1) % 7)
+                out.append((model_wd, start, end))
+        return out
+
+    # Determine current membership early (used for permission checks below)
+    current_membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
+
+    # If client provided bulk maps, and user has permissions, persist them and return
+    if member_map and isinstance(member_map, dict):
+        # Only owner/admin may set arbitrary member maps; non-owner may only write their own membership
+        if not (user_has_role(request.user, org, ('owner',)) or user_has_role(request.user, org, ('admin',))):
+            # allow only if member_map contains solely the current_membership id
+            allowed_id = str(current_membership.id) if current_membership else None
+            for mid in member_map.keys():
+                if str(mid) != str(allowed_id):
+                    return HttpResponseForbidden('Insufficient permissions to set member availability')
+        # Persist each membership's availability
+        created_count = 0
+        with transaction.atomic():
+            for mid, av in member_map.items():
+                try:
+                    mem_id = int(mid)
+                except Exception:
+                    continue
+                membership = Membership.objects.filter(id=mem_id, organization=org, is_active=True).first()
+                if not membership:
+                    continue
+                try:
+                    cleaned_rows = _parse_availability_array(av)
+                except ValueError:
+                    continue
+                MemberWeeklyAvailability.objects.filter(membership=membership).delete()
+                MemberWeeklyAvailability.objects.bulk_create([
+                    MemberWeeklyAvailability(membership=membership, weekday=wd, start_time=start, end_time=end, is_active=True) for (wd, start, end) in cleaned_rows
+                ])
+                created_count += len(cleaned_rows)
+        return JsonResponse({'success': True, 'member_count': created_count})
+
+    if service_map and isinstance(service_map, dict):
+        if not (user_has_role(request.user, org, ('owner',)) or user_has_role(request.user, org, ('admin',))):
+            return HttpResponseForbidden('Insufficient permissions to set service availability')
+        created_count = 0
+        with transaction.atomic():
+            for sid, av in service_map.items():
+                try:
+                    svc_id = int(sid)
+                except Exception:
+                    continue
+                svc = Service.objects.filter(id=svc_id, organization=org).first()
+                if not svc:
+                    continue
+                try:
+                    cleaned_rows = _parse_availability_array(av)
+                except ValueError:
+                    continue
+                ServiceWeeklyAvailability.objects.filter(service=svc).delete()
+                ServiceWeeklyAvailability.objects.bulk_create([
+                    ServiceWeeklyAvailability(service=svc, weekday=wd, start_time=start, end_time=end, is_active=True) for (wd, start, end) in cleaned_rows
+                ])
+                created_count += len(cleaned_rows)
+        return JsonResponse({'success': True, 'service_count': created_count})
+
+    # Determine target: optional 'target' may indicate 'svc:<id>' or 'mem:<id>' or membership id
+    target = None
+    try:
+        target = payload.get('target') if isinstance(payload, dict) else None
+    except Exception:
+        target = None
+
+    # Persist to appropriate model depending on target
+    # Permission check: allow owner/admin to save anything; allow a staff/manager
+    # to save only their own membership target.
+    current_membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
+
+    if target:
+        t = str(target)
+        # Service-specific
+        if t.startswith('svc:'):
+            try:
+                svc_id = int(t.split(':', 1)[1])
+            except Exception:
+                return HttpResponseBadRequest('Invalid service target')
+            svc = Service.objects.filter(id=svc_id, organization=org).first()
+            if not svc:
+                return HttpResponseBadRequest('Service not found')
+            # Only owner/admin may save service-level availability
+            if not request.user_has_role('owner', org) and not request.user_has_role('admin', org):
+                return HttpResponseForbidden('Insufficient permissions to set service availability')
+            with transaction.atomic():
+                ServiceWeeklyAvailability.objects.filter(service=svc).delete()
+                ServiceWeeklyAvailability.objects.bulk_create([
+                    ServiceWeeklyAvailability(
+                        service=svc,
+                        weekday=wd,
+                        start_time=start,
+                        end_time=end,
+                        is_active=True,
+                    )
+                    for (wd, start, end) in cleaned
+                ])
+            return JsonResponse({'success': True, 'count': len(cleaned), 'target': t})
+
+        # Membership-specific (accept 'mem:<id>' or plain numeric id)
+        mem_id = None
+        if t.startswith('mem:'):
+            try:
+                mem_id = int(t.split(':', 1)[1])
+            except Exception:
+                mem_id = None
+        elif t.isdigit():
+            mem_id = int(t)
+
+        if mem_id is not None:
+            membership = Membership.objects.filter(id=mem_id, organization=org, is_active=True).first()
+            if not membership:
+                return HttpResponseBadRequest('Membership not found')
+            # Allow if owner/admin, or if current user represents this membership
+            if not (request.user_has_role('owner', org) or request.user_has_role('admin', org)):
+                if not current_membership or current_membership.id != membership.id:
+                    return HttpResponseForbidden('Insufficient permissions to set this member availability')
+            with transaction.atomic():
+                MemberWeeklyAvailability.objects.filter(membership=membership).delete()
+                MemberWeeklyAvailability.objects.bulk_create([
+                    MemberWeeklyAvailability(
+                        membership=membership,
+                        weekday=wd,
+                        start_time=start,
+                        end_time=end,
+                        is_active=True,
+                    )
+                    for (wd, start, end) in cleaned
+                ])
+            return JsonResponse({'success': True, 'count': len(cleaned), 'target': f'mem:{membership.id}'})
+
+    # Default: organization-level weekly availability (existing behavior)
     with transaction.atomic():
         WeeklyAvailability.objects.filter(organization=org).delete()
         WeeklyAvailability.objects.bulk_create([
@@ -1016,6 +1224,19 @@ def admin_pin_view(request):
             except Exception:
                 pass
             request.session['admin_pin_ok'] = True
+            # If the user is being forwarded to the Django admin root, send
+            # them to the Owner-branded login page instead so they see the
+            # business-owner styled login (preserve the original next).
+            try:
+                from django.urls import reverse
+                from urllib.parse import quote
+                # Treat any admin-prefixed path as admin area (e.g. /admin/)
+                if next_url and (next_url == '/admin/' or next_url.startswith('/admin')):
+                    owner_login = reverse('accounts:login_owner')
+                    return redirect(f"{owner_login}?next={quote(next_url)}")
+            except Exception:
+                # Fall back to original behavior on any error
+                pass
             return redirect(next_url)
 
         # Failure: increment attempts and set expiry
@@ -1225,6 +1446,28 @@ def create_service(request, org_slug):
         svc.refund_policy_text = request.POST.get("refund_policy_text", "").strip()
         svc.save()
 
+        # Persist any assigned members posted from the form (optional)
+        try:
+            from bookings.models import ServiceAssignment
+            from accounts.models import Membership
+            posted = request.POST.getlist('assigned_members') or []
+            desired = set()
+            for v in posted:
+                try:
+                    iv = int(v)
+                    if Membership.objects.filter(id=iv, organization=org).exists():
+                        desired.add(iv)
+                except Exception:
+                    continue
+            for mid in desired:
+                try:
+                    mem = Membership.objects.get(id=mid, organization=org)
+                    ServiceAssignment.objects.create(service=svc, membership=mem)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         messages.success(request, "Service created.")
         return redirect("calendar_app:dashboard", org_slug=org.slug)
 
@@ -1309,6 +1552,41 @@ def edit_service(request, org_slug, service_id):
             pass
 
         service.save()
+        # Update service assignments (which memberships are allowed to deliver this service)
+        try:
+            from bookings.models import ServiceAssignment
+            # Accept either select-posted values or multiple same-name inputs
+            posted = request.POST.getlist('assigned_members') or []
+            # Normalize to ints, ignore invalid
+            desired = set()
+            from accounts.models import Membership
+            for v in posted:
+                try:
+                    iv = int(v)
+                    # ensure membership belongs to this org
+                    if Membership.objects.filter(id=iv, organization=org).exists():
+                        desired.add(iv)
+                except Exception:
+                    continue
+
+            existing_qs = ServiceAssignment.objects.filter(service=service)
+            existing_ids = set(existing_qs.values_list('membership_id', flat=True))
+
+            to_add = desired - existing_ids
+            to_remove = existing_ids - desired
+
+            for mid in to_add:
+                try:
+                    mem = Membership.objects.get(id=mid, organization=org)
+                    ServiceAssignment.objects.create(service=service, membership=mem)
+                except Exception:
+                    continue
+
+            if to_remove:
+                ServiceAssignment.objects.filter(service=service, membership_id__in=list(to_remove)).delete()
+        except Exception:
+            # If migrations not applied or model missing, fail silently
+            pass
         service.refresh_from_db()
         # Store a short debug payload in session so PRG redirect can display raw POST state
         try:
@@ -1354,12 +1632,22 @@ def edit_service(request, org_slug, service_id):
         has_bookings = False
     can_edit_slug = not has_bookings
 
+    # Determine assigned member ids for template pre-selection
+    assigned_member_ids = []
+    try:
+        from bookings.models import ServiceAssignment
+        assigned_member_ids = list(ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True))
+        assigned_member_ids = [str(x) for x in assigned_member_ids]
+    except Exception:
+        assigned_member_ids = []
+
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
         'needs_migration': not field_present,
         'cc_debug_post': debug_post,
         'can_edit_slug': can_edit_slug,
+        'assigned_member_ids': assigned_member_ids,
     })
 
 
@@ -1397,21 +1685,57 @@ def invite_member(request, org_slug):
             active_members = Membership.objects.filter(organization=org, is_active=True).count()
             if active_members >= 1 and not can_add_staff(org):
                 messages.error(request, "Team plan required to invite additional staff members. Upgrade to add more team members.")
-                return redirect("team_dashboard", org_slug=org.slug)
+                return redirect("calendar_app:team_dashboard", org_slug=org.slug)
         except Exception:
             pass
 
-        Invite.objects.create(
+        inv = Invite.objects.create(
             organization=org,
             email=email,
             role=role,
             token=token
         )
 
-        # TODO: send actual email later
-        print("Invite link:", f"http://127.0.0.1:8000/invite/{token}/")
+        # Build accept URL and attempt to send email. Fall back to printing link.
+        try:
+            from django.urls import reverse
+            from django.template.loader import render_to_string
+            from django.core.mail import EmailMultiAlternatives
+            from django.conf import settings
 
-        return redirect("team_dashboard", org_slug=org.slug)
+            accept_path = reverse('calendar_app:accept_invite', kwargs={'token': token})
+            accept_url = request.build_absolute_uri(accept_path)
+
+            context = {
+                'org': org,
+                'email': email,
+                'role': role,
+                'accept_url': accept_url,
+                'site_url': getattr(settings, 'SITE_URL', request.build_absolute_uri('/')),
+                'recipient_name': '',
+            }
+
+            subject = f"{org.name} invited you to join"
+            text_content = render_to_string('calendar_app/emails/invite_email.txt', context)
+            html_content = render_to_string('calendar_app/emails/invite_email.html', context)
+
+            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [email])
+            msg.attach_alternative(html_content, "text/html")
+            msg.send()
+
+            messages.success(request, f"Invitation sent to {email}.")
+            try:
+                print("Invite link:", accept_url)
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                print("Failed to send invite email:", e)
+            except Exception:
+                pass
+            messages.error(request, f"Failed to send invitation to {email}. Invite was saved.")
+
+        return redirect("calendar_app:team_dashboard", org_slug=org.slug)
 
     return HttpResponseForbidden("Invalid request")
 
@@ -1429,7 +1753,7 @@ def remove_member(request, org_slug, member_id):
         return HttpResponseForbidden("Cannot remove organization owner.")
 
     member.delete()
-    return redirect("team_dashboard", org_slug=org.slug)
+    return redirect("calendar_app:team_dashboard", org_slug=org.slug)
 
 def update_member_role(request, org_slug, member_id):
     org = request.organization
@@ -1446,31 +1770,77 @@ def update_member_role(request, org_slug, member_id):
     member.role = new_role
     member.save()
 
-    return redirect("team_dashboard", org_slug=org.slug)
+    return redirect("calendar_app:team_dashboard", org_slug=org.slug)
 
 
 def accept_invite(request, token):
     invite = get_object_or_404(Invite, token=token)
 
-    # If not logged in, redirect to login
-    if not request.user.is_authenticated:
-        request.session["pending_invite"] = token
-        return redirect("/login/")
+    # If user is already authenticated, just create the membership and redirect
+    if request.user.is_authenticated:
+        user = request.user
+        org = invite.organization
+        Membership.objects.get_or_create(
+            user=user,
+            organization=org,
+            defaults={"role": invite.role}
+        )
+        invite.accepted = True
+        invite.save()
+        return redirect(f"/bus/{org.slug}/calendar/")
 
-    user = request.user
-    org = invite.organization
+    # Not authenticated: render a staff-only signup form tied to this invite.
+    from calendar_app.forms import InviteSignupForm
+    if request.method == 'POST':
+        form = InviteSignupForm(request.POST)
+        if form.is_valid():
+            # Ensure the email matches the invite address
+            email = form.cleaned_data.get('email')
+            if email and email.lower() != invite.email.lower():
+                form.add_error('email', 'Email must match the invited address.')
+            else:
+                user = form.save(commit=True)
+                try:
+                    user.is_active = True
+                    user.save()
+                except Exception:
+                    pass
+                # After creating the account, immediately attach the membership so
+                # the user will be routed to the dashboard when they sign in.
+                try:
+                    Membership.objects.get_or_create(
+                        user=user,
+                        organization=invite.organization,
+                        defaults={'role': invite.role}
+                    )
+                    invite.accepted = True
+                    invite.save()
+                except Exception:
+                    # If membership creation fails, fall back to pending_invite so
+                    # the login flow can attach it after authentication.
+                    request.session['pending_invite'] = token
+                messages.success(request, 'Account created. Please sign in to continue.')
+                return redirect('accounts:login_staff')
+    else:
+        # Prefill email and make it read-only in the template
+        form = InviteSignupForm(initial={'email': invite.email})
 
-    # Create membership
-    Membership.objects.get_or_create(
-        user=user,
-        organization=org,
-        defaults={"role": invite.role}
-    )
+    # Detect if a user with this email already exists so we can offer a sign-in
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        existing_user = User.objects.filter(email__iexact=invite.email).exists()
+    except Exception:
+        existing_user = False
 
-    invite.accepted = True
-    invite.save()
-
-    return redirect(f"/bus/{org.slug}/calendar/")
+    return render(request, 'registration/invite_signup.html', {
+        'form': form,
+        'invite_email': invite.email,
+        'role': invite.role,
+        'existing_user': existing_user,
+        'invite_token': token,
+        'org': invite.organization,
+    })
 
 
 
@@ -1570,8 +1940,40 @@ def services_page(request, org_slug):
     List all services for this organization (internal management page).
     """
     org = request.organization
-    services = Service.objects.filter(organization=org).order_by('name')
-    
+    services = list(Service.objects.filter(organization=org).order_by('name'))
+
+    # Attach assigned member display names to each service for template rendering
+    try:
+        from bookings.models import ServiceAssignment
+        assigned = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user')
+        assign_map = {}
+        for a in assigned:
+            try:
+                user = getattr(a.membership, 'user', None)
+                if not user:
+                    continue
+                # Prefer profile.display_name when present, fall back to full name or email
+                display = None
+                try:
+                    display = getattr(user, 'profile').display_name
+                except Exception:
+                    display = None
+                if not display:
+                    fn = (getattr(user, 'first_name', '') or '').strip()
+                    ln = (getattr(user, 'last_name', '') or '').strip()
+                    if fn or ln:
+                        display = f"{fn} {ln}".strip()
+                    else:
+                        display = getattr(user, 'email', '')
+                assign_map.setdefault(a.service_id, []).append(display)
+            except Exception:
+                continue
+        for s in services:
+            s.assigned_names = assign_map.get(s.id, [])
+    except Exception:
+        for s in services:
+            s.assigned_names = []
+
     return render(request, "calendar_app/services.html", {
         "org": org,
         "services": services,
@@ -1612,6 +2014,23 @@ def create_service(request, org_slug):
         if not name:
             messages.error(request, "Name is required.")
         else:
+            # Require at-least-one assigned member for every service
+            try:
+                from accounts.models import Membership
+                posted_assigned = request.POST.getlist('assigned_members') or []
+                valid_found = False
+                for v in posted_assigned:
+                    try:
+                        iv = int(v)
+                        if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
+                            valid_found = True
+                            break
+                    except Exception:
+                        continue
+                # Allow services to be created without assigned members (unassigned services are valid)
+            except Exception:
+                # Fail open if membership lookup not available
+                pass
             # Build slug (unique per organization)
             base_slug = slugify(slug_input or name)
             slug = base_slug or get_random_string(8)
@@ -1660,6 +2079,29 @@ def create_service(request, org_slug):
                     pass
                 svc.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
                 svc.save()
+
+                # Persist service assignments (which memberships can deliver this service)
+                try:
+                    from bookings.models import ServiceAssignment
+                    from accounts.models import Membership
+                    posted = request.POST.getlist('assigned_members') or []
+                    desired = set()
+                    for v in posted:
+                        try:
+                            iv = int(v)
+                            if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
+                                desired.add(iv)
+                        except Exception:
+                            continue
+                    for mid in desired:
+                        try:
+                            mem = Membership.objects.get(id=mid, organization=org)
+                            ServiceAssignment.objects.create(service=svc, membership=mem)
+                        except Exception:
+                            continue
+                except Exception:
+                    # Fail open if model/migration missing
+                    pass
 
                 messages.success(request, "Service created.")
                 return redirect("calendar_app:services_page", org_slug=org.slug)
@@ -1878,7 +2320,40 @@ def edit_service(request, org_slug, service_id):
                 except Exception:
                     pass
 
+                # No team-plan assignment enforcement here; services may be unassigned
+
                 service.save()
+                # Sync service assignments (which memberships can deliver this service)
+                try:
+                    from bookings.models import ServiceAssignment
+                    from accounts.models import Membership
+                    posted = request.POST.getlist('assigned_members') or []
+                    desired = set()
+                    for v in posted:
+                        try:
+                            iv = int(v)
+                            if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
+                                desired.add(iv)
+                        except Exception:
+                            continue
+                    # Allow empty assignment set (service may be unassigned)
+
+                    existing_qs = ServiceAssignment.objects.filter(service=service)
+                    existing_ids = set(existing_qs.values_list('membership_id', flat=True))
+                    to_add = desired - existing_ids
+                    to_remove = existing_ids - desired
+                    for mid in to_add:
+                        try:
+                            mem = Membership.objects.get(id=mid, organization=org)
+                            ServiceAssignment.objects.create(service=service, membership=mem)
+                        except Exception:
+                            continue
+                    if to_remove:
+                        ServiceAssignment.objects.filter(service=service, membership_id__in=list(to_remove)).delete()
+                except Exception:
+                    # Fail open if model/migration missing
+                    pass
+
                 if conflict_services and apply_to_conflicts:
                     # Apply slot fields to conflicting services
                     others_qs = Service.objects.filter(organization=org).exclude(id=service.id)
@@ -1983,12 +2458,20 @@ def edit_service(request, org_slug, service_id):
         other_active = 0
     is_only_active_service = (other_active == 0)
 
+    # Safely compute assigned_member_ids (bookings.models may be unavailable if migrations missing)
+    try:
+        from bookings.models import ServiceAssignment
+        assigned_member_ids = [str(x) for x in ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True)]
+    except Exception:
+        assigned_member_ids = []
+
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
         "weekly_edit_rows": weekly_edit_rows,
         "can_edit_slug": can_edit_slug,
         "is_only_active_service": is_only_active_service,
+        'assigned_member_ids': assigned_member_ids,
     })
 
 

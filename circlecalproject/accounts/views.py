@@ -2,7 +2,7 @@ from django.shortcuts import render
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from .forms import ProfileForm
+from .forms import ProfileForm, StaffAuthenticationForm
 from .models import LoginActivity, Membership, Invite
 from billing.models import Subscription
 from django.views.decorators.http import require_POST
@@ -112,6 +112,25 @@ class CustomLoginView(TwoFactorLoginView):
 	def form_valid(self, form):
 		# Default response from TwoFactorLoginView
 		response = super().form_valid(form)
+		# If the session contains a pending invite token, attach the user to
+		# the invited organization after successful authentication.
+		try:
+			token = self.request.session.pop('pending_invite', None)
+			if token and getattr(self.request, 'user', None) and self.request.user.is_authenticated:
+				from .models import Membership
+				from accounts.models import Invite
+				inv = Invite.objects.filter(token=token, accepted=False, email__iexact=self.request.user.email).first()
+				if inv:
+					Membership.objects.get_or_create(
+						user=self.request.user,
+						organization=inv.organization,
+						defaults={'role': inv.role}
+					)
+					inv.accepted = True
+					inv.save()
+		except Exception:
+			# Don't block login on invite processing errors
+				pass
 		# If a cookie was set for post-login redirect, redirect there.
 		redirect_to = self.request.COOKIES.get('post_login_redirect')
 		if redirect_to:
@@ -120,6 +139,107 @@ class CustomLoginView(TwoFactorLoginView):
 			resp.delete_cookie('post_login_redirect')
 			return resp
 		return response
+
+
+def login_choice_view(request):
+	"""Render a simple page allowing the user to choose Owner vs Staff/Manager login."""
+	return TemplateResponse(request, 'registration/login_choice.html', {})
+
+
+class StaffLoginView(CustomLoginView):
+	"""Login view for staff/managers only. After successful authentication,
+	verify the user has a Membership with role 'manager' or 'staff'. If not,
+	log them out and show an error message.
+	"""
+
+	def form_valid(self, form):
+		# First run the normal two-factor flow which may authenticate the user
+		response = super().form_valid(form)
+		# If the user is authenticated at this point, ensure they have an appropriate role
+		user = getattr(self.request, 'user', None)
+		if user and user.is_authenticated:
+			try:
+				# Import here to avoid circular imports at module load
+				from .models import Membership
+				has_role = Membership.objects.filter(user=user, role__in=['manager', 'staff']).exists()
+			except Exception:
+				has_role = False
+			if not has_role:
+				# Not authorized for staff login — log out and show error
+				try:
+					from django.contrib.auth import logout
+					logout(self.request)
+				except Exception:
+					pass
+				# Render the standard login template with an error message
+				return TemplateResponse(self.request, 'registration/login.html', {
+					'form': getattr(self, 'get_form_class', lambda: None)(),
+					'error': 'This login path is for staff and managers only. Use the Owner login if you are an owner.'
+				})
+		# If super() already returned a redirect (e.g. honoring post_login_redirect cookie),
+		# inspect the target. For staff/manager logins we should NOT send them to the
+		# generic onboarding `create-business` path; prefer their org dashboard instead.
+		from django.http import HttpResponseRedirect
+		if isinstance(response, HttpResponseRedirect):
+			try:
+				from django.urls import reverse
+				loc = response.get('Location') or getattr(response, 'url', '')
+				# If the redirect points to post_login or the create_business path, override it
+				post_login_path = reverse('calendar_app:post_login')
+				create_path = reverse('calendar_app:create_business')
+				if loc and (loc.endswith(post_login_path) or loc.endswith(create_path) or 'create-business' in str(loc)):
+					# fall through to dashboard redirect logic below
+					pass
+				else:
+					return response
+			except Exception:
+				# If anything goes wrong inspecting the redirect, preserve original response
+				return response
+		# For staff/manager users, prefer sending them directly to their org dashboard.
+		try:
+			mem = Membership.objects.filter(user=user, role__in=['manager', 'staff'], is_active=True).select_related('organization').first()
+			if mem and getattr(mem, 'organization', None):
+				return redirect('calendar_app:dashboard', org_slug=mem.organization.slug)
+		except Exception:
+			pass
+		return response
+
+	# Use the staff-specific authentication form so error messages and labels
+	# reference email instead of username.
+	form_class = StaffAuthenticationForm
+
+	def dispatch(self, request, *args, **kwargs):
+		"""Allow staff to submit their email in the username field.
+
+		If the POST contains an email address in `username`, translate it to
+		the corresponding user's `username` value so Django's authentication
+		backend (which expects `username`) can authenticate correctly.
+		"""
+		# If the invite token is present on GET (from invite link), persist it
+		if request.method == 'GET':
+			try:
+				token = request.GET.get('pending_invite')
+				if token:
+					request.session['pending_invite'] = token
+			except Exception:
+				pass
+
+		if request.method == 'POST':
+			try:
+				data = request.POST.copy()
+				username_val = data.get('username')
+				if username_val and '@' in username_val:
+					from django.contrib.auth import get_user_model
+					User = get_user_model()
+					u = User.objects.filter(email__iexact=username_val).first()
+					if u:
+						data['username'] = u.get_username()
+						request.POST = data
+			except Exception:
+				# Don't block login flow on translation errors; let normal
+				# authentication handle failures and surface useful errors.
+				pass
+		return super().dispatch(request, *args, **kwargs)
 
 
 @login_required

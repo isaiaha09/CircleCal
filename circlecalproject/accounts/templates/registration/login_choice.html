@@ -1,0 +1,67 @@
+{% extends 'calendar_app/base.html' %}
+
+{% block title %}Choose Login{% endblock %}
+
+{% block content %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in</title>
+  <style>
+    :root {
+      --primary: #007bff;
+      --primary-600: #0056b3;
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --success: #10b981;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+    .container { min-height: auto; display: grid; place-items: center; padding: 24px; padding-top: 80px; }
+    .card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { padding: 24px 24px 0 24px; text-align: center; }
+    .title { margin: 0; font-size: 24px; font-weight: 700; }
+    .subtitle { margin: 6px 0 0 0; color: var(--muted); font-size: 14px; }
+    .content { padding: 24px; }
+    .form-row { margin-bottom: 16px; }
+    label { display: inline-block; margin-bottom: 8px; font-weight: 600; }
+    .helper { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .actions { display: flex; flex-direction: row; gap: 12px; margin-top: 10px; }
+    /* Make buttons share available space and remain accessible on small screens */
+    .actions .btn { flex: 1 1 0; min-width: 120px; appearance: none; cursor: pointer; border: none; border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 15px; transition: background-color .15s ease, transform .05s ease; text-decoration: none; display: inline-block; text-align: center; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-600); }
+    .btn-primary:active { transform: translateY(1px); }
+    .btn-secondary { background: #eef2ff; color: var(--text); border: 1px solid #d6ddff; }
+    .btn-secondary:hover { background: #e6ebff; }
+    .alt { text-align: center; font-size: 13px; color: var(--muted); }
+    .alt a { color: var(--muted); text-decoration: none; transition: color .12s ease; }
+    .alt a:hover { color: var(--primary); text-decoration: underline; }
+  </style>
+  {% load static %}
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="header">
+        <h1 class="title">Sign in</h1>
+        <p class="subtitle">Choose how you would like to sign in</p>
+      </div>
+      <div class="content">
+        <div class="actions">
+              <a class="btn btn-primary" href="{% url 'accounts:login_owner' %}">Business Owner Login</a>
+              <a class="btn btn-secondary" href="{% url 'accounts:login_staff' %}">Staff | Manager Login</a>
+        </div>
+        <p class="alt" style="margin-top:12px; text-align:center;">New here? <a href="{% url 'calendar_app:signup' %}">Create an account</a></p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+{% endblock %}

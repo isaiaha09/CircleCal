@@ -10,6 +10,8 @@ from .views import (
     reactivate_account_view,
     reactivate_account_action,
     CustomLoginView,
+    login_choice_view,
+    StaffLoginView,
 )
 from .forms import PasswordResetIncludeInactiveForm
 app_name = 'accounts'
@@ -32,8 +34,10 @@ urlpatterns = [
     path('reactivate/action/', reactivate_account_action, name='reactivate_action'),
 
     # Login / Logout (use our styled template)
-    # Use our custom login view so we can honor a post-login redirect cookie
-    path('login/', CustomLoginView.as_view(template_name='registration/login.html'), name='login'),
+    # Show a choice page that splits owner vs staff/manager login flows
+    path('login/', login_choice_view, name='login'),
+    path('login/owner/', CustomLoginView.as_view(template_name='registration/login_owner.html'), name='login_owner'),
+    path('login/staff/', StaffLoginView.as_view(template_name='registration/login_staff.html'), name='login_staff'),
     path('logout/',
          auth_views.LogoutView.as_view(),
          name='logout'),

@@ -1,7 +1,9 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from django.contrib.auth.models import User
+from django.conf import settings
+from django.contrib.auth import get_user_model
+User = get_user_model()
 from accounts.models import Business as Organization, Membership
 import secrets
 
@@ -83,6 +85,21 @@ class Booking(models.Model):
     )
     created_at = models.DateTimeField(default=timezone.now)
     public_ref = models.CharField(max_length=16, unique=True, null=True, blank=True, db_index=True, help_text='Public booking reference shown to clients')
+    # Optional assignment to a specific staff user or a Team (group of staff).
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_bookings'
+    )
+    assigned_team = models.ForeignKey(
+        'accounts.Team',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_bookings'
+    )
 
     def __str__(self):
         return f"{self.title or 'Booking'} ({self.start.date()})"
@@ -181,6 +198,31 @@ class ServiceWeeklyAvailability(models.Model):
         except Exception:
             org = None
 
+
+class MemberWeeklyAvailability(models.Model):
+    """Per-membership weekly availability windows.
+
+    Weekday: 0=Monday ... 6=Sunday
+    """
+    membership = models.ForeignKey('accounts.Membership', on_delete=models.CASCADE, related_name='weekly_availability')
+    weekday = models.PositiveSmallIntegerField()  # 0-6
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["membership", "weekday", "start_time"]
+        indexes = [
+            models.Index(fields=["membership", "weekday"]),
+        ]
+
+    def __str__(self):
+        return f"mem-{self.membership_id} {self.weekday} {self.start_time}-{self.end_time}"
+
+    def clean(self):
+        if self.end_time <= self.start_time:
+            raise ValidationError("end_time must be after start_time")
+
         if org:
             # find any org weekly window that fully contains this service window
             matches = WeeklyAvailability.objects.filter(
@@ -210,6 +252,24 @@ class ServiceSettingFreeze(models.Model):
 
     def __str__(self):
         return f"Freeze for {self.service} on {self.date}"
+
+
+class ServiceAssignment(models.Model):
+    """Assign a Service to a specific Membership (team member) within the organization.
+
+    This model allows services to be scoped to one or more members without
+    modifying the core `Service` schema. Migrations are required to create
+    this table in production, but the view code will gracefully handle the
+    absence of the table if migrations have not been applied.
+    """
+    service = models.ForeignKey('Service', on_delete=models.CASCADE, related_name='assignments')
+    membership = models.ForeignKey(Membership, on_delete=models.CASCADE, related_name='service_assignments')
+
+    class Meta:
+        unique_together = ('service', 'membership')
+
+    def __str__(self):
+        return f"{self.service} assigned to {self.membership}"
 
 
 class AuditBooking(models.Model):

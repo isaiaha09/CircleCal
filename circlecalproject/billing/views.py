@@ -16,6 +16,8 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.utils import timezone as dj_timezone
 from django.db.models import Q
+import logging
+import traceback
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -178,14 +180,36 @@ def invoice_unhide(request, org_slug, invoice_id):
 
     stripe_id = invoice_id
     try:
-        meta = InvoiceMeta.objects.filter(organization=org).filter(Q(stripe_invoice_id=stripe_id) | Q(subscription_change_id=stripe_id)).first()
+        # Match either an InvoiceMeta with the stripe_invoice_id, or a SubscriptionChange
+        # whose stripe_invoice_id matches (avoid treating the stripe id as a FK id).
+        meta = InvoiceMeta.objects.filter(organization=org).filter(
+            Q(stripe_invoice_id=stripe_id) | Q(subscription_change__stripe_invoice_id=stripe_id)
+        ).first()
         if not meta:
-            return JsonResponse({'error': 'Invoice meta not found'}, status=404)
-        meta.hidden = False
-        meta.save()
-        InvoiceActionLog.objects.create(invoice_meta=meta, user=request.user, action='unhide')
+            # If no meta exists yet for this invoice, create one (idempotent unhide)
+            try:
+                meta = InvoiceMeta.objects.create(organization=org, stripe_invoice_id=stripe_id, hidden=False)
+            except Exception:
+                return JsonResponse({'error': 'Invoice meta not found and could not be created'}, status=404)
+        else:
+            meta.hidden = False
+            meta.save()
+        try:
+            InvoiceActionLog.objects.create(invoice_meta=meta, user=request.user, action='unhide')
+        except Exception:
+            # Log action failure is non-fatal for the client
+            pass
         return JsonResponse({'success': True, 'hidden': False})
     except Exception as e:
+        # Log full traceback to server console and include trace in JSON when DEBUG
+        logging.exception('invoice_unhide failed')
+        tb = traceback.format_exc()
+        # If in DEBUG mode it's helpful to return the trace to the client for quick iteration
+        try:
+            if settings.DEBUG:
+                return JsonResponse({'error': str(e), 'trace': tb}, status=500)
+        except Exception:
+            pass
         return JsonResponse({'error': str(e)}, status=500)
 
 
@@ -714,9 +738,16 @@ def manage_billing(request, org_slug):
                 return (raw.get('status') or 'scheduled')
             return (inv.get('status') or '').lower()
 
-        # Filter by card last4
+        # Filter by card last4 — consider the org's default card as a fallback
         if filter_card:
-            invoices = [i for i in invoices if (i.get('card_last4') and i.get('card_last4') == filter_card) or (i.get('raw', {}).get('card_last4') == filter_card)]
+            try:
+                fallback_last4 = default_card_last4
+            except NameError:
+                fallback_last4 = None
+            def _matches_card(i):
+                v = i.get('card_last4') or (i.get('raw', {}) or {}).get('card_last4') or fallback_last4
+                return (v == filter_card)
+            invoices = [i for i in invoices if _matches_card(i)]
 
         # Filter by status
         if filter_status and filter_status.lower() not in ('', 'all'):
@@ -962,6 +993,12 @@ def manage_billing(request, org_slug):
         end = start + page_size
         page_items = filtered[start:end]
 
+        # Ensure we have a stable fallback for card last4 when invoices lack it
+        try:
+            fallback_last4 = default_card_last4
+        except NameError:
+            fallback_last4 = None
+
         def _serialize(inv):
             raw = inv.get('raw') or {}
             created_dt = inv.get('created')
@@ -976,7 +1013,7 @@ def manage_billing(request, org_slug):
                 'status': (raw.get('status') if isinstance(raw, dict) and raw.get('pseudo') else inv.get('status')),
                 'hosted_invoice_url': inv.get('hosted_invoice_url'),
                 'card_brand': inv.get('card_brand'),
-                'card_last4': inv.get('card_last4'),
+                'card_last4': (inv.get('card_last4') or fallback_last4),
                 'hidden': bool(inv.get('hidden')),
                 'discount': (raw.get('discount') if isinstance(raw, dict) and raw.get('discount') else applied_discount),
             }
@@ -1017,6 +1054,7 @@ def manage_billing(request, org_slug):
         "hidden_stripe_ids": list(hidden_stripe_ids) if 'hidden_stripe_ids' in locals() else [],
         "hidden_change_ids": list(hidden_change_ids) if 'hidden_change_ids' in locals() else [],
         "applied_discount": applied_discount,
+        "default_card_last4": (locals().get('default_card_last4') if 'default_card_last4' in locals() else None),
         # Upcoming invoice adjusted total when a local applied discount exists
         "upcoming_invoice_adjusted": (None if not (upcoming_invoice and applied_discount) else (
             (lambda ai, ad: {

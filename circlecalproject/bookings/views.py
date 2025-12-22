@@ -39,6 +39,20 @@ def booking_to_event(bk: Booking):
         }
     }
 
+    # Include any scope metadata so frontend can filter per-date overrides by selected member/service
+    try:
+        if getattr(bk, 'assigned_user', None):
+            event['extendedProps']['assigned_user_id'] = getattr(bk.assigned_user, 'id', None)
+        # Legacy/service-scoped marker stored in client_name like 'scope:svc:<id>'
+        if isinstance(bk.client_name, str) and bk.client_name.startswith('scope:svc:'):
+            try:
+                svc_id = int(bk.client_name.split(':', 2)[2])
+                event['extendedProps']['assigned_scope_service_id'] = svc_id
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     if bk.service is None:
         # Per-date override
         if bk.is_blocking:
@@ -634,6 +648,8 @@ def batch_create(request, org_slug):
     except Exception:
         tz = timezone.get_current_timezone()
 
+    target = data.get('target') if isinstance(data, dict) else None
+
     for d in dates:
         dobj = parse_date(d)
         if not dobj:
@@ -668,16 +684,39 @@ def batch_create(request, org_slug):
         if not bool(data.get("is_blocking", False)) and _has_overlap(org, s, e, service=None):
             continue
 
-        bk = Booking.objects.create(
-            organization=org,
-            title=data.get('title', ''),
-            start=s,
-            end=e,
-            client_name=data.get('client_name', ''),
-            client_email=data.get('client_email', ''),
-            is_blocking=bool(data.get('is_blocking', False)),
-            service=None  # ensure overrides are stored as service NULL
-        )
+        # Scope the override to the provided target (membership id or svc:<id>)
+        create_kwargs = {
+            'organization': org,
+            'title': data.get('title', ''),
+            'start': s,
+            'end': e,
+            'client_name': data.get('client_name', ''),
+            'client_email': data.get('client_email', ''),
+            'is_blocking': bool(data.get('is_blocking', False)),
+            'service': None
+        }
+        try:
+            if target:
+                # Service-scoped: encode into client_name marker
+                if isinstance(target, str) and target.startswith('svc:'):
+                    try:
+                        svc_id = int(str(target).split(':', 1)[1])
+                        create_kwargs['client_name'] = f'scope:svc:{svc_id}'
+                    except Exception:
+                        pass
+                else:
+                    # Membership target (membership id) -> assign to that membership's user
+                    try:
+                        mid = int(target)
+                        mem = Membership.objects.filter(id=mid).first()
+                        if mem and getattr(mem, 'user', None):
+                            create_kwargs['assigned_user'] = mem.user
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        bk = Booking.objects.create(**create_kwargs)
         created.append(booking_to_event(bk))
 
     return JsonResponse({'status': 'ok', 'created': created})
@@ -722,6 +761,26 @@ def batch_delete(request, org_slug):
             start__lt=day_end,
             end__gt=day_start,
         )
+        # If a target was provided, narrow deletions to that scope only
+        try:
+            target = data.get('target') if isinstance(data, dict) else None
+            if target:
+                if isinstance(target, str) and target.startswith('svc:'):
+                    try:
+                        svc_id = int(str(target).split(':', 1)[1])
+                        qs = qs.filter(client_name__startswith=f'scope:svc:{svc_id}')
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        mid = int(target)
+                        mem = Membership.objects.filter(id=mid).first()
+                        if mem and getattr(mem, 'user', None):
+                            qs = qs.filter(assigned_user=mem.user)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         deleted += qs.count()
         qs.delete()
 
@@ -965,6 +1024,33 @@ def public_service_page(request, org_slug, service_slug):
             trialing_active = True
             trial_end_date = subscription.trial_end
     
+    # Attach assigned member display names to services for client UI
+    try:
+        from .models import ServiceAssignment
+        ass_qs = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user__profile', 'service', 'membership__user')
+        ass_map = {}
+        for sa in ass_qs:
+            sslug = sa.service.slug
+            user = getattr(sa.membership, 'user', None)
+            name = ''
+            try:
+                profile = getattr(user, 'profile', None)
+                if profile and getattr(profile, 'display_name', None):
+                    name = profile.display_name
+                else:
+                    full = user.get_full_name() if getattr(user, 'get_full_name', None) else ''
+                    name = full if full else getattr(user, 'email', '')
+            except Exception:
+                name = getattr(user, 'email', '')
+            ass_map.setdefault(sslug, []).append(name)
+        for s in services:
+            s.assigned_names = ', '.join(ass_map.get(s.slug, []))
+        service.assigned_names = ', '.join(ass_map.get(service.slug, []))
+    except Exception:
+        for s in services:
+            s.assigned_names = ''
+        service.assigned_names = ''
+
     return render(request, "public/public_service_page.html", {
         "org": org,
         "services": services,
@@ -985,6 +1071,7 @@ def public_service_page(request, org_slug, service_slug):
         'prefill_client_name': request.GET.get('client_name') or '',
         'prefill_client_email': request.GET.get('client_email') or '',
     })
+
 
 
 

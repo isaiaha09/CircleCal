@@ -16,7 +16,12 @@
             {% for service in services %}
                 <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
                     <div class="flex justify-between items-start mb-2">
-                        <h2 class="text-xl font-semibold text-white">{{ service.name }}</h2>
+                        <h2 class="text-xl font-semibold text-white">
+                            {{ service.name }}
+                            {% if service.assigned_names %}
+                                <span class="text-sm font-normal text-gray-400">&mdash; with {{ service.assigned_names|join:", " }}</span>
+                            {% endif %}
+                        </h2>
                         {% if not service.is_active %}
                             <span class="text-xs bg-gray-600 text-gray-300 px-2 py-1 rounded">Inactive</span>
                         {% endif %}

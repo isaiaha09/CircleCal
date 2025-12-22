@@ -63,3 +63,32 @@ class SignupForm(UserCreationForm):
     class Meta:
         model = User
         fields = ("username", "email", "password1", "password2")
+
+
+class InviteSignupForm(UserCreationForm):
+    """Signup form for invite flow: do not ask for username, generate one."""
+    email = forms.EmailField(required=True, widget=forms.EmailInput(attrs={'readonly': 'readonly'}))
+
+    class Meta:
+        model = User
+        fields = ("email", "password1", "password2")
+
+    def _generate_username(self, base_email):
+        base = slugify(base_email.split('@')[0]) or 'user'
+        username = base
+        i = 1
+        UserModel = get_user_model()
+        while UserModel.objects.filter(username__iexact=username).exists():
+            i += 1
+            username = f"{base}{i}"
+        return username
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        # Ensure username exists
+        if not getattr(user, 'username', None):
+            user.username = self._generate_username(self.cleaned_data.get('email', 'user'))
+        user.email = self.cleaned_data.get('email')
+        if commit:
+            user.save()
+        return user

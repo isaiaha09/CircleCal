@@ -18,10 +18,27 @@
 {% block content %}
 
 <div style="margin-bottom:32px;">
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-    <div style="text-align:center; flex:1;">
-      <h1 class="calendar-title" style="font-size:32px; font-weight:800; margin:0 0 8px 0; letter-spacing:-0.5px;">Calendar</h1>
-      <p style="color:var(--gray-600); font-size:15px; margin:0;">Manage your availability and view bookings</p>
+    <div style="display:flex; justify-content:center; align-items:center; margin-bottom:12px; flex-direction:column;">
+        <div style="text-align:center;">
+            <h1 class="calendar-title" style="font-size:32px; font-weight:800; margin:0 0 8px 0; letter-spacing:-0.5px;">Calendar</h1>
+            <p style="color:var(--gray-600); font-size:15px; margin:0;">Manage your availability and view bookings</p>
+        </div>
+        {% if is_team_plan %}
+            <div style="width:320px; margin-top:12px; text-align:center;">
+                <label for="memberSelect" style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:6px;">Showing calendar for</label>
+                <select id="memberSelect" style="width:70%;padding:8px;border-radius:8px;border:1px solid var(--gray-200);display:inline-block;vertical-align:middle;">
+                    {% for m in members_list %}
+                        {% with fname=m.user__first_name lname=m.user__last_name email=m.user__email %}
+                            <option value="{{ m.id }}">{% if fname or lname %}{{ fname }} {{ lname }}{% else %}{{ email }}{% endif %}</option>
+                        {% endwith %}
+                    {% endfor %}
+                </select>
+                <button id="applyMemberSelectBtn" style="display:inline-block;margin-left:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--gray-200);background:var(--primary-500);color:white;cursor:pointer;vertical-align:middle;font-size:13px;">Apply</button>
+                <div style="margin-top:6px; display:flex; justify-content:center;">
+                    <span id="memberScopeBadge" style="font-size:12px;color:var(--gray-600);padding:6px 10px;border-radius:999px;border:1px solid var(--gray-200);background:transparent;">Showing org defaults</span>
+                </div>
+            </div>
+        {% endif %}
     </div>
         <!-- Inline Audit Modal -->
         <div id="inlineAuditModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000; padding: 20px;">
@@ -69,6 +86,28 @@
     padding: 24px;
     border-radius: 16px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Improved member/service select styling */
+#memberSelect {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background: white url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="%23343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>') no-repeat right 10px center/12px 12px;
+    padding: 10px 36px 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--gray-200);
+    box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+    font-size: 14px;
+    color: var(--gray-900);
+}
+
+#memberSelect option {
+    padding: 6px 8px;
+}
+
+#memberSelect.optgroup-service {
+    font-weight: 600;
 }
 
 /* Remove all calendar borders/grid lines */
@@ -1223,8 +1262,8 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 </div>
 
 <div id="weeklyCalendarRow" style="display:flex; gap:40px; align-items:stretch; flex-wrap:nowrap; margin-top:24px; width:100%;">
-    <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 540px; min-width:540px; margin-bottom:32px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
-    <h3 style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
+        <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 540px; min-width:540px; margin-bottom:32px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+                <h3 style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
     <table style="width:100%; border-collapse:collapse;">
         <thead>
         <tr style="border-bottom:2px solid var(--gray-200); background:var(--gray-50);">
@@ -1650,63 +1689,152 @@ document.addEventListener('DOMContentLoaded', function() {
             return cookieValue;
         }
         const csrftoken = getCookie('csrftoken');
+
+        // Ensure any fetch calls to our authenticated endpoints include
+        // credentials by default so the session cookie is sent. Many existing
+        // calls in this template call `fetch('/bus/...')` without options.
+        // Monkeypatch window.fetch to inject `credentials: 'same-origin'`
+        // for same-origin relative `/bus/` paths.
+        (function ensureBusFetchCredentials(){
+            try {
+                const _origFetch = window.fetch.bind(window);
+                window.fetch = function(input, init){
+                    try{
+                        // Resolve URL string when provided
+                        const urlStr = (typeof input === 'string') ? input : (input && input.url) || '';
+                        if (typeof urlStr === 'string' && urlStr.startsWith('/bus/')) {
+                            init = init || {};
+                            if (!('credentials' in init)) init.credentials = 'same-origin';
+                        }
+                    } catch(e) { /* non-fatal */ }
+                    return _origFetch(input, init);
+                };
+            } catch(e) {
+                // If monkeypatching fails, fall back to leaving fetch as-is.
+                console.warn('Could not monkeypatch fetch for /bus/ credentials', e);
+            }
+        })();
         // -----------------------------
         // 1️⃣ Initialize default availability from server (fall back to sensible defaults)
         // -----------------------------
         const serverAvail = {{ coach_availability_json|default:"{}"|safe }} || {};
+        // Per-member availability map (membership_id -> availability payload)
+        const memberAvailMap = {{ member_availability_map|default:"{}"|safe }} || {};
         const weekdayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
-        // Build defaultAvailability with all days unavailable initially
-        const defaultAvailability = {};
-        for (let i = 0; i < 7; i++) {
-            defaultAvailability[i] = { start: '09:00', end: '17:00', unavailable: true, ranges: [] };
-        }
+        // Helper to build availability map from a server payload (same shape as coach_availability_json)
+        function buildAvailabilityFromPayload(payload) {
+            const out = {};
+            for (let i = 0; i < 7; i++) out[i] = { start: '09:00', end: '17:00', unavailable: true, ranges: [] };
 
-        // Server may return either:
-        // 1) an array of records: [{ day_of_week: 0..6, ranges: [...], unavailable: boolean }, ...]
-        // 2) a mapping object: { "Sunday": ["09:00-17:00"], "Tuesday": [...] }
-        if (Array.isArray(serverAvail)) {
-            serverAvail.forEach(item => {
-                // Expect backend to use 0=Sunday..6=Saturday. Accept numeric strings too.
-                let dayIndex = null;
-                if (typeof item.day_of_week === 'number') dayIndex = item.day_of_week;
-                else if (typeof item.day_of_week === 'string' && item.day_of_week.trim() !== '') dayIndex = parseInt(item.day_of_week, 10);
-                if (isNaN(dayIndex) || dayIndex === null) return;
-                dayIndex = ((dayIndex % 7) + 7) % 7; // normalize to 0..6
-
-                defaultAvailability[dayIndex].unavailable = !!item.unavailable;
-                defaultAvailability[dayIndex].ranges = item.ranges || [];
-
-                if (item.ranges?.length > 0) {
-                    const [start, end] = item.ranges[0].split("-");
-                    defaultAvailability[dayIndex].start = start;
-                    defaultAvailability[dayIndex].end = end;
-                }
-            });
-        } else if (serverAvail && typeof serverAvail === 'object') {
-            // serverAvail is a dict keyed by weekday names
-            Object.entries(serverAvail).forEach(([dayName, slots]) => {
-                try {
-                    const dn = String(dayName).trim();
-                    const idx = weekdayNames.indexOf(dn);
-                    if (idx === -1) return;
-                    if (!Array.isArray(slots) || slots.length === 0) {
-                        // empty means unavailable
-                        defaultAvailability[idx].unavailable = true;
-                        defaultAvailability[idx].ranges = [];
+            if (Array.isArray(payload)) {
+                    // Detect two common array shapes:
+                    // 1) array of per-day objects: [{ day_of_week: 0, ranges: [...], unavailable: bool }, ...]
+                    // 2) weekly-array: [ ['09:00-12:00'], [], ['10:00-11:00'], ... ] (index=0 => Sunday)
+                    if (payload.length === 7 && (Array.isArray(payload[0]) || typeof payload[0] === 'string' || payload[0] === null)) {
+                        // weekly-array shape
+                        payload.forEach((slots, idx) => {
+                            let ranges = [];
+                            if (Array.isArray(slots)) ranges = slots.slice();
+                            else if (typeof slots === 'string' && slots.trim() !== '') ranges = [slots];
+                            out[idx].unavailable = !(ranges && ranges.length);
+                            out[idx].ranges = ranges || [];
+                            if (out[idx].ranges && out[idx].ranges.length) {
+                                const first = out[idx].ranges[0];
+                                if (first && first.includes('-')) {
+                                    const [s,e] = first.split('-');
+                                    out[idx].start = s.trim();
+                                    out[idx].end = e.trim();
+                                }
+                            }
+                        });
                     } else {
-                        defaultAvailability[idx].unavailable = false;
-                        defaultAvailability[idx].ranges = slots;
-                        const first = slots[0];
-                        if (first && first.includes('-')) {
-                            const [s,e] = first.split('-');
-                            defaultAvailability[idx].start = s.trim();
-                            defaultAvailability[idx].end = e.trim();
-                        }
+                        payload.forEach(item => {
+                            let dayIndex = null;
+                            if (typeof item.day_of_week === 'number') dayIndex = item.day_of_week;
+                            else if (typeof item.day_of_week === 'string' && item.day_of_week.trim() !== '') dayIndex = parseInt(item.day_of_week, 10);
+                            if (isNaN(dayIndex) || dayIndex === null) return;
+                            dayIndex = ((dayIndex % 7) + 7) % 7;
+                            out[dayIndex].unavailable = !!item.unavailable;
+                            out[dayIndex].ranges = item.ranges || [];
+                            if (item.ranges?.length > 0) {
+                                const [start, end] = item.ranges[0].split('-');
+                                out[dayIndex].start = start;
+                                out[dayIndex].end = end;
+                            }
+                        });
                     }
-                } catch (e) { /* ignore malformed entries */ }
-            });
+                } else if (payload && typeof payload === 'object') {
+                Object.entries(payload).forEach(([dayName, slots]) => {
+                    try {
+                        const dn = String(dayName).trim();
+                        const idx = weekdayNames.indexOf(dn);
+                        if (idx === -1) return;
+                        if (!Array.isArray(slots) || slots.length === 0) {
+                            out[idx].unavailable = true;
+                            out[idx].ranges = [];
+                        } else {
+                            out[idx].unavailable = false;
+                            out[idx].ranges = slots;
+                            const first = slots[0];
+                            if (first && first.includes('-')) {
+                                const [s,e] = first.split('-');
+                                out[idx].start = s.trim();
+                                out[idx].end = e.trim();
+                            }
+                        }
+                    } catch (e) { }
+                });
+            }
+            return out;
         }
+
+        // Helper: produce a server-format availability array marking all days unavailable
+        function makeAllUnavailablePayload() {
+            const names = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+            return names.map(n => ({ day: n, ranges: [], unavailable: true }));
+        }
+
+        // Build the canonical org-wide availability once
+        const orgDefaultAvailability = buildAvailabilityFromPayload(serverAvail);
+
+        // Build per-member availability map (membership_id -> availability)
+        const memberDefaultAvailability = {};
+        try {
+            // First convert any server-provided member maps
+            for (const k of Object.keys(memberAvailMap || {})) {
+                try { memberDefaultAvailability[String(k)] = buildAvailabilityFromPayload(memberAvailMap[k]); } catch(e){ /* fallthrough */ }
+            }
+        } catch(e){ /* ignore */ }
+
+        // Ensure every membership present in the selector has an entry (new members default to all-unavailable)
+        try {
+            const sel = document.getElementById('memberSelect');
+            if (sel) {
+                Array.from(sel.options).forEach(opt => {
+                    try{
+                        const val = opt.value;
+                        if (!val) return;
+                        // skip service pseudo-options
+                        if (String(val).startsWith('svc:')) return;
+                        if (!memberDefaultAvailability[String(val)]){
+                            memberDefaultAvailability[String(val)] = buildAvailabilityFromPayload(makeAllUnavailablePayload());
+                        }
+                    }catch(e){}
+                });
+            } else {
+                // fallback: ensure known MEMBERS have entries
+                if (Array.isArray(MEMBERS)){
+                    for (const m of MEMBERS){
+                        const mid = String(m.id);
+                        if (!memberDefaultAvailability[mid]) memberDefaultAvailability[mid] = buildAvailabilityFromPayload(makeAllUnavailablePayload());
+                    }
+                }
+            }
+        } catch(e){ /* ignore */ }
+
+        // The live defaultAvailability object used by the UI. Initialized to org defaults.
+        const defaultAvailability = JSON.parse(JSON.stringify(orgDefaultAvailability));
 
     // -----------------------------
     // 2️⃣ Helper: is date in the past
@@ -2198,6 +2326,38 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('Saving weekly availability payload (day names):', JSON.parse(JSON.stringify(payload)));
 
             try {
+                // Build helper to convert built availability (indexed 0=Sun) to server availability array
+                function builtToAvailabilityArray(built){
+                    try{
+                        const out = [];
+                        for (let i=0;i<7;i++){
+                            const day = weekdayNames[i];
+                            const info = built[i] || { ranges: [], unavailable: true };
+                            out.push({ day: day, ranges: info.ranges || [], unavailable: !!info.unavailable });
+                        }
+                        return out;
+                    }catch(e){ return [] }
+                }
+
+                // Compose member_map and service_map so owner can save all existing availability
+                const member_map = {};
+                try{
+                    for (const mid of Object.keys(memberDefaultAvailability || {})){
+                        member_map[mid] = builtToAvailabilityArray(memberDefaultAvailability[mid]);
+                    }
+                }catch(e){}
+
+                const service_map = {};
+                try{
+                    for (const s of (SERVICES||[])){
+                        try{
+                            // if service.weekly_map is already in server shape, use it; otherwise convert
+                            if (Array.isArray(s.weekly_map)) service_map[String(s.id)] = s.weekly_map;
+                            else service_map[String(s.id)] = builtToAvailabilityArray(buildAvailabilityFromPayload(s.weekly_map || []));
+                        }catch(e){}
+                    }
+                }catch(e){}
+
                 const res = await fetch(`/bus/${orgSlug}/availability/save/`, {
                     method: 'POST',
                     credentials: 'same-origin',
@@ -2205,7 +2365,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': csrftoken
                     },
-                    body: JSON.stringify({ availability: payload })
+                    body: JSON.stringify({ availability: payload, target: (SELECTED_MEMBER || null), member_map: member_map, service_map: service_map })
                 });
 
                 const data = await res.json().catch(() => null);
@@ -2268,12 +2428,206 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const orgSlug = "{{ organization.slug }}";
     const orgTimezone = "{{ org_timezone }}";  // e.g., 'America/Los_Angeles'
-    // Services metadata from server (includes per-service weekly_map)
-    const SERVICES = {{ services_json|default:"[]"|safe }} || [];
+        // Services metadata from server (includes per-service weekly_map)
+        const SERVICES = {{ services_json|default:"[]"|safe }} || [];
+        const MEMBERS = {{ members_list|default:'[]'|safe }} || [];
+        const IS_TEAM = {{ is_team_plan|yesno:'true,false' }};
+        // Selected member id (string). Defaults to saved selection or provided default_member_id or first member id.
+        const DEFAULT_MEMBER = {{ default_member_id|default:'null' }};
+        const _stored_selected = localStorage.getItem('cc_selected_member');
+        let SELECTED_MEMBER = (_stored_selected && _stored_selected !== 'null') ? _stored_selected : (DEFAULT_MEMBER ? String(DEFAULT_MEMBER) : (MEMBERS.length? String(MEMBERS[0].id) : null));
+        // If not a Team plan, disable member selection and clear stored preference
+        if (!IS_TEAM){
+            SELECTED_MEMBER = null;
+            try{ localStorage.removeItem('cc_selected_member'); }catch(e){}
+        }
+        // Visible services after filtering by selected member
+        let VISIBLE_SERVICES = [];
+
+        function updateVisibleServices(){
+            if (!SELECTED_MEMBER){
+                VISIBLE_SERVICES = SERVICES.slice();
+                return;
+            }
+            // If a service option is selected (prefixed with 'svc:'), show only that service
+            try{
+                if (String(SELECTED_MEMBER).startsWith('svc:')){
+                    const svcId = String(SELECTED_MEMBER).slice(4);
+                    VISIBLE_SERVICES = SERVICES.filter(s => String(s.id) === svcId);
+                    return;
+                }
+            }catch(e){ /* fall back to member filtering */ }
+
+            VISIBLE_SERVICES = SERVICES.filter(s => {
+                try{
+                    const assigned = Array.isArray(s.assigned_members) ? s.assigned_members.map(String) : [];
+                    if (assigned.length === 0) return false; // hide unassigned services when a member is selected
+                    return assigned.indexOf(String(SELECTED_MEMBER)) !== -1;
+                }catch(e){ return false; }
+            });
+        }
+
+        function svcById(svcId){
+            const idStr = String(svcId);
+            let found = VISIBLE_SERVICES.find(s => String(s.id) === idStr);
+            if (!found) found = SERVICES.find(s => String(s.id) === idStr);
+            return found || null;
+        }
+
+        // Initialize visible services
+        updateVisibleServices();
+
+        // Wire member selector when present
+        try{
+            const sel = document.getElementById('memberSelect');
+            if (sel) {
+                // Set initial selection if stored
+                if (SELECTED_MEMBER){
+                    const opt = sel.querySelector('option[value="' + SELECTED_MEMBER + '"]');
+                    if (opt) opt.selected = true;
+                }
+                // Append services (no-members or multi-member) as selectable options (prefix values with 'svc:')
+                try{
+                    if (IS_TEAM && Array.isArray(SERVICES)){
+                        for (const s of SERVICES){
+                            try{
+                                            const assigned = Array.isArray(s.assigned_members) ? s.assigned_members : [];
+                                            if (!assigned || assigned.length === 0 || (Array.isArray(assigned) && assigned.length > 1)){
+                                                const val = 'svc:' + String(s.id);
+                                                if (!sel.querySelector('option[value="' + val + '"]')){
+                                                    const opt = document.createElement('option');
+                                                    opt.value = val;
+                                                    opt.textContent = '[Service] ' + (s.name || ('Service ' + String(s.id)));
+                                                    sel.appendChild(opt);
+                                                }
+                                            }
+                                            // Ensure service has a weekly_map; new services default to all-unavailable
+                                            try{
+                                                if (!s.weekly_map || (typeof s.weekly_map === 'object' && Object.keys(s.weekly_map).length === 0)){
+                                                    s.weekly_map = makeAllUnavailablePayload();
+                                                }
+                                            }catch(e){}
+                                        }catch(e){}
+                        }
+                    }
+                }catch(e){}
+                // Initialize select2 for nicer UX if available
+                try { if (window.$ && $.fn && $.fn.select2) $(sel).select2({ width: 'resolve' }); } catch(e){}
+                function selectDefaultAvailabilityFor(selection){
+                    try{
+                        if (selection && String(selection).startsWith('svc:')){
+                            const svcId = String(selection).slice(4);
+                            const svc = SERVICES.find(s=>String(s.id)===svcId) || null;
+                            if (svc && svc.weekly_map) {
+                                const src = svc.weekly_map;
+                                const built = buildAvailabilityFromPayload(src);
+                                for (const k of Object.keys(built)) defaultAvailability[k] = built[k];
+                                return;
+                            }
+                        }
+                        // membership-specific availability
+                        if (selection && memberDefaultAvailability[String(selection)]){
+                            const src = memberDefaultAvailability[String(selection)];
+                            for (const k of Object.keys(src)) defaultAvailability[k] = JSON.parse(JSON.stringify(src[k]));
+                        } else {
+                            // fallback to org defaults
+                            for (const k of Object.keys(orgDefaultAvailability)) defaultAvailability[k] = JSON.parse(JSON.stringify(orgDefaultAvailability[k]));
+                        }
+                    }catch(e){ console.warn('selectDefaultAvailabilityFor error', e); }
+                }
+
+                    function updateSelectionBadge(selection){
+                        try{
+                            const badge = document.getElementById('memberScopeBadge');
+                            if (!badge) return;
+                            if (selection && String(selection).startsWith('svc:')){
+                                const svcId = String(selection).slice(4);
+                                const svc = SERVICES.find(s=>String(s.id)===svcId) || null;
+                                if (svc && svc.weekly_map && Object.keys(svc.weekly_map).length>0){
+                                    badge.textContent = 'Service-specific availability';
+                                    badge.style.borderColor = 'rgba(16,185,129,0.15)';
+                                    badge.style.background = 'rgba(16,185,129,0.06)';
+                                    badge.style.color = 'var(--success-600)';
+                                    return;
+                                }
+                            }
+                            if (selection && memberAvailMap && memberAvailMap[String(selection)]){
+                                badge.textContent = 'Member-specific availability';
+                                badge.style.borderColor = 'rgba(59,130,246,0.15)';
+                                badge.style.background = 'rgba(59,130,246,0.06)';
+                                badge.style.color = 'var(--primary-600)';
+                                return;
+                            }
+                            // default
+                            badge.textContent = 'Showing org defaults';
+                            badge.style.borderColor = 'var(--gray-200)';
+                            badge.style.background = 'transparent';
+                            badge.style.color = 'var(--gray-600)';
+                        }catch(e){ /* ignore */ }
+                    }
+
+                // Explicit apply flow: changing the select only stages a pending selection.
+                let pendingSelection = SELECTED_MEMBER;
+                sel.addEventListener('change', function(){
+                    try{
+                        pendingSelection = sel.value || null;
+                        console.log('memberSelect change -> pendingSelection=', pendingSelection);
+                        // Immediately apply selection so defaults update without clicking Apply
+                        try{ applySelection(pendingSelection || sel.value); } catch(e) { console.warn('applySelection immediate failed', e); }
+                    }catch(e){ console.warn('memberSelect change handler failed', e); }
+                });
+
+                // If Select2 is in use, also listen for its events which may not
+                // always bubble as native change events in the same way.
+                try{
+                    if (window.$ && $.fn && $.fn.select2) {
+                        try{
+                            $(sel).on('select2:select select2:unselect select2:close', function(e){
+                                try{ pendingSelection = sel.value || null; console.log('select2 event ->', e.type, pendingSelection); try{ applySelection(pendingSelection || sel.value); }catch(ae){ console.warn('applySelection from select2 failed', ae); } }catch(ie){}
+                            });
+                        }catch(e){}
+                    }
+                }catch(e){}
+
+                function applySelection(selection){
+                    try{
+                        SELECTED_MEMBER = selection || null;
+                        if (SELECTED_MEMBER) localStorage.setItem('cc_selected_member', SELECTED_MEMBER);
+                        else localStorage.removeItem('cc_selected_member');
+                        updateVisibleServices();
+                        try { selectDefaultAvailabilityFor(SELECTED_MEMBER); } catch(e){}
+                        try { updateSelectionBadge(SELECTED_MEMBER); } catch(e){}
+                        try { calendar && calendar.refetchEvents(); } catch(e){}
+                        try { displayDefaultAvailability(); } catch(e){}
+                        try { syncAvailabilityToCalendar(); } catch(e){}
+                    }catch(e){ console.warn('applySelection failed', e); }
+                    // disable apply button until next change
+                    const applyBtn = document.getElementById('applyMemberSelectBtn');
+                    if (applyBtn) {
+                        applyBtn.disabled = true;
+                        applyBtn.style.opacity = '0.6';
+                    }
+                }
+
+                // Wire the Apply button
+                try{
+                    const applyBtn = document.getElementById('applyMemberSelectBtn');
+                    if (applyBtn){
+                        applyBtn.addEventListener('click', function(ev){ ev.preventDefault(); console.log('Apply clicked, pending=', pendingSelection, 'current=', SELECTED_MEMBER); applySelection(pendingSelection || sel.value); });
+                        // start enabled to be responsive; it will be a no-op if nothing changed
+                        applyBtn.disabled = false;
+                        applyBtn.style.opacity = '1';
+                    }
+                }catch(e){}
+
+                // Initialize defaultAvailability for the current selection by applying it once
+                try { applySelection(SELECTED_MEMBER); } catch(e){}
+            }
+        }catch(e){ console.warn('member selector wiring failed', e); }
     const AUTO_OPEN_SERVICE = "{{ auto_open_service|default:'' }}";
     const AUTO_OPEN_DATE = "{{ auto_open_date|default:'' }}";
      
-    if (!calendarEl) return;
+                if (!calendarEl) return;
 
     let selectedDates = new Set();
     let isDragging = false;
@@ -2282,13 +2636,64 @@ document.addEventListener('DOMContentLoaded', function() {
     let dragStartIsUnavailable = false;
 
     let calendar = null;
-    try {
+        try {
         calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
         height: 'auto',
         selectable: false, // disable default selection highlight
         editable: false,
-        events: `/bus/${orgSlug}/events/`,
+        events: function(fetchInfo, successCallback, failureCallback) {
+            // Fetch events from server then filter by VISIBLE_SERVICES
+            const params = new URLSearchParams();
+            if (fetchInfo && fetchInfo.startStr) params.set('start', fetchInfo.startStr);
+            if (fetchInfo && fetchInfo.endStr) params.set('end', fetchInfo.endStr);
+            const url = `/bus/${orgSlug}/events/?` + params.toString();
+            fetch(url, { credentials: 'same-origin' }).then(r => r.json()).then(data => {
+                try{
+                    const items = Array.isArray(data) ? data : (data.events || []);
+                    // build allowed service id set from VISIBLE_SERVICES
+                    const allowed = new Set((VISIBLE_SERVICES||[]).map(s=>String(s.id)));
+                    // Map membership id -> user id (if provided in MEMBERS payload)
+                    const MEMBER_TO_USER = {};
+                    try{ MEMBERS.forEach(m => { MEMBER_TO_USER[String(m.id)] = (m.user__id || m.user_id || (m.user && (m.user.id || m.user.pk)) || null); }); }catch(e){}
+
+                    const filtered = items.filter(ev => {
+                        try{
+                            const ext = (ev.extendedProps || {});
+                            // If this is a per-date override, allow it when it matches the selected scope
+                            if (ext.is_per_date) {
+                                // No selection -> show all per-date overrides
+                                if (!SELECTED_MEMBER) return true;
+                                // Service-scoped selection (values like 'svc:123') -> match assigned_scope_service_id
+                                if (String(SELECTED_MEMBER).startsWith('svc:')){
+                                    const svcId = String(SELECTED_MEMBER).slice(4);
+                                    const assignedSvc = (ext.assigned_scope_service_id || ext.assigned_scope_service || (ev.client_name && ev.client_name.replace && ev.client_name.replace('scope:svc:','')) || null);
+                                    if (assignedSvc && String(assignedSvc) === svcId) return true;
+                                    return false;
+                                }
+                                // Membership selection -> compare assigned_user_id (map membership->user id when needed)
+                                const mUser = MEMBER_TO_USER[String(SELECTED_MEMBER)] || null;
+                                const assignedUserId = ext.assigned_user_id || ev.assigned_user_id || null;
+                                if (assignedUserId && String(assignedUserId) === String(mUser)) return true;
+                                return false;
+                            }
+
+                            // Non per-date events: match by visible service ids or slug/name fallback
+                            const svcId = (ev.service_id || ext.service_id || ext.service || null);
+                            if (svcId && allowed.has(String(svcId))) return true;
+                            const slug = (ev.service_slug || ext.service_slug || ev.title || ev.service || null);
+                            if (slug) {
+                                for (const s of VISIBLE_SERVICES) {
+                                    if (String(s.slug) === String(slug) || String(s.name) === String(slug)) return true;
+                                }
+                            }
+                        }catch(e){/* ignore */}
+                        return false;
+                    });
+                    successCallback(filtered);
+                }catch(e){ successCallback([]); }
+            }).catch(err => { failureCallback(err); });
+        },
         headerToolbar: { left: 'prev', center: 'title', right: 'next' },
         showNonCurrentDates: false,
         dayMaxEvents: true,
@@ -2392,7 +2797,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!AUTO_OPEN_SERVICE) return;
                 // AUTO_OPEN_SERVICE may be an id (numeric). Find service by id.
                 const svcId = Number(AUTO_OPEN_SERVICE) || null;
-                const svc = SERVICES.find(s => Number(s.id) === svcId);
+                const svc = svcById(svcId);
                 if (!svc) return;
 
                 // Starting date: prefer AUTO_OPEN_DATE, fall back to today
@@ -3187,7 +3592,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     end: dateStr + 'T23:59',
                     display: 'background',
                     color: '#e0e0e0',
-                    extendedProps: { is_per_date: true, override_type: 'blocked' }
+                    extendedProps: Object.assign({ is_per_date: true, override_type: 'blocked' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {}))
                 });
             } catch (e) { console.warn('applyPerDateUnavailable addEvent failed', e); }
 
@@ -3246,6 +3651,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         }
+
+        // Debounce sync to avoid expensive repeated recalculations on rapid events
+        function debounce(fn, wait) {
+            let t = null;
+            return function(...args) {
+                if (t) clearTimeout(t);
+                t = setTimeout(() => { try { fn.apply(this, args); } catch(e){}; t = null; }, wait);
+            };
+        }
+        // Replace syncAvailabilityToCalendar with a debounced version to reduce CPU spikes
+        syncAvailabilityToCalendar = debounce(syncAvailabilityToCalendar, 150);
 
 
     // 1️⃣ Function to mark past days grey
@@ -3433,7 +3849,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Find the service by id (autoService may be string)
             const svcId = String(autoService);
-            const svc = SERVICES.find(s => String(s.id) === svcId);
+            const svc = svcById(svcId);
             if (!svc) return;
 
             // helper: format Date to YYYY-MM-DD
@@ -3578,7 +3994,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                             try {
                                 const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates })
+                                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: (SELECTED_MEMBER || null) })
                                 });
                                 const data = await res.json().catch(() => null);
                                 if (res.ok) {
@@ -3714,7 +4130,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 resetBtn.disabled = true;
                 try {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d] })
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d], target: (SELECTED_MEMBER || null) })
                     });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
@@ -3814,7 +4230,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 // Remove existing overrides for these dates
-                await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates }) });
+                await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: (SELECTED_MEMBER || null) }) });
 
                 if (unique.length === 0) {
                     // No ranges -> simply deleted (reverts to weekly defaults)
@@ -3823,7 +4239,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     for (const rr of unique) {
                         await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                            body: JSON.stringify({ dates, start_time: rr.start, end_time: rr.end })
+                            body: JSON.stringify({ dates, start_time: rr.start, end_time: rr.end, target: (SELECTED_MEMBER || null) })
                         });
                     }
                 }
@@ -3946,7 +4362,7 @@ document.addEventListener('DOMContentLoaded', function() {
             makeUnavailableBtn.onclick = async () => {
                 if (!confirm(`Mark ${dateStr} as unavailable? This will block the whole day.`)) return;
                 try {
-                    const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true }) });
+                    const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) }) });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
                         applyPerDateUnavailable(dateStr);
@@ -3983,7 +4399,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                        body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true })
+                        body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) })
                     });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
@@ -4020,7 +4436,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 // remove existing per-date overrides for the date
-                try { await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr] }) }); } catch(e){}
+                try { await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], target: (SELECTED_MEMBER || null) }) }); } catch(e){}
 
                 // Remove existing optimistic background events for this date before adding new ones
                 try {
@@ -4037,12 +4453,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 for (const r of rangesToCreate) {
                     try {
                         // optimistic UI
-                        const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: r.start, end_time: r.end }) });
+                        const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: r.start, end_time: r.end, target: (SELECTED_MEMBER || null) }) });
                         const data = await res.json().catch(() => null);
                         if (!res.ok) console.warn('Error creating per-date range', r, data);
                         else {
                             // On success add event (avoid transient duplicate before server cleanup)
-                            try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: { is_per_date: true, override_type: 'available' } }); } catch(e){}
+                            try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) }); } catch(e){}
                         }
                     } catch (err) { console.error('range create failed', err); }
                 }
@@ -4880,13 +5296,13 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({ dates: datesArray })
+            body: JSON.stringify({ dates: datesArray, target: (SELECTED_MEMBER || null) })
         }).catch(err => console.warn('batch_delete pre-clean failed', err)).finally(() => {
             // Optimistically add per-date background events so they override defaults immediately
             try {
                 datesArray.forEach(d => {
                     try {
-                        calendar.addEvent({ start: d + 'T' + selectedStartTime, end: d + 'T' + selectedEndTime, display: 'background', color: '#d0f0d0', extendedProps: { is_per_date: true } });
+                        calendar.addEvent({ start: d + 'T' + selectedStartTime, end: d + 'T' + selectedEndTime, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) });
                     } catch (e) { /* ignore */ }
                 });
             } catch (e) { console.warn('optimistic add failed', e); }
@@ -5080,7 +5496,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                    body: JSON.stringify({ dates: [dates[0]] })
+                                    body: JSON.stringify({ dates: [dates[0]], target: (SELECTED_MEMBER || null) })
                                 });
                                 const data = await res.json().catch(() => null);
                                 if (res.ok) {
@@ -5101,7 +5517,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                             end: dates[0] + 'T17:00',
                                             display: 'background',
                                             color: '#d0f0d0',
-                                            extendedProps: { is_per_date: true }
+                                            extendedProps: { is_per_date: true, override_type: 'available' }
                                         });
                                     } catch (e) { /* ignore */ }
 
@@ -5219,7 +5635,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                         } else if (info.start && info.end) { s = info.start; e = info.end; }
 
                                         try {
-                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: { is_per_date: true } });
+                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) });
                                         } catch (ee) { /* ignore addEvent errors */ }
 
                                         // Update day cell classes immediately
@@ -5242,7 +5658,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const delRes = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                    body: JSON.stringify({ dates: dates })
+                                    body: JSON.stringify({ dates: dates, target: (SELECTED_MEMBER || null) })
                                 });
                                 const delData = await delRes.json().catch(() => null);
                                 if (!delRes.ok) {
@@ -5259,7 +5675,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     return fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                        body: JSON.stringify({ dates: g.dates, start_time: g.start, end_time: g.end })
+                                        body: JSON.stringify({ dates: g.dates, start_time: g.start, end_time: g.end, target: (SELECTED_MEMBER || null) })
                                     }).then(r => r.json().catch(() => null).then(data => ({ ok: r.ok, data })));
                                 });
 
@@ -5331,7 +5747,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                        body: JSON.stringify({ dates: dates, start_time: '00:00', end_time: '23:59', is_blocking: true })
+                        body: JSON.stringify({ dates: dates, start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) })
                     });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
@@ -5386,7 +5802,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                            body: JSON.stringify({ dates: [theDate], start_time: '00:00', end_time: '23:59', is_blocking: true })
+                            body: JSON.stringify({ dates: [theDate], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) })
                         });
                         const data = await res.json().catch(() => null);
                         if (res.ok) {
@@ -5437,7 +5853,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // First remove existing per-date overrides for these dates
                 try {
                     const delRes = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: dates })
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: dates, target: (SELECTED_MEMBER || null) })
                     });
                     // ignore result details — we'll refetch after creating
                 } catch (e) { /* ignore delete errors */ }
@@ -5457,12 +5873,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     try {
                         // optimistic UI addition
                         dates.forEach(d => {
-                            try { calendar.addEvent({ start: d + 'T' + r.start, end: d + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: { is_per_date: true } }); } catch(e) {}
+                                            try { calendar.addEvent({ start: d + 'T' + r.start, end: d + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available' }, (SELECTED_MEMBER ? (String(SELECTED_MEMBER).startsWith('svc:') ? { assigned_scope_service_id: Number(String(SELECTED_MEMBER).slice(4)) } : { assigned_user_id: Number(SELECTED_MEMBER) }) : {})) }); } catch(e) {}
                         });
 
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                            body: JSON.stringify({ dates: dates, start_time: r.start, end_time: r.end })
+                            body: JSON.stringify({ dates: dates, start_time: r.start, end_time: r.end, target: (SELECTED_MEMBER || null) })
                         });
                         const data = await res.json().catch(() => null);
                         if (!res.ok) {
@@ -5532,7 +5948,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                        body: JSON.stringify({ dates: targets })
+                        body: JSON.stringify({ dates: targets, target: (SELECTED_MEMBER || null) })
                     });
                     if (res.ok) {
                         try { await res.json(); } catch(e) {}

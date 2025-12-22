@@ -9,10 +9,10 @@
       <select id="mainServiceSelect" class="px-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         {% if services %}
           {% for s in services %}
-            <option value="{{ s.slug }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
+            <option value="{{ s.slug }}" data-assigned-names="{{ s.assigned_names|default:''|escapejs }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
           {% endfor %}
         {% else %}
-          <option value="{{ service.slug }}" selected>{{ service.name }}</option>
+          <option value="{{ service.slug }}" data-assigned-names="{{ service.assigned_names|default:''|escapejs }}" selected>{{ service.name }}</option>
         {% endif %}
       </select>
       <span id="serviceInfoIcon" class="ml-2 cursor-pointer" style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#e0e7ff; color:#374151; font-size:18px; border:1px solid #c7d2fe;" title="View service details">&#9432;</span>
@@ -35,6 +35,7 @@
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
+    <div><strong>Team:</strong> <span id="mainSvcTeam"></span></div>
     <div><strong>Refunds:</strong>
       <span id="mainSvcRefundLine"></span>
       <div id="mainSvcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
@@ -83,6 +84,15 @@
       mainSvcDesc.textContent = d.description || "—";
       mainSvcDuration.textContent = d.duration || 0;
       mainSvcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+      // Populate assigned team members (from option dataset when provided)
+      const mainSvcTeamEl = document.getElementById('mainSvcTeam');
+      try {
+        const opt = mainServiceSelect && mainServiceSelect.options ? mainServiceSelect.options[mainServiceSelect.selectedIndex] : null;
+        const assigned = (opt && opt.dataset && opt.dataset.assignedNames) ? opt.dataset.assignedNames : (d.assigned_members || '');
+        if (mainSvcTeamEl) mainSvcTeamEl.textContent = assigned || '—';
+      } catch (err) {
+        if (mainSvcTeamEl) mainSvcTeamEl.textContent = '—';
+      }
       if (d.refunds_allowed) {
         mainSvcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
         if (d.refund_policy_text) {
@@ -170,10 +180,10 @@
       <select id="serviceSelect" name="service_slug" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         {% if services %}
           {% for s in services %}
-            <option value="{{ s.slug }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
+            <option value="{{ s.slug }}" data-assigned-names="{{ s.assigned_names|default:''|escapejs }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
           {% endfor %}
         {% else %}
-          <option value="{{ service.slug }}" selected>{{ service.name }}</option>
+          <option value="{{ service.slug }}" data-assigned-names="{{ service.assigned_names|default:''|escapejs }}" selected>{{ service.name }}</option>
         {% endif %}
       </select>
 
@@ -183,6 +193,7 @@
         <div><strong>Description:</strong> <span id="svcDesc">{{ service.description|default:"—" }}</span></div>
         <div><strong>Duration:</strong> <span id="svcDuration">{{ service.duration }}</span> minutes</div>
         <div><strong>Price:</strong> $<span id="svcPrice">{{ service.price }}</span></div>
+        <div><strong>Team:</strong> <span id="svcTeam"></span></div>
         <!-- Client-facing modal intentionally omits buffer/increment/fixed/allow settings -->
         <div><strong>Refunds:</strong>
           <span id="svcRefundLine">
@@ -576,6 +587,16 @@ document.addEventListener("DOMContentLoaded", async function () {
         svcDesc.textContent = d.description || "—";
         svcDuration.textContent = d.duration || 0;
         svcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+        // Populate team members into the booking modal (reads option dataset if available)
+        try {
+          const opt = serviceSelect && serviceSelect.options ? serviceSelect.options[serviceSelect.selectedIndex] : null;
+          const assigned = (opt && opt.dataset && opt.dataset.assignedNames) ? opt.dataset.assignedNames : (d.assigned_members || '');
+          const svcTeamEl = document.getElementById('svcTeam');
+          if (svcTeamEl) svcTeamEl.textContent = assigned || '—';
+        } catch (err) {
+          const svcTeamEl = document.getElementById('svcTeam');
+          if (svcTeamEl) svcTeamEl.textContent = '—';
+        }
         // show additional settings
         // Client-facing modal intentionally omits buffer/increment/fixed/allow details
         if (d.refunds_allowed) {

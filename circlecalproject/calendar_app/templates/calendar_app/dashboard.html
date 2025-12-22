@@ -4,81 +4,125 @@
 {% block content %}
 <div class="text-center py-6 md:py-10">
 
-    <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-4 md:mb-6">
-        Welcome, {{ request.user.username }} 👋
-    </h1>
+    {% if user_org_role == 'staff' or user_org_role == 'manager' %}
+        {% if request.user.first_name and request.user.last_name %}
 
-    <p class="text-gray-700 mb-6 md:mb-10 text-base md:text-lg">
-        What would you like to do today?
-    </p>
+            <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-4 md:mb-6">
+                {% if request.user.profile and request.user.profile.display_name %}
+                    Welcome, {{ request.user.profile.display_name }} 👋
+                {% else %}
+                    Welcome, {{ request.user.first_name }} 👋
+                {% endif %}
+            </h1>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <p class="text-gray-700 mb-6 md:mb-10 text-base md:text-lg">
+                What would you like to do today?
+            </p>
 
-        <!-- Organizations -->
-        <a href="{% url 'calendar_app:choose_business' %}"
-           class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-            <h2 class="text-2xl font-semibold text-blue-600">Businesses</h2>
-            <p class="text-gray-600 mt-2">View and manage your businesses.</p>
-        </a>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {# Staff/Manager: only show Bookings and Profile tiles #}
+                {% if org %}
+                    <a href="{% url 'calendar_app:bookings_list' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                        <h2 class="text-2xl font-semibold text-blue-600">Bookings</h2>
+                        <p class="text-gray-600 mt-2">View all client bookings.</p>
+                    </a>
+                {% endif %}
 
-        <!-- Billing Portal -->
-        {% if org %}
-            <a href="{% url 'billing:manage_billing' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-                <h2 class="text-2xl font-semibold text-blue-600">Billing</h2>
-                <p class="text-gray-600 mt-2">In-app billing: trial countdown, plan, payment methods.</p>
-            </a>
+                <a href="{% url 'accounts:profile' %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Profile</h2>
+                    <p class="text-gray-600 mt-2">Update your personal info.</p>
+                </a>
+            </div>
 
-            <!-- Pricing -->
-            <a href="{% url 'calendar_app:pricing_page' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-                <h2 class="text-2xl font-semibold text-blue-600">Pricing</h2>
-                <p class="text-gray-600 mt-2">View available plans.</p>
-            </a>
-
-            <!-- Calendar -->
-            <a href="{% url 'calendar_app:calendar' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-                <h2 class="text-2xl font-semibold text-blue-600">Calendar</h2>
-                <p class="text-gray-600 mt-2">Open your scheduling calendar.</p>
-            </a>
-
-            <!-- Services -->
-            {% if has_availability %}
-            <a id="services-card" href="{% url 'calendar_app:services_page' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-                <h2 class="text-2xl font-semibold text-blue-600">Services</h2>
-                <p class="text-gray-600 mt-2">Manage your service offerings.</p>
-            </a>
-            {% else %}
-            <a id="services-card" href="{% url 'calendar_app:services_page' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow transition border opacity-60 cursor-not-allowed" data-availability-disabled="1">
-                <h2 class="text-2xl font-semibold text-blue-600">Services</h2>
-                <p class="text-gray-600 mt-2">Manage your service offerings.</p>
-            </a>
-            {% endif %}
-
-            <!-- Bookings -->
-            <a href="{% url 'calendar_app:bookings_list' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-                <h2 class="text-2xl font-semibold text-blue-600">Bookings</h2>
-                <p class="text-gray-600 mt-2">View all client bookings.</p>
-            </a>
-
-            <!-- Team -->
-            <a href="{% url 'calendar_app:team_dashboard' org.slug %}"
-               class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-                <h2 class="text-2xl font-semibold text-blue-600">Team</h2>
-                <p class="text-gray-600 mt-2">Manage team roles & invitations.</p>
-            </a>
+        {% else %}
+            <div class="max-w-2xl mx-auto p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <h2 class="text-xl font-semibold text-yellow-700 mb-2">Complete your profile to access the dashboard</h2>
+                <p class="text-gray-700 mb-4">Before you can use the dashboard, please add your <strong>First Name</strong> and <strong>Last Name</strong> on your profile. These are required for staff accounts.</p>
+                <div class="flex gap-3 justify-center">
+                    <a href="{% url 'accounts:profile' %}" class="px-4 py-2 bg-blue-600 text-white rounded">Complete Profile</a>
+                </div>
+            </div>
         {% endif %}
 
-        <!-- Profile -->
-        <a href="{% url 'accounts:profile' %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
-            <h2 class="text-2xl font-semibold text-blue-600">Profile</h2>
-            <p class="text-gray-600 mt-2">Update your personal info.</p>
-        </a>
-    </div>
+    {% else %}
+
+        <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-4 md:mb-6">
+            {% if request.user.profile and request.user.profile.display_name %}
+                Welcome, {{ request.user.profile.display_name }} 👋
+            {% elif request.user.first_name %}
+                Welcome, {{ request.user.first_name }} 👋
+            {% else %}
+                Welcome, {{ request.user.username }} 👋
+            {% endif %}
+        </h1>
+
+        <p class="text-gray-700 mb-6 md:mb-10 text-base md:text-lg">
+            What would you like to do today?
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <!-- Full dashboard for owners/admins -->
+            <!-- Organizations -->
+            <a href="{% url 'calendar_app:choose_business' %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Businesses</h2>
+                <p class="text-gray-600 mt-2">View and manage your businesses.</p>
+            </a>
+
+            <!-- Billing Portal -->
+            {% if org %}
+                <a href="{% url 'billing:manage_billing' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Billing</h2>
+                    <p class="text-gray-600 mt-2">In-app billing: trial countdown, plan, payment methods.</p>
+                </a>
+
+                <!-- Pricing -->
+                <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Pricing</h2>
+                    <p class="text-gray-600 mt-2">View available plans.</p>
+                </a>
+
+                <!-- Calendar -->
+                <a href="{% url 'calendar_app:calendar' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Calendar</h2>
+                    <p class="text-gray-600 mt-2">Open your scheduling calendar.</p>
+                </a>
+
+                <!-- Services -->
+                {% if has_availability %}
+                <a id="services-card" href="{% url 'calendar_app:services_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Services</h2>
+                    <p class="text-gray-600 mt-2">Manage your service offerings.</p>
+                </a>
+                {% else %}
+                <a id="services-card" href="{% url 'calendar_app:services_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow transition border opacity-60 cursor-not-allowed" data-availability-disabled="1">
+                    <h2 class="text-2xl font-semibold text-blue-600">Services</h2>
+                    <p class="text-gray-600 mt-2">Manage your service offerings.</p>
+                </a>
+                {% endif %}
+
+                <!-- Bookings -->
+                <a href="{% url 'calendar_app:bookings_list' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Bookings</h2>
+                    <p class="text-gray-600 mt-2">View all client bookings.</p>
+                </a>
+
+                <!-- Team -->
+                <a href="{% url 'calendar_app:team_dashboard' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                    <h2 class="text-2xl font-semibold text-blue-600">Staff</h2>
+                    <p class="text-gray-600 mt-2">Manage staff roles & invitations.</p>
+                </a>
+            {% endif %}
+
+            <!-- Profile -->
+            <a href="{% url 'accounts:profile' %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <h2 class="text-2xl font-semibold text-blue-600">Profile</h2>
+                <p class="text-gray-600 mt-2">Update your personal info.</p>
+            </a>
+
+        </div>
+
+    {% endif %}
 
 </div>
 

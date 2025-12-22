@@ -303,7 +303,8 @@
       }
     </style>
     <script>
-      (function(){
+          (function(){
+            const defaultCardLast4 = "{{ default_card_last4|default:''|escapejs }}";
         const panel = document.getElementById('invoice-filters-panel');
         const openBtn = document.getElementById('openFiltersBtn');
         const closeBtn = document.getElementById('closeFiltersBtn');
@@ -351,7 +352,7 @@
             <tr class="border-t"
               data-inv-id="{{ inv.raw.id|default:'' }}"
               data-amount="{{ inv.amount_display_dollars|default:0 }}"
-              data-card="{{ inv.card_last4|default:'' }}"
+              data-card="{{ inv.card_last4|default:default_card_last4|default:'' }}"
               data-status="{% if inv.raw.pseudo %}{{ inv.raw.status|default:'scheduled' }}{% else %}{{ inv.status|default:'' }}{% endif %}"
               data-created="{{ inv.created|date:'c' }}"
               data-pseudo="{{ inv.raw.pseudo|default_if_none:False }}"
@@ -370,11 +371,13 @@
               {% if inv.raw.pseudo %}
                 <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-semibold">Scheduled change</span>
               {% else %}
-                {% if inv.card_last4 %}
-                  **** {{ inv.card_last4 }}{% if inv.card_brand %} ({{ inv.card_brand }}){% endif %}
-                {% else %}
-                  —
-                {% endif %}
+                {% with display_last4=inv.card_last4|default:default_card_last4 %}
+                  {% if display_last4 %}
+                    **** {{ display_last4 }}{% if inv.card_brand %} ({{ inv.card_brand }}){% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                {% endwith %}
               {% endif %}
             </td>
             <td class="p-2">
@@ -480,11 +483,12 @@
                 }
               }
               const amount = inv.amount_display_dollars != null ? '$' + Number(inv.amount_display_dollars).toFixed(2) : '—';
-              const card = inv.card_last4 ? ('**** ' + inv.card_last4 + (inv.card_brand ? (' (' + inv.card_brand + ')') : '')) : '—';
+              const cardLast4 = (inv.card_last4 || defaultCardLast4 || '');
+              const card = cardLast4 ? ('**** ' + cardLast4 + (inv.card_brand ? (' (' + inv.card_brand + ')') : '')) : '—';
               const status = inv.pseudo ? (inv.status || '') : (inv.status || '');
               const hiddenAttr = inv.hidden ? '1' : '0';
               const dataInvId = inv.id || '';
-              html += `<tr class="border-t cc-row${enterClass}" data-inv-id="${dataInvId}" data-amount="${amount}" data-card="${inv.card_last4 || ''}" data-status="${status}" data-created="${createdIso}" data-pseudo="${inv.pseudo ? '1' : '0'}" data-hidden="${hiddenAttr}">`;
+              html += `<tr class="border-t cc-row${enterClass}" data-inv-id="${dataInvId}" data-amount="${amount}" data-card="${cardLast4}" data-status="${status}" data-created="${createdIso}" data-pseudo="${inv.pseudo ? '1' : '0'}" data-hidden="${hiddenAttr}">`;
               html += `<td class="p-2">${createdDateStr ? `<div>${createdDateStr}</div><div class="text-xs text-gray-500">${createdTimeStr}</div>` : '—'}</td>`;
               html += `<td class="p-2">${amount}</td>`;
               html += `<td class="p-2">${inv.pseudo ? '<span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-semibold">Scheduled change</span>' : card}</td>`;
@@ -534,7 +538,8 @@
                 }
               }
               const amount = inv.amount_display_dollars != null ? '$' + Number(inv.amount_display_dollars).toFixed(2) : '—';
-              const card = inv.card_last4 ? ('**** ' + inv.card_last4) : '—';
+              const cardLast4Mobile = (inv.card_last4 || defaultCardLast4 || '');
+              const card = cardLast4Mobile ? ('**** ' + cardLast4Mobile) : '—';
               const status = inv.status || '';
               const hiddenBadge = inv.hidden ? '<span class="text-xs text-gray-500 ml-2">(archived)</span>' : '';
               mhtml += `<div class="border rounded p-3 bg-white shadow-sm cc-mobile-card${enterClassMobile}">`;
@@ -579,18 +584,8 @@
           }
 
           function bindInvoiceButtons() {
-            document.querySelectorAll('.hide-inv-btn').forEach(btn => {
-              btn.removeEventListener('click', hideHandler);
-              btn.addEventListener('click', hideHandler);
-            });
-            document.querySelectorAll('.unhide-inv-btn').forEach(btn => {
-              btn.removeEventListener('click', unhideHandler);
-              btn.addEventListener('click', unhideHandler);
-            });
-            document.querySelectorAll('.void-inv-btn').forEach(btn => {
-              btn.removeEventListener('click', voidHandler);
-              btn.addEventListener('click', voidHandler);
-            });
+            // No-op: delegated handlers are used (avoid adding duplicate listeners)
+            return;
           }
 
           async function hideHandler(e){
@@ -1086,6 +1081,77 @@
       });
     });
   }
+  // Delegate invoice action clicks so dynamically-rendered rows always work
+  document.addEventListener('click', function(e){
+    const hideBtn = e.target.closest && e.target.closest('.hide-inv-btn');
+    if (hideBtn) {
+      e.preventDefault();
+      (async function(){
+        const invId = hideBtn.getAttribute('data-inv-id');
+        if (!invId) return;
+        if (!confirm('Hide this invoice from the UI?')) return;
+        try { showLoading(); } catch (e) {}
+        try {
+          const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/hide/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+          if (!resp.ok) throw new Error('Hide failed');
+          try { showToast('info', 'Invoice hidden'); } catch(e){}
+          try { applyInvoiceFilters(); } catch(e) { /* fallback: hide row */ const row=document.querySelector(`tr[data-inv-id="${invId}"]`); if(row) row.style.display='none'; }
+        } catch (err) {
+          try { showToast('error', 'Failed to hide invoice.'); } catch(e){}
+        } finally { try { hideLoading(); } catch(e){} }
+      })();
+      return;
+    }
+
+    const unhideBtn = e.target.closest && e.target.closest('.unhide-inv-btn');
+    if (unhideBtn) {
+      e.preventDefault();
+      (async function(){
+        const invId = unhideBtn.getAttribute('data-inv-id');
+        if (!invId) return;
+        if (!confirm('Unhide this invoice?')) return;
+        try { showLoading(); } catch (e) {}
+        try {
+          const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/unhide/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+          if (!resp.ok) throw new Error('Unhide failed');
+          // Refresh visible rows via the same client-side filtering so the UI state stays consistent
+          try { applyInvoiceFilters(); } catch(e) { /* fallback: show row */ const row=document.querySelector(`tr[data-inv-id="${invId}"]`); if(row) { row.style.display=''; row.classList.remove('cc-row-hidden'); } }
+          try { showToast('success', 'Invoice unhidden'); } catch(e){}
+        } catch (err) {
+          try { showToast('error', 'Failed to unhide invoice.'); } catch(e){}
+        } finally { try { hideLoading(); } catch(e){} }
+      })();
+      return;
+    }
+
+    const voidBtn = e.target.closest && e.target.closest('.void-inv-btn');
+    if (voidBtn) {
+      e.preventDefault();
+      (async function(){
+        const invId = voidBtn.getAttribute('data-inv-id');
+        if (!invId) return;
+        if (!confirm('Void this invoice in Stripe? This cannot be undone.')) return;
+        try { showLoading(); } catch (e) {}
+        try {
+          const resp = await fetch(`/billing/api/bus/${orgSlug}/invoice/${invId}/void/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+          const payload = await resp.json().catch(()=> ({}));
+          if (!resp.ok) { try{ showToast('error', payload.error || 'Failed to void invoice'); }catch(e){} }
+          else {
+            const row = document.querySelector(`tr[data-inv-id="${invId}"]`);
+            if (row) {
+              row.setAttribute('data-status','voided');
+              const tds = row.querySelectorAll('td');
+              if (tds && tds.length >= 4) tds[3].innerHTML = '<span class="inline-flex items-center px-2 py-1 rounded bg-red-100 text-red-700 text-sm">Voided</span>';
+            }
+            try { showToast('success', 'Invoice voided.'); } catch(e){}
+          }
+        } catch (err) {
+          try { showToast('error', 'Failed to void invoice.'); } catch(e){}
+        } finally { try { hideLoading(); } catch(e){} }
+      })();
+      return;
+    }
+  });
 
   // Subscription-change modal handler
   function populateSubscriptionChangeFields(data) {
