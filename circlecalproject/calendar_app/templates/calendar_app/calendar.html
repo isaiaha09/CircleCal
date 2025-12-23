@@ -26,13 +26,31 @@
         {% if is_team_plan %}
             <div style="width:320px; margin-top:12px; text-align:center;">
                 <label for="memberSelect" style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:6px;">Showing calendar for</label>
-                <select id="memberSelect" style="width:70%;padding:8px;border-radius:8px;border:1px solid var(--gray-200);display:inline-block;vertical-align:middle;">
+                <!-- Keep a hidden select in the DOM for legacy initialization code that enumerates members. -->
+                <select id="memberSelect" style="display:none" aria-hidden="true">
                     {% for m in members_list %}
                         {% with fname=m.user__first_name lname=m.user__last_name email=m.user__email %}
                             <option value="{{ m.id }}">{% if fname or lname %}{{ fname }} {{ lname }}{% else %}{{ email }}{% endif %}</option>
                         {% endwith %}
                     {% endfor %}
                 </select>
+
+                <!-- New nested scope menu: Members -> Personal Services -->
+                <div id="ccScopeMenuRoot" style="position:relative; display:inline-block; width:70%; text-align:left;">
+                    <button id="ccScopeMenuButton" type="button" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--gray-200); background:white; box-shadow: 0 1px 2px rgba(16,24,40,0.04); font-size:14px; color:var(--gray-900); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <span id="ccScopeMenuButtonLabel" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Select member</span>
+                        <span style="color:var(--gray-600); font-size:16px; line-height:1;">▾</span>
+                    </button>
+
+                    <div id="ccScopeMenu" style="display:none; position:absolute; left:0; top:calc(100% + 6px); width:100%; background:white; border:1px solid var(--gray-200); border-radius:12px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1); z-index:10001; overflow:hidden;">
+                        <div id="ccScopeMenuMembers" style="max-height:280px; overflow:auto;"></div>
+                    </div>
+
+                    <div id="ccScopeSubmenu" style="display:none; position:absolute; left:100%; top:calc(100% + 6px); width:100%; background:white; border:1px solid var(--gray-200); border-radius:12px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1); z-index:10002; overflow:hidden;">
+                        <div id="ccScopeSubmenuInner" style="max-height:280px; overflow:auto;"></div>
+                    </div>
+                </div>
+
                 <div style="margin-top:6px; display:flex; justify-content:center;">
                     <span id="memberScopeBadge" style="font-size:12px;color:var(--gray-600);padding:6px 10px;border-radius:999px;border:1px solid var(--gray-200);background:transparent;">Showing org defaults</span>
                 </div>
@@ -2326,37 +2344,9 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('Saving weekly availability payload (day names):', JSON.parse(JSON.stringify(payload)));
 
             try {
-                // Build helper to convert built availability (indexed 0=Sun) to server availability array
-                function builtToAvailabilityArray(built){
-                    try{
-                        const out = [];
-                        for (let i=0;i<7;i++){
-                            const day = weekdayNames[i];
-                            const info = built[i] || { ranges: [], unavailable: true };
-                            out.push({ day: day, ranges: info.ranges || [], unavailable: !!info.unavailable });
-                        }
-                        return out;
-                    }catch(e){ return [] }
-                }
-
-                // Compose member_map and service_map so owner can save all existing availability
-                const member_map = {};
-                try{
-                    for (const mid of Object.keys(memberDefaultAvailability || {})){
-                        member_map[mid] = builtToAvailabilityArray(memberDefaultAvailability[mid]);
-                    }
-                }catch(e){}
-
-                const service_map = {};
-                try{
-                    for (const s of (SERVICES||[])){
-                        try{
-                            // if service.weekly_map is already in server shape, use it; otherwise convert
-                            if (Array.isArray(s.weekly_map)) service_map[String(s.id)] = s.weekly_map;
-                            else service_map[String(s.id)] = builtToAvailabilityArray(buildAvailabilityFromPayload(s.weekly_map || []));
-                        }catch(e){}
-                    }
-                }catch(e){}
+                // Save ONLY the current selection (member or service). Sending bulk maps here
+                // causes stale data to overwrite the current edits.
+                const target = (SELECTED_MEMBER || null);
 
                 const res = await fetch(`/bus/${orgSlug}/availability/save/`, {
                     method: 'POST',
@@ -2365,12 +2355,35 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': csrftoken
                     },
-                    body: JSON.stringify({ availability: payload, target: (SELECTED_MEMBER || null), member_map: member_map, service_map: service_map })
+                    body: JSON.stringify({ availability: payload, target: target })
                 });
 
                 const data = await res.json().catch(() => null);
                 if (res.ok && data && data.success) {
                     alert('Weekly availability saved!');
+
+                    // Update selection-specific caches so switching scopes doesn't revert until reload.
+                    try {
+                        if (target && !String(target).startsWith('svc:')) {
+                            // membership id
+                            memberDefaultAvailability[String(target)] = buildAvailabilityFromPayload(payload);
+                            try { memberAvailMap[String(target)] = payload; } catch (e) {}
+                        } else if (target && String(target).startsWith('svc:')) {
+                            const svcId = String(target).slice(4);
+                            const svc = (SERVICES||[]).find(s => String(s.id) === String(svcId));
+                            if (svc) {
+                                // Store as list-of-lists (UI expects this shape for unions).
+                                const byDay = [[],[],[],[],[],[],[]];
+                                for (let i=0;i<7;i++){
+                                    const row = payload[i];
+                                    if (row && !row.unavailable && Array.isArray(row.ranges)) byDay[i] = row.ranges.slice();
+                                    else byDay[i] = [];
+                                }
+                                svc.weekly_map = byDay;
+                                svc.has_service_weekly_windows = true;
+                            }
+                        }
+                    } catch (e) { console.warn('Failed to update selection caches after save', e); }
 
                     // Update local defaultAvailability from payload so the UI reflects saved values immediately
                     try {
@@ -2443,6 +2456,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         // Visible services after filtering by selected member
         let VISIBLE_SERVICES = [];
+
+        // Ensure each service has a weekly_map array (server should provide this, but keep a defensive fallback).
+        try{
+            if (Array.isArray(SERVICES)){
+                for (const s of SERVICES){
+                    try{
+                        if (!s.weekly_map || !Array.isArray(s.weekly_map) || s.weekly_map.length !== 7){
+                            s.weekly_map = makeAllUnavailablePayload().map(row => row.ranges || []);
+                        }
+                    }catch(e){}
+                }
+            }
+        }catch(e){}
 
         function getAssignedMembersForService(serviceObj) {
             try {
@@ -2561,86 +2587,6 @@ document.addEventListener('DOMContentLoaded', function() {
         try{
             const sel = document.getElementById('memberSelect');
             if (sel) {
-                // Set initial selection if stored
-                if (SELECTED_MEMBER){
-                    const opt = sel.querySelector('option[value="' + SELECTED_MEMBER + '"]');
-                    if (opt) opt.selected = true;
-                }
-                // Append services (no-members or multi-member) as selectable options (prefix values with 'svc:')
-                try{
-                    if (IS_TEAM && Array.isArray(SERVICES)){
-                        for (const s of SERVICES){
-                            try{
-                                            // Only show service-scoped schedules when the service is either:
-                                            // - unassigned (0 members), OR
-                                            // - shared (2+ members)
-                                            // If the service has exactly 1 member, it is assumed to inherit that member's schedule.
-                                            const assigned = getAssignedMembersForService(s);
-                                            if (assigned.length === 0 || assigned.length > 1){
-                                                const val = 'svc:' + String(s.id);
-                                                if (!sel.querySelector('option[value="' + val + '"]')){
-                                                    const opt = document.createElement('option');
-                                                    opt.value = val;
-                                                    opt.textContent = '[Service] ' + (s.name || ('Service ' + String(s.id)));
-                                                    sel.appendChild(opt);
-                                                }
-                                            }
-                                            // Ensure service has a weekly_map; new services default to all-unavailable
-                                            try{
-                                                if (!s.weekly_map || (typeof s.weekly_map === 'object' && Object.keys(s.weekly_map).length === 0)){
-                                                    s.weekly_map = makeAllUnavailablePayload();
-                                                }
-                                            }catch(e){}
-                                        }catch(e){}
-                        }
-                    }
-                }catch(e){}
-
-                // If the stored selection is a service (svc:ID) that wasn't added by the
-                // "unassigned or multi-member" rule, ensure it still exists so reload
-                // correctly reflects the last selected service.
-                try {
-                    if (SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')) {
-                        const val = String(SELECTED_MEMBER);
-                        const svcId = val.slice(4);
-                        const svc = SERVICES.find(s => String(s.id) === String(svcId));
-
-                        // If the service has exactly 1 assignee, it should not be selectable.
-                        // Switch the selection to that member instead.
-                        if (svc && isSingleAssigneeService(svc)) {
-                            const assigned = getAssignedMembersForService(svc);
-                            const onlyMemberId = assigned.length === 1 ? assigned[0] : null;
-                            if (onlyMemberId) {
-                                SELECTED_MEMBER = String(onlyMemberId);
-                                try { localStorage.setItem('cc_selected_member', SELECTED_MEMBER); } catch (e) {}
-                                const memberOpt = sel.querySelector('option[value="' + SELECTED_MEMBER + '"]');
-                                if (memberOpt) memberOpt.selected = true;
-                                sel.value = SELECTED_MEMBER;
-                            }
-                        } else {
-                            // Otherwise, ensure the service option exists (for unassigned or shared services)
-                            if (!sel.querySelector('option[value="' + val + '"]')) {
-                                const opt = document.createElement('option');
-                                opt.value = val;
-                                opt.textContent = '[Service] ' + (svc ? (svc.name || ('Service ' + String(svcId))) : ('Service ' + String(svcId)));
-                                sel.appendChild(opt);
-                            }
-                            sel.value = val;
-                        }
-                    }
-                } catch (e) {}
-
-                // Initialize select2 for nicer UX if available
-                try { if (window.$ && $.fn && $.fn.select2) $(sel).select2({ width: 'resolve' }); } catch(e){}
-                // Ensure Select2 reflects the stored/current selection
-                try {
-                    if (SELECTED_MEMBER) {
-                        sel.value = String(SELECTED_MEMBER);
-                        if (window.$ && $.fn && $.fn.select2) {
-                            $(sel).val(String(SELECTED_MEMBER)).trigger('change.select2');
-                        }
-                    }
-                } catch (e) {}
                 function selectDefaultAvailabilityFor(selection){
                     try{
                         if (selection && String(selection).startsWith('svc:')){
@@ -2653,7 +2599,59 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return;
                             }
                         }
-                        // membership-specific availability
+
+                        // membership selection: if the member has multiple personal services with mixed scheduling
+                        // settings, show the union of their services so the member view reflects service coverage.
+                        const mid = selection ? String(selection) : null;
+                        const personal = (mid && Array.isArray(SERVICES)) ? SERVICES.filter(s => {
+                            const assigned = getAssignedMembersForService(s);
+                            return assigned.length === 1 && String(assigned[0]) === mid;
+                        }) : [];
+
+                        function svcSig(s){
+                            try{
+                                return [
+                                    Number(s.duration||0),
+                                    Number(s.buffer_after||0),
+                                    Number(s.time_increment_minutes||30),
+                                    !!s.use_fixed_increment,
+                                    !!s.allow_squished_bookings,
+                                    !!s.allow_ends_after_availability
+                                ].join('|');
+                            }catch(e){ return '0|0|30|0|0|0'; }
+                        }
+
+                        const sigs = new Set();
+                        for (const s of personal) sigs.add(svcSig(s));
+                        const mixed = personal.length > 1 && sigs.size > 1;
+
+                        if (mixed) {
+                            // Union the personal service weekly maps for a member-scoped view.
+                            const union = makeAllUnavailablePayload().map(row => ({ day: row.day, ranges: [], unavailable: true }));
+                            for (let uiDay = 0; uiDay < 7; uiDay++) {
+                                const ranges = [];
+                                for (const s of personal) {
+                                    try{
+                                        const dayRanges = (s.weekly_map && Array.isArray(s.weekly_map)) ? (s.weekly_map[uiDay] || []) : [];
+                                        for (const r of dayRanges) ranges.push(String(r));
+                                    }catch(e){}
+                                }
+                                // Dedup + sort
+                                const uniq = Array.from(new Set(ranges)).filter(Boolean).sort();
+                                if (uniq.length > 0) {
+                                    union[uiDay].ranges = uniq;
+                                    union[uiDay].unavailable = false;
+                                } else {
+                                    union[uiDay].ranges = [];
+                                    union[uiDay].unavailable = true;
+                                }
+                            }
+                            const built = buildAvailabilityFromPayload(union);
+                            for (const k of Object.keys(built)) defaultAvailability[k] = built[k];
+                            return;
+                        }
+
+                        // Default membership-specific availability
                         if (selection && memberDefaultAvailability[String(selection)]){
                             const src = memberDefaultAvailability[String(selection)];
                             for (const k of Object.keys(src)) defaultAvailability[k] = JSON.parse(JSON.stringify(src[k]));
@@ -2671,7 +2669,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (selection && String(selection).startsWith('svc:')){
                                 const svcId = String(selection).slice(4);
                                 const svc = SERVICES.find(s=>String(s.id)===svcId) || null;
-                                if (svc && svc.weekly_map && Object.keys(svc.weekly_map).length>0){
+                                const hasAnyRanges = !!(svc && Array.isArray(svc.weekly_map) && svc.weekly_map.some(day => Array.isArray(day) && day.length > 0));
+                                if (hasAnyRanges && svc && (svc.has_service_weekly_windows || false)){
                                     badge.textContent = 'Service-specific availability';
                                     badge.style.borderColor = 'rgba(16,185,129,0.15)';
                                     badge.style.background = 'rgba(16,185,129,0.06)';
@@ -2696,26 +2695,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Explicit apply flow: changing the select only stages a pending selection.
                 let pendingSelection = SELECTED_MEMBER;
-                sel.addEventListener('change', function(){
-                    try{
-                        pendingSelection = sel.value || null;
-                        console.log('memberSelect change -> pendingSelection=', pendingSelection);
-                        // Immediately apply selection so defaults update without clicking Apply
-                        try{ applySelection(pendingSelection || sel.value); } catch(e) { console.warn('applySelection immediate failed', e); }
-                    }catch(e){ console.warn('memberSelect change handler failed', e); }
-                });
-
-                // If Select2 is in use, also listen for its events which may not
-                // always bubble as native change events in the same way.
-                try{
-                    if (window.$ && $.fn && $.fn.select2) {
-                        try{
-                            $(sel).on('select2:select select2:unselect select2:close', function(e){
-                                try{ pendingSelection = sel.value || null; console.log('select2 event ->', e.type, pendingSelection); try{ applySelection(pendingSelection || sel.value); }catch(ae){ console.warn('applySelection from select2 failed', ae); } }catch(ie){}
-                            });
-                        }catch(e){}
-                    }
-                }catch(e){}
 
                 function applySelection(selection){
                     try{
@@ -2733,11 +2712,192 @@ document.addEventListener('DOMContentLoaded', function() {
                         try { calendar && calendar.refetchEvents(); } catch(e){}
                         try { displayDefaultAvailability(); } catch(e){}
                         try { syncAvailabilityToCalendar(); } catch(e){}
+
+                        // Update scope menu button label (new UI)
+                        try {
+                            const lbl = document.getElementById('ccScopeMenuButtonLabel');
+                            if (lbl) lbl.textContent = getSelectionLabel();
+                        } catch (e) {}
                     }catch(e){ console.warn('applySelection failed', e); }
+                }
+
+                // ---- New nested menu wiring ----
+                function memberDisplayName(m){
+                    try {
+                        const fname = (m.user__first_name || '').trim();
+                        const lname = (m.user__last_name || '').trim();
+                        const email = (m.user__email || '').trim();
+                        const base = ((fname || lname) ? `${fname} ${lname}`.trim() : (email || 'Member'));
+                        return base;
+                    } catch (e) { return 'Member'; }
+                }
+
+                function personalServicesForMember(mid){
+                    try {
+                        const idStr = String(mid);
+                        return SERVICES.filter(s => {
+                            const assigned = getAssignedMembersForService(s);
+                            return assigned.length === 1 && String(assigned[0]) === idStr;
+                        });
+                    } catch (e) { return []; }
+                }
+
+                function closeScopeMenus(){
+                    try{ const m = document.getElementById('ccScopeMenu'); if (m) m.style.display = 'none'; }catch(e){}
+                    try{ const sm = document.getElementById('ccScopeSubmenu'); if (sm) sm.style.display = 'none'; }catch(e){}
+                }
+
+                function openScopeMenu(){
+                    try{ const m = document.getElementById('ccScopeMenu'); if (m) m.style.display = 'block'; }catch(e){}
+                }
+
+                function openSubmenuForMember(mid){
+                    const sm = document.getElementById('ccScopeSubmenu');
+                    const inner = document.getElementById('ccScopeSubmenuInner');
+                    if (!sm || !inner) return;
+                    inner.innerHTML = '';
+
+                    const header = document.createElement('div');
+                    header.style.padding = '10px 12px';
+                    header.style.borderBottom = '1px solid var(--gray-100)';
+                    header.style.fontWeight = '700';
+                    header.style.fontSize = '12px';
+                    header.style.color = 'var(--gray-700)';
+                    header.style.textTransform = 'uppercase';
+                    header.style.letterSpacing = '0.5px';
+                    const m = MEMBERS.find(mm => String(mm.id) === String(mid));
+                    header.textContent = m ? memberDisplayName(m) : 'Member';
+                    inner.appendChild(header);
+
+                    const memberItem = document.createElement('button');
+                    memberItem.type = 'button';
+                    memberItem.textContent = 'View member availability';
+                    memberItem.style.display = 'block';
+                    memberItem.style.width = '100%';
+                    memberItem.style.textAlign = 'left';
+                    memberItem.style.padding = '10px 12px';
+                    memberItem.style.border = 'none';
+                    memberItem.style.background = 'transparent';
+                    memberItem.style.cursor = 'pointer';
+                    memberItem.addEventListener('click', function(){
+                        closeScopeMenus();
+                        pendingSelection = String(mid);
+                        applySelection(pendingSelection);
+                    });
+                    inner.appendChild(memberItem);
+
+                    const divider = document.createElement('div');
+                    divider.style.height = '1px';
+                    divider.style.background = 'var(--gray-100)';
+                    inner.appendChild(divider);
+
+                    const svcHeader = document.createElement('div');
+                    svcHeader.style.padding = '10px 12px 6px 12px';
+                    svcHeader.style.fontWeight = '700';
+                    svcHeader.style.fontSize = '12px';
+                    svcHeader.style.color = 'var(--gray-700)';
+                    svcHeader.style.textTransform = 'uppercase';
+                    svcHeader.style.letterSpacing = '0.5px';
+                    svcHeader.textContent = 'Personal services';
+                    inner.appendChild(svcHeader);
+
+                    const services = personalServicesForMember(mid);
+                    if (!services.length){
+                        const empty = document.createElement('div');
+                        empty.style.padding = '8px 12px 12px 12px';
+                        empty.style.color = 'var(--gray-600)';
+                        empty.style.fontSize = '13px';
+                        empty.textContent = 'No personal services.';
+                        inner.appendChild(empty);
+                    } else {
+                        for (const s of services){
+                            const btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.textContent = s.name || ('Service ' + String(s.id));
+                            btn.style.display = 'block';
+                            btn.style.width = '100%';
+                            btn.style.textAlign = 'left';
+                            btn.style.padding = '10px 12px';
+                            btn.style.border = 'none';
+                            btn.style.background = 'transparent';
+                            btn.style.cursor = 'pointer';
+                            btn.addEventListener('click', function(){
+                                closeScopeMenus();
+                                pendingSelection = 'svc:' + String(s.id);
+                                applySelection(pendingSelection);
+                            });
+                            inner.appendChild(btn);
+                        }
+                    }
+
+                    sm.style.display = 'block';
+                }
+
+                function buildScopeMenu(){
+                    const root = document.getElementById('ccScopeMenuRoot');
+                    const btn = document.getElementById('ccScopeMenuButton');
+                    const menu = document.getElementById('ccScopeMenu');
+                    const list = document.getElementById('ccScopeMenuMembers');
+                    if (!root || !btn || !menu || !list) return;
+
+                    list.innerHTML = '';
+                    for (const m of MEMBERS){
+                        const row = document.createElement('div');
+                        row.style.display = 'flex';
+                        row.style.alignItems = 'center';
+                        row.style.justifyContent = 'space-between';
+                        row.style.gap = '10px';
+                        row.style.padding = '10px 12px';
+                        row.style.cursor = 'pointer';
+
+                        const left = document.createElement('div');
+                        left.style.flex = '1 1 auto';
+                        left.style.whiteSpace = 'nowrap';
+                        left.style.overflow = 'hidden';
+                        left.style.textOverflow = 'ellipsis';
+                        left.textContent = memberDisplayName(m);
+
+                        const right = document.createElement('div');
+                        right.style.flex = '0 0 auto';
+                        right.style.color = 'var(--gray-600)';
+                        right.style.fontSize = '16px';
+                        right.textContent = '›';
+
+                        row.appendChild(left);
+                        row.appendChild(right);
+
+                        row.addEventListener('mouseenter', function(){
+                            try{ openSubmenuForMember(m.id); }catch(e){}
+                        });
+                        row.addEventListener('click', function(){
+                            try{ openSubmenuForMember(m.id); }catch(e){}
+                        });
+
+                        list.appendChild(row);
+                    }
+
+                    btn.addEventListener('click', function(e){
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const isOpen = menu.style.display === 'block';
+                        if (isOpen){ closeScopeMenus(); }
+                        else { openScopeMenu(); }
+                    });
+
+                    document.addEventListener('click', function(ev){
+                        try{
+                            if (!root.contains(ev.target)) closeScopeMenus();
+                        }catch(e){}
+                    });
                 }
 
                 // Initialize defaultAvailability for the current selection by applying it once
                 try { applySelection(SELECTED_MEMBER); } catch(e){}
+                try { buildScopeMenu(); } catch(e){}
+                try {
+                    const lbl = document.getElementById('ccScopeMenuButtonLabel');
+                    if (lbl) lbl.textContent = getSelectionLabel();
+                } catch (e) {}
             }
         }catch(e){ console.warn('member selector wiring failed', e); }
     const AUTO_OPEN_SERVICE = "{{ auto_open_service|default:'' }}";

@@ -722,13 +722,143 @@ def _build_org_weekly_map(org):
     return availability_map
 
 
+def _service_schedule_signature(service):
+    """Fields that affect slot generation/scheduling compatibility."""
+    try:
+        return (
+            int(getattr(service, 'duration', 0) or 0),
+            int(getattr(service, 'buffer_after', 0) or 0),
+            int(getattr(service, 'time_increment_minutes', 30) or 30),
+            bool(getattr(service, 'use_fixed_increment', False)),
+            bool(getattr(service, 'allow_squished_bookings', False)),
+            bool(getattr(service, 'allow_ends_after_availability', False)),
+            int(getattr(service, 'min_notice_hours', 0) or 0),
+            int(getattr(service, 'max_booking_days', 0) or 0),
+        )
+    except Exception:
+        # Defensive fallback
+        return (0, 0, 30, False, False, False, 0, 0)
+
+
+def _effective_member_weekly_map(org, membership_id):
+    """Return the member's effective weekly map (member-specific if present, else org defaults)."""
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return _build_org_weekly_map(org)
+
+    try:
+        has_member_rows = MemberWeeklyAvailability.objects.filter(membership_id=mid, is_active=True).exists()
+    except Exception:
+        has_member_rows = False
+
+    if has_member_rows:
+        return _build_member_weekly_map(mid)
+    return _build_org_weekly_map(org)
+
+
+def _solo_services_signature_mode(org, membership_id):
+    """Return 'all_same' or 'mixed' for the member's solo services.
+
+    'solo service' = a service assigned to exactly this one member.
+
+    If there are 0-1 solo services, treat as all_same.
+    """
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return 'all_same'
+
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return 'all_same'
+
+    try:
+        service_ids = list(
+            ServiceAssignment.objects.filter(membership_id=mid, service__organization=org, service__is_active=True)
+            .values_list('service_id', flat=True)
+        )
+    except Exception:
+        service_ids = []
+
+    if not service_ids:
+        return 'all_same'
+
+    try:
+        counts = (
+            ServiceAssignment.objects.filter(service_id__in=service_ids)
+            .values('service_id')
+            .annotate(c=Count('id'))
+        )
+        solo_ids = [row['service_id'] for row in counts if int(row.get('c') or 0) == 1]
+    except Exception:
+        solo_ids = []
+
+    if len(solo_ids) <= 1:
+        return 'all_same'
+
+    try:
+        sigs = {
+            _service_schedule_signature(s)
+            for s in Service.objects.filter(organization=org, is_active=True, id__in=solo_ids)
+        }
+    except Exception:
+        sigs = set()
+
+    return 'mixed' if len(sigs) > 1 else 'all_same'
+
+
 def _build_service_weekly_map(service):
+    """Return a UI weekly map for a service.
+
+    Behavior:
+    - If the service has explicit ServiceWeeklyAvailability rows, return them.
+    - If the service is assigned to exactly one member:
+        - When that member's solo services all share the same scheduling settings,
+          treat the service as inheriting the member's availability.
+        - When the member has multiple solo services with mixed scheduling settings,
+          do NOT assume inheritance (availability must be explicitly partitioned).
+    """
     rows = service.weekly_availability.filter(is_active=True).order_by('weekday', 'start_time')
     svc_map = [[] for _ in range(7)]
+    has_rows = False
     for row in rows:
+        has_rows = True
         ui_idx = (row.weekday + 1) % 7
         svc_map[ui_idx].append(f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}")
-    return svc_map
+    if has_rows:
+        return svc_map
+
+    # No explicit service windows; for single-assignee services we may inherit.
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return svc_map
+
+    try:
+        assigned_ids = list(
+            ServiceAssignment.objects.filter(service=service)
+            .values_list('membership_id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        assigned_ids = []
+
+    if len(assigned_ids) != 1:
+        return svc_map
+
+    mid = assigned_ids[0]
+    try:
+        mode = _solo_services_signature_mode(service.organization, mid)
+    except Exception:
+        mode = 'all_same'
+
+    if mode == 'mixed':
+        # In mixed-settings mode, require explicit per-service availability.
+        return svc_map
+
+    return _effective_member_weekly_map(service.organization, mid)
 
 
 def _service_availability_applicability(org, service):
@@ -786,6 +916,100 @@ def _service_availability_applicability(org, service):
         return False, "Service availability is not applicable for this service."
 
     return True, ""
+
+
+def _intervals_overlap(a_start, a_end, b_start, b_end):
+    return (a_start < b_end) and (b_start < a_end)
+
+
+def _hm_to_minutes(hm):
+    try:
+        s = str(hm).strip()
+        hh = int(s[:2])
+        mm = int(s[3:5])
+        return hh * 60 + mm
+    except Exception:
+        return None
+
+
+def _enforce_no_overlap_between_mixed_signature_solo_services(org, membership_id, service, proposed_cleaned_rows):
+    """Raise ValueError if proposed windows overlap other solo services with different signatures.
+
+    This is a server-side guardrail for the business rule:
+    - If a member has multiple solo services and their scheduling settings differ,
+      those services must be offered on separate days/times.
+    """
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return
+
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return
+
+    # Only applies when the member has multiple solo services with mixed settings.
+    if _solo_services_signature_mode(org, mid) != 'mixed':
+        return
+
+    my_sig = _service_schedule_signature(service)
+
+    # Identify solo services for the member.
+    try:
+        service_ids = list(
+            ServiceAssignment.objects.filter(membership_id=mid, service__organization=org, service__is_active=True)
+            .values_list('service_id', flat=True)
+        )
+    except Exception:
+        service_ids = []
+
+    if not service_ids:
+        return
+
+    try:
+        counts = (
+            ServiceAssignment.objects.filter(service_id__in=service_ids)
+            .values('service_id')
+            .annotate(c=Count('id'))
+        )
+        solo_ids = [row['service_id'] for row in counts if int(row.get('c') or 0) == 1]
+    except Exception:
+        solo_ids = []
+
+    if len(solo_ids) <= 1:
+        return
+
+    proposed_by_wd = {}
+    for (wd, start, end) in proposed_cleaned_rows:
+        sm = _hm_to_minutes(start)
+        em = _hm_to_minutes(end)
+        if sm is None or em is None:
+            continue
+        proposed_by_wd.setdefault(int(wd), []).append((sm, em))
+
+    # Compare against other solo services with different signature.
+    others = Service.objects.filter(organization=org, is_active=True, id__in=solo_ids).exclude(id=service.id)
+    for other in others:
+        if _service_schedule_signature(other) == my_sig:
+            continue
+        other_rows = other.weekly_availability.filter(is_active=True).values_list('weekday', 'start_time', 'end_time')
+        for (wd, st, et) in other_rows:
+            try:
+                st_s = st.strftime('%H:%M')
+                et_s = et.strftime('%H:%M')
+            except Exception:
+                continue
+            osm = _hm_to_minutes(st_s)
+            oem = _hm_to_minutes(et_s)
+            if osm is None or oem is None:
+                continue
+            for (psm, pem) in proposed_by_wd.get(int(wd), []):
+                if _intervals_overlap(psm, pem, osm, oem):
+                    raise ValueError(
+                        f"Availability overlaps another solo service ('{other.name}') with different scheduling settings. "
+                        "Services with different settings must be offered on separate days/times."
+                    )
 
 
 def _get_single_assignee_display_name(org, service):
@@ -916,6 +1140,7 @@ def calendar_view(request, org_slug):
             'allow_ends_after_availability': bool(getattr(s, 'allow_ends_after_availability', False)),
             # Provide a simple weekly availability map for the client to compute next-available dates
             'weekly_map': _build_service_weekly_map(s),
+            'has_service_weekly_windows': bool(s.weekly_availability.filter(is_active=True).exists()),
             # assigned_members: list of membership ids allowed to deliver this service
             'assigned_members': assigned_members,
         })
@@ -1190,6 +1415,28 @@ def save_availability(request, slug):
             # Only owner/admin may save service-level availability
             if not request.user_has_role('owner', org) and not request.user_has_role('admin', org):
                 return HttpResponseForbidden('Insufficient permissions to set service availability')
+
+            # If this is a single-assignee service, only allow service availability edits when applicable.
+            try:
+                from bookings.models import ServiceAssignment
+                assigned_ids = list(
+                    ServiceAssignment.objects.filter(service=svc)
+                    .values_list('membership_id', flat=True)
+                    .distinct()
+                )
+            except Exception:
+                assigned_ids = []
+
+            if len(assigned_ids) == 1:
+                enabled, reason = _service_availability_applicability(org, svc)
+                if not enabled:
+                    return HttpResponseForbidden(reason or 'Service availability is not applicable for this service.')
+                # Enforce "separate days/times" when member has mixed scheduling settings.
+                try:
+                    _enforce_no_overlap_between_mixed_signature_solo_services(org, assigned_ids[0], svc, cleaned)
+                except ValueError as ve:
+                    return HttpResponseBadRequest(str(ve))
+
             with transaction.atomic():
                 ServiceWeeklyAvailability.objects.filter(service=svc).delete()
                 ServiceWeeklyAvailability.objects.bulk_create([
