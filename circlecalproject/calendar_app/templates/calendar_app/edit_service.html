@@ -861,10 +861,32 @@
           <div class="text-sm text-gray-600 text-center mt-1">Applies to: <span class="font-medium">{{ service_availability_member_name }}</span></div>
         {% endif %}
         {% if can_edit_service_availability and service_availability_member_name %}
-          <p class="text-sm text-gray-500 mt-3">Specify which days/times this service is offered. These must be within the assigned member’s weekly availability shown for each day below.</p>
+          <p class="text-sm text-gray-500 mt-3 text-center">Specify which days/times this service is offered. These must be within the assigned member’s weekly availability shown for each day below.</p>
         {% else %}
-          <p class="text-sm text-gray-500 mt-3">Specify which days/times this service is offered. These must be within the organization’s weekly availability shown for each day below.</p>
+          <p class="text-sm text-gray-500 mt-3 text-center">Specify which days/times this service is offered. These must be within the organization’s weekly availability shown for each day below.</p>
         {% endif %}
+
+        <div class="mt-2 text-center">
+          <div class="text-xs text-gray-500">These weekly service availability settings are interchangeable with the Calendar page (when viewing this service). You can update them in either place.</div>
+          <a id="cc-open-calendar-from-service" href="{% url 'calendar_app:calendar' org.slug %}"
+             class="inline-flex items-center px-3 py-2 mt-2 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50">
+            Open in Calendar
+          </a>
+        </div>
+
+        <script>
+          // When jumping to Calendar from Edit Service, preselect this service scope.
+          (function(){
+            try{
+              const btn = document.getElementById('cc-open-calendar-from-service');
+              if (!btn) return;
+              btn.addEventListener('click', function(){
+                try { localStorage.setItem('cc_selected_member', 'svc:{{ service.id }}'); } catch (e) {}
+              });
+            }catch(e){}
+          })();
+        </script>
+
         {% if not can_edit_service_availability %}
           <div class="availability-overlay" role="status" aria-live="polite">
             <div class="msg">

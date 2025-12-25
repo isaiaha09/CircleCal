@@ -236,7 +236,6 @@
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
-    <div><strong>Team:</strong> <span id="mainSvcTeam"></span></div>
     <div><strong>Refunds:</strong>
       <span id="mainSvcRefundLine"></span>
       <div id="mainSvcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
@@ -262,19 +261,9 @@
       allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
       time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
       use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
-      allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
-      weekly_ranges: []
+      allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }}
     };
   {% endfor %}
-
-  // Per-service weekly ranges provided from the backend as JSON
-  const SERVICE_WEEKLY_MAP = {{ service_weekly_map_json|safe }} || {};
-  // Attach weekly ranges to SERVICE_MAP entries
-  Object.keys(SERVICE_WEEKLY_MAP).forEach(function(slug) {
-    if (SERVICE_MAP[slug]) {
-      SERVICE_MAP[slug].weekly_ranges = SERVICE_WEEKLY_MAP[slug];
-    }
-  });
 
   document.addEventListener("DOMContentLoaded", function () {
     // Info box elements
@@ -316,34 +305,6 @@
         mainSvcRefundText.style.display = 'none';
         mainSvcRefundText.textContent = '';
       }
-      // Show weekly offered days/times
-      const weekly = SERVICE_MAP[slug] && SERVICE_MAP[slug].weekly_ranges ? SERVICE_MAP[slug].weekly_ranges : (SERVICE_WEEKLY_MAP[slug] || []);
-      try {
-        const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        const offered = [];
-        for (let i=0;i<7;i++){
-          const ranges = weekly[i] || [];
-          if (ranges.length>0){
-            offered.push(`${dayLabels[i]} ${ranges.join(',')}`);
-          }
-        }
-        // Only show weekly offered days if there are specific ranges configured
-        if (offered.length > 0) {
-          const offeredLine = offered.join('; ');
-          const extra = document.getElementById('mainSvcOffered');
-          if (extra) { extra.textContent = offeredLine; }
-          else {
-            const div = document.createElement('div');
-            div.id = 'mainSvcOffered';
-            div.style.marginTop='8px';
-            div.textContent = offeredLine;
-            mainSvcRefundText.parentNode.appendChild(div);
-          }
-        } else {
-          // remove any previously shown element
-          const existing = document.getElementById('mainSvcOffered'); if (existing) existing.remove();
-        }
-      } catch (e){ /* ignore UI failures */ }
       // (Client-facing info intentionally omits buffer/increment/fixed details)
     }
 

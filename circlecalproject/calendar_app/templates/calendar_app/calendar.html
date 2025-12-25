@@ -1283,7 +1283,17 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 
 <div id="weeklyCalendarRow" style="display:flex; gap:40px; align-items:stretch; flex-wrap:nowrap; margin-top:24px; width:100%;">
         <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 540px; min-width:540px; margin-bottom:32px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
-                <h3 style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 10px 0;">
+                    <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
+                    <a id="cc-open-edit-service-from-calendar"
+                       href="#"
+                       style="display:none; padding:10px 12px; border-radius:10px; background:white; border:1px solid var(--primary-500); color:var(--primary-600); font-weight:700; cursor:pointer; text-decoration:none;">
+                        Open Edit Service
+                    </a>
+                </div>
+                <div id="cc-weekly-interchange-note" style="margin:0 0 14px 0; font-size:13px; color:var(--gray-600); line-height:1.4;">
+                    Tip: When you select a service scope, this weekly schedule is interchangeable with that service’s availability on the Edit Service page.
+                </div>
     <table style="width:100%; border-collapse:collapse;">
         <thead>
         <tr style="border-bottom:2px solid var(--gray-200); background:var(--gray-50);">
@@ -2536,6 +2546,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const orgSlug = "{{ organization.slug }}";
     const orgTimezone = "{{ org_timezone }}";  // e.g., 'America/Los_Angeles'
+    const EDIT_SERVICE_URL_TEMPLATE = "{% url 'calendar_app:edit_service' organization.slug 0 %}";
         // Services metadata from server (includes per-service weekly_map)
         const SERVICES = {{ services_json|default:"[]"|safe }} || [];
         const MEMBERS = {{ members_list|default:'[]'|safe }} || [];
@@ -2747,8 +2758,32 @@ document.addEventListener('DOMContentLoaded', function() {
                         }catch(e){ /* ignore */ }
                     }
 
+                    function updateInterchangeLink(selection){
+                        try{
+                            const btn = document.getElementById('cc-open-edit-service-from-calendar');
+                            const note = document.getElementById('cc-weekly-interchange-note');
+                            if (!btn || !note) return;
+
+                            if (selection && String(selection).startsWith('svc:')){
+                                const svcId = String(selection).slice(4);
+                                const url = String(EDIT_SERVICE_URL_TEMPLATE).replace('/0/edit/', '/' + svcId + '/edit/');
+                                btn.setAttribute('href', url);
+                                btn.style.display = 'inline-flex';
+                                note.textContent = 'These weekly service availability settings are interchangeable with the Edit Service page. You can update them in either place.';
+                                return;
+                            }
+
+                            btn.style.display = 'none';
+                            btn.setAttribute('href', '#');
+                            note.textContent = 'Tip: When you select a service scope, this weekly schedule is interchangeable with that service’s availability on the Edit Service page.';
+                        }catch(e){ /* ignore */ }
+                    }
+
                 // Explicit apply flow: changing the select only stages a pending selection.
                 let pendingSelection = SELECTED_MEMBER;
+
+                // Initialize the Calendar <-> Edit Service cross-link based on the current scope.
+                try { updateInterchangeLink(SELECTED_MEMBER); } catch(e){}
 
                 function applySelection(selection){
                     try{
@@ -2763,6 +2798,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         updateVisibleServices();
                         try { selectDefaultAvailabilityFor(SELECTED_MEMBER); } catch(e){}
                         try { updateSelectionBadge(SELECTED_MEMBER); } catch(e){}
+                        try { updateInterchangeLink(SELECTED_MEMBER); } catch(e){}
                         try { calendar && calendar.refetchEvents(); } catch(e){}
                         try { displayDefaultAvailability(); } catch(e){}
                         try { syncAvailabilityToCalendar(); } catch(e){}
