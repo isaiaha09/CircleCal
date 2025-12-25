@@ -1,6 +1,8 @@
 {% extends "calendar_app/base.html" %}
 {% block title %}Dashboard{% endblock %}
 
+{% block main_class %}max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 py-6 md:px-6 md:py-8{% endblock %}
+
 {% block content %}
 <div class="text-center py-6 md:py-10">
 
@@ -19,7 +21,7 @@
                 What would you like to do today?
             </p>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {# Staff/Manager: only show Bookings and Profile tiles #}
                 {% if org %}
                     <a href="{% url 'calendar_app:bookings_list' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
@@ -60,7 +62,7 @@
             What would you like to do today?
         </p>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
 
             <!-- Full dashboard for owners/admins -->
             <!-- Organizations -->

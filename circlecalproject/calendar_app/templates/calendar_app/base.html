@@ -229,7 +229,7 @@
     </header>
 
     <!-- Content -->
-    <main class="max-w-6xl mx-auto px-4 py-6 md:p-6">
+    <main class="{% block main_class %}max-w-6xl mx-auto px-4 py-6 md:p-6{% endblock %}">
         {% if messages %}
         <div class="mb-4 space-y-2">
             {% for message in messages %}

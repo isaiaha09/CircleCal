@@ -105,9 +105,34 @@
     z-index: 101;
   }
 
-  /* Hard guard: when fading, hide from layout to avoid flash */
-  .calendar-grid.is-fading { visibility: hidden; }
-  #monthHeader.is-fading { visibility: hidden; }
+  /* Loading overlay for slow month renders */
+  .calendar-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(250, 250, 250, 0.78);
+    border-radius: 12px;
+    z-index: 30;
+  }
+  .calendar-loading.hidden { display: none; }
+  .calendar-loading .spinner {
+    width: 36px;
+    height: 36px;
+    border-radius: 9999px;
+    border: 4px solid rgba(79, 70, 229, 0.18);
+    border-top-color: rgba(79, 70, 229, 0.95);
+    animation: spin 0.85s linear infinite;
+  }
+  .calendar-loading .label {
+    font-size: 0.95rem;
+    color: #374151;
+    font-weight: 600;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Centered service selector styles */
   #mainServiceSelect {
@@ -219,16 +244,23 @@
     </div>
   {% endif %}
 
-  <div class="weekday-row" id="weekdayRow">
-    <div class="weekday-cell">sun</div>
-    <div class="weekday-cell">mon</div>
-    <div class="weekday-cell">tue</div>
-    <div class="weekday-cell">wed</div>
-    <div class="weekday-cell">thu</div>
-    <div class="weekday-cell">fri</div>
-    <div class="weekday-cell">sat</div>
+  <div id="calendarGridWrap" style="position:relative;">
+    <div id="calendarLoading" class="calendar-loading hidden" role="status" aria-live="polite" aria-label="Loading calendar">
+      <div class="spinner"></div>
+      <div class="label">Loading...</div>
+    </div>
+
+    <div class="weekday-row" id="weekdayRow">
+      <div class="weekday-cell">sun</div>
+      <div class="weekday-cell">mon</div>
+      <div class="weekday-cell">tue</div>
+      <div class="weekday-cell">wed</div>
+      <div class="weekday-cell">thu</div>
+      <div class="weekday-cell">fri</div>
+      <div class="weekday-cell">sat</div>
+    </div>
+    <div class="calendar-grid" id="dayGrid"></div>
   </div>
-  <div class="calendar-grid" id="dayGrid"></div>
 
   <div id="mainServiceDetails" class="service-details-fade">
     <div id="mainSvcTitle" class="modal-title" style="margin-bottom:6px;"></div>
@@ -436,6 +468,9 @@ document.addEventListener("DOMContentLoaded", async function () {
   try { /* init */ } catch (e) {}
   const dayGrid = document.getElementById("dayGrid");
   const monthHeader = document.getElementById("monthHeader");
+  const calendarLoading = document.getElementById('calendarLoading');
+  const prevBtn = document.getElementById('prevMonthBtn');
+  const nextBtn = document.getElementById('nextMonthBtn');
   const timeModal = document.getElementById("timeModal");
   const timeModalViewSlots = document.getElementById("timeModalViewSlots");
   const timeModalViewDetails = document.getElementById("timeModalViewDetails");
@@ -464,19 +499,63 @@ document.addEventListener("DOMContentLoaded", async function () {
   // Store day summary globally for guards
   let dayHasSlots = {};
 
+  let loadingTimer = null;
+  function setCalendarBusy(busy, opts) {
+    const immediate = !!(opts && opts.immediate);
+
+    if (prevBtn) prevBtn.disabled = !!busy;
+    if (nextBtn) nextBtn.disabled = !!busy;
+    if (prevBtn) prevBtn.style.opacity = busy ? '0.6' : '';
+    if (nextBtn) nextBtn.style.opacity = busy ? '0.6' : '';
+
+    if (!calendarLoading) return;
+    if (!busy) {
+      if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
+      calendarLoading.classList.add('hidden');
+      return;
+    }
+
+    if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
+    if (immediate) {
+      calendarLoading.classList.remove('hidden');
+    } else {
+      // Delay slightly so quick renders don't flash the loader.
+      loadingTimer = setTimeout(() => {
+        calendarLoading.classList.remove('hidden');
+      }, 180);
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async function generateCalendar(month, year) {
     // Advance render token so only latest render will apply
     const myToken = ++renderToken;
     isRendering = true;
-    // Build all elements off-DOM to avoid partial/incremental rendering
-    const fragment = document.createDocumentFragment();
-    // Trigger fade-out before rebuild and hide from layout
-    dayGrid.classList.add('is-fading');
-    dayGrid.style.visibility = 'hidden';
-    dayGrid.innerHTML = "";
-    // Fade out header before changing text (no crossfade)
-    monthHeader.classList.add('is-fading');
-    const newHeaderText = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
+    const isInitial = dayGrid && dayGrid.childElementCount === 0;
+    setCalendarBusy(true, { immediate: isInitial });
+    try {
+      // Fade out current view first; only clear after fade completes.
+      dayGrid.classList.add('is-fading');
+      monthHeader.classList.add('is-fading');
+      const newHeaderText = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
+
+      if (!isInitial) {
+        await sleep(180);
+      }
+
+      if (myToken !== renderToken) {
+        return;
+      }
+
+      // Now that we're faded out, swap content while hidden.
+      monthHeader.innerText = newHeaderText;
+      dayGrid.innerHTML = "";
+
+      // Build all elements off-DOM to avoid partial/incremental rendering
+      const fragment = document.createDocumentFragment();
 
     const firstDay = new Date(year, month, 1).getDay();
     const numDays = new Date(year, month + 1, 0).getDate();
@@ -656,21 +735,28 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     // Append all circles in one batch to prevent partial paints
     dayGrid.appendChild(fragment);
-    // Mark render complete
-    isRendering = false;
-    // Orchestrate fade: header fades out, then updates text, then both fade in
-    setTimeout(() => {
+
+    // Fade in the newly-rendered month
+    requestAnimationFrame(() => {
       if (myToken !== renderToken) return;
-      // Update header text after fade-out completes
-      monthHeader.innerText = newHeaderText;
-      // Next frame, remove fading classes to fade in
+      dayGrid.classList.remove('is-fading');
+      monthHeader.classList.remove('is-fading');
+    });
+    } catch (e) {
+      console.error('generateCalendar failed', e);
+      // If this is still the latest render, don't leave the UI in a faded-out state.
       requestAnimationFrame(() => {
         if (myToken !== renderToken) return;
         dayGrid.classList.remove('is-fading');
-        dayGrid.style.visibility = 'visible';
         monthHeader.classList.remove('is-fading');
       });
-    }, 180);
+    } finally {
+      // Only the latest render should control the busy state.
+      if (myToken === renderToken) {
+        isRendering = false;
+        setCalendarBusy(false);
+      }
+    }
   }
 
   // Fetch availability from server and show time circles for selected day
@@ -1132,8 +1218,6 @@ document.addEventListener("DOMContentLoaded", async function () {
   // Initial render
   try { generateCalendar(currentMonth, currentYear); } catch (e) { console.error('generateCalendar failed', e); }
 
-  const prevBtn = document.getElementById('prevMonthBtn');
-  const nextBtn = document.getElementById('nextMonthBtn');
   if (prevBtn) {
     prevBtn.onclick = function () {
       // Prevent overlapping renders; queue the latest intent

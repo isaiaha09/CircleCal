@@ -50,16 +50,16 @@
                            class="text-blue-400 hover:text-blue-300 text-sm">
                             View Public Page →
                         </a>
-                        <div class="flex gap-2">
+                        <div class="flex items-center gap-3">
                             <a href="{% url 'calendar_app:edit_service' org.slug service.id %}" 
-                               class="text-yellow-400 hover:text-yellow-300 text-sm">
+                               class="inline-flex items-center text-yellow-400 hover:text-yellow-300 text-sm">
                                 Edit
                             </a>
                             <form method="post" action="{% url 'calendar_app:delete_service' org.slug service.id %}" 
                                   onsubmit="return confirm('Delete {{ service.name }}? This cannot be undone.');"
-                                  class="inline">
+                                  class="m-0 inline-flex items-center">
                                 {% csrf_token %}
-                                <button type="submit" class="text-red-400 hover:text-red-300 text-sm">
+                                <button type="submit" class="inline-flex items-center text-red-400 hover:text-red-300 text-sm">
                                     Delete
                                 </button>
                             </form>
