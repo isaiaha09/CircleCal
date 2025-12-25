@@ -436,9 +436,13 @@ def apply_service_update(request, org_slug, service_id):
                     for rw in svc_rows.order_by('start_time'):
                         weekly_windows.append({'start': rw.start_time.strftime('%H:%M'), 'end': rw.end_time.strftime('%H:%M')})
                 else:
-                    org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=wd)
-                    for rw in org_rows:
-                        weekly_windows.append({'start': rw.start_time.strftime('%H:%M'), 'end': rw.end_time.strftime('%H:%M')})
+                    any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+                    if not any_org_rows:
+                        weekly_windows = [{'start': '00:00', 'end': '23:59'}]
+                    else:
+                        org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=wd)
+                        for rw in org_rows:
+                            weekly_windows.append({'start': rw.start_time.strftime('%H:%M'), 'end': rw.end_time.strftime('%H:%M')})
             except Exception:
                 weekly_windows = []
 
@@ -697,6 +701,15 @@ def apply_service_update(request, org_slug, service_id):
                         continue
                     new_objs.append(obj)
                 if new_objs:
+                    # Enforce subset + partition overlap guardrails before persisting.
+                    try:
+                        mid = _get_single_assignee_membership_id(org, svc)
+                        cleaned_rows = [(o.weekday, o.start_time, o.end_time) for o in new_objs]
+                        if mid is not None:
+                            _enforce_service_windows_within_member_availability(org, mid, cleaned_rows)
+                            _enforce_no_overlap_between_mixed_signature_solo_services(org, mid, svc, cleaned_rows)
+                    except ValueError as ve:
+                        return JsonResponse({'status': 'error', 'error': str(ve)})
                     ServiceWeeklyAvailability.objects.filter(service=svc).delete()
                     ServiceWeeklyAvailability.objects.bulk_create(new_objs)
             else:
@@ -705,7 +718,28 @@ def apply_service_update(request, org_slug, service_id):
     except Exception:
         pass
 
+    # Enforce activation guardrail for JSON save path:
+    # if the service has no weekly availability (overrides do not count), it must be inactive.
+    forced_inactive = False
+    try:
+        if getattr(svc, 'is_active', False) and (not _service_has_effective_weekly_availability_for_activation(org, svc)):
+            svc.is_active = False
+            svc.save(update_fields=['is_active'])
+            forced_inactive = True
+            try:
+                messages.error(
+                    request,
+                    "This service was set to inactive because it has no weekly availability. "
+                    "Add weekly availability (overrides don’t count) to activate it."
+                )
+            except Exception:
+                pass
+    except Exception:
+        forced_inactive = False
+
     resp = {'status': 'ok', 'freezes_created': freezes_created, 'booked_dates_count': len(booked_dates), 'booked_dates': frozen_dates}
+    if forced_inactive:
+        resp['forced_inactive'] = True
     if freeze_error:
         resp['freeze_error'] = str(freeze_error)
         resp['warning'] = 'Freezes could not be created (DB may need migrations). Changes were still applied to the service.'
@@ -809,6 +843,41 @@ def _solo_services_signature_mode(org, membership_id):
     return 'mixed' if len(sigs) > 1 else 'all_same'
 
 
+def _solo_services_count(org, membership_id):
+    """Return count of solo services (services assigned to exactly this member)."""
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return 0
+
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return 0
+
+    try:
+        service_ids = list(
+            ServiceAssignment.objects.filter(membership_id=mid, service__organization=org, service__is_active=True)
+            .values_list('service_id', flat=True)
+        )
+    except Exception:
+        service_ids = []
+
+    if not service_ids:
+        return 0
+
+    try:
+        counts = (
+            ServiceAssignment.objects.filter(service_id__in=service_ids)
+            .values('service_id')
+            .annotate(c=Count('id'))
+        )
+        solo_ids = [row['service_id'] for row in counts if int(row.get('c') or 0) == 1]
+        return len(solo_ids)
+    except Exception:
+        return 0
+
+
 def _build_service_weekly_map(service):
     """Return a UI weekly map for a service.
 
@@ -849,25 +918,28 @@ def _build_service_weekly_map(service):
         return svc_map
 
     mid = assigned_ids[0]
+    # Rule: if the member has ONLY ONE solo service, that service inherits the member's availability.
+    # If the member has multiple solo services, they must be explicitly partitioned per service.
     try:
-        mode = _solo_services_signature_mode(service.organization, mid)
+        solo_count = _solo_services_count(service.organization, mid)
     except Exception:
-        mode = 'all_same'
+        solo_count = 0
 
-    if mode == 'mixed':
-        # In mixed-settings mode, require explicit per-service availability.
-        return svc_map
+    if solo_count <= 1:
+        return _effective_member_weekly_map(service.organization, mid)
 
-    return _effective_member_weekly_map(service.organization, mid)
+    # Partition mode: service must have explicit service-weekly rows.
+    return svc_map
 
 
 def _service_availability_applicability(org, service):
     """Return (enabled, reason).
 
-    Enabled only when:
-    - The service has exactly one assigned team member, AND
-    - That same member is the sole assignee on at least one other service
-      within the same organization.
+        Enabled when:
+        - The service has 0 assigned team members (unassigned service schedule), OR
+        - The service has 2+ assigned team members (shared service schedule), OR
+        - The service has exactly one assigned team member AND that member has multiple
+            solo services (so per-service partitioning is required).
     """
     try:
         from bookings.models import ServiceAssignment
@@ -879,10 +951,15 @@ def _service_availability_applicability(org, service):
     except Exception:
         assigned_ids = []
 
+    # Unassigned services and shared services always have their own schedule.
+    if len(assigned_ids) == 0:
+        return True, ""
+    if len(assigned_ids) >= 2:
+        return True, ""
+
+    # Single assignee: only enable when partitioning is needed.
     if len(assigned_ids) != 1:
-        if len(assigned_ids) == 0:
-            return False, "Assign exactly one team member to enable Service availability."
-        return False, "Service availability applies only to services assigned to exactly one team member."
+        return False, "Service availability is not applicable for this service."
 
     mid = assigned_ids[0]
 
@@ -932,6 +1009,183 @@ def _hm_to_minutes(hm):
         return None
 
 
+def _time_to_minutes(t):
+    """Convert a time-like value to minutes since midnight.
+
+    Accepts datetime.time, 'HH:MM' or 'HH:MM:SS' strings.
+    """
+    try:
+        if hasattr(t, 'hour') and hasattr(t, 'minute'):
+            return (int(t.hour) * 60) + int(t.minute)
+    except Exception:
+        pass
+    return _hm_to_minutes(t)
+
+
+def _get_single_assignee_membership_id(org, service):
+    """Return membership_id if the service has exactly one assignee, else None."""
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return None
+
+    try:
+        ids = list(
+            ServiceAssignment.objects.filter(service=service)
+            .values_list('membership_id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        ids = []
+
+    if len(ids) != 1:
+        return None
+    try:
+        return int(ids[0])
+    except Exception:
+        return None
+
+
+def _service_requires_explicit_weekly(org, service):
+    """Return True when a service should be treated as explicitly scoped to service-weekly rows.
+
+    Explicitly scoped services must have ServiceWeeklyAvailability rows to be bookable.
+    This matches the public booking semantics:
+    - Unassigned services (0 assignees)
+    - Shared services (2+ assignees)
+    - Single-assignee services when that assignee has multiple solo services (partitioning)
+    """
+    if not service:
+        return False
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return False
+
+    try:
+        assigned_ids = list(
+            ServiceAssignment.objects.filter(service=service)
+            .values_list('membership_id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        assigned_ids = []
+
+    if len(assigned_ids) == 0:
+        return True
+    if len(assigned_ids) >= 2:
+        return True
+
+    mid = assigned_ids[0]
+    try:
+        solo_service_ids = list(
+            Service.objects.filter(organization=org, assignments__membership_id=mid)
+            .annotate(num_assignees=Count('assignments'))
+            .filter(num_assignees=1)
+            .values_list('id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        solo_service_ids = []
+
+    return len(solo_service_ids) > 1
+
+
+def _service_has_effective_weekly_availability_for_activation(org, service):
+    """Return True if a service has any weekly availability that makes it bookable.
+
+    Important: per-date overrides do NOT count.
+    """
+    if not service:
+        return False
+
+    # If the service is explicitly scoped, it must have service-weekly rows.
+    try:
+        svc_has_any = service.weekly_availability.filter(is_active=True).exists()
+    except Exception:
+        svc_has_any = False
+
+    try:
+        requires_explicit = _service_requires_explicit_weekly(org, service)
+    except Exception:
+        requires_explicit = False
+
+    if requires_explicit or svc_has_any:
+        return bool(svc_has_any)
+
+    # Otherwise, it can inherit member weekly availability (single assignee) or org weekly.
+    mid = _get_single_assignee_membership_id(org, service)
+    if mid is not None:
+        try:
+            from bookings.models import MemberWeeklyAvailability
+            if MemberWeeklyAvailability.objects.filter(membership_id=mid, is_active=True).exists():
+                return True
+        except Exception:
+            pass
+
+    # Fall back to org weekly. If org has no weekly rows at all, preserve legacy "open" behavior.
+    try:
+        from bookings.models import WeeklyAvailability
+        if not WeeklyAvailability.objects.filter(organization=org, is_active=True).exists():
+            return True
+        return WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    except Exception:
+        return True
+
+
+def _enforce_service_windows_within_member_availability(org, membership_id, proposed_cleaned_rows):
+    """Raise ValueError if any proposed service window falls outside member availability."""
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return
+
+    # Build model-weekday -> [(start_min, end_min), ...] from effective member map.
+    eff_ui_map = _effective_member_weekly_map(org, mid)
+    allowed = {i: [] for i in range(7)}
+    for ui_day in range(7):
+        model_wd = ((ui_day - 1) % 7)  # UI 0=Sun..6=Sat -> model 0=Mon..6=Sun
+        for r in (eff_ui_map[ui_day] or []):
+            try:
+                start_s, end_s = [x.strip() for x in str(r).split('-', 1)]
+            except Exception:
+                continue
+            sm = _hm_to_minutes(start_s)
+            em = _hm_to_minutes(end_s)
+            if sm is None or em is None:
+                continue
+            allowed[model_wd].append((sm, em))
+
+    model_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    for (wd, start, end) in (proposed_cleaned_rows or []):
+        try:
+            wdi = int(wd)
+        except Exception:
+            continue
+        sm = _time_to_minutes(start)
+        em = _time_to_minutes(end)
+        if sm is None or em is None:
+            continue
+
+        ok = False
+        for (am, bm) in allowed.get(wdi, []):
+            if am <= sm and bm >= em:
+                ok = True
+                break
+
+        if not ok:
+            try:
+                st_s = start.strftime('%H:%M') if hasattr(start, 'strftime') else str(start)
+                et_s = end.strftime('%H:%M') if hasattr(end, 'strftime') else str(end)
+            except Exception:
+                st_s, et_s = str(start), str(end)
+            day = model_labels[wdi] if 0 <= wdi <= 6 else str(wd)
+            raise ValueError(
+                f"Service availability must be within the assigned member's weekly availability. "
+                f"Invalid window: {day} {st_s}-{et_s}."
+            )
+
+
 def _enforce_no_overlap_between_mixed_signature_solo_services(org, membership_id, service, proposed_cleaned_rows):
     """Raise ValueError if proposed windows overlap other solo services with different signatures.
 
@@ -949,11 +1203,59 @@ def _enforce_no_overlap_between_mixed_signature_solo_services(org, membership_id
     except Exception:
         return
 
-    # Only applies when the member has multiple solo services with mixed settings.
-    if _solo_services_signature_mode(org, mid) != 'mixed':
-        return
-
     my_sig = _service_schedule_signature(service)
+
+    def _member_allowed_by_wd(mid_local):
+        """Return model-weekday -> list of (start_min, end_min) for member effective availability."""
+        eff_ui_map = _effective_member_weekly_map(org, mid_local)
+        allowed_local = {i: [] for i in range(7)}
+        for ui_day in range(7):
+            model_wd = ((ui_day - 1) % 7)
+            for r in (eff_ui_map[ui_day] or []):
+                try:
+                    start_s, end_s = [x.strip() for x in str(r).split('-', 1)]
+                except Exception:
+                    continue
+                sm = _hm_to_minutes(start_s)
+                em = _hm_to_minutes(end_s)
+                if sm is None or em is None:
+                    continue
+                allowed_local[model_wd].append((sm, em))
+        return allowed_local
+
+    member_allowed = _member_allowed_by_wd(mid)
+
+    def _effective_service_intervals(other_service):
+        """Return model-weekday -> list of (start_min, end_min) for another service.
+
+        If the service has explicit service-weekly windows, use them.
+        Otherwise, treat it as inheriting the member's overall availability.
+
+        This is critical to prevent "leaking" availability into other services
+        that haven't been explicitly partitioned yet.
+        """
+        out = {i: [] for i in range(7)}
+        try:
+            other_rows = list(
+                other_service.weekly_availability.filter(is_active=True)
+                .values_list('weekday', 'start_time', 'end_time')
+            )
+        except Exception:
+            other_rows = []
+
+        if other_rows:
+            for (wd, st, et) in other_rows:
+                osm = _time_to_minutes(st)
+                oem = _time_to_minutes(et)
+                if osm is None or oem is None:
+                    continue
+                out[int(wd)].append((osm, oem))
+            return out
+
+        # No explicit rows: inherit member availability.
+        for wd, intervals in member_allowed.items():
+            out[int(wd)] = list(intervals or [])
+        return out
 
     # Identify solo services for the member.
     try:
@@ -993,23 +1295,102 @@ def _enforce_no_overlap_between_mixed_signature_solo_services(org, membership_id
     for other in others:
         if _service_schedule_signature(other) == my_sig:
             continue
-        other_rows = other.weekly_availability.filter(is_active=True).values_list('weekday', 'start_time', 'end_time')
-        for (wd, st, et) in other_rows:
+
+        other_by_wd = _effective_service_intervals(other)
+        for wd, other_intervals in other_by_wd.items():
+            for (osm, oem) in (other_intervals or []):
+                for (psm, pem) in proposed_by_wd.get(int(wd), []):
+                    if _intervals_overlap(psm, pem, osm, oem):
+                        raise ValueError(
+                            f"Availability overlaps another solo service ('{other.name}') with different scheduling settings. "
+                            "Services with different settings must be offered on separate days/times."
+                        )
+
+
+def _enforce_service_windows_within_allowed_rows(allowed_cleaned_rows, service, err_prefix=None):
+    """Raise ValueError if this service has explicit service-weekly rows outside allowed rows.
+
+    `allowed_cleaned_rows` are model-weekday tuples: (weekday, start, end) with start/end as
+    'HH:MM' strings or time objects.
+
+    This is used to ensure a member/org overall availability isn't shrunk below existing
+    service availability.
+    """
+    allowed = {i: [] for i in range(7)}
+    for (wd, start, end) in (allowed_cleaned_rows or []):
+        try:
+            wdi = int(wd)
+        except Exception:
+            continue
+        sm = _time_to_minutes(start)
+        em = _time_to_minutes(end)
+        if sm is None or em is None:
+            continue
+        allowed[wdi].append((sm, em))
+
+    rows = list(service.weekly_availability.filter(is_active=True).values_list('weekday', 'start_time', 'end_time'))
+    if not rows:
+        return
+
+    model_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    for (wd, st, et) in rows:
+        sm = _time_to_minutes(st)
+        em = _time_to_minutes(et)
+        if sm is None or em is None:
+            continue
+        ok = False
+        for (am, bm) in allowed.get(int(wd), []):
+            if am <= sm and bm >= em:
+                ok = True
+                break
+        if not ok:
             try:
-                st_s = st.strftime('%H:%M')
-                et_s = et.strftime('%H:%M')
+                st_s = st.strftime('%H:%M') if hasattr(st, 'strftime') else str(st)
+                et_s = et.strftime('%H:%M') if hasattr(et, 'strftime') else str(et)
             except Exception:
-                continue
-            osm = _hm_to_minutes(st_s)
-            oem = _hm_to_minutes(et_s)
-            if osm is None or oem is None:
-                continue
-            for (psm, pem) in proposed_by_wd.get(int(wd), []):
-                if _intervals_overlap(psm, pem, osm, oem):
-                    raise ValueError(
-                        f"Availability overlaps another solo service ('{other.name}') with different scheduling settings. "
-                        "Services with different settings must be offered on separate days/times."
-                    )
+                st_s, et_s = str(st), str(et)
+            day = model_labels[int(wd)] if 0 <= int(wd) <= 6 else str(wd)
+            prefix = (str(err_prefix).strip() + ' ') if err_prefix else ''
+            raise ValueError(
+                f"{prefix}Overall availability cannot exclude existing service availability. "
+                f"Service '{getattr(service, 'name', 'Service')}' has {day} {st_s}-{et_s} outside the overall availability."
+            )
+
+
+def _iter_member_solo_services(org, membership_id):
+    """Yield active solo services for a membership (services assigned to exactly this one member)."""
+    try:
+        from bookings.models import ServiceAssignment
+    except Exception:
+        return []
+
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return []
+
+    try:
+        service_ids = list(
+            ServiceAssignment.objects.filter(membership_id=mid, service__organization=org, service__is_active=True)
+            .values_list('service_id', flat=True)
+        )
+    except Exception:
+        service_ids = []
+    if not service_ids:
+        return []
+
+    try:
+        counts = (
+            ServiceAssignment.objects.filter(service_id__in=service_ids)
+            .values('service_id')
+            .annotate(c=Count('id'))
+        )
+        solo_ids = [row['service_id'] for row in counts if int(row.get('c') or 0) == 1]
+    except Exception:
+        solo_ids = []
+    if not solo_ids:
+        return []
+    return Service.objects.filter(organization=org, is_active=True, id__in=solo_ids)
 
 
 def _get_single_assignee_display_name(org, service):
@@ -1055,6 +1436,36 @@ def _build_member_weekly_map(membership):
         ui_idx = (row.weekday + 1) % 7
         mem_map[ui_idx].append(f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}")
     return mem_map
+
+
+def _format_ranges_12h(ranges):
+    """Convert ['HH:MM-HH:MM', ...] into 'h:MM AM - h:MM PM, ...'."""
+    def _fmt_time(hhmm):
+        try:
+            s = str(hhmm).strip()
+            if len(s) < 4:
+                return ''
+            hh = int(s[:2])
+            mm = int(s[3:5])
+            ampm = 'AM' if hh < 12 else 'PM'
+            h12 = hh % 12
+            if h12 == 0:
+                h12 = 12
+            return f"{h12}:{mm:02d} {ampm}"
+        except Exception:
+            return ''
+
+    out = []
+    for r in (ranges or []):
+        try:
+            a, b = [x.strip() for x in str(r).split('-', 1)]
+        except Exception:
+            continue
+        sa = _fmt_time(a)
+        sb = _fmt_time(b)
+        if sa and sb:
+            out.append(f"{sa} - {sb}")
+    return ', '.join(out)
 
 def home(request):
     return render(request, "calendar_app/index.html")
@@ -1119,7 +1530,9 @@ def calendar_view(request, org_slug):
     # Prevent any accidental </script> sequences from being embedded raw into templates
     if isinstance(coach_availability_json, str):
         coach_availability_json = coach_availability_json.replace('</script>', '<\\/script>')
-    services_qs = Service.objects.filter(organization=org, is_active=True).order_by('name')
+    # Internal calendar is a management view: include inactive services so owners
+    # can see/edit them (public pages still filter to active-only).
+    services_qs = Service.objects.filter(organization=org).order_by('name')
     services = []
     for s in services_qs:
         assigned_members = []
@@ -1133,6 +1546,7 @@ def calendar_view(request, org_slug):
             'id': s.id,
             'name': s.name,
             'slug': s.slug,
+            'is_active': bool(getattr(s, 'is_active', True)),
             'duration': s.duration,
             'time_increment_minutes': getattr(s, 'time_increment_minutes', 30),
             'use_fixed_increment': bool(getattr(s, 'use_fixed_increment', False)),
@@ -1185,6 +1599,133 @@ def calendar_view(request, org_slug):
 
 def demo_calendar_view(request):
     return render(request, "calendar_app/demo_calendar.html")
+
+
+def _snapshot_weekly_windows_for_service_date(org, service, date_obj):
+    """Return a list of {'start': 'HH:MM', 'end': 'HH:MM'} for the service/date.
+
+    Snapshot is based on the weekly windows currently in effect for that service:
+    - Prefer explicit ServiceWeeklyAvailability for that weekday.
+    - Else fall back to org WeeklyAvailability.
+    - If org has no weekly rows at all, treat as fully available (legacy).
+    """
+    try:
+        wd = date_obj.weekday()  # model weekday 0=Mon..6=Sun
+    except Exception:
+        return []
+
+    # Prefer explicit service weekly windows if present for that weekday.
+    try:
+        svc_rows = service.weekly_availability.filter(is_active=True, weekday=wd).order_by('start_time')
+        if svc_rows.exists():
+            return [{'start': r.start_time.strftime('%H:%M'), 'end': r.end_time.strftime('%H:%M')} for r in svc_rows]
+    except Exception:
+        pass
+
+    # Org defaults
+    try:
+        any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    except Exception:
+        any_org_rows = False
+    if not any_org_rows:
+        return [{'start': '00:00', 'end': '23:59'}]
+
+    try:
+        org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=wd).order_by('start_time')
+        return [{'start': r.start_time.strftime('%H:%M'), 'end': r.end_time.strftime('%H:%M')} for r in org_rows]
+    except Exception:
+        return []
+
+
+def _service_settings_snapshot(service, weekly_windows=None):
+    try:
+        snap = {
+            'duration': int(getattr(service, 'duration', 0) or 0),
+            'buffer_after': int(getattr(service, 'buffer_after', 0) or 0),
+            'time_increment_minutes': int(getattr(service, 'time_increment_minutes', 30) or 30),
+            'use_fixed_increment': bool(getattr(service, 'use_fixed_increment', False)),
+            'allow_ends_after_availability': bool(getattr(service, 'allow_ends_after_availability', False)),
+            'allow_squished_bookings': bool(getattr(service, 'allow_squished_bookings', False)),
+        }
+    except Exception:
+        snap = {}
+    if weekly_windows is not None:
+        snap['weekly_windows'] = weekly_windows
+    return snap
+
+
+def _ensure_weekly_freezes_for_booked_dates(org, services, org_tz, horizon):
+    """Ensure ServiceSettingFreeze rows contain weekly window snapshots for booked dates."""
+    if not services:
+        return
+
+    try:
+        today_org = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    except Exception:
+        today_org = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    try:
+        from bookings.models import ServiceSettingFreeze
+    except Exception:
+        return
+
+    # Only real bookings (exclude per-date override rows)
+    try:
+        bookings = Booking.objects.filter(
+            organization=org,
+            service__in=list(services),
+            service__isnull=False,
+            start__gte=today_org,
+            start__lte=horizon,
+        ).select_related('service')
+    except Exception:
+        return
+
+    # Deduplicate by (service_id, local_date)
+    pairs = set()
+    for b in bookings:
+        try:
+            d = b.start.astimezone(org_tz).date()
+        except Exception:
+            d = b.start.date()
+        if b.service_id:
+            pairs.add((b.service_id, d))
+
+    if not pairs:
+        return
+
+    svc_by_id = {s.id: s for s in services}
+    for (sid, d) in pairs:
+        svc = svc_by_id.get(sid)
+        if not svc:
+            continue
+        weekly_windows = _snapshot_weekly_windows_for_service_date(org, svc, d)
+        frozen_settings = _service_settings_snapshot(svc, weekly_windows=weekly_windows)
+
+        try:
+            existing = ServiceSettingFreeze.objects.filter(service=svc, date=d).first()
+        except Exception:
+            existing = None
+
+        if existing:
+            # Do not overwrite an existing freeze; only backfill weekly_windows if missing/empty.
+            try:
+                if isinstance(existing.frozen_settings, dict):
+                    if not existing.frozen_settings.get('weekly_windows'):
+                        new_settings = dict(existing.frozen_settings)
+                        new_settings['weekly_windows'] = weekly_windows
+                        existing.frozen_settings = new_settings
+                        existing.save(update_fields=['frozen_settings'])
+                else:
+                    existing.frozen_settings = frozen_settings
+                    existing.save(update_fields=['frozen_settings'])
+            except Exception:
+                continue
+        else:
+            try:
+                ServiceSettingFreeze.objects.create(service=svc, date=d, frozen_settings=frozen_settings)
+            except Exception:
+                continue
 
 
 @require_http_methods(['POST'])
@@ -1369,6 +1910,24 @@ def save_availability(request, slug):
         if not (user_has_role(request.user, org, ('owner',)) or user_has_role(request.user, org, ('admin',))):
             return HttpResponseForbidden('Insufficient permissions to set service availability')
         created_count = 0
+        # Freeze weekly windows for booked dates before changing service weekly availability.
+        try:
+            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        except Exception:
+            org_tz = timezone.get_current_timezone()
+        try:
+            max_days = 0
+            for v in Service.objects.filter(organization=org).values_list('max_booking_days', flat=True):
+                try:
+                    max_days = max(max_days, int(v or 0))
+                except Exception:
+                    continue
+        except Exception:
+            max_days = 0
+        try:
+            horizon = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=max(max_days, 365))
+        except Exception:
+            horizon = timezone.now() + timedelta(days=365)
         with transaction.atomic():
             for sid, av in service_map.items():
                 try:
@@ -1379,6 +1938,10 @@ def save_availability(request, slug):
                 if not svc:
                     continue
                 try:
+                    _ensure_weekly_freezes_for_booked_dates(org, [svc], org_tz, horizon)
+                except Exception:
+                    pass
+                try:
                     cleaned_rows = _parse_availability_array(av)
                 except ValueError:
                     continue
@@ -1386,6 +1949,15 @@ def save_availability(request, slug):
                 ServiceWeeklyAvailability.objects.bulk_create([
                     ServiceWeeklyAvailability(service=svc, weekday=wd, start_time=start, end_time=end, is_active=True) for (wd, start, end) in cleaned_rows
                 ])
+                # New rule: a service with no weekly availability must be inactive.
+                # Per-date overrides do not count.
+                if not cleaned_rows:
+                    try:
+                        if getattr(svc, 'is_active', False):
+                            svc.is_active = False
+                            svc.save(update_fields=['is_active'])
+                    except Exception:
+                        pass
                 created_count += len(cleaned_rows)
         return JsonResponse({'success': True, 'service_count': created_count})
 
@@ -1430,12 +2002,33 @@ def save_availability(request, slug):
             if len(assigned_ids) == 1:
                 enabled, reason = _service_availability_applicability(org, svc)
                 if not enabled:
-                    return HttpResponseForbidden(reason or 'Service availability is not applicable for this service.')
-                # Enforce "separate days/times" when member has mixed scheduling settings.
+                    return JsonResponse({'success': False, 'error': (reason or 'Service availability is not applicable for this service.')}, status=403)
+                # Enforce subset: service windows must be within the member's effective availability.
+                try:
+                    _enforce_service_windows_within_member_availability(org, assigned_ids[0], cleaned)
+                except ValueError as ve:
+                    return JsonResponse({'success': False, 'error': str(ve)}, status=400)
+                # Enforce partitioning: when a member has multiple solo services, service windows must not overlap.
                 try:
                     _enforce_no_overlap_between_mixed_signature_solo_services(org, assigned_ids[0], svc, cleaned)
                 except ValueError as ve:
-                    return HttpResponseBadRequest(str(ve))
+                    return JsonResponse({'success': False, 'error': str(ve)}, status=400)
+
+            # Freeze weekly windows for dates that already have bookings for this service
+            # so later weekly edits don't change those booked days.
+            try:
+                try:
+                    org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+                except Exception:
+                    org_tz = timezone.get_current_timezone()
+                today_org = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+                try:
+                    horizon = today_org + timedelta(days=max(int(getattr(svc, 'max_booking_days', 0) or 0), 365))
+                except Exception:
+                    horizon = today_org + timedelta(days=365)
+                _ensure_weekly_freezes_for_booked_dates(org, [svc], org_tz, horizon)
+            except Exception:
+                pass
 
             with transaction.atomic():
                 ServiceWeeklyAvailability.objects.filter(service=svc).delete()
@@ -1449,6 +2042,16 @@ def save_availability(request, slug):
                     )
                     for (wd, start, end) in cleaned
                 ])
+
+                # New rule: a service with no weekly availability must be inactive.
+                # Per-date overrides do not count.
+                if not cleaned:
+                    try:
+                        if getattr(svc, 'is_active', False):
+                            svc.is_active = False
+                            svc.save(update_fields=['is_active'])
+                    except Exception:
+                        pass
             return JsonResponse({'success': True, 'count': len(cleaned), 'target': t})
 
         # Membership-specific (accept 'mem:<id>' or plain numeric id)
@@ -1469,6 +2072,15 @@ def save_availability(request, slug):
             if not (request.user_has_role('owner', org) or request.user_has_role('admin', org)):
                 if not current_membership or current_membership.id != membership.id:
                     return HttpResponseForbidden('Insufficient permissions to set this member availability')
+
+            # Guardrail: do not allow shrinking a member's overall availability below existing
+            # explicit service availability for that member's solo services.
+            try:
+                for svc in _iter_member_solo_services(org, membership.id):
+                    _enforce_service_windows_within_allowed_rows(cleaned, svc, err_prefix="Member availability update blocked:")
+            except ValueError as ve:
+                return JsonResponse({'success': False, 'error': str(ve)}, status=400)
+
             with transaction.atomic():
                 MemberWeeklyAvailability.objects.filter(membership=membership).delete()
                 MemberWeeklyAvailability.objects.bulk_create([
@@ -1484,6 +2096,50 @@ def save_availability(request, slug):
             return JsonResponse({'success': True, 'count': len(cleaned), 'target': f'mem:{membership.id}'})
 
     # Default: organization-level weekly availability (existing behavior)
+    # Guardrail: do not allow shrinking org defaults below explicit service availability for
+    # solo services whose assignees inherit org defaults (no member override rows).
+    try:
+        # Identify memberships that currently inherit org defaults.
+        inheriting_ids = list(
+            Membership.objects.filter(organization=org, is_active=True)
+            .exclude(id__in=MemberWeeklyAvailability.objects.filter(is_active=True).values_list('membership_id', flat=True))
+            .values_list('id', flat=True)
+        )
+    except Exception:
+        inheriting_ids = []
+    if inheriting_ids:
+        try:
+            for mid in inheriting_ids:
+                for svc in _iter_member_solo_services(org, mid):
+                    _enforce_service_windows_within_allowed_rows(cleaned, svc, err_prefix="Org availability update blocked:")
+        except ValueError as ve:
+            return JsonResponse({'success': False, 'error': str(ve)}, status=400)
+
+    # Freeze org-default weekly windows for booked dates of services that inherit org defaults
+    # (i.e., no explicit service-weekly rows).
+    try:
+        try:
+            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        except Exception:
+            org_tz = timezone.get_current_timezone()
+        today_org = timezone.now().astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        try:
+            max_days = 0
+            for v in Service.objects.filter(organization=org).values_list('max_booking_days', flat=True):
+                try:
+                    max_days = max(max_days, int(v or 0))
+                except Exception:
+                    continue
+        except Exception:
+            max_days = 0
+        horizon = today_org + timedelta(days=max(max_days, 365))
+
+        svc_ids_with_explicit = set(ServiceWeeklyAvailability.objects.filter(is_active=True).values_list('service_id', flat=True))
+        inheriting_svcs = list(Service.objects.filter(organization=org).exclude(id__in=list(svc_ids_with_explicit)))
+        _ensure_weekly_freezes_for_booked_dates(org, inheriting_svcs, org_tz, horizon)
+    except Exception:
+        pass
+
     with transaction.atomic():
         WeeklyAvailability.objects.filter(organization=org).delete()
         WeeklyAvailability.objects.bulk_create([
@@ -2605,6 +3261,27 @@ def edit_service(request, org_slug, service_id):
     org = request.organization
     service = get_object_or_404(Service, id=service_id, organization=org)
 
+    # Keep UI truthful: if a service has no weekly availability (overrides don't count), it cannot remain active.
+    try:
+        if getattr(service, 'is_active', False) and (not _service_has_effective_weekly_availability_for_activation(org, service)):
+            service.is_active = False
+            service.save(update_fields=['is_active'])
+            # Ensure the in-memory object reflects the saved value
+            try:
+                service.refresh_from_db(fields=['is_active'])
+            except Exception:
+                pass
+            try:
+                messages.error(
+                    request,
+                    "This service was set to inactive because it has no weekly availability. "
+                    "Add weekly availability (overrides don’t count) to activate it."
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
         description = (request.POST.get("description") or "").strip()
@@ -2615,18 +3292,11 @@ def edit_service(request, org_slug, service_id):
         buffer_after_raw = request.POST.get("buffer_after") or "0"
         min_notice_hours_raw = request.POST.get("min_notice_hours") or "1"
         max_booking_days_raw = request.POST.get("max_booking_days") or "30"
-        is_active = request.POST.get("is_active") == "on"
+        requested_active = request.POST.get("is_active") == "on"
 
         # Snapshot current service settings so we can freeze them for booked dates
         try:
-            current_settings_snapshot = {
-                'duration': int(getattr(service, 'duration', 0) or 0),
-                'buffer_after': int(getattr(service, 'buffer_after', 0) or 0),
-                'time_increment_minutes': int(getattr(service, 'time_increment_minutes', 0) or 0),
-                'use_fixed_increment': bool(getattr(service, 'use_fixed_increment', False)),
-                'allow_ends_after_availability': bool(getattr(service, 'allow_ends_after_availability', False)),
-                'allow_squished_bookings': bool(getattr(service, 'allow_squished_bookings', False)),
-            }
+            current_settings_snapshot = _service_settings_snapshot(service)
         except Exception:
             current_settings_snapshot = None
 
@@ -2651,7 +3321,7 @@ def edit_service(request, org_slug, service_id):
                 service.buffer_after = buffer_after
                 service.min_notice_hours = min_notice_hours
                 service.max_booking_days = max_booking_days
-                service.is_active = is_active
+                service.is_active = requested_active
 
                 # Per-service slot settings
                 try:
@@ -2683,6 +3353,21 @@ def edit_service(request, org_slug, service_id):
                     service.refund_cutoff_hours = 0
 
                 service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+
+                # New rule: block activating a service unless it has weekly availability.
+                # Per-date overrides do not count.
+                if requested_active:
+                    try:
+                        if not _service_has_effective_weekly_availability_for_activation(org, service):
+                            service.is_active = False
+                            messages.error(
+                                request,
+                                "This service can’t be activated because it has no weekly availability. "
+                                "Add weekly availability in the Service availability section or via the calendar first."
+                            )
+                    except Exception:
+                        # If checks fail, fail open to avoid locking out editing.
+                        pass
 
                 # Allow slug update only when there are no bookings for this service.
                 try:
@@ -2735,7 +3420,7 @@ def edit_service(request, org_slug, service_id):
                     weekday_labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
                     weekly_edit_rows = []
                     for ui in range(7):
-                        org_ranges = ', '.join(org_map[ui]) if org_map and org_map[ui] else ''
+                        org_ranges = _format_ranges_12h(org_map[ui]) if org_map and org_map[ui] else ''
                         svc_ranges = ', '.join(svc_map[ui]) if svc_map and svc_map[ui] else ''
                         weekly_edit_rows.append({'ui': ui, 'label': weekday_labels[ui], 'org_ranges': org_ranges, 'svc_ranges': svc_ranges})
 
@@ -2756,8 +3441,36 @@ def edit_service(request, org_slug, service_id):
 
                     can_edit_service_availability, service_availability_disabled_reason = _service_availability_applicability(org, service)
 
-                    service_availability_member_name = ""
+                    allowed_map = org_map
+                    # For single-assignee partitioned services, constrain service windows
+                    # to the assignee's weekly availability.
                     if can_edit_service_availability:
+                        try:
+                            mid = _get_single_assignee_membership_id(org, service)
+                            if mid is not None:
+                                allowed_map = _effective_member_weekly_map(org, mid)
+                        except Exception:
+                            allowed_map = org_map
+
+                    for r in weekly_edit_rows:
+                        try:
+                            ui = int(r.get('ui'))
+                        except Exception:
+                            ui = None
+                        if ui is None or ui < 0 or ui > 6:
+                            r['allowed_ranges'] = ''
+                        else:
+                            try:
+                                r['allowed_ranges'] = _format_ranges_12h(allowed_map[ui]) if allowed_map and allowed_map[ui] else ''
+                            except Exception:
+                                r['allowed_ranges'] = ''
+
+                    service_availability_member_name = ""
+                    try:
+                        mid = _get_single_assignee_membership_id(org, service)
+                    except Exception:
+                        mid = None
+                    if mid is not None and can_edit_service_availability:
                         service_availability_member_name = _get_single_assignee_display_name(org, service)
                     return render(request, "calendar_app/edit_service.html", {
                         "org": org,
@@ -2802,15 +3515,13 @@ def edit_service(request, org_slug, service_id):
                                 d = b.start.date()
                             booked_dates.add(d)
 
-                        # Create freezes preserving the current settings for these dates
+                        # Create freezes preserving the current settings AND weekly windows for these dates
                         from django.db.utils import OperationalError
                         for d in booked_dates:
                             try:
-                                obj, created = ServiceSettingFreeze.objects.get_or_create(
-                                    service=service,
-                                    date=d,
-                                    defaults={'frozen_settings': current_settings_snapshot}
-                                )
+                                frozen = dict(current_settings_snapshot or {})
+                                frozen['weekly_windows'] = _snapshot_weekly_windows_for_service_date(org, service, d)
+                                obj, created = ServiceSettingFreeze.objects.get_or_create(service=service, date=d, defaults={'frozen_settings': frozen})
                                 # Do not overwrite existing freezes; leave prior frozen settings intact
                             except OperationalError:
                                 # If migrations missing or DB error, skip freezes but continue
@@ -2819,9 +3530,11 @@ def edit_service(request, org_slug, service_id):
                     # Defensive: don't block saving if freeze creation fails
                     pass
 
-                # Prevent deactivating the last active service for the org
+                # Prevent deactivating the last active service for the org.
+                # Important: if activation was requested but blocked due to missing weekly availability,
+                # we allow the service to remain inactive (do not enforce this guard).
                 try:
-                    if not service.is_active:
+                    if not requested_active:
                         other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
                         if other_active == 0:
                             messages.error(request, "At least one service must remain active for your public booking page. Activate another service first.")
@@ -2832,6 +3545,23 @@ def edit_service(request, org_slug, service_id):
                 # No team-plan assignment enforcement here; services may be unassigned
 
                 service.save()
+
+                # After changing scheduling-affecting fields, ensure existing service-weekly
+                # windows still satisfy the solo-service overlap rule and remain within the
+                # assigned member's overall weekly availability.
+                try:
+                    mid = _get_single_assignee_membership_id(org, service)
+                except Exception:
+                    mid = None
+                if mid is not None:
+                    try:
+                        existing_rows = list(service.weekly_availability.filter(is_active=True).values_list('weekday', 'start_time', 'end_time'))
+                        if existing_rows:
+                            _enforce_service_windows_within_member_availability(org, mid, existing_rows)
+                            _enforce_no_overlap_between_mixed_signature_solo_services(org, mid, service, existing_rows)
+                    except ValueError as ve:
+                        messages.error(request, str(ve))
+                        return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
                 # Sync service assignments (which memberships can deliver this service)
                 try:
                     from bookings.models import ServiceAssignment
@@ -2880,6 +3610,7 @@ def edit_service(request, org_slug, service_id):
                 # Each field may contain comma-separated ranges like "09:00-12:00,13:00-17:00" or be empty.
                 can_edit_svc_avail, _reason = _service_availability_applicability(org, service)
                 if can_edit_svc_avail:
+                    svc_avail_had_error = False
                     svc_windows = []
                     for ui_day in range(7):
                         key = f"svc_avail_{ui_day}"
@@ -2895,10 +3626,12 @@ def edit_service(request, org_slug, service_id):
                                 start_s, end_s = [x.strip() for x in part.split('-')]
                             except Exception:
                                 messages.error(request, f"Invalid range format for {key}: {part}")
+                                svc_avail_had_error = True
                                 continue
                             # Basic sanity check
                             if len(start_s) != 5 or len(end_s) != 5 or start_s[2] != ':' or end_s[2] != ':':
                                 messages.error(request, f"Invalid time format for {key}: {part}")
+                                svc_avail_had_error = True
                                 continue
                             svc_windows.append((model_wd, start_s, end_s))
 
@@ -2913,6 +3646,7 @@ def edit_service(request, org_slug, service_id):
                                 et = datetime.strptime(end_s, '%H:%M').time()
                             except Exception:
                                 messages.error(request, f"Invalid time values: {start_s}-{end_s}")
+                                svc_avail_had_error = True
                                 continue
                             obj = ServiceWeeklyAvailability(
                                 service=service,
@@ -2926,16 +3660,33 @@ def edit_service(request, org_slug, service_id):
                             except Exception as e:
                                 # Display first validation error
                                 messages.error(request, f"Service availability error: {e}")
+                                svc_avail_had_error = True
                             else:
                                 new_objs.append(obj)
 
                         if new_objs:
-                            # Replace existing windows
-                            ServiceWeeklyAvailability.objects.filter(service=service).delete()
-                            ServiceWeeklyAvailability.objects.bulk_create(new_objs)
+                            # Enforce subset + partition overlap guardrails before persisting.
+                            try:
+                                mid = _get_single_assignee_membership_id(org, service)
+                                cleaned_rows = [(o.weekday, o.start_time, o.end_time) for o in new_objs]
+                                if mid is not None:
+                                    _enforce_service_windows_within_member_availability(org, mid, cleaned_rows)
+                                    _enforce_no_overlap_between_mixed_signature_solo_services(org, mid, service, cleaned_rows)
+                            except ValueError as ve:
+                                messages.error(request, str(ve))
+                                svc_avail_had_error = True
+                            else:
+                                # Replace existing windows
+                                ServiceWeeklyAvailability.objects.filter(service=service).delete()
+                                ServiceWeeklyAvailability.objects.bulk_create(new_objs)
                     else:
                         # If no posted windows present, remove any existing per-service windows
                         ServiceWeeklyAvailability.objects.filter(service=service).delete()
+
+                    # If there were service-availability errors (including overlap/subset violations),
+                    # do not show a success message.
+                    if svc_avail_had_error:
+                        return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
                 
                 messages.success(request, "Service updated.")
                 # Return to edit page to reflect saved values immediately
@@ -2947,7 +3698,7 @@ def edit_service(request, org_slug, service_id):
     weekday_labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
     weekly_edit_rows = []
     for ui in range(7):
-        org_ranges = ', '.join(org_map[ui]) if org_map and org_map[ui] else ''
+        org_ranges = _format_ranges_12h(org_map[ui]) if org_map and org_map[ui] else ''
         svc_ranges = ', '.join(svc_map[ui]) if svc_map and svc_map[ui] else ''
         weekly_edit_rows.append({
             'ui': ui,
@@ -2969,6 +3720,19 @@ def edit_service(request, org_slug, service_id):
         other_active = 0
     is_only_active_service = (other_active == 0)
 
+    # Activation lock: disable toggling on when the service has no weekly availability.
+    # Overrides do not count.
+    try:
+        can_activate_service = bool(_service_has_effective_weekly_availability_for_activation(org, service))
+    except Exception:
+        can_activate_service = True
+    activation_locked = (not can_activate_service) and (not getattr(service, 'is_active', False))
+    activation_lock_reason = "Add weekly availability (overrides don’t count) to activate this service." if activation_locked else ""
+    try:
+        activation_requires_service_weekly = bool(_service_requires_explicit_weekly(org, service))
+    except Exception:
+        activation_requires_service_weekly = False
+
     # Safely compute assigned_member_ids (bookings.models may be unavailable if migrations missing)
     try:
         from bookings.models import ServiceAssignment
@@ -2978,8 +3742,35 @@ def edit_service(request, org_slug, service_id):
 
     can_edit_service_availability, service_availability_disabled_reason = _service_availability_applicability(org, service)
 
-    service_availability_member_name = ""
+    allowed_map = org_map
+    # For single-assignee partitioned services, constrain service windows to that member.
     if can_edit_service_availability:
+        try:
+            mid = _get_single_assignee_membership_id(org, service)
+            if mid is not None:
+                allowed_map = _effective_member_weekly_map(org, mid)
+        except Exception:
+            allowed_map = org_map
+
+    for r in weekly_edit_rows:
+        try:
+            ui = int(r.get('ui'))
+        except Exception:
+            ui = None
+        if ui is None or ui < 0 or ui > 6:
+            r['allowed_ranges'] = ''
+        else:
+            try:
+                r['allowed_ranges'] = _format_ranges_12h(allowed_map[ui]) if allowed_map and allowed_map[ui] else ''
+            except Exception:
+                r['allowed_ranges'] = ''
+
+    service_availability_member_name = ""
+    try:
+        mid = _get_single_assignee_membership_id(org, service)
+    except Exception:
+        mid = None
+    if mid is not None and can_edit_service_availability:
         service_availability_member_name = _get_single_assignee_display_name(org, service)
 
     return render(request, "calendar_app/edit_service.html", {
@@ -2988,6 +3779,9 @@ def edit_service(request, org_slug, service_id):
         "weekly_edit_rows": weekly_edit_rows,
         "can_edit_slug": can_edit_slug,
         "is_only_active_service": is_only_active_service,
+        "activation_locked": activation_locked,
+        "activation_lock_reason": activation_lock_reason,
+        "activation_requires_service_weekly": activation_requires_service_weekly,
         'assigned_member_ids': assigned_member_ids,
         'can_edit_service_availability': can_edit_service_availability,
         'service_availability_disabled_reason': service_availability_disabled_reason,

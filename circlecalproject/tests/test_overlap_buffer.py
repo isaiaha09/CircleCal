@@ -46,8 +46,12 @@ class CreateBookingBufferIntegrationTests(TestCase):
         self.user.set_password('password')
         self.user.save()
         self.org = Business.objects.create(name='Int Org', slug='int-org', owner=self.user)
-        Membership.objects.update_or_create(user=self.user, organization=self.org, defaults={'role':'owner','is_active':True})
+        membership, _ = Membership.objects.update_or_create(user=self.user, organization=self.org, defaults={'role':'owner','is_active':True})
         self.service = Service.objects.create(organization=self.org, name='Buffer Service', slug='buffer-service', duration=60, buffer_before=30, buffer_after=30)
+        # Ensure the service is single-assignee so it can inherit org/member weekly availability
+        # (unassigned services require explicit service-weekly rows).
+        from bookings.models import ServiceAssignment
+        ServiceAssignment.objects.get_or_create(service=self.service, membership=membership)
         # Add a weekly availability window so anchors are generated predictably
         from bookings.models import WeeklyAvailability
         from datetime import time

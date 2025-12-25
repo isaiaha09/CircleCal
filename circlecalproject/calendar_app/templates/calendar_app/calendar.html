@@ -24,7 +24,7 @@
             <p style="color:var(--gray-600); font-size:15px; margin:0;">Manage your availability and view bookings</p>
         </div>
         {% if is_team_plan %}
-            <div style="width:320px; margin-top:12px; text-align:center;">
+            <div style="width:min(460px, 92vw); margin-top:12px; text-align:center;">
                 <label for="memberSelect" style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:6px;">Showing calendar for</label>
                 <!-- Keep a hidden select in the DOM for legacy initialization code that enumerates members. -->
                 <select id="memberSelect" style="display:none" aria-hidden="true">
@@ -36,9 +36,9 @@
                 </select>
 
                 <!-- New nested scope menu: Members -> Personal Services -->
-                <div id="ccScopeMenuRoot" style="position:relative; display:inline-block; width:70%; text-align:left;">
+                <div id="ccScopeMenuRoot" style="position:relative; display:inline-block; width:100%; text-align:left;">
                     <button id="ccScopeMenuButton" type="button" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--gray-200); background:white; box-shadow: 0 1px 2px rgba(16,24,40,0.04); font-size:14px; color:var(--gray-900); display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                        <span id="ccScopeMenuButtonLabel" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Select member</span>
+                        <span id="ccScopeMenuButtonLabel" style="flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Select member</span>
                         <span style="color:var(--gray-600); font-size:16px; line-height:1;">▾</span>
                     </button>
 
@@ -2233,7 +2233,27 @@ document.addEventListener('DOMContentLoaded', function() {
             removeBtn.className = 'remove-range-btn';
             removeBtn.setAttribute('aria-label', 'Remove range');
             removeBtn.innerHTML = '<span class="remove-icon" aria-hidden="true">✖</span>';
-            removeBtn.addEventListener('click', () => row.remove());
+            removeBtn.addEventListener('click', () => {
+                try { row.remove(); } catch (e) {}
+                // If the user removed the last range for a day, treat that day as unavailable.
+                // This matches backend semantics (no rows => unavailable) and prevents the UI
+                // from auto-adding a default range on re-render after save.
+                try {
+                    const containerEl = document.getElementById(`ranges-container-${dayIndex}`);
+                    const hasAny = containerEl ? containerEl.querySelectorAll('.range-row').length > 0 : false;
+                    if (!hasAny) {
+                        const cb = document.querySelector(`.unavailable-checkbox[data-day='${dayIndex}']`);
+                        if (cb && !cb.checked) {
+                            cb.checked = true;
+                            cb.dispatchEvent(new Event('change'));
+                        } else {
+                            // Ensure in-memory state still reflects the removal
+                            defaultAvailability[dayIndex].unavailable = true;
+                            defaultAvailability[dayIndex].ranges = [];
+                        }
+                    }
+                } catch (e) {}
+            });
 
             row.appendChild(startContainer);
             row.appendChild(endContainer);
@@ -2315,6 +2335,75 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Save handler (use onclick to avoid duplicate listeners)
         const saveBtn = document.getElementById('saveDefaultAvailabilityBtn');
+
+        function _ensureAvailabilitySaveBanner(){
+            let el = document.getElementById('cc-availability-save-banner');
+            if (el) return el;
+            el = document.createElement('div');
+            el.id = 'cc-availability-save-banner';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            el.style.display = 'none';
+            el.style.margin = '0 0 10px 0';
+            el.style.padding = '10px 12px';
+            el.style.borderRadius = '10px';
+            el.style.border = '1px solid #e5e7eb';
+            el.style.background = '#f9fafb';
+            el.style.color = '#111827';
+            el.style.fontSize = '14px';
+            el.style.lineHeight = '1.35';
+            // Place banner right above the Save button if possible.
+            try {
+                const parent = saveBtn && saveBtn.parentElement ? saveBtn.parentElement : null;
+                if (parent) parent.insertBefore(el, saveBtn);
+                else document.body.appendChild(el);
+            } catch (e) {
+                document.body.appendChild(el);
+            }
+            return el;
+        }
+
+        function _availabilitySaveHint(msg){
+            const m = String(msg || '').toLowerCase();
+            if (m.includes('overlaps another solo service')) {
+                return "Tip: Either make the services' scheduling settings identical, or move one service to a non-overlapping day/time.";
+            }
+            if (m.includes("within the assigned member's weekly availability")) {
+                return "Tip: Expand the member's overall availability first (or shrink the service window).";
+            }
+            if (m.includes('overall availability cannot exclude existing service availability')) {
+                return 'Tip: Expand overall availability first, then save.';
+            }
+            return '';
+        }
+
+        function _showAvailabilitySaveBanner(kind, message){
+            const el = _ensureAvailabilitySaveBanner();
+            const hint = _availabilitySaveHint(message);
+            const safeMsg = String(message || '').trim();
+
+            el.style.display = 'block';
+            if (kind === 'success') {
+                el.style.border = '1px solid #86efac';
+                el.style.background = '#ecfdf5';
+                el.style.color = '#065f46';
+                el.innerHTML = `<div style="font-weight:700">Saved</div><div style="margin-top:2px">${safeMsg || 'Weekly availability saved.'}</div>`;
+            } else {
+                el.style.border = '1px solid #fecaca';
+                el.style.background = '#fef2f2';
+                el.style.color = '#7f1d1d';
+                el.innerHTML = `<div style="font-weight:700">Couldn't save</div><div style="margin-top:2px">${safeMsg || 'The server rejected these changes.'}</div>${hint ? `<div style="margin-top:6px;color:#991b1b"><strong>\u2022</strong> ${hint}</div>` : ''}`;
+            }
+            try { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+        }
+
+        function _clearAvailabilitySaveBanner(){
+            const el = document.getElementById('cc-availability-save-banner');
+            if (!el) return;
+            el.style.display = 'none';
+            el.textContent = '';
+        }
+
         saveBtn.onclick = async function() {
             // Build payload from dynamic inputs
             const payload = [];
@@ -2335,7 +2424,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     ranges.push(`${s}-${e}`);
                 }
                 if (invalid) return;
-                const unavailable = !!document.querySelector(`.unavailable-checkbox[data-day='${day}']`).checked;
+                const cb = document.querySelector(`.unavailable-checkbox[data-day='${day}']`);
+                const unavailableChecked = !!(cb && cb.checked);
+                // If no ranges remain, treat the day as unavailable even if the checkbox
+                // wasn't toggled. This matches persisted semantics and avoids re-render
+                // creating a default range row.
+                const unavailable = unavailableChecked || ranges.length === 0;
                 // Backend accepts day names or numeric; send full day name for clarity
                 payload.push({ day: days[day], ranges: ranges, unavailable: unavailable });
             }
@@ -2360,7 +2454,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const data = await res.json().catch(() => null);
                 if (res.ok && data && data.success) {
-                    alert('Weekly availability saved!');
+                    _showAvailabilitySaveBanner('success', 'Weekly availability saved.');
 
                     // Update selection-specific caches so switching scopes doesn't revert until reload.
                     try {
@@ -2424,11 +2518,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     try { calendar.refetchEvents(); } catch (e) { /* ignore */ }
                 } else {
                     const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
-                    alert('Error saving availability: ' + msg);
+                    _showAvailabilitySaveBanner('error', msg);
                 }
             } catch (err) {
                 console.error('Save failed', err);
-                alert('Error saving availability: ' + err.message);
+                const msg = (err && err.message) ? err.message : String(err);
+                _showAvailabilitySaveBanner('error', msg);
             }
         };
     }
@@ -2536,7 +2631,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (String(SELECTED_MEMBER).startsWith('svc:')) {
                     const svcId = String(SELECTED_MEMBER).slice(4);
                     const svc = SERVICES.find(s => String(s.id) === String(svcId));
-                    return svc ? (svc.name || svc.title || `Service ${svcId}`) : `Service ${svcId}`;
+                    const svcLabel = svc ? (svc.name || svc.title || `Service ${svcId}`) : `Service ${svcId}`;
+                    try {
+                        if (svc) {
+                            const assigned = getAssignedMembersForService(svc) || [];
+                            if (assigned.length === 1) {
+                                const m = MEMBERS.find(mm => String(mm.id) === String(assigned[0]));
+                                const mLabel = m ? memberDisplayName(m) : 'Member';
+                                return `${mLabel} - ${svcLabel}`;
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+                    return svcLabel;
                 }
                 const m = MEMBERS.find(mm => String(mm.id) === String(SELECTED_MEMBER));
                 if (!m) return 'selected member';
@@ -2599,58 +2705,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return;
                             }
                         }
-
-                        // membership selection: if the member has multiple personal services with mixed scheduling
-                        // settings, show the union of their services so the member view reflects service coverage.
-                        const mid = selection ? String(selection) : null;
-                        const personal = (mid && Array.isArray(SERVICES)) ? SERVICES.filter(s => {
-                            const assigned = getAssignedMembersForService(s);
-                            return assigned.length === 1 && String(assigned[0]) === mid;
-                        }) : [];
-
-                        function svcSig(s){
-                            try{
-                                return [
-                                    Number(s.duration||0),
-                                    Number(s.buffer_after||0),
-                                    Number(s.time_increment_minutes||30),
-                                    !!s.use_fixed_increment,
-                                    !!s.allow_squished_bookings,
-                                    !!s.allow_ends_after_availability
-                                ].join('|');
-                            }catch(e){ return '0|0|30|0|0|0'; }
-                        }
-
-                        const sigs = new Set();
-                        for (const s of personal) sigs.add(svcSig(s));
-                        const mixed = personal.length > 1 && sigs.size > 1;
-
-                        if (mixed) {
-                            // Union the personal service weekly maps for a member-scoped view.
-                            const union = makeAllUnavailablePayload().map(row => ({ day: row.day, ranges: [], unavailable: true }));
-                            for (let uiDay = 0; uiDay < 7; uiDay++) {
-                                const ranges = [];
-                                for (const s of personal) {
-                                    try{
-                                        const dayRanges = (s.weekly_map && Array.isArray(s.weekly_map)) ? (s.weekly_map[uiDay] || []) : [];
-                                        for (const r of dayRanges) ranges.push(String(r));
-                                    }catch(e){}
-                                }
-                                // Dedup + sort
-                                const uniq = Array.from(new Set(ranges)).filter(Boolean).sort();
-                                if (uniq.length > 0) {
-                                    union[uiDay].ranges = uniq;
-                                    union[uiDay].unavailable = false;
-                                } else {
-                                    union[uiDay].ranges = [];
-                                    union[uiDay].unavailable = true;
-                                }
-                            }
-                            const built = buildAvailabilityFromPayload(union);
-                            for (const k of Object.keys(built)) defaultAvailability[k] = built[k];
-                            return;
-                        }
-
                         // Default membership-specific availability
                         if (selection && memberDefaultAvailability[String(selection)]){
                             const src = memberDefaultAvailability[String(selection)];
@@ -2874,6 +2928,114 @@ document.addEventListener('DOMContentLoaded', function() {
                         });
 
                         list.appendChild(row);
+                    }
+
+                    // ---- Service scopes (below members) ----
+                    function hideSubmenu(){
+                        try{
+                            const sm = document.getElementById('ccScopeSubmenu');
+                            if (sm) sm.style.display = 'none';
+                        }catch(e){}
+                    }
+
+                    function addDivider(){
+                        const divider = document.createElement('div');
+                        divider.style.height = '1px';
+                        divider.style.background = 'var(--gray-100)';
+                        list.appendChild(divider);
+                    }
+
+                    function addSectionHeader(text){
+                        const h = document.createElement('div');
+                        h.style.padding = '10px 12px 6px 12px';
+                        h.style.fontWeight = '700';
+                        h.style.fontSize = '12px';
+                        h.style.color = 'var(--gray-700)';
+                        h.style.textTransform = 'uppercase';
+                        h.style.letterSpacing = '0.5px';
+                        h.textContent = text;
+                        list.appendChild(h);
+                    }
+
+                    function addEmptyRow(text){
+                        const empty = document.createElement('div');
+                        empty.style.padding = '8px 12px 12px 12px';
+                        empty.style.color = 'var(--gray-600)';
+                        empty.style.fontSize = '13px';
+                        empty.textContent = text;
+                        list.appendChild(empty);
+                    }
+
+                    function addServiceRow(service, badgeText){
+                        const row = document.createElement('div');
+                        row.style.display = 'flex';
+                        row.style.alignItems = 'center';
+                        row.style.justifyContent = 'space-between';
+                        row.style.gap = '10px';
+                        row.style.padding = '10px 12px';
+                        row.style.cursor = 'pointer';
+
+                        const left = document.createElement('div');
+                        left.style.flex = '1 1 auto';
+                        left.style.whiteSpace = 'nowrap';
+                        left.style.overflow = 'hidden';
+                        left.style.textOverflow = 'ellipsis';
+                        left.textContent = service.name || ('Service ' + String(service.id));
+
+                        const right = document.createElement('div');
+                        right.style.flex = '0 0 auto';
+                        right.style.color = 'var(--gray-600)';
+                        right.style.fontSize = '12px';
+                        right.textContent = badgeText || '';
+
+                        row.appendChild(left);
+                        row.appendChild(right);
+
+                        row.addEventListener('mouseenter', function(){
+                            hideSubmenu();
+                        });
+                        row.addEventListener('click', function(){
+                            hideSubmenu();
+                            closeScopeMenus();
+                            pendingSelection = 'svc:' + String(service.id);
+                            applySelection(pendingSelection);
+                        });
+
+                        list.appendChild(row);
+                    }
+
+                    // Below the members list, show ONLY:
+                    // - Unassigned services (0 assignees)
+                    // - Group services (2+ assignees)
+                    // Solo (1-assignee) services stay in each member's submenu only.
+                    let unassigned = [];
+                    let shared = [];
+                    try{
+                        for (const s of SERVICES){
+                            const assigned = getAssignedMembersForService(s) || [];
+                            if (assigned.length === 0) unassigned.push(s);
+                            else if (assigned.length >= 2) shared.push(s);
+                        }
+                    }catch(e){ unassigned = []; shared = []; }
+
+                    addDivider();
+                    addSectionHeader('Unassigned services');
+                    if (!unassigned.length) addEmptyRow('No unassigned services.');
+                    else {
+                        unassigned.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+                        for (const s of unassigned) addServiceRow(s, 'Unassigned');
+                    }
+
+                    addDivider();
+                    addSectionHeader('Group services');
+                    if (!shared.length) addEmptyRow('No group services.');
+                    else {
+                        shared.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+                        for (const s of shared){
+                            let badge = '';
+                            try { badge = String((getAssignedMembersForService(s)||[]).length) + ' members'; } catch(e) { badge = 'Group'; }
+                            addServiceRow(s, badge);
+                        }
                     }
 
                     btn.addEventListener('click', function(e){

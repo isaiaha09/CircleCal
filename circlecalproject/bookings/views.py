@@ -7,6 +7,8 @@ from django.utils.timezone import make_aware
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
+from django.db.models import Q, Count
+from typing import Optional
 from accounts.models import Business as Organization
 from accounts.models import Membership
 from bookings.models import Service
@@ -19,9 +21,251 @@ from django.core.mail import send_mail
 from datetime import timedelta
 from bookings.models import Booking
 from bookings.models import WeeklyAvailability, OrgSettings
+from bookings.models import ServiceAssignment
 from calendar_app.utils import user_has_role  # <-- single source of truth
 from calendar_app.permissions import require_roles
 from billing.utils import get_subscription
+from billing.utils import get_plan_slug, TEAM_SLUG
+
+
+def _active_service_freeze_for_date(org, service, target_date, org_tz):
+    """Return a ServiceSettingFreeze for (service, date) only when there are bookings.
+
+    This matches the slot-generation behavior: we ignore stale freezes when
+    there are no remaining bookings for that service/date.
+    """
+    if service is None or target_date is None:
+        return None
+    try:
+        from bookings.models import ServiceSettingFreeze
+        freeze = ServiceSettingFreeze.objects.filter(service=service, date=target_date).first()
+        if not freeze:
+            return None
+    except Exception:
+        return None
+
+    try:
+        day_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0)
+        if day_start.tzinfo is None:
+            day_start = make_aware(day_start, org_tz)
+        day_end = day_start + timedelta(days=1)
+        has_bookings = Booking.objects.filter(service=service, organization=org, start__gte=day_start, start__lt=day_end).exists()
+        return freeze if has_bookings else None
+    except Exception:
+        # Be conservative on errors: keep freeze.
+        return freeze
+
+
+def _dt_windows_from_weekly(date_obj, org_tz, weekly_rows):
+    windows = []
+    for w in weekly_rows:
+        try:
+            ws = datetime(date_obj.year, date_obj.month, date_obj.day, w.start_time.hour, w.start_time.minute, tzinfo=org_tz)
+            we = datetime(date_obj.year, date_obj.month, date_obj.day, w.end_time.hour, w.end_time.minute, tzinfo=org_tz)
+            if we > ws:
+                windows.append((ws, we))
+        except Exception:
+            continue
+    return windows
+
+
+def _interval_is_within_any_window(start_dt, end_dt, windows):
+    for ws, we in windows:
+        if ws <= start_dt and end_dt <= we:
+            return True
+    return False
+
+
+def _intervals_overlap(a_start, a_end, b_start, b_end):
+    return a_start < b_end and b_start < a_end
+
+
+def _member_weekly_windows_for_date(org, membership, date_obj, org_tz):
+    """Return the member's effective weekly windows for a date.
+
+    Prefer explicit MemberWeeklyAvailability; else fall back to org WeeklyAvailability.
+    If org has no weekly rows at all, treat as fully available (legacy).
+    """
+    weekday = date_obj.weekday()
+    try:
+        from bookings.models import MemberWeeklyAvailability
+        rows = MemberWeeklyAvailability.objects.filter(membership=membership, is_active=True, weekday=weekday)
+        if rows.exists():
+            return _dt_windows_from_weekly(date_obj, org_tz, rows)
+    except Exception:
+        pass
+
+    any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    if not any_org_rows:
+        # Legacy behavior: no weekly rows implies open availability.
+        return [(datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0, tzinfo=org_tz), datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59, tzinfo=org_tz))]
+
+    org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
+    return _dt_windows_from_weekly(date_obj, org_tz, org_rows)
+
+
+def _service_has_explicit_weekly(service):
+    try:
+        return service.weekly_availability.filter(is_active=True).exists()
+    except Exception:
+        return False
+
+
+def _service_requires_explicit_weekly(org, service: Optional[Service]):
+    """Return True when a service should NOT fall back to org weekly availability.
+
+    We treat these as explicitly-scoped schedules:
+    - Unassigned services (0 assignees): must have their own service schedule.
+    - Shared services (2+ assignees): must have their own service schedule.
+    - Single-assignee services where that assignee has multiple solo services:
+      service schedules must be explicitly partitioned per service.
+
+    In these cases, an empty service schedule means "no availability".
+    """
+    if not service:
+        return False
+
+    try:
+        assigned_ids = list(
+            ServiceAssignment.objects.filter(service=service)
+            .values_list('membership_id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        assigned_ids = []
+
+    if len(assigned_ids) == 0:
+        return True
+    if len(assigned_ids) >= 2:
+        return True
+
+    # Single assignee: if they have multiple solo services, require explicit partitioning.
+    mid = assigned_ids[0]
+    try:
+        solo_service_ids = list(
+            Service.objects.filter(organization=org, assignments__membership_id=mid)
+            .annotate(num_assignees=Count('assignments'))
+            .filter(num_assignees=1)
+            .values_list('id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        solo_service_ids = []
+
+    return len(solo_service_ids) > 1
+
+
+def _service_weekly_windows_for_date(service, date_obj, org_tz):
+    weekday = date_obj.weekday()
+    try:
+        rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+    except Exception:
+        rows = []
+    return _dt_windows_from_weekly(date_obj, org_tz, rows)
+
+
+def _service_scoped_per_date_windows(org, service_id, date_obj, org_tz):
+    day_start = datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0, 0, tzinfo=org_tz)
+    day_end = day_start + timedelta(days=1)
+    qs = Booking.objects.filter(
+        organization=org,
+        service__isnull=True,
+        start__lt=day_end,
+        end__gt=day_start,
+        client_name=f'scope:svc:{int(service_id)}',
+    )
+    blocked = False
+    windows = []
+    for bk in qs:
+        try:
+            bk_start = bk.start.astimezone(org_tz)
+            bk_end = bk.end.astimezone(org_tz)
+        except Exception:
+            bk_start = bk.start
+            bk_end = bk.end
+
+        if bk.is_blocking:
+            # Treat any blocking override covering the whole day as a full-day block.
+            # Note: UI uses 23:59 as end_time for full-day blocks.
+            if bk_start <= day_start and bk_end >= (day_end - timedelta(minutes=1)):
+                blocked = True
+        else:
+            if bk_end > bk_start:
+                windows.append((bk_start.replace(second=0, microsecond=0), bk_end.replace(second=0, microsecond=0)))
+    return blocked, windows
+
+
+def _is_team_multi_solo_service_context(org, service: Service):
+    """Return (membership, other_solo_service_ids) if this is a team-plan multi-solo context."""
+    try:
+        if get_plan_slug(org) != TEAM_SLUG:
+            return None, []
+    except Exception:
+        return None, []
+
+    # Only applies to solo services (exactly one assignee)
+    assignees = list(ServiceAssignment.objects.filter(service=service).select_related('membership'))
+    if len(assignees) != 1:
+        return None, []
+    membership = getattr(assignees[0], 'membership', None)
+    if not membership:
+        return None, []
+
+    # Member must have multiple solo services
+    solo_service_ids = list(
+        Service.objects.filter(organization=org, assignments__membership=membership)
+        .annotate(num_assignees=Count('assignments'))
+        .filter(num_assignees=1)
+        .values_list('id', flat=True)
+    )
+    if len(solo_service_ids) < 2:
+        return None, []
+
+    others = [sid for sid in solo_service_ids if int(sid) != int(service.id)]
+    return membership, others
+
+
+def _per_date_override_scope_q(service: Optional[Service]):
+    """Return a Q() filter limiting per-date overrides to the relevant scope.
+
+    Per-date overrides are stored as Booking rows with service=NULL.
+
+    Scopes:
+    - Org-scoped: assigned_user IS NULL and NOT service-scoped marker.
+    - Service-scoped: client_name == 'scope:svc:<service_id>'
+    - Member-scoped: assigned_user == <single assignee user> (only when service has exactly 1 assignee)
+
+    Rationale: calendar.html can create member- or service-scoped overrides. Availability checks
+    must respect that scoping; otherwise an override for one service/member leaks to others.
+    """
+    q = Q(assigned_user__isnull=True) & ~Q(client_name__startswith='scope:svc:')
+
+    if not service:
+        return q
+
+    # Service-scoped overrides for this specific service
+    q = q | Q(client_name=f'scope:svc:{service.id}')
+
+    # Member-scoped overrides apply to a service only when it has a single assignee.
+    try:
+        assigned = list(
+            ServiceAssignment.objects.filter(service=service).select_related('membership__user')
+        )
+        users = []
+        for a in assigned:
+            try:
+                u = getattr(getattr(a, 'membership', None), 'user', None)
+                if u:
+                    users.append(u)
+            except Exception:
+                continue
+        # only apply member-scope overrides when there is exactly one assignee
+        if len(users) == 1:
+            q = q | Q(assigned_user=users[0])
+    except Exception:
+        pass
+
+    return q
 
 
 def booking_to_event(bk: Booking):
@@ -357,12 +601,16 @@ def is_within_availability(org, start_dt, end_dt, service=None):
     if timezone.is_naive(end_dt):
         end_dt = make_aware(end_dt, org_tz)
 
-    # Query all per-date overrides for that calendar day (service NULL so they are not actual client bookings)
+    # Query per-date overrides for that calendar day (service NULL so they are not actual client bookings)
+    # Scoped so overrides only affect the intended member/service.
+    day_start = start_dt.astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
     override_qs = Booking.objects.filter(
         organization=org,
-        start__date=start_dt.date(),
-        service__isnull=True
-    )
+        service__isnull=True,
+        start__lt=day_end,
+        end__gt=day_start,
+    ).filter(_per_date_override_scope_q(service))
 
     # Partition overrides
     blocking_windows = []
@@ -399,14 +647,68 @@ def is_within_availability(org, start_dt, end_dt, service=None):
             return True
 
     # 3. Fall back to weekly windows logic
-    # If a service-specific weekly availability exists, prefer that.
+    # If a per-date ServiceSettingFreeze contains a weekly window snapshot for this
+    # date, prefer it. This preserves booked dates when weekly availability is
+    # edited later.
     if service is not None:
+        try:
+            freeze = _active_service_freeze_for_date(org, service, start_dt.astimezone(org_tz).date(), org_tz)
+        except Exception:
+            freeze = None
+
+        if freeze and isinstance(getattr(freeze, 'frozen_settings', None), dict) and freeze.frozen_settings.get('weekly_windows'):
+            start_t = start_dt.time()
+            end_t = end_dt.time()
+            allow_ends_after = bool(freeze.frozen_settings.get(
+                'allow_ends_after_availability', getattr(service, 'allow_ends_after_availability', False)
+            ))
+
+            for w in freeze.frozen_settings.get('weekly_windows', []):
+                try:
+                    st = str(w.get('start', ''))
+                    et = str(w.get('end', ''))
+                    if len(st) != 5 or len(et) != 5 or st[2] != ':' or et[2] != ':':
+                        continue
+                    st_h, st_m = (int(x) for x in st.split(':'))
+                    et_h, et_m = (int(x) for x in et.split(':'))
+                    w_start = datetime(2000, 1, 1, st_h, st_m).time()
+                    w_end = datetime(2000, 1, 1, et_h, et_m).time()
+                except Exception:
+                    continue
+
+                if allow_ends_after:
+                    if w_start <= start_t and start_t < w_end:
+                        return True
+                else:
+                    if w_start <= start_t and end_t <= w_end:
+                        return True
+            return False
+
+        # A service can be explicitly scoped either because it has explicit
+        # service-weekly rows, OR because it is a service type that must have its
+        # own schedule (unassigned/shared/partitioned solo). In that case, days
+        # with no service rows should be unavailable (do NOT fall back to org weekly).
+        try:
+            svc_has_any = service.weekly_availability.filter(is_active=True).exists()
+        except Exception:
+            svc_has_any = False
+
+        try:
+            svc_requires_explicit = _service_requires_explicit_weekly(org, service)
+        except Exception:
+            svc_requires_explicit = False
+
+        svc_is_scoped = bool(svc_has_any or svc_requires_explicit)
+
         try:
             svc_rows = service.weekly_availability.filter(is_active=True, weekday=start_dt.weekday())
         except Exception:
             svc_rows = None
 
-        if svc_rows and svc_rows.exists():
+        if svc_is_scoped:
+            if not (svc_rows and svc_rows.exists()):
+                return False
+
             # Check if any service window fully contains the slot
             start_t = start_dt.time()
             end_t = end_dt.time()
@@ -650,6 +952,22 @@ def batch_create(request, org_slug):
         tz = timezone.get_current_timezone()
 
     target = data.get('target') if isinstance(data, dict) else None
+    is_blocking = bool(data.get('is_blocking', False))
+
+    # If this is a service-scoped per-date "available" override in a team multi-solo context,
+    # enforce that it does not bypass the weekly partitioning rules.
+    target_service = None
+    team_multi_solo_membership = None
+    other_solo_service_ids = []
+    if target and isinstance(target, str) and target.startswith('svc:') and not is_blocking:
+        try:
+            svc_id = int(str(target).split(':', 1)[1])
+            target_service = Service.objects.filter(id=svc_id, organization=org).first()
+        except Exception:
+            target_service = None
+
+        if target_service:
+            team_multi_solo_membership, other_solo_service_ids = _is_team_multi_solo_service_context(org, target_service)
 
     for d in dates:
         dobj = parse_date(d)
@@ -667,6 +985,61 @@ def batch_create(request, org_slug):
 
         if e <= s:
             continue
+
+        # Guardrails for team + multi-solo services: service-scoped "available" overrides
+        # cannot create overlapping availability across services or expand beyond weekly partitions.
+        if target_service and team_multi_solo_membership and other_solo_service_ids:
+            # Require explicit service weekly windows; do not allow per-date overrides
+            # to create availability outside the service's partition.
+            if not _service_has_explicit_weekly(target_service):
+                return HttpResponseBadRequest(
+                    "This service inherits member availability. Set service weekly availability first to make room before using per-date overrides."
+                )
+
+            # Must fit within the service's weekly windows for that weekday
+            svc_windows = _service_weekly_windows_for_date(target_service, dobj, tz)
+            if not svc_windows or not _interval_is_within_any_window(s, e, svc_windows):
+                return HttpResponseBadRequest(
+                    "Per-date availability must be within this service's weekly availability. Update service weekly availability first to make room."
+                )
+
+            # Must also fit within the member's overall weekly availability
+            mem_windows = _member_weekly_windows_for_date(org, team_multi_solo_membership, dobj, tz)
+            if mem_windows and not _interval_is_within_any_window(s, e, mem_windows):
+                return HttpResponseBadRequest(
+                    "Per-date availability must be within the assigned member's weekly availability. Update member availability first."
+                )
+
+            # Must not overlap any other solo service's effective availability for that date.
+            for other_id in other_solo_service_ids:
+                other_service = Service.objects.filter(id=int(other_id), organization=org).first()
+                if not other_service:
+                    continue
+
+                # If the other service is blocked for the whole day, it frees the day.
+                other_blocked, other_override_windows = _service_scoped_per_date_windows(org, int(other_id), dobj, tz)
+                if other_blocked:
+                    continue
+
+                # Effective windows for overlap check:
+                # - prefer per-date availability overrides if present
+                # - else prefer other service weekly windows if defined
+                # - else treat as inheriting member availability (occupies all, unless blocked)
+                if other_override_windows:
+                    other_windows = other_override_windows
+                else:
+                    other_weekly = _service_weekly_windows_for_date(other_service, dobj, tz)
+                    if other_weekly:
+                        other_windows = other_weekly
+                    else:
+                        other_windows = mem_windows
+
+                for ws, we in (other_windows or []):
+                    if _intervals_overlap(s, e, ws, we):
+                        other_label = getattr(other_service, 'name', None) or f"service {other_id}"
+                        return HttpResponseBadRequest(
+                            f"Per-date availability overlaps {other_label}. Override that service to unavailable for this day (or adjust weekly availability first) to make room."
+                        )
 
         # DON'T delete all existing overrides - allow multiple time ranges per date.
         # Only skip exact duplicates *within the same scope* (target).
@@ -834,8 +1207,11 @@ def public_service_page(request, org_slug, service_slug):
     POST -> create a Booking for the selected time
     """
     org = get_object_or_404(Organization, slug=org_slug)
-    services = Service.objects.filter(organization=org).order_by("name")
-    service = get_object_or_404(Service, slug=service_slug, organization=org)
+    services = Service.objects.filter(organization=org, is_active=True).order_by("name")
+    # Inactive services should not be bookable or selectable on the public page.
+    service = Service.objects.filter(slug=service_slug, organization=org, is_active=True).first()
+    if not service:
+        return redirect(reverse('bookings:public_org_page', args=[org.slug]))
 
     if request.method == "POST":
         client_name = request.POST.get("client_name")
@@ -845,7 +1221,9 @@ def public_service_page(request, org_slug, service_slug):
         # Allow selecting a different service from the modal
         posted_service_slug = request.POST.get("service_slug")
         if posted_service_slug and posted_service_slug != service_slug:
-            service = get_object_or_404(Service, slug=posted_service_slug, organization=org)
+            service = Service.objects.filter(slug=posted_service_slug, organization=org, is_active=True).first()
+            if not service:
+                return HttpResponseBadRequest("Service is not available")
 
         if not all([client_name, client_email, start_str, end_str]):
             return HttpResponseBadRequest("Missing required fields")
@@ -1079,20 +1457,53 @@ def public_service_page(request, org_slug, service_slug):
             s.assigned_names = ''
         service.assigned_names = ''
 
+    # Provide per-service EFFECTIVE weekly availability (UI index 0=Sun..6=Sat) as JSON.
+    # If a service is explicitly scoped (has any active service-weekly rows OR is an
+    # unassigned/shared/partitioned service that must have its own schedule), it is
+    # restricted to ONLY those days/times (days without service rows should be empty,
+    # not org fallback). Otherwise fall back to org weekly windows -> legacy full-day.
+    any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+    service_weekly_map = {}
+    for s in services:
+        try:
+            svc_has_any = s.weekly_availability.filter(is_active=True).exists()
+        except Exception:
+            svc_has_any = False
+
+        try:
+            svc_requires_explicit = _service_requires_explicit_weekly(org, s)
+        except Exception:
+            svc_requires_explicit = False
+
+        svc_is_scoped = bool(svc_has_any or svc_requires_explicit)
+        per_day = []
+        for ui in range(7):
+            model_wd = (ui - 1) % 7  # convert UI 0=Sun..6=Sat -> model 0=Mon..6=Sun
+            svc_rows = list(s.weekly_availability.filter(is_active=True, weekday=model_wd).order_by('start_time'))
+            if svc_rows:
+                per_day.append([f"{r.start_time.strftime('%H:%M')}-{r.end_time.strftime('%H:%M')}" for r in svc_rows])
+            else:
+                if svc_is_scoped:
+                    per_day.append([])
+                else:
+                    if any_org_rows:
+                        org_rows = WeeklyAvailability.objects.filter(
+                            organization=org,
+                            is_active=True,
+                            weekday=model_wd,
+                        ).order_by('start_time')
+                        per_day.append([f"{r.start_time.strftime('%H:%M')}-{r.end_time.strftime('%H:%M')}" for r in org_rows])
+                    else:
+                        per_day.append(['00:00-23:59'])
+        service_weekly_map[s.slug] = per_day
+
     return render(request, "public/public_service_page.html", {
         "org": org,
         "services": services,
         "service": service,
         "trialing_active": trialing_active,
         "trial_end_date": trial_end_date,
-        # provide per-service weekly availability (UI index 0=Sun..6=Sat) as JSON
-        "service_weekly_map_json": json.dumps({
-            s.slug: [
-                [f"{r.start_time.strftime('%H:%M')}-{r.end_time.strftime('%H:%M')}" for r in s.weekly_availability.filter(is_active=True, weekday=((ui-1)%7)).order_by('start_time')]
-                for ui in range(7)
-            ]
-            for s in services
-        }),
+        "service_weekly_map_json": json.dumps(service_weekly_map),
         # Support reschedule GET params to prefill client info and attach reschedule metadata
         'reschedule_source': request.GET.get('reschedule_source') or request.GET.get('source'),
         'reschedule_token': request.GET.get('reschedule_token') or request.GET.get('token'),
@@ -1293,7 +1704,8 @@ def service_availability(request, org_slug, service_slug):
         range_end = latest_allowed
     # ---------------------------------------------
     # Per-date overrides live as bookings with service NULL
-    # Fetch per-date overrides that overlap the requested day in org timezone
+    # Fetch per-date overrides that overlap the requested day in org timezone,
+    # scoped to this service/member context.
     day_start_candidate = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end_candidate = day_start_candidate.replace(hour=23, minute=59, second=59)
     override_qs = Booking.objects.filter(
@@ -1301,7 +1713,7 @@ def service_availability(request, org_slug, service_slug):
         service__isnull=True,
         start__lt=day_end_candidate,
         end__gt=day_start_candidate,
-    )
+    ).filter(_per_date_override_scope_q(service))
     blocking_full_day = False
     availability_override_windows = []  # list of (start,end) datetimes in org timezone
     for bk in override_qs:
@@ -1410,7 +1822,21 @@ def service_availability(request, org_slug, service_slug):
                 except Exception:
                     continue
         else:
-            # Prefer service-specific weekly windows if defined
+            # Prefer service-specific weekly windows if defined.
+            # IMPORTANT: if a service has any active service-weekly rows, it is
+            # restricted to ONLY those days/times (no per-day fallback to org weekly).
+            try:
+                svc_has_any = service.weekly_availability.filter(is_active=True).exists()
+            except Exception:
+                svc_has_any = False
+
+            try:
+                svc_requires_explicit = _service_requires_explicit_weekly(org, service)
+            except Exception:
+                svc_requires_explicit = False
+
+            svc_is_scoped = bool(svc_has_any or svc_requires_explicit)
+
             svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
             if svc_rows.exists():
                 base_windows = []
@@ -1419,12 +1845,15 @@ def service_availability(request, org_slug, service_slug):
                     w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
                     base_windows.append((w_start, w_end))
             else:
-                weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
-                base_windows = []
-                for w in weekly_rows:
-                    w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
-                    w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
-                    base_windows.append((w_start, w_end))
+                if svc_is_scoped:
+                    base_windows = []
+                else:
+                    weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
+                    base_windows = []
+                    for w in weekly_rows:
+                        w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                        w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                        base_windows.append((w_start, w_end))
 
     # Determine slot increment: front-end may pass `?inc=` (minutes) to control
     # the UI tick spacing. If provided and valid, use it for slot iteration;
@@ -1771,6 +2200,20 @@ def batch_availability_summary(request, org_slug, service_slug):
         trial_end_midnight = trial_end_dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         if trial_end_midnight < max_booking_date:
             max_booking_date = trial_end_midnight
+
+    # If this service is explicitly scoped (has any active service-weekly rows OR
+    # is unassigned/shared/partitioned), days without service rows are unavailable.
+    try:
+        svc_has_any_weekly = service.weekly_availability.filter(is_active=True).exists()
+    except Exception:
+        svc_has_any_weekly = False
+
+    try:
+        svc_requires_explicit = _service_requires_explicit_weekly(org, service)
+    except Exception:
+        svc_requires_explicit = False
+
+    svc_is_scoped = bool(svc_has_any_weekly or svc_requires_explicit)
     
     while current < range_end:
         day_start = current
@@ -1788,64 +2231,119 @@ def batch_availability_summary(request, org_slug, service_slug):
             current += timedelta(days=1)
             continue
 
-        # Per-date overrides (service NULL bookings)
-        # Consider any overrides that overlap the day window (org timezone)
+        # Per-date overrides (service NULL bookings), scoped to the selected service.
+        # Consider overrides that overlap the day window (org timezone).
         override_qs = Booking.objects.filter(
             organization=org,
             service__isnull=True,
             start__lt=day_end,
             end__gt=day_start,
-        )
-        if override_qs.exists():
-            # If there is any availability override (non-blocking), the day should be considered available.
-            # Only mark unavailable if there are blocking overrides that span the full day AND no availability overrides.
-            has_avail = False
-            full_block = False
-            for bk in override_qs:
-                # Normalize booking times to org timezone for comparison
-                bk_start_org = bk.start.astimezone(org_tz) if bk.start.tzinfo else bk.start
-                bk_end_org = bk.end.astimezone(org_tz) if bk.end.tzinfo else bk.end
-                
-                if bk.is_blocking:
-                    # Treat a blocking override as full-day block if it covers the entire day
-                    # Allow for small time differences (< 2 minutes) to account for 23:59 vs 23:59:59
-                    covers_start = bk_start_org <= day_start + timedelta(minutes=1)
-                    covers_end = bk_end_org >= day_end - timedelta(minutes=1)
-                    if covers_start and covers_end:
-                        full_block = True
-                else:
-                    has_avail = True
-            if has_avail:
-                summary[current.strftime('%Y-%m-%d')] = True
-                current += timedelta(days=1)
-                continue
-            if full_block:
-                summary[current.strftime('%Y-%m-%d')] = False
-                current += timedelta(days=1)
-                continue
+        ).filter(_per_date_override_scope_q(service))
 
-        # Check if this weekday has ANY availability windows
-        windows = WeeklyAvailability.objects.filter(
-            organization=org,
-            is_active=True,
-            weekday=day_start.weekday()
-        )
-        
-        if not windows.exists():
-            # No weekly availability defined for this weekday
+        availability_override_windows = []
+        has_avail = False
+        full_block = False
+        for bk in override_qs:
+            try:
+                bk_start_org = bk.start.astimezone(org_tz)
+            except Exception:
+                bk_start_org = bk.start
+            try:
+                bk_end_org = bk.end.astimezone(org_tz)
+            except Exception:
+                bk_end_org = bk.end
+
+            if bk.is_blocking:
+                # Treat a blocking override as full-day block if it covers the entire day.
+                # Allow for small time differences (< 2 minutes) to account for 23:59 vs 23:59:59.
+                covers_start = bk_start_org <= day_start + timedelta(minutes=1)
+                covers_end = bk_end_org >= day_end - timedelta(minutes=1)
+                if covers_start and covers_end:
+                    full_block = True
+            else:
+                has_avail = True
+                if bk_end_org > bk_start_org:
+                    availability_override_windows.append((bk_start_org, bk_end_org))
+
+        # Full-day block with no availability overrides => no availability for that date.
+        if full_block and not has_avail:
             summary[current.strftime('%Y-%m-%d')] = False
             current += timedelta(days=1)
             continue
 
-        # For today's date, ensure windows actually contain future times after min-notice.
-        # Otherwise, reporting this day as "available" is misleading (the modal will later show no slots).
+        # Determine effective weekly windows for this day:
+        # 1) availability override windows (if any)
+        # 2) per-date freeze weekly_windows (only when bookings exist)
+        # 3) service-specific weekly windows
+        # 4) org weekly windows
+        # 5) legacy: if org has no weekly rows at all, treat as fully available
+        base_windows = []
+
+        if availability_override_windows:
+            base_windows = [(s, e) for (s, e) in availability_override_windows if e > s]
+        else:
+            freeze = None
+            try:
+                freeze = _active_service_freeze_for_date(org, service, day_start.date(), org_tz)
+            except Exception:
+                freeze = None
+
+            if freeze and isinstance(getattr(freeze, 'frozen_settings', None), dict) and freeze.frozen_settings.get('weekly_windows'):
+                for w in freeze.frozen_settings.get('weekly_windows', []):
+                    try:
+                        sh, sm = (int(x) for x in (str(w.get('start', '00:00')).split(':')))
+                        eh, em = (int(x) for x in (str(w.get('end', '00:00')).split(':')))
+                        ws = day_start.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                        we = day_start.replace(hour=eh, minute=em, second=0, microsecond=0)
+                        if we > ws:
+                            base_windows.append((ws, we))
+                    except Exception:
+                        continue
+            else:
+                try:
+                    svc_rows = service.weekly_availability.filter(is_active=True, weekday=day_start.weekday()).order_by('start_time')
+                except Exception:
+                    svc_rows = None
+
+                if svc_rows and svc_rows.exists():
+                    for w in svc_rows:
+                        ws = day_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                        we = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                        if we > ws:
+                            base_windows.append((ws, we))
+                else:
+                    if svc_is_scoped:
+                        base_windows = []
+                    else:
+                        try:
+                            any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+                        except Exception:
+                            any_org_rows = False
+
+                        if not any_org_rows:
+                            base_windows = [(day_start.replace(hour=0, minute=0, second=0, microsecond=0), day_start.replace(hour=23, minute=59, second=0, microsecond=0))]
+                        else:
+                            windows = WeeklyAvailability.objects.filter(
+                                organization=org,
+                                is_active=True,
+                                weekday=day_start.weekday()
+                            )
+                            for w in windows:
+                                ws = day_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                                we = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                                if we > ws:
+                                    base_windows.append((ws, we))
+
+        # If no base windows, day cannot be available.
+        if not base_windows:
+            summary[current.strftime('%Y-%m-%d')] = False
+            current += timedelta(days=1)
+            continue
+
+        # Ensure windows actually contain future times after min-notice and before max booking.
         has_future_window = False
-        for w in windows:
-            # Construct window start/end in org timezone for this day
-            w_start = day_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
-            w_end = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
-            # If any portion of the window is after earliest_allowed and before max booking, consider it potentially available
-            if w_end > earliest_allowed and w_start < max_booking_date:
+        for ws, we in base_windows:
+            if we > earliest_allowed and ws < max_booking_date:
                 has_future_window = True
                 break
 

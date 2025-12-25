@@ -1189,6 +1189,17 @@ document.addEventListener("DOMContentLoaded", async function () {
     };
   }
 
+  // Re-render the month grid when the main service selector changes.
+  // (Previously the change handler lived in a different script scope and could not call `generateCalendar`.)
+  const mainServiceSelect = document.getElementById('mainServiceSelect');
+  if (mainServiceSelect) {
+    mainServiceSelect.addEventListener('change', function (e) {
+      window.selectedServiceSlug = e.target.value;
+      // Always re-render current month/year for the newly selected service.
+      generateCalendar(currentMonth, currentYear);
+    });
+  }
+
   // No service selection impacts availability at this stage; service is chosen in the booking form
 });
 </script>

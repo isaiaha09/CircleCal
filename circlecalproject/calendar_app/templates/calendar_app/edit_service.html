@@ -5,6 +5,24 @@
 {% block content %}
 {% block extra_head %}
 <style>
+  /* Match the palette tokens used in calendar.html (base.html does not define these) */
+  :root {
+    --primary-500: #3b82f6;
+    --primary-600: #2563eb;
+    --primary-700: #1d4ed8;
+    --success-500: #10b981;
+    --success-600: #059669;
+    --danger-500: #ef4444;
+    --danger-600: #dc2626;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-900: #111827;
+  }
+
   /* Page-specific enhanced field styling (aligned with create service) */
   .cc-field {
     border: 1px solid #d1d5db; /* gray-300 */
@@ -51,6 +69,121 @@
   .member-chip { display:inline-block; background:#eef6ff; color:#0b5cff; padding:6px 10px; border-radius:999px; font-size:0.95rem; margin-right:6px; margin-bottom:2px; }
   .member-chip .member-chip-remove { display:inline-block; margin-left:8px; color:#0840c6; background:transparent; border-radius:999px; padding:0 6px; cursor:pointer; font-weight:700; line-height:1; }
   .member-chip .member-chip-remove:hover { background:rgba(11,92,255,0.08); }
+
+  /* Service availability: match Calendar default availability time picker UI */
+  #svcAvailEditor .time-input-container { position: relative; display: inline-block; }
+  /* Border around each time range row (Start/End/Remove) */
+  #svcAvailEditor .svc-range-row {
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #svcAvailEditor .svc-range-row .cc-field {
+    border: 1px solid var(--gray-900);
+  }
+  #svcAvailEditor .range-start,
+  #svcAvailEditor .range-end {
+    text-align: center;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--gray-900);
+    background: white;
+    font-weight: 600;
+    min-width: 0;
+  }
+
+  #svcAvailEditor .custom-time-picker {
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    background: white;
+    border: 1px solid var(--gray-300);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1);
+    z-index: 2000;
+    padding: 16px;
+    min-width: 280px;
+    display: none;
+    animation: svcSlideDown 0.2s ease-out;
+  }
+  @keyframes svcSlideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  #svcAvailEditor .custom-time-picker.active { display: block; }
+
+  #svcAvailEditor .time-picker-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  #svcAvailEditor .time-picker-display {
+    font-size: 32px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--primary-600);
+    margin-bottom: 16px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+  #svcAvailEditor .time-picker-selectors { display: flex; gap: 12px; margin-bottom: 16px; }
+  #svcAvailEditor .time-selector { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  #svcAvailEditor .time-selector-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--gray-600);
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+  #svcAvailEditor .time-scroll-container {
+    height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: var(--gray-50);
+    padding: 4px;
+  }
+  #svcAvailEditor .time-scroll-container::-webkit-scrollbar { width: 6px; }
+  #svcAvailEditor .time-scroll-container::-webkit-scrollbar-track { background: transparent; }
+  #svcAvailEditor .time-scroll-container::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+  #svcAvailEditor .time-option {
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    color: var(--gray-700);
+  }
+  #svcAvailEditor .time-option:hover { background: white; color: var(--primary-600); }
+  #svcAvailEditor .time-option.selected { background: var(--primary-500); color: white; font-weight: 600; }
+  #svcAvailEditor .time-picker-actions { display: flex; gap: 8px; margin-top: 12px; }
+  #svcAvailEditor .time-picker-btn {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  #svcAvailEditor .time-picker-btn.confirm { background: var(--primary-500); color: white; }
+  #svcAvailEditor .time-picker-btn.confirm:hover {
+    background: var(--primary-600);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+  }
+  #svcAvailEditor .time-picker-btn.cancel { background: var(--gray-200); color: var(--gray-700); }
+  #svcAvailEditor .time-picker-btn.cancel:hover { background: var(--gray-300); }
 </style>
 {% endblock %}
 
@@ -58,7 +191,7 @@
   <form class="cc-form" method="post">
     {% csrf_token %}
   {% if request.GET.saved %}
-    <div class="mb-4 p-3 rounded bg-green-50 border-l-4 border-green-400 text-green-800" role="status" aria-live="polite">
+    <div id="svc-saved-banner" class="mb-4 p-3 rounded bg-green-50 border-l-4 border-green-400 text-green-800" role="status" aria-live="polite">
       <strong>Changes saved</strong>
       <div class="text-sm mt-1">Your changes were saved successfully.</div>
     </div>
@@ -86,8 +219,8 @@
               <input type="hidden" name="is_active" value="on">
             {% endif %}
             <input type="checkbox" name="is_active" id="is_active" {% if service.is_active %}checked{% endif %}
-                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if is_only_active_service %}opacity-60 cursor-not-allowed{% endif %}"
-                   {% if is_only_active_service %}disabled aria-disabled="true"{% endif %}>
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if is_only_active_service or activation_locked %}opacity-60 cursor-not-allowed{% endif %}"
+                   {% if is_only_active_service or activation_locked %}disabled aria-disabled="true"{% endif %}>
             <div class="ml-3">
               <div class="text-lg font-semibold text-gray-800">Service is active</div>
               <div class="text-sm text-gray-600">Visible on the public booking page</div>
@@ -96,12 +229,98 @@
           {% if is_only_active_service %}
             <p class="mt-2 text-sm text-gray-700">You currently have only one active service. To keep your public booking page available to clients, activate another service before disabling this one.</p>
           {% endif %}
+          {% if activation_locked %}
+            <p class="mt-2 text-sm text-gray-700">{{ activation_lock_reason }}</p>
+          {% endif %}
         </div>
         <div class="text-sm text-gray-700">
           <span class="inline-flex items-center px-2 py-1 rounded bg-white text-gray-700">Important</span>
         </div>
       </div>
     </div>
+
+    <script>
+    // Enable/disable the Active toggle immediately based on draft service-availability edits.
+    // This must work even before saving changes.
+    (function(){
+      try{
+        const cb = document.getElementById('is_active');
+        if (!cb) return;
+
+        // If the checkbox is locked because this is the only active service, do not change it.
+        const lockedOnlyActive = {{ is_only_active_service|yesno:"true,false" }};
+        if (lockedOnlyActive) return;
+
+        // Only apply draft gating when activation is currently locked.
+        // If activation is already allowed, do not interfere.
+        const activationLocked = {{ activation_locked|yesno:"true,false" }};
+        if (!activationLocked) return;
+
+        const editor = document.getElementById('svcAvailEditor');
+        if (!editor) return;
+
+        function hmToMinutes(v){
+          try{
+            const s = String(v || '').trim();
+            if (s.length < 4) return null;
+            const hh = parseInt(s.slice(0,2), 10);
+            const mm = parseInt(s.slice(3,5), 10);
+            if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+            return (hh * 60) + mm;
+          }catch(e){ return null; }
+        }
+
+        function hasAnyDraftAvailabilitySafe(){
+          try{
+            const days = Array.from(editor.querySelectorAll('.svc-day-editor'));
+            for (const day of days){
+              const unavail = day.querySelector('input.svc-unavail');
+              if (unavail && unavail.checked) continue;
+              const rows = Array.from(day.querySelectorAll('.svc-range-row'));
+              for (const r of rows){
+                const stEl = r.querySelector('input.range-start');
+                const enEl = r.querySelector('input.range-end');
+                const sm = hmToMinutes(stEl && stEl.value);
+                const em = hmToMinutes(enEl && enEl.value);
+                if (sm !== null && em !== null && sm < em) return true;
+              }
+            }
+            return false;
+          }catch(e){ return false; }
+        }
+
+        function updateToggle(){
+          const has = hasAnyDraftAvailabilitySafe();
+          cb.disabled = !has;
+          if (!has) cb.checked = false;
+          try{
+            cb.classList.toggle('opacity-60', cb.disabled);
+            cb.classList.toggle('cursor-not-allowed', cb.disabled);
+          }catch(e){}
+        }
+
+        // Delegate events because the availability editor mutates DOM and may not
+        // dispatch input/change events when syncing hidden fields.
+        let t = null;
+        function schedule(){
+          if (t) clearTimeout(t);
+          t = setTimeout(updateToggle, 0);
+        }
+        editor.addEventListener('click', schedule, true);
+        editor.addEventListener('input', schedule, true);
+        editor.addEventListener('change', schedule, true);
+        editor.addEventListener('keyup', schedule, true);
+
+        // Also observe subtree changes (add/remove range rows).
+        try{
+          const mo = new MutationObserver(schedule);
+          mo.observe(editor, { subtree: true, childList: true });
+        }catch(e){}
+
+        updateToggle();
+      }catch(e){ console.warn('active toggle draft gating failed', e); }
+    })();
+    </script>
 
     <script>
     // Hours / minutes helper for buffer_after: keep hidden `buffer_after` in minutes in-sync
@@ -641,7 +860,11 @@
         {% if can_edit_service_availability and service_availability_member_name %}
           <div class="text-sm text-gray-600 text-center mt-1">Applies to: <span class="font-medium">{{ service_availability_member_name }}</span></div>
         {% endif %}
-        <p class="text-sm text-gray-500 mt-3">Specify which days/times this service is offered. These must be within your organization's default weekly availability shown below. Use comma-separated ranges like <code>09:00-12:00,13:00-17:00</code>.</p>
+        {% if can_edit_service_availability and service_availability_member_name %}
+          <p class="text-sm text-gray-500 mt-3">Specify which days/times this service is offered. These must be within the assigned member’s weekly availability shown for each day below.</p>
+        {% else %}
+          <p class="text-sm text-gray-500 mt-3">Specify which days/times this service is offered. These must be within the organization’s weekly availability shown for each day below.</p>
+        {% endif %}
         {% if not can_edit_service_availability %}
           <div class="availability-overlay" role="status" aria-live="polite">
             <div class="msg">
@@ -650,21 +873,356 @@
             </div>
           </div>
         {% endif %}
-        <div class="grid grid-cols-1 gap-2 mt-2">
+        <div class="grid grid-cols-1 gap-3 mt-3" id="svcAvailEditor">
           {% for row in weekly_edit_rows %}
-            <div class="flex items-center gap-3">
-              <div style="width:64px; font-weight:600">{{ row.label }}</div>
-              <div class="text-xs text-gray-600">Default: {{ row.org_ranges|default:'—' }}</div>
-            </div>
-            <div>
-              <input type="text" name="svc_avail_{{ row.ui }}" value="{{ row.svc_ranges }}"
-                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" placeholder="e.g. 09:00-12:00,13:00-17:00"
+            <div class="border rounded-md p-3 bg-white">
+              <div class="flex items-center justify-between gap-3">
+                <div class="font-semibold text-gray-800" style="width:64px">{{ row.label }}</div>
+                <div class="text-xs text-gray-600">Allowed: {{ row.allowed_ranges|default:row.org_ranges|default:'—' }}</div>
+              </div>
+
+              <input type="hidden"
+                     name="svc_avail_{{ row.ui }}"
+                     value="{{ row.svc_ranges }}"
+                     class="svc-avail-hidden"
+                     data-ui="{{ row.ui }}"
                      {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>
+
+              <div class="mt-2 svc-day-editor" data-ui="{{ row.ui }}" {% if not can_edit_service_availability %}data-disabled="1"{% endif %}>
+                <label class="inline-flex items-center text-sm text-gray-700">
+                  <input type="checkbox" class="svc-unavail rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                         {% if not row.svc_ranges %}checked{% endif %}
+                         {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>
+                  <span class="ml-2">Unavailable</span>
+                </label>
+                <div class="svc-ranges mt-2" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <button type="button" class="svc-add-range mt-2 text-sm text-blue-600 hover:text-blue-700"
+                        {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>+ Add time range</button>
+              </div>
             </div>
           {% endfor %}
         </div>
       </div>
     </div>
+
+    <script>
+      // Service availability editor: time inputs -> hidden svc_avail_* fields
+      (function(){
+        try{
+          // Calendar-like custom time picker (hour/minute scrollers)
+          function createCustomTimePicker(inputElement){
+            const picker = document.createElement('div');
+            picker.className = 'custom-time-picker';
+
+            const [initialHour, initialMinute] = (inputElement.value || '09:00').split(':');
+            let selectedHour = initialHour;
+            let selectedMinute = initialMinute;
+
+            const isStart = inputElement.classList.contains('range-start') || inputElement.classList.contains('modal-range-start');
+            const headerText = isStart ? 'Start Time' : 'End Time';
+
+            picker.innerHTML = `
+              <div class="time-picker-header">${headerText}</div>
+              <div class="time-picker-display">${formatDisplayTime(selectedHour, selectedMinute)}</div>
+              <div class="time-picker-selectors">
+                <div class="time-selector">
+                  <div class="time-selector-label">Hour</div>
+                  <div class="time-scroll-container" data-type="hour"></div>
+                </div>
+                <div class="time-selector">
+                  <div class="time-selector-label">Minute</div>
+                  <div class="time-scroll-container" data-type="minute"></div>
+                </div>
+              </div>
+              <div class="time-picker-actions">
+                <button class="time-picker-btn cancel" type="button">Cancel</button>
+                <button class="time-picker-btn confirm" type="button">Confirm</button>
+              </div>
+            `;
+
+            const hourContainer = picker.querySelector('[data-type="hour"]');
+            for (let h = 0; h < 24; h++){
+              const hourStr = String(h).padStart(2, '0');
+              const opt = document.createElement('div');
+              opt.className = 'time-option';
+              if (hourStr === selectedHour) opt.classList.add('selected');
+              opt.textContent = formatHour(h);
+              opt.addEventListener('click', () => {
+                hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                selectedHour = hourStr;
+                updateDisplay();
+                opt.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              });
+              hourContainer.appendChild(opt);
+            }
+
+            const minuteContainer = picker.querySelector('[data-type="minute"]');
+            for (let m = 0; m < 60; m++){
+              const minStr = String(m).padStart(2, '0');
+              const opt = document.createElement('div');
+              opt.className = 'time-option';
+              if (minStr === selectedMinute) opt.classList.add('selected');
+              opt.textContent = minStr;
+              opt.addEventListener('click', () => {
+                minuteContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                selectedMinute = minStr;
+                updateDisplay();
+                opt.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              });
+              minuteContainer.appendChild(opt);
+            }
+
+            function updateDisplay(){
+              picker.querySelector('.time-picker-display').textContent = formatDisplayTime(selectedHour, selectedMinute);
+            }
+            function formatHour(h){
+              if (h === 0) return '12 AM';
+              if (h < 12) return `${h} AM`;
+              if (h === 12) return '12 PM';
+              return `${h - 12} PM`;
+            }
+            function formatDisplayTime(h, m){
+              const hour = parseInt(h, 10);
+              const ampm = hour >= 12 ? 'PM' : 'AM';
+              const h12 = hour === 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+              return `${h12}:${m} ${ampm}`;
+            }
+
+            setTimeout(() => {
+              try{ hourContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' }); }catch(e){}
+              try{ minuteContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' }); }catch(e){}
+            }, 50);
+
+            picker.querySelector('.confirm').addEventListener('click', (e) => {
+              e.stopPropagation();
+              inputElement.value = `${selectedHour}:${selectedMinute}`;
+              try{ inputElement.dispatchEvent(new Event('input', { bubbles: true })); }catch(err){}
+              try{ inputElement.dispatchEvent(new Event('change', { bubbles: true })); }catch(err){}
+              picker.remove();
+            });
+            picker.querySelector('.cancel').addEventListener('click', (e) => {
+              e.stopPropagation();
+              picker.remove();
+            });
+
+            setTimeout(() => {
+              document.addEventListener('click', function closeOnOutside(ev){
+                try{
+                  if (!picker.contains(ev.target) && ev.target !== inputElement) {
+                    picker.remove();
+                    document.removeEventListener('click', closeOnOutside);
+                  }
+                }catch(e){ /* ignore */ }
+              });
+            }, 100);
+
+            return picker;
+          }
+
+          function normalizeTime(t){
+            const s = String(t || '').trim();
+            // accept HH:MM
+            if (s.length === 5 && s[2] === ':') return s;
+            return '';
+          }
+
+          function parseRanges(raw){
+            const out = [];
+            const s = String(raw || '').trim();
+            if (!s) return out;
+            const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+            for (const p of parts){
+              const seg = p.split('-').map(x => x.trim());
+              if (seg.length !== 2) continue;
+              const a = normalizeTime(seg[0]);
+              const b = normalizeTime(seg[1]);
+              if (!a || !b) continue;
+              out.push({start: a, end: b});
+            }
+            return out;
+          }
+
+          function buildRangeRow(startVal, endVal, onChange, onRemove, disabled){
+            const row = document.createElement('div');
+            row.className = 'svc-range-row';
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '10px';
+
+            const startContainer = document.createElement('div');
+            startContainer.className = 'time-input-container';
+            const start = document.createElement('input');
+            start.type = 'time';
+            start.value = startVal || '';
+            start.className = 'cc-field range-start';
+            start.style.maxWidth = '140px';
+            start.readOnly = true;
+            start.style.cursor = 'pointer';
+            startContainer.appendChild(start);
+
+            const endContainer = document.createElement('div');
+            endContainer.className = 'time-input-container';
+            const end = document.createElement('input');
+            end.type = 'time';
+            end.value = endVal || '';
+            end.className = 'cc-field range-end';
+            end.style.maxWidth = '140px';
+            end.readOnly = true;
+            end.style.cursor = 'pointer';
+            endContainer.appendChild(end);
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = 'Remove';
+            remove.className = 'text-sm text-gray-600 hover:text-gray-800';
+
+            function fire(){ try{ onChange(); }catch(e){} }
+
+            start.addEventListener('input', fire);
+            end.addEventListener('input', fire);
+
+            // Open custom picker on click (matches calendar default availability)
+            start.addEventListener('click', function(e){
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                document.querySelectorAll('#svcAvailEditor .custom-time-picker').forEach(p => p.remove());
+                const picker = createCustomTimePicker(start);
+                picker.classList.add('active');
+                startContainer.appendChild(picker);
+              } catch (err) { /* ignore */ }
+            });
+            end.addEventListener('click', function(e){
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                document.querySelectorAll('#svcAvailEditor .custom-time-picker').forEach(p => p.remove());
+                const picker = createCustomTimePicker(end);
+                picker.classList.add('active');
+                endContainer.appendChild(picker);
+              } catch (err) { /* ignore */ }
+            });
+            remove.addEventListener('click', function(){
+              try{ onRemove(row); }catch(e){}
+              fire();
+            });
+
+            if (disabled){
+              start.disabled = true;
+              end.disabled = true;
+              remove.disabled = true;
+            }
+
+            row.appendChild(startContainer);
+            row.appendChild(endContainer);
+            row.appendChild(remove);
+
+            row.__get = function(){
+              return { start: normalizeTime(start.value), end: normalizeTime(end.value) };
+            };
+
+            return row;
+          }
+
+          const editors = Array.from(document.querySelectorAll('.svc-day-editor'));
+          for (const ed of editors){
+            const ui = ed.getAttribute('data-ui');
+            const disabled = ed.getAttribute('data-disabled') === '1';
+            const hidden = document.querySelector('.svc-avail-hidden[data-ui="' + ui + '"]');
+            const list = ed.querySelector('.svc-ranges');
+            const unavail = ed.querySelector('.svc-unavail');
+            const addBtn = ed.querySelector('.svc-add-range');
+            if (!hidden || !list || !unavail || !addBtn) continue;
+
+            function syncHidden(){
+              if (unavail.checked){
+                hidden.value = '';
+                return;
+              }
+              const ranges = [];
+              for (const child of Array.from(list.children)){
+                if (!child.__get) continue;
+                const r = child.__get();
+                if (!r.start || !r.end) continue;
+                ranges.push(r.start + '-' + r.end);
+              }
+              hidden.value = ranges.join(',');
+            }
+
+            function setAvailabilityEnabled(){
+              const isUnavail = !!unavail.checked;
+              list.style.opacity = isUnavail ? '0.6' : '1';
+              addBtn.style.opacity = (isUnavail || disabled) ? '0.5' : '1';
+              try{ addBtn.disabled = isUnavail || disabled; }catch(e){}
+              for (const child of Array.from(list.children)){
+                try{
+                  const inputs = child.querySelectorAll('input, button');
+                  inputs.forEach(i => { i.disabled = disabled || isUnavail; });
+                }catch(e){}
+              }
+              if (isUnavail){
+                // Keep existing UI rows but they won't be submitted.
+                syncHidden();
+              }
+            }
+
+            function removeRow(node){
+              try{ node.remove(); }catch(e){}
+
+              // If all ranges are removed, automatically mark the day unavailable.
+              // This matches backend semantics (no rows => unavailable) and avoids
+              // requiring an extra manual checkbox click.
+              try{
+                const hasAny = !!(list && list.children && list.children.length);
+                if (!hasAny){
+                  unavail.checked = true;
+                  list.textContent = '';
+                  setAvailabilityEnabled();
+                  syncHidden();
+                }
+              }catch(e){}
+            }
+
+            function addRow(startVal, endVal){
+              const row = buildRangeRow(startVal, endVal, syncHidden, removeRow, disabled);
+              list.appendChild(row);
+            }
+
+            // init from hidden
+            const initial = parseRanges(hidden.value);
+            if (initial.length){
+              unavail.checked = false;
+              for (const r of initial) addRow(r.start, r.end);
+            } else {
+              unavail.checked = true;
+            }
+
+            unavail.addEventListener('change', function(){
+              if (unavail.checked){
+                // clear rows when marking unavailable
+                list.textContent = '';
+              } else {
+                if (!list.children.length) addRow('09:00','17:00');
+              }
+              setAvailabilityEnabled();
+              syncHidden();
+            });
+
+            addBtn.addEventListener('click', function(){
+              if (disabled || unavail.checked) return;
+              addRow('09:00','17:00');
+              setAvailabilityEnabled();
+              syncHidden();
+            });
+
+            setAvailabilityEnabled();
+            syncHidden();
+          }
+        }catch(e){ console.warn('svc availability editor init failed', e); }
+      })();
+    </script>
 
     <!-- Bottom action bar: Cancel (left) and Save (right) -->
     <div class="flex items-center justify-between mt-6">
@@ -1060,6 +1618,45 @@
 
     async function onSaveClick(ev){
       try{
+        // If the URL has ?saved=1 from a previous successful save, hide that
+        // success banner as soon as the user attempts a new save. If this save
+        // fails (e.g. overlap rejection), we should not keep showing success.
+        function hideSavedBanner(){
+          try{
+            const el = document.getElementById('svc-saved-banner');
+            if (el) el.style.display = 'none';
+          }catch(e){}
+        }
+
+        function showErrorBanner(msg){
+          try{
+            hideSavedBanner();
+            let el = document.getElementById('svc-error-banner');
+            if (!el){
+              el = document.createElement('div');
+              el.id = 'svc-error-banner';
+              el.setAttribute('role', 'status');
+              el.setAttribute('aria-live', 'polite');
+              el.className = 'mb-4 p-3 rounded';
+              el.style.borderLeft = '4px solid #dc2626';
+              el.style.background = '#fef2f2';
+              el.style.color = '#7f1d1d';
+              try{
+                const form = document.querySelector('form.cc-form');
+                if (form) form.insertBefore(el, form.firstChild && form.firstChild.nextSibling ? form.firstChild.nextSibling : form.firstChild);
+              }catch(e){ document.body.appendChild(el); }
+            }
+            const safe = String(msg || '').trim();
+            el.innerHTML = `<strong>Couldn't save</strong><div class="text-sm mt-1">${escapeHtml(safe || 'The server rejected these changes.')}</div>`;
+            el.style.display = 'block';
+            try{ el.scrollIntoView({behavior:'smooth', block:'nearest'}); }catch(e){}
+          }catch(e){ try{ alert(msg || 'Unable to save changes.'); }catch(_){ } }
+        }
+
+        // Clear any prior error banner on new attempt
+        try{ const prior = document.getElementById('svc-error-banner'); if (prior) prior.style.display = 'none'; }catch(e){}
+        hideSavedBanner();
+
         const payload = serializeFormToPayload();
         const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
         const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
@@ -1068,6 +1665,10 @@
           try {
             pl.confirm = true;
             const applied = await postJson(applyUrl, pl);
+            if (applied && applied.status === 'error'){
+              showErrorBanner(applied.error || 'Unable to save changes.');
+              return false;
+            }
             if (applied && applied.status === 'ok'){
               const base = window.location.pathname;
               window.location.href = base + '?saved=1';
@@ -1075,6 +1676,7 @@
             }
             return false;
           } catch (err) {
+            showErrorBanner((err && err.message) ? err.message : String(err));
             return false;
           }
         }
