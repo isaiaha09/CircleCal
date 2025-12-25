@@ -165,10 +165,10 @@
                             </nav>
                         {% else %}
                             <nav class="hidden md:flex items-center space-x-6">
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
-                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
+                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
+                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="text-gray-700 hover:text-blue-600">Switch</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                     {% csrf_token %}
@@ -207,8 +207,8 @@
                     {% else %}
                         <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Dashboard</a>
                         <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Calendar</a>
-                        <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Team</a>
                         <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Pricing</a>
+                        <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-2">Team</a>
                         <a href="{% url 'calendar_app:choose_business' %}" class="block text-gray-700 hover:text-blue-600 py-2">Switch Business</a>
                         <form action="{% url 'accounts:logout' %}" method="post" class="mt-2">
                             {% csrf_token %}
@@ -471,10 +471,10 @@
                     <h3 class="font-bold text-lg mb-3">Quick Links</h3>
                     <ul class="space-y-2 text-sm">
                         {% if request.user.is_authenticated and request.organization %}
-                            <li><a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Dashboard</a></li>
                             <li><a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Calendar</a></li>
-                            <li><a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Team</a></li>
+                            <li><a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Dashboard</a></li>
                             <li><a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Pricing</a></li>
+                            <li><a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Team</a></li>
                         {% else %}
                             <li><a href="{% url 'accounts:login' %}" class="text-gray-600 hover:text-blue-600">Login</a></li>
                             <li><a href="{% url 'calendar_app:signup' %}" class="text-gray-600 hover:text-blue-600">Sign Up</a></li>
