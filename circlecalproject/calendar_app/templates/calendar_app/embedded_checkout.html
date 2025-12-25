@@ -32,38 +32,63 @@
   let elements;
 
   async function init() {
-    const res = await fetch("{% url 'billing:create_embedded_subscription' organization.slug plan.id %}", {
-      method: "POST",
-      headers: {"X-CSRFToken": "{{ csrf_token }}"}
-    });
-    if (!res.ok) {
-      document.getElementById('message').textContent = 'Failed to create subscription.';
-      return;
-    }
-    const data = await res.json();
-    const clientSecret = data.client_secret;
+    const msgEl = document.getElementById('message');
+    try {
+      const res = await fetch("{% url 'billing:create_embedded_subscription' organization.slug plan.id %}", {
+        method: "POST",
+        credentials: "same-origin",
+      });
 
-    elements = stripe.elements({clientSecret});
-    const paymentElement = elements.create("payment");
-    paymentElement.mount("#payment-element");
+      if (!res.ok) {
+        let details = '';
+        try {
+          const ct = (res.headers.get('content-type') || '').toLowerCase();
+          if (ct.includes('application/json')) {
+            const errData = await res.json();
+            details = errData && (errData.error || errData.detail) ? (errData.error || errData.detail) : JSON.stringify(errData);
+          } else {
+            details = await res.text();
+          }
+        } catch (e) {
+          details = '';
+        }
 
-    // Hide loading once mounted and enable submit
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('submit').disabled = false;
+        msgEl.textContent = details ? (`Failed to create subscription: ${details}`) : 'Failed to create subscription.';
+        return;
+      }
 
-    document.getElementById('submit').addEventListener('click', async () => {
-      document.getElementById('submit').disabled = true;
-      const {error} = await stripe.confirmPayment({
-        elements,
-        confirmParams: {
-          return_url: window.location.origin + "/bus/" + orgSlug + "/dashboard/?checkout=success",
+      const data = await res.json();
+      const clientSecret = data.client_secret;
+      if (!clientSecret) {
+        msgEl.textContent = 'Failed to initialize Stripe: missing client secret.';
+        return;
+      }
+
+      elements = stripe.elements({ clientSecret });
+      const paymentElement = elements.create("payment");
+      paymentElement.mount("#payment-element");
+
+      // Hide loading once mounted and enable submit
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('submit').disabled = false;
+
+      document.getElementById('submit').addEventListener('click', async () => {
+        document.getElementById('submit').disabled = true;
+        const { error } = await stripe.confirmPayment({
+          elements,
+          confirmParams: {
+            return_url: window.location.origin + "/bus/" + orgSlug + "/dashboard/?checkout=success",
+          }
+        });
+        if (error) {
+          msgEl.textContent = error.message || 'Payment failed. Please try again.';
+          document.getElementById('submit').disabled = false;
         }
       });
-      if (error) {
-        document.getElementById('message').textContent = error.message || 'Payment failed. Please try again.';
-        document.getElementById('submit').disabled = false;
-      }
-    });
+    } catch (e) {
+      try { console.error('Embedded checkout init failed', e); } catch (err) {}
+      msgEl.textContent = (e && e.message) ? e.message : 'Payment form failed to load.';
+    }
   }
 
   init();

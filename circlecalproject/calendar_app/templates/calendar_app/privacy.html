@@ -1,0 +1,87 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Privacy Policy{% endblock %}
+
+{% block main_class %}max-w-4xl mx-auto px-4 py-8 md:px-6 md:py-10{% endblock %}
+
+{% block content %}
+<div class="bg-white border rounded-lg shadow-sm p-6 md:p-8 text-left">
+    <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-2">Privacy Policy</h1>
+    <p class="text-sm text-gray-600 mb-6">Effective date: December 25, 2025</p>
+
+    <div class="text-sm text-gray-600 mb-6">
+        <p class="mb-2"><strong>Note:</strong> This Privacy Policy is provided as a general template for CircleCal and is not legal advice. Consider reviewing it with a qualified attorney, especially for California/US compliance and your specific data flows.</p>
+    </div>
+
+    <div class="space-y-6 text-gray-800">
+        <section>
+            <h2 class="text-xl font-semibold mb-2">1. Overview</h2>
+            <p>This Privacy Policy explains how CircleCal (“CircleCal”, “we”, “us”) collects, uses, and shares information when you use our website and scheduling platform (the “Service”).</p>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">2. Information We Collect</h2>
+            <ul class="list-disc pl-6 space-y-2">
+                <li><strong>Account information:</strong> name, email, username, and profile details you provide.</li>
+                <li><strong>Business information:</strong> business name, services, availability, and settings you configure.</li>
+                <li><strong>Booking information:</strong> appointment details and, where provided, client/customer names and contact details.</li>
+                <li><strong>Technical information:</strong> IP address, device/browser details, and logs needed to operate and secure the Service.</li>
+                <li><strong>Payment information:</strong> payments are processed by Stripe. CircleCal receives limited billing metadata (such as plan status and transaction identifiers) but does not store full card numbers.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">3. Cookies</h2>
+            <p>CircleCal currently uses <strong>essential cookies</strong> and similar technologies required to operate the Service, such as keeping you signed in and protecting the platform. We do not currently use advertising cookies.</p>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">4. How We Use Information</h2>
+            <p>We use information to:</p>
+            <ul class="list-disc pl-6 space-y-2">
+                <li>Provide, maintain, and secure the Service.</li>
+                <li>Process billing and manage subscriptions for business owners.</li>
+                <li>Send important account or service-related communications (e.g., password reset, booking confirmations where enabled).</li>
+                <li>Monitor and prevent fraud, abuse, and security incidents.</li>
+                <li>Comply with legal obligations.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">5. How We Share Information</h2>
+            <p>We may share information in the following ways:</p>
+            <ul class="list-disc pl-6 space-y-2">
+                <li><strong>Service providers:</strong> with vendors who help us run the Service (for example, payment processing via Stripe, hosting, and email delivery), subject to contractual protections.</li>
+                <li><strong>Within an organization:</strong> business owners may grant access to staff or managers; those users can access business data according to their role.</li>
+                <li><strong>Legal and safety:</strong> if required by law or to protect rights, safety, and security.</li>
+                <li><strong>Business transfers:</strong> if we are involved in a merger, acquisition, or sale of assets.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">6. Data Retention</h2>
+            <p>We retain information for as long as needed to provide the Service and for legitimate business purposes such as security, dispute resolution, and compliance. Businesses may also retain booking records for their own operational needs.</p>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">7. Security</h2>
+            <p>We use reasonable administrative, technical, and organizational measures designed to protect information. No security measures are perfect, and we cannot guarantee absolute security.</p>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">8. Your Choices and Rights</h2>
+            <p>You may be able to request access, correction, or deletion of your information by contacting us. If you are a customer/client booking with a business that uses CircleCal, your request may need to be directed to that business as well.</p>
+            <p class="mt-2">If you are a California resident, you may have additional rights under California privacy laws (such as the CCPA/CPRA), subject to applicable exceptions.</p>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">9. Changes to This Policy</h2>
+            <p>We may update this Privacy Policy from time to time. If we make material changes, we will update the effective date and may provide additional notice.</p>
+        </section>
+
+        <section>
+            <h2 class="text-xl font-semibold mb-2">10. Contact</h2>
+            <p>If you have questions about this Privacy Policy, please use our <a class="text-blue-600 hover:underline" href="{% url 'calendar_app:contact' %}">contact form</a>.</p>
+        </section>
+    </div>
+</div>
+{% endblock %}

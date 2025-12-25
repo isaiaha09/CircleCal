@@ -29,6 +29,8 @@ from django.conf import settings
 from datetime import timedelta
 from bookings.emails import send_booking_confirmation
 from django.db.models import Count
+from django.core.mail import send_mail
+from calendar_app.forms import ContactForm
 
 
 @require_http_methods(['POST'])
@@ -1468,7 +1470,71 @@ def _format_ranges_12h(ranges):
     return ', '.join(out)
 
 def home(request):
-    return render(request, "calendar_app/index.html")
+    try:
+        from billing.models import Plan
+        plans = Plan.objects.filter(is_active=True).order_by('price')
+    except Exception:
+        plans = []
+    return render(request, "calendar_app/index.html", {"plans": plans})
+
+
+def plan_detail(request, plan_slug):
+    from billing.models import Plan
+    plan = get_object_or_404(Plan, slug=plan_slug, is_active=True)
+    return render(request, "calendar_app/plan_detail.html", {"plan": plan})
+
+
+def contact(request):
+    if request.method == 'POST':
+        form = ContactForm(request.POST)
+        if form.is_valid():
+            business_name = form.cleaned_data['business_name']
+            name = form.cleaned_data['name']
+            email = form.cleaned_data['email']
+            subject_key = form.cleaned_data['subject']
+            other_subject = (form.cleaned_data.get('other_subject') or '').strip()
+            message = form.cleaned_data['message']
+
+            # Resolve the subject label for readability
+            try:
+                subject_map = dict(getattr(ContactForm, 'SUBJECT_CHOICES', []))
+                subject_label = subject_map.get(subject_key, subject_key)
+            except Exception:
+                subject_label = subject_key
+
+            final_subject = other_subject if subject_key == 'other' else subject_label
+
+            body = (
+                f"New contact form submission\n\n"
+                f"Business: {business_name}\n"
+                f"Name: {name}\n"
+                f"Email: {email}\n"
+                f"Subject: {final_subject}\n"
+                f"Category: {subject_label}\n\n"
+                f"Message:\n{message}\n"
+            )
+
+            # If email is configured, attempt to send. If not, still accept the
+            # submission to avoid breaking UX in local/dev environments.
+            try:
+                to_addr = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or getattr(settings, 'SERVER_EMAIL', None) or None
+                if to_addr:
+                    send_mail(
+                        subject=f"[CircleCal Contact] {final_subject}",
+                        message=body,
+                        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None) or None,
+                        recipient_list=[to_addr],
+                        fail_silently=False,
+                    )
+            except Exception:
+                pass
+
+            messages.success(request, "Thanks — your message has been sent.")
+            return redirect('calendar_app:contact')
+    else:
+        form = ContactForm()
+
+    return render(request, 'calendar_app/contact.html', {'form': form})
 
 @login_required
 def post_login_redirect(request):

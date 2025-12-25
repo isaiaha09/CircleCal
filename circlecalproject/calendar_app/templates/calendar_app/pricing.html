@@ -58,7 +58,6 @@
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Everything in Pro</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Multiple staff accounts</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Team management</li>
-                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Priority support</li>
                 {% endif %}
             </ul>
 
@@ -251,13 +250,34 @@
         const clickable = s.querySelector('.card');
         if (!clickable) return;
         clickable.style.cursor = 'pointer';
-        clickable.addEventListener('click', (e) => { e.preventDefault(); current = idx; reposition(); });
+        clickable.addEventListener('click', (e) => {
+            // Don't hijack clicks on links/buttons/inputs inside the card.
+            try {
+                const t = e.target;
+                const el = (t && t.nodeType === 3) ? t.parentElement : t; // handle Text node targets
+                if (el && el.closest && el.closest('a,button,input,select,textarea,label')) return;
+            } catch (err) {}
+
+            e.preventDefault();
+            current = idx;
+            reposition();
+        });
     });
 
     // basic pointer/touch swipe support: detect horizontal swipes and change current accordingly
     let pointerDown = false, startX = 0, deltaX = 0;
     carousel.addEventListener('pointerdown', (e) => {
-        pointerDown = true; startX = e.clientX; deltaX = 0; carousel.setPointerCapture?.(e.pointerId);
+        // If the user is clicking a real control (e.g., the checkout link), don't turn it into a swipe.
+        try {
+            const t = e.target;
+            const el = (t && t.nodeType === 3) ? t.parentElement : t; // handle Text node targets
+            if (el && el.closest && el.closest('a,button,input,select,textarea,label')) return;
+        } catch (err) {}
+
+        pointerDown = true;
+        startX = e.clientX;
+        deltaX = 0;
+        carousel.setPointerCapture?.(e.pointerId);
     });
     window.addEventListener('pointermove', (e) => {
         if (!pointerDown) return;

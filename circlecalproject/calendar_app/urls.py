@@ -6,7 +6,11 @@ app_name = 'calendar_app'
 
 urlpatterns = [
 
-    path("", TemplateView.as_view(template_name="calendar_app/index.html"), name="home"),
+    path("", views.home, name="home"),
+    path("contact/", views.contact, name="contact"),
+    path("terms/", TemplateView.as_view(template_name="calendar_app/terms.html"), name="terms"),
+    path("privacy/", TemplateView.as_view(template_name="calendar_app/privacy.html"), name="privacy"),
+    path("plans/<slug:plan_slug>/", views.plan_detail, name="plan_detail"),
     path("demo/", views.demo_calendar_view, name="demo_calendar"),
 
     path('bus/<slug:org_slug>/calendar/', views.calendar_view, name="calendar"),

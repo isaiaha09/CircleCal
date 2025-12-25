@@ -398,7 +398,7 @@ def create_embedded_subscription(request, org_slug, plan_id):
 
     plan = get_object_or_404(Plan, id=plan_id)
     if not plan.stripe_price_id:
-        return HttpResponseBadRequest("Plan has no Stripe price id.")
+        return JsonResponse({"error": "Plan has no Stripe price id."}, status=400)
 
     # Ensure customer exists
     if not org.stripe_customer_id:
@@ -409,20 +409,55 @@ def create_embedded_subscription(request, org_slug, plan_id):
         org.stripe_customer_id = customer.id
         org.save()
 
-    # Create subscription in incomplete state; Stripe will require payment confirmation client-side
+    # Create subscription in incomplete state; Stripe will require payment confirmation client-side.
+    # Stripe API change (2025-03): Invoice.payment_intent removed; use Invoice.payments[*].payment.payment_intent.
     try:
         sub = stripe.Subscription.create(
             customer=org.stripe_customer_id,
             items=[{"price": plan.stripe_price_id}],
             payment_behavior="default_incomplete",
-            expand=["latest_invoice.payment_intent"],
+            expand=["latest_invoice.payments"],
             metadata={"organization_id": str(org.id), "plan_id": str(plan.id)},
         )
-    except Exception as e:
-        return HttpResponseBadRequest(str(e))
 
-    pi = sub["latest_invoice"]["payment_intent"]
-    client_secret = pi["client_secret"]
+        latest_invoice = sub.get("latest_invoice")
+        if not latest_invoice:
+            return JsonResponse({"error": "Stripe did not return latest_invoice for the subscription."}, status=400)
+
+        payments = latest_invoice.get("payments") if isinstance(latest_invoice, dict) else getattr(latest_invoice, "payments", None)
+        if not payments:
+            # In case payments weren't expanded for some reason, try retrieving invoice with payments expanded.
+            invoice_id = latest_invoice.get("id") if isinstance(latest_invoice, dict) else getattr(latest_invoice, "id", None)
+            if not invoice_id:
+                return JsonResponse({"error": "Unable to locate invoice id to retrieve payments."}, status=400)
+            latest_invoice = stripe.Invoice.retrieve(invoice_id, expand=["payments"])
+            payments = latest_invoice.get("payments")
+
+        payment_rows = payments.get("data", []) if isinstance(payments, dict) else []
+        if not payment_rows:
+            return JsonResponse({"error": "Stripe invoice has no pending payments to confirm."}, status=400)
+
+        payment = payment_rows[0].get("payment", {}) if isinstance(payment_rows[0], dict) else {}
+        payment_intent = payment.get("payment_intent") if isinstance(payment, dict) else None
+
+        # payment_intent may be an ID string or an expanded object
+        if isinstance(payment_intent, dict):
+            client_secret = payment_intent.get("client_secret")
+            pi_id = payment_intent.get("id")
+        else:
+            pi_id = payment_intent
+            client_secret = None
+
+        if not client_secret:
+            if not pi_id:
+                return JsonResponse({"error": "Unable to locate Stripe PaymentIntent for invoice payment."}, status=400)
+            pi = stripe.PaymentIntent.retrieve(pi_id)
+            client_secret = pi.get("client_secret")
+
+        if not client_secret:
+            return JsonResponse({"error": "Stripe PaymentIntent is missing client_secret."}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
     return JsonResponse({
         "subscription_id": sub["id"],

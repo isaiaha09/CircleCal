@@ -23,4 +23,338 @@
        View Demo Calendar
     </a>
 </div>
+
+<div id="plans" class="container mx-auto py-6 md:py-10 px-4 max-w-6xl">
+    <h2 class="text-3xl md:text-4xl font-bold text-center mb-3 md:mb-4">Choose Your Plan</h2>
+    <p class="text-center text-gray-600 mb-8 md:mb-12 text-sm md:text-base">Scale with CircleCal as your business grows</p>
+
+    {% if plans %}
+    <div class="relative">
+        <!-- Carousel arrows -->
+        <button id="pricing-prev" aria-label="Previous" class="absolute left-2 top-1/2 -translate-y-1/2 z-20 bg-white/90 hover:bg-white p-2 rounded-full shadow-md">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <button id="pricing-next" aria-label="Next" class="absolute right-2 top-1/2 -translate-y-1/2 z-20 bg-white/90 hover:bg-white p-2 rounded-full shadow-md">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </button>
+
+        <div id="pricing-carousel" class="overflow-hidden px-4 py-6 md:py-8 mx-auto max-w-5xl" style="perspective:1200px;">
+            <div id="pricing-track" class="flex flex-row flex-nowrap items-stretch gap-8 will-change-transform transition-transform duration-500">
+                {% for plan in plans %}
+                <div class="slide-wrapper inline-flex flex-shrink-0 justify-center w-[85%] sm:w-3/4 md:w-1/2 lg:w-1/3 max-w-2xl px-2" data-plan="{{ plan.slug }}">
+                    <div class="card relative border rounded-xl p-8 shadow-lg hover:shadow-xl transition bg-white {% if plan.slug == 'pro' %}border-blue-500 ring-2 ring-blue-500{% elif plan.slug == 'team' %}border-green-500 ring-2 ring-green-500{% else %}border-gray-700 ring-2 ring-gray-700{% endif %}">
+                        <div class="card-inner opacity-60">
+                            {% if plan.slug == 'pro' %}
+                            <div class="bg-blue-500 text-white text-xs font-bold uppercase px-3 py-1 rounded-full inline-block mb-4">Most Popular</div>
+                            {% endif %}
+
+                            <h3 class="text-2xl font-semibold mb-2">{{ plan.name }}</h3>
+                            <p class="text-5xl font-bold mb-2">${{ plan.price|floatformat:2 }}</p>
+                            <p class="text-gray-500 text-sm mb-6">per month</p>
+                            <p class="text-gray-600 mb-6 h-12">{{ plan.description }}</p>
+
+                            <ul class="text-left space-y-3 mb-8">
+                                {% if plan.slug == 'basic' %}
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> 1 active service</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Up to 100 bookings/month</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Basic calendar</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Email support</li>
+                                {% elif plan.slug == 'pro' %}
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Unlimited services</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Unlimited bookings</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Custom weekly availability</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Custom branding</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Payment processing</li>
+                                {% elif plan.slug == 'team' %}
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Everything in Pro</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Multiple staff accounts</li>
+                                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Team management</li>
+                                {% endif %}
+                            </ul>
+
+                            <div>
+                                <a href="{% url 'calendar_app:plan_detail' plan.slug %}"
+                                   class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
+                                    See details
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+        <div class="max-w-2xl mx-auto text-center bg-white border rounded-lg p-6 text-gray-700">
+            Pricing plans haven’t been configured in this environment yet.
+        </div>
+    {% endif %}
+</div>
+
+<div id="cookie-banner" class="fixed inset-x-0 bottom-0 z-50 hidden">
+    <div class="bg-white border-t shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div class="text-sm text-gray-700">
+                <div class="font-semibold text-gray-900">Cookies</div>
+                <p>
+                    This site uses cookies to help it work properly and keep you signed in.
+                    We only use essential cookies right now, and they are required for core features like security and session authentication.
+                    <a href="{% url 'calendar_app:privacy' %}" class="text-blue-600 hover:underline">Learn more</a>.
+                </p>
+            </div>
+            <button id="cookie-banner-dismiss" type="button" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+                Ok
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<style>
+/* 3D carousel helpers */
+#pricing-carousel { overflow: visible; /* allow borders/shadows to be visible when cards translate/rotate */ }
+#pricing-carousel .slide-wrapper { transform-style: preserve-3d; }
+#pricing-carousel .card { transform-origin: center center; will-change: transform; transform-style: preserve-3d; -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+#pricing-carousel .card-inner { will-change: opacity; }
+/* ensure some safe horizontal padding so right/left borders aren't clipped in landscape */
+#pricing-carousel { padding-left: 1rem; padding-right: 1rem; }
+#pricing-track { overflow: visible; }
+</style>
+
+<script>
+(function () {
+    // Cookie banner
+    const STORAGE_KEY = 'cc_cookie_banner_dismissed';
+
+    let dismissed = false;
+    try {
+        dismissed = localStorage.getItem(STORAGE_KEY) === '1';
+    } catch (e) {
+        dismissed = false;
+    }
+
+    const banner = document.getElementById('cookie-banner');
+    const dismissBtn = document.getElementById('cookie-banner-dismiss');
+    if (banner && dismissBtn && !dismissed) {
+        banner.classList.remove('hidden');
+        dismissBtn.addEventListener('click', function () {
+            banner.classList.add('hidden');
+            try {
+                localStorage.setItem(STORAGE_KEY, '1');
+            } catch (e) {}
+        });
+    }
+})();
+
+(function(){
+    // Pricing carousel (copied from pricing.html)
+    const carousel = document.getElementById('pricing-carousel');
+    if (!carousel) return;
+    const track = document.getElementById('pricing-track');
+    if (!track) return;
+
+    // clone slides to remove previous event listeners and inline transforms
+    const originalSlides = Array.from(track.querySelectorAll('.slide-wrapper'));
+    const slides = originalSlides.map(s => {
+        const clone = s.cloneNode(true);
+        // clear any inline transform/left left from previous logic
+        clone.style.transform = '';
+        clone.style.left = '';
+        clone.style.zIndex = '';
+        clone.style.position = '';
+        track.replaceChild(clone, s);
+        return clone;
+    });
+
+    if (!slides.length) return;
+
+    // reset prev/next buttons by cloning to remove old listeners
+    function resetBtn(id){
+        const old = document.getElementById(id);
+        if (!old || !old.parentNode) return null;
+        const clone = old.cloneNode(true);
+        old.parentNode.replaceChild(clone, old);
+        return clone;
+    }
+    const prevBtn = resetBtn('pricing-prev');
+    const nextBtn = resetBtn('pricing-next');
+
+    // initial current index (from dataset or default 0)
+    let current = 0;
+    try{
+        const start = carousel.dataset.currentPlan;
+        if (start) {
+            const idx = slides.findIndex(s => s.dataset.plan === start);
+            if (idx >= 0) current = idx;
+        }
+    } catch(e){}
+
+    // normalize card heights so all cards appear same height (use exact height and include box-sizing)
+    function normalizeHeights(){
+        const cards = slides.map(s => s.querySelector('.card')).filter(Boolean);
+        const heights = cards.map(c => Math.ceil(c.getBoundingClientRect().height) || c.offsetHeight || 0);
+        const maxH = Math.max(...heights, 0);
+        cards.forEach(c => {
+            c.style.boxSizing = 'border-box';
+            c.style.height = maxH + 'px';
+            c.style.minHeight = maxH + 'px';
+            c.style.overflow = 'hidden';
+        });
+        // ensure track holds space + small buffer for shadows/transform visual overflow
+        if (maxH) track.style.minHeight = (maxH + 48) + 'px';
+    }
+
+    // canonical center (set on initial no-animate layout)
+    let canonicalCenterX = null;
+
+    // reposition slides around the fixed center of the carousel
+    function reposition(noAnimate){
+        const vw = carousel.clientWidth;
+        // compute center inside the carousel container (more consistent across devices/emulation)
+        // small nudge to the left/right so the visual center aligns perfectly
+        const centerOffset = -14; // user-adjustable nudge (negative => left)
+        const centerLocal = Math.round(carousel.clientWidth / 2) + centerOffset;
+        let centerX = centerLocal;
+        // if we have a canonical center from initial layout, use it so every move targets the exact same spot
+        if (!noAnimate && canonicalCenterX !== null) centerX = canonicalCenterX;
+
+        // detect mobile mode for gentler transforms and spacing
+        const isMobile = window.innerWidth < 768;
+
+        slides.forEach((s, idx) => {
+            const card = s.querySelector('.card');
+            if (!card) return;
+
+            // compute circular index difference
+            let raw = (idx - current + slides.length) % slides.length;
+            if (raw > slides.length/2) raw -= slides.length;
+            const diff = raw;
+            const adiff = Math.abs(diff);
+
+            // width of slide wrapper — use wrapper offsetWidth (stable, unaffected by transforms)
+            let sw = s.offsetWidth || s.getBoundingClientRect().width || 520;
+
+            // On mobile, cap the card width to a percentage of the viewport so cards aren't huge
+            if (isMobile) {
+                const maxMobileW = Math.round(vw * 0.82);
+                const desiredW = Math.min(sw, maxMobileW);
+                s.style.width = desiredW + 'px';
+                const cardInner = s.querySelector('.card-inner');
+                if (cardInner) cardInner.style.width = '100%';
+                sw = desiredW;
+            }
+
+            // spacing - how far apart slides sit horizontally
+            let baseSpacing = Math.round(sw * (isMobile ? 0.76 : 0.66));
+            if (adiff >= 2) baseSpacing = Math.round(sw * (isMobile ? 0.95 : 1.05));
+
+            // compute left so that center slide is centered in the carousel viewport
+            const leftPx = centerX - Math.round(sw / 2) + (diff * baseSpacing);
+
+            // apply absolute positioning
+            s.style.position = 'absolute';
+            s.style.top = '0';
+            s.style.left = leftPx + 'px';
+            // if noAnimate flag passed, disable transition for the initial layout
+            s.style.transition = noAnimate ? 'none' : 'left 420ms cubic-bezier(.2,.9,.2,1)';
+
+            // depth and rotation mapping (tweakable), softer on mobile
+            let z = 0, scale = 1, rotY = 0;
+            if (adiff === 0) { z = isMobile ? 36 : 120; scale = 1; rotY = 0; }
+            else if (adiff === 1) { z = isMobile ? -40 : -140; scale = isMobile ? 0.94 : 0.86; rotY = diff < 0 ? (isMobile ? 14 : 22) : (isMobile ? -14 : -22); }
+            else if (adiff === 2) { z = isMobile ? -80 : -260; scale = isMobile ? 0.86 : 0.74; rotY = diff < 0 ? (isMobile ? 18 : 28) : (isMobile ? -18 : -28); }
+            else { z = isMobile ? -120 : -380; scale = isMobile ? 0.78 : 0.62; rotY = diff < 0 ? (isMobile ? 20 : 34) : (isMobile ? -20 : -34); }
+
+            card.style.transition = noAnimate ? 'none' : 'transform 320ms cubic-bezier(.2,.9,.2,1), box-shadow 240ms ease, opacity 180ms ease';
+            card.style.transform = `translateZ(${z}px) scale(${scale}) rotateY(${rotY}deg)`;
+
+            // opacity: active fully opaque, others dimmed — apply to inner so border remains visible
+            const inner = card.querySelector('.card-inner');
+            if (inner) {
+                if (adiff === 0) {
+                    inner.style.opacity = '1';
+                    inner.classList.remove('opacity-60');
+                } else {
+                    inner.style.opacity = '0.6';
+                    inner.classList.add('opacity-60');
+                }
+            }
+
+            // stacking order
+            const zidx = 300 - (adiff * 10);
+            s.style.zIndex = zidx;
+            card.style.zIndex = zidx + 10;
+        });
+
+        // store canonical center after an initial no-animate run so subsequent moves target the exact same spot
+        if (noAnimate && canonicalCenterX === null) canonicalCenterX = centerLocal;
+    }
+
+    // allow clicking a slide to center it
+    slides.forEach((s, idx) => {
+        const clickable = s.querySelector('.card');
+        if (!clickable) return;
+        clickable.style.cursor = 'pointer';
+        clickable.addEventListener('click', (e) => {
+            // Don't hijack clicks on links/buttons/inputs inside the card.
+            try {
+                const t = e.target;
+                const el = (t && t.nodeType === 3) ? t.parentElement : t; // handle Text node targets
+                if (el && el.closest && el.closest('a,button,input,select,textarea,label')) return;
+            } catch (err) {}
+
+            e.preventDefault();
+            current = idx;
+            reposition();
+        });
+    });
+
+    // basic pointer/touch swipe support: detect horizontal swipes and change current accordingly
+    let pointerDown = false, startX = 0, deltaX = 0;
+    carousel.addEventListener('pointerdown', (e) => {
+        // If the user is clicking a real control (e.g., the details link), don't turn it into a swipe.
+        try {
+            const t = e.target;
+            const el = (t && t.nodeType === 3) ? t.parentElement : t; // handle Text node targets
+            if (el && el.closest && el.closest('a,button,input,select,textarea,label')) return;
+        } catch (err) {}
+
+        pointerDown = true;
+        startX = e.clientX;
+        deltaX = 0;
+        carousel.setPointerCapture?.(e.pointerId);
+    });
+    window.addEventListener('pointermove', (e) => {
+        if (!pointerDown) return;
+        deltaX = e.clientX - startX;
+    });
+    window.addEventListener('pointerup', (e) => {
+        if (!pointerDown) return; pointerDown = false; carousel.releasePointerCapture?.(e.pointerId);
+        const threshold = Math.max(32, window.innerWidth * 0.06); // swipe threshold
+        if (Math.abs(deltaX) > threshold) {
+            if (deltaX < 0) current = (current + 1) % slides.length;
+            else current = (current - 1 + slides.length) % slides.length;
+            reposition();
+        }
+        deltaX = 0;
+    });
+
+    prevBtn?.addEventListener('click', (e) => { e.preventDefault(); current = (current - 1 + slides.length) % slides.length; reposition(); });
+    nextBtn?.addEventListener('click', (e) => { e.preventDefault(); current = (current + 1) % slides.length; reposition(); });
+
+    // initial layout: do an instant (no-transition) layout first so items start centered,
+    // then enable animated repositioning for user interactions. Also retry after load/next frame
+    normalizeHeights();
+    reposition(true);
+
+    // rerun after a short timeout and on load to handle late font/image layout changes
+    requestAnimationFrame(() => requestAnimationFrame(() => { normalizeHeights(); reposition(true); }));
+    setTimeout(() => { normalizeHeights(); reposition(true); }, 60);
+    window.addEventListener('load', () => { normalizeHeights(); reposition(true); });
+
+    window.addEventListener('resize', () => { normalizeHeights(); reposition(); });
+})();
+</script>
 {% endblock %}

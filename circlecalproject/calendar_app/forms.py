@@ -92,3 +92,40 @@ class InviteSignupForm(UserCreationForm):
         if commit:
             user.save()
         return user
+
+
+class ContactForm(forms.Form):
+    business_name = forms.CharField(max_length=160, required=True, label='Business Name')
+    name = forms.CharField(max_length=120, required=True)
+    email = forms.EmailField(required=True)
+
+    SUBJECT_CHOICES = [
+        ('billing_subscription', 'Billing / Subscription / Stripe'),
+        ('booking_link', 'Booking link not working'),
+        ('calendar_availability', 'Calendar availability / time slots'),
+        ('cancellations_refunds', 'Cancellations / refunds policy'),
+        ('notifications_emails', 'Notifications / confirmation emails'),
+        ('public_booking', 'Public booking page issue'),
+        ('services_setup', 'Services setup / service settings'),
+        ('staff_team', 'Staff / team access and roles'),
+        ('timezone', 'Timezone or time display issue'),
+        ('login_security', 'Login / password / 2FA help'),
+        ('bug_report', 'Bug report'),
+        ('feature_request', 'Feature request'),
+        ('other', 'Other (write your own subject)'),
+    ]
+    subject = forms.ChoiceField(choices=SUBJECT_CHOICES, required=True)
+    other_subject = forms.CharField(max_length=160, required=False, label='Other Subject')
+    message = forms.CharField(required=True, widget=forms.Textarea(attrs={
+        'rows': 6,
+    }))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('subject') == 'other':
+            other = (cleaned.get('other_subject') or '').strip()
+            if not other:
+                self.add_error('other_subject', 'Please enter a subject.')
+            else:
+                cleaned['other_subject'] = other
+        return cleaned

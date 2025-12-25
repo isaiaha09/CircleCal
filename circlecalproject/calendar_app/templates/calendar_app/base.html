@@ -474,10 +474,14 @@
                             <li><a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Calendar</a></li>
                             <li><a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Dashboard</a></li>
                             <li><a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Pricing</a></li>
+                            <li><a href="{% url 'calendar_app:privacy' %}" class="text-gray-600 hover:text-blue-600">Privacy Policy</a></li>
                             <li><a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Team</a></li>
+                            <li><a href="{% url 'calendar_app:terms' %}" class="text-gray-600 hover:text-blue-600">Terms of Service</a></li>
                         {% else %}
                             <li><a href="{% url 'accounts:login' %}" class="text-gray-600 hover:text-blue-600">Login</a></li>
                             <li><a href="{% url 'calendar_app:signup' %}" class="text-gray-600 hover:text-blue-600">Sign Up</a></li>
+                            <li><a href="{% url 'calendar_app:privacy' %}" class="text-gray-600 hover:text-blue-600">Privacy Policy</a></li>
+                            <li><a href="{% url 'calendar_app:terms' %}" class="text-gray-600 hover:text-blue-600">Terms of Service</a></li>
                         {% endif %}
                     </ul>
                 </div>
@@ -486,8 +490,7 @@
                 <div>
                     <h3 class="font-bold text-lg mb-3">Contact</h3>
                     <ul class="space-y-2 text-sm text-gray-600">
-                        <li>Email: support@circlecal.com</li>
-                        <li>Phone: +1 (555) 123-4567</li>
+                        <li><a href="{% url 'calendar_app:contact' %}" class="text-gray-600 hover:text-blue-600">Contact Form</a></li>
                     </ul>
                 </div>
             </div>
