@@ -52,16 +52,13 @@
                 <li class="flex items-start"><span class="text-gray-500 mr-2">•</span> Max services: {{ plan.max_services }}</li>
                 <li class="flex items-start"><span class="text-gray-500 mr-2">•</span> Bookings/month: {{ plan.max_bookings_per_month }}</li>
                 <li class="flex items-start"><span class="text-gray-500 mr-2">•</span> Custom branding: {{ plan.allow_custom_branding|yesno:"Yes,No" }}</li>
-                {% if plan.slug != 'team' %}
-                <li class="flex items-start"><span class="text-gray-500 mr-2">•</span> Priority support: {{ plan.allow_priority_support|yesno:"Yes,No" }}</li>
-                {% endif %}
                 <li class="flex items-start"><span class="text-gray-500 mr-2">•</span> Payment processing: {{ plan.allow_payment_processing|yesno:"Yes,No" }}</li>
             </ul>
         </div>
     </div>
 
     <div class="mt-8 flex items-center justify-between text-sm">
-        <a href="{% url 'calendar_app:home' %}#plans" class="text-blue-600 hover:underline">← Back to plans</a>
+        <a href="{% url 'calendar_app:home' %}" class="text-blue-600 hover:underline">← Back to plans</a>
         <a href="{% url 'calendar_app:signup' %}?plan={{ plan.slug }}" class="text-blue-600 hover:underline">Sign up</a>
     </div>
 </div>
