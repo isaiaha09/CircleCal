@@ -50,6 +50,11 @@ urlpatterns = [
     path('bus/<slug:org_slug>/services/<int:service_id>/preview_update/', views.preview_service_update, name='preview_service_update'),
     path('bus/<slug:org_slug>/services/<int:service_id>/apply_update/', views.apply_service_update, name='apply_service_update'),
 
+    # Facility Resources (owner-managed cages/rooms)
+    path('bus/<slug:org_slug>/resources/', views.resources_page, name='resources_page'),
+    path('bus/<slug:org_slug>/resources/<int:resource_id>/edit/', views.edit_resource, name='edit_resource'),
+    path('bus/<slug:org_slug>/resources/<int:resource_id>/toggle/', views.toggle_resource_active, name='toggle_resource_active'),
+
     # Bookings
     path('bus/<slug:org_slug>/bookings/', views.bookings_list, name="bookings_list"),
     path('bus/<slug:org_slug>/bookings/<int:booking_id>/delete/', views.delete_booking, name="delete_booking"),

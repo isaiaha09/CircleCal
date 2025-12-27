@@ -1,0 +1,80 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Resources – {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto py-8 px-4">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-3xl font-bold text-gray-900">Resources</h1>
+    <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Dashboard</a>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-2">Add a resource</h2>
+    <p class="text-sm text-gray-600 mb-4">Create a space (For example, a cage or a room) where your services can be held/reserved</p>
+
+    <form method="post" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Name</label>
+        <input name="name" type="text" class="mt-1 w-full px-3 py-2 rounded border border-gray-300" placeholder="Cage 1" required>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Slug (optional)</label>
+        <input name="slug" type="text" class="mt-1 w-full px-3 py-2 rounded border border-gray-300" placeholder="cage-1">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Max services</label>
+        <input name="max_services" type="number" min="0" class="mt-1 w-full px-3 py-2 rounded border border-gray-300" value="1">
+        <p class="mt-1 text-xs text-gray-500">1 = exclusive. 0 = unlimited sharing.</p>
+      </div>
+      <div class="flex items-center justify-between md:justify-start gap-4">
+        <label class="inline-flex items-center text-sm text-gray-700">
+          <input type="checkbox" name="is_active" value="1" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+          <span class="ml-2">Active</span>
+        </label>
+        <button type="submit" class="ml-auto md:ml-0 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Create</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-lg">
+    <div class="p-5 border-b border-gray-200">
+      <h2 class="text-lg font-semibold text-gray-900">Your resources</h2>
+      <p class="text-sm text-gray-600 mt-1">Link resources to services from the service edit page.</p>
+    </div>
+
+    {% if resources %}
+      <div class="divide-y divide-gray-200">
+        {% for r in resources %}
+          <div class="p-5 flex items-center justify-between gap-4">
+            <div>
+              <div class="font-medium text-gray-900">{{ r.name }}</div>
+              <div class="text-sm text-gray-600">
+                Slug: {{ r.slug }}
+                • Max services: {% if r.max_services == 0 %}Unlimited{% else %}{{ r.max_services }}{% endif %}
+                {% if r.cc_service_count|default:0 > 0 %}
+                  • <span class="text-gray-500">Linked to {{ r.cc_service_count }} service{% if r.cc_service_count != 1 %}s{% endif %}</span>
+                {% endif %}
+                {% if not r.is_active %} • <span class="text-gray-500">Inactive</span>{% endif %}
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <a href="{% url 'calendar_app:edit_resource' org.slug r.id %}" class="px-3 py-2 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">Edit</a>
+              <form method="post" action="{% url 'calendar_app:toggle_resource_active' org.slug r.id %}" class="m-0">
+                {% csrf_token %}
+                {% if r.is_active %}
+                  <button type="submit" class="px-3 py-2 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 {% if r.cc_service_count|default:0 > 0 %}opacity-50 cursor-not-allowed{% endif %}" {% if r.cc_service_count|default:0 > 0 %}disabled{% endif %}>Deactivate</button>
+                {% else %}
+                  <button type="submit" class="px-3 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700">Activate</button>
+                {% endif %}
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="p-5 text-sm text-gray-600">No resources created yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

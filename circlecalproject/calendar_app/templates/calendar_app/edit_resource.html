@@ -1,0 +1,41 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Edit Resource – {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto py-8 px-4">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-3xl font-bold text-gray-900">Edit Resource</h1>
+    <a href="{% url 'calendar_app:resources_page' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">← Back to Resources</a>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-lg p-5">
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Name</label>
+        <input name="name" type="text" class="mt-1 w-full px-3 py-2 rounded border border-gray-300" value="{{ resource.name }}" required>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Slug</label>
+        <input name="slug" type="text" class="mt-1 w-full px-3 py-2 rounded border border-gray-300" value="{{ resource.slug }}">
+        <p class="mt-1 text-xs text-gray-500">Used internally and for uniqueness. Changing it won’t affect existing bookings.</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Max services</label>
+        <input name="max_services" type="number" min="0" class="mt-1 w-full px-3 py-2 rounded border border-gray-300" value="{{ resource.max_services|default:1 }}">
+        <p class="mt-1 text-xs text-gray-500">1 = exclusive. 0 = unlimited sharing.</p>
+      </div>
+      <div>
+        <label class="inline-flex items-center text-sm text-gray-700">
+          <input type="checkbox" name="is_active" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if resource.is_active %}checked{% endif %}>
+          <span class="ml-2">Active</span>
+        </label>
+      </div>
+      <div class="flex items-center justify-end gap-2">
+        <a href="{% url 'calendar_app:resources_page' org.slug %}" class="px-4 py-2 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">Cancel</a>
+        <button type="submit" class="px-4 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

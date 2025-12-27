@@ -6,6 +6,23 @@
 {% block content %}
 <div class="text-center py-6 md:py-10">
 
+<style>
+    /* Center the last dashboard tile on 2-col layouts, but keep it the same width as other tiles.
+         Uses the same gap as `gap-6` (1.5rem). Reverts to normal at md+. */
+    .cc-dashboard-last-tile {
+        grid-column: 1 / -1;
+        justify-self: center;
+        width: calc((100% - 1.5rem) / 2);
+    }
+    @media (min-width: 768px) {
+        .cc-dashboard-last-tile {
+            grid-column: auto;
+            justify-self: stretch;
+            width: auto;
+        }
+    }
+</style>
+
     {% if user_org_role == 'staff' or user_org_role == 'manager' %}
         {% if request.user.first_name and request.user.last_name %}
 
@@ -21,7 +38,7 @@
                 What would you like to do today?
             </p>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-6">
                 {# Staff/Manager: only show Bookings and Profile tiles #}
                 {% if org %}
                     <a href="{% url 'calendar_app:bookings_list' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
@@ -50,19 +67,19 @@
 
         <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-4 md:mb-6">
             {% if request.user.profile and request.user.profile.display_name %}
-                Welcome, {{ request.user.profile.display_name }} 👋
+                Welcome, {{ request.user.profile.display_name }}👋
             {% elif request.user.first_name %}
-                Welcome, {{ request.user.first_name }} 👋
+                Welcome, {{ request.user.first_name }}👋
             {% else %}
-                Welcome, {{ request.user.username }} 👋
+                Welcome, {{ request.user.username }}👋
             {% endif %}
         </h1>
 
         <p class="text-gray-700 mb-6 md:mb-10 text-base md:text-lg">
-            What would you like to do today?
+            Choose a portal to access
         </p>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-6">
 
             <!-- Full dashboard for owners/admins (alphabetical left-to-right) -->
             {% if org %}
@@ -100,6 +117,14 @@
             {% endif %}
 
             {% if org %}
+                <!-- Resources (Team plan only) -->
+                <a href="{% url 'calendar_app:resources_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow transition border {% if plan_slug != 'team' %}opacity-60 cursor-not-allowed{% else %}hover:shadow-md{% endif %}">
+                    <h2 class="text-2xl font-semibold text-blue-600">Resources</h2>
+                    <p class="text-gray-600 mt-2">Manage space and capacity{% if plan_slug != 'team' %} (Team plan only){% endif %}</p>
+                </a>
+            {% endif %}
+
+            {% if org %}
                 <!-- Pricing -->
                 <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
                     <h2 class="text-2xl font-semibold text-blue-600">Pricing</h2>
@@ -127,10 +152,10 @@
                 </a>
                 {% endif %}
 
-                <!-- Staff -->
-                <a href="{% url 'calendar_app:team_dashboard' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
+                <!-- Staff (Team plan only) -->
+                <a href="{% url 'calendar_app:team_dashboard' org.slug %}" class="block bg-white p-6 rounded-lg shadow transition border cc-dashboard-last-tile {% if plan_slug != 'team' %}opacity-60 cursor-not-allowed{% else %}hover:shadow-md{% endif %}">
                     <h2 class="text-2xl font-semibold text-blue-600">Staff</h2>
-                    <p class="text-gray-600 mt-2">Manage staff roles & invitations</p>
+                    <p class="text-gray-600 mt-2">Manage staff roles & invitations{% if plan_slug != 'team' %} (Team plan only){% endif %}</p>
                 </a>
             {% endif %}
 

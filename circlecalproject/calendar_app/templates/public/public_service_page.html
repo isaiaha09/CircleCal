@@ -234,10 +234,10 @@
       <select id="mainServiceSelect" class="px-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         {% if services %}
           {% for s in services %}
-            <option value="{{ s.slug }}" data-assigned-names="{{ s.assigned_names|default:''|escapejs }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
+            <option value="{{ s.slug }}" {% if show_with_line %}data-assigned-names="{{ s.assigned_names|default:''|escapejs }}"{% endif %} {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
           {% endfor %}
         {% else %}
-          <option value="{{ service.slug }}" data-assigned-names="{{ service.assigned_names|default:''|escapejs }}" selected>{{ service.name }}</option>
+          <option value="{{ service.slug }}" {% if show_with_line %}data-assigned-names="{{ service.assigned_names|default:''|escapejs }}"{% endif %} selected>{{ service.name }}</option>
         {% endif %}
       </select>
       <span id="serviceInfoIcon" class="ml-2 cursor-pointer" style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#e0e7ff; color:#374151; font-size:18px; border:1px solid #c7d2fe;" title="View service details">&#9432;</span>
@@ -264,7 +264,7 @@
 
   <div id="mainServiceDetails" class="service-details-fade">
     <div id="mainSvcTitle" class="modal-title" style="margin-bottom:6px;"></div>
-    <div><strong>With:</strong> <span id="mainSvcTeam"></span></div>
+    {% if show_with_line %}<div><strong>With:</strong> <span id="mainSvcTeam"></span></div>{% endif %}
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
@@ -285,7 +285,7 @@
       description: "{{ s.description|default:""|escapejs }}",
       duration: {{ s.duration|default:0 }},
       price: {{ s.price|default:0 }},
-      assigned_names: "{{ s.assigned_names|default:''|escapejs }}",
+      {% if show_with_line %}assigned_names: "{{ s.assigned_names|default:''|escapejs }}",{% endif %}
       refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
       refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
       refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
@@ -413,17 +413,17 @@
       <select id="serviceSelect" name="service_slug" required class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         {% if services %}
           {% for s in services %}
-            <option value="{{ s.slug }}" data-assigned-names="{{ s.assigned_names|default:''|escapejs }}" {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
+            <option value="{{ s.slug }}" {% if show_with_line %}data-assigned-names="{{ s.assigned_names|default:''|escapejs }}"{% endif %} {% if s.slug == service.slug %}selected{% endif %}>{{ s.name }}</option>
           {% endfor %}
         {% else %}
-          <option value="{{ service.slug }}" data-assigned-names="{{ service.assigned_names|default:''|escapejs }}" selected>{{ service.name }}</option>
+          <option value="{{ service.slug }}" {% if show_with_line %}data-assigned-names="{{ service.assigned_names|default:''|escapejs }}"{% endif %} selected>{{ service.name }}</option>
         {% endif %}
       </select>
 
       <!-- Service details preview -->
       <div id="serviceDetails" class="mb-4 p-3 rounded border border-gray-200 bg-gray-50 text-sm">
         <div><strong>Name:</strong> <span id="svcName">{{ service.name }}</span></div>
-        <div><strong>With:</strong> <span id="svcTeam"></span></div>
+        {% if show_with_line %}<div><strong>With:</strong> <span id="svcTeam"></span></div>{% endif %}
         <div><strong>Description:</strong> <span id="svcDesc">{{ service.description|default:"—" }}</span></div>
         <div><strong>Duration:</strong> <span id="svcDuration">{{ service.duration }}</span> minutes</div>
         <div><strong>Price:</strong> $<span id="svcPrice">{{ service.price }}</span></div>

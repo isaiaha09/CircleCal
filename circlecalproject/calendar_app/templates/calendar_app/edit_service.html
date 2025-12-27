@@ -65,6 +65,21 @@
   .availability-disabled { position: relative; opacity: 0.8; }
   .availability-disabled .availability-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center; border-radius:0.75rem; z-index:20; }
   .availability-disabled .availability-overlay .msg { max-width:56rem; padding:1rem 1.5rem; text-align:center; color:#374151; }
+
+  /* Locked advanced settings overlay */
+  .cc-adv-lock-wrap { position: relative; }
+  .cc-adv-lock-wrap.cc-adv-locked,
+  .cc-adv-lock-wrap.cc-adv-locked * {
+    cursor: default !important;
+  }
+  .cc-adv-lock-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    background: rgba(255, 255, 255, 0.01);
+    cursor: default;
+    border-radius: 0.5rem;
+  }
   /* Selected member chips shown in the dropdown label */
   .member-chip { display:inline-block; background:#eef6ff; color:#0b5cff; padding:6px 10px; border-radius:999px; font-size:0.95rem; margin-right:6px; margin-bottom:2px; }
   .member-chip .member-chip-remove { display:inline-block; margin-left:8px; color:#0840c6; background:transparent; border-radius:999px; padding:0 6px; cursor:pointer; font-weight:700; line-height:1; }
@@ -184,10 +199,60 @@
   }
   #svcAvailEditor .time-picker-btn.cancel { background: var(--gray-200); color: var(--gray-700); }
   #svcAvailEditor .time-picker-btn.cancel:hover { background: var(--gray-300); }
+
+  /* Saving overlay (shown while AJAX save runs) */
+  #svc-saving-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(17, 24, 39, 0.35); /* gray-900 with alpha */
+    z-index: 2500;
+  }
+  #svc-saving-overlay.active { display: flex; }
+  #svc-saving-overlay .panel {
+    background: #ffffff;
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    padding: 16px 18px;
+    min-width: 280px;
+    max-width: 92vw;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+  }
+  #svc-saving-overlay .spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 3px solid var(--gray-200);
+    border-top-color: var(--primary-600);
+    animation: svcSpin 0.8s linear infinite;
+    flex: 0 0 auto;
+  }
+  @keyframes svcSpin { to { transform: rotate(360deg); } }
+  #svc-saving-overlay .text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  #svc-saving-overlay .title { font-weight: 700; color: var(--gray-900); }
+  #svc-saving-overlay .sub { font-size: 0.9rem; color: var(--gray-700); }
 </style>
 {% endblock %}
 
 <div class="cc-page">
+  <div id="svc-saving-overlay" role="status" aria-live="polite" aria-hidden="true">
+    <div class="panel">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="text">
+        <div class="title">Saving changes…</div>
+        <div class="sub">Please wait.</div>
+      </div>
+    </div>
+  </div>
   <form class="cc-form" method="post">
     {% csrf_token %}
   {% if request.GET.saved %}
@@ -387,6 +452,7 @@
 
     <!-- core timing controls are shown below in a grouped card -->
 
+    {% if is_team_plan %}
     <!-- Assign service to one or more team members -->
     <div class="section-card">
       <div class="section-title">Assign to team members</div>
@@ -540,6 +606,7 @@
         })();
       </script>
     </div>
+    {% endif %}
 
 
     <!-- Slot increment settings are configured in the Day Schedule modal (calendar). Removed from edit page to avoid duplication. -->
@@ -552,22 +619,77 @@
           <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
         </div>
         <div>
-          <label class="inline-flex items-center">
-            <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" {% if service.use_fixed_increment %}checked{% endif %}
-                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-            <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
-          </label>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+            <label class="inline-flex items-center">
+              <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" {% if service.use_fixed_increment %}checked{% endif %}
+                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
+            </label>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
           <p class="mt-1 text-xs text-gray-500">When enabled, clients will only see anchors spaced by the service duration plus cleanup buffer.</p>
         </div>
         <div>
-          <label class="inline-flex items-center">
-            <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" {% if service.allow_squished_bookings %}checked{% endif %}
-                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-            <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
-          </label>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+            <label class="inline-flex items-center">
+              <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" {% if service.allow_squished_bookings %}checked{% endif %}
+                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
+            </label>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
           <p class="mt-1 text-xs text-gray-500">When enabled, the system will allow bookings that fit the service duration even if they don't satisfy the configured buffers. Owners will receive a notification when such bookings occur.</p>
         </div>
       </div>
+    </div>
+
+    <!-- Facility resources (cages/rooms/etc) -->
+    <div class="section-card">
+      <div class="section-title">Facility resources</div>
+
+      {% if can_use_facility_resources %}
+        <p class="text-sm text-gray-600 mb-3">
+          Choose the space capacity this service can use. If you select none, this service will not enforce facility capacity.
+        </p>
+        <div class="mb-3">
+          <a href="{% url 'calendar_app:resources_page' org.slug %}" class="text-sm text-blue-600 hover:text-blue-700">Manage resources →</a>
+        </div>
+
+        {% if user_org_role != 'owner' %}
+          <div class="mb-3 p-3 rounded bg-yellow-50 border border-yellow-200 text-sm text-yellow-800">
+            Only the business owner can change resource settings.
+          </div>
+        {% endif %}
+
+        {% if facility_resources %}
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {% for r in facility_resources %}
+              <label class="flex items-center gap-2 px-3 py-2 rounded border border-gray-200 bg-white {% if r.cc_disabled %}opacity-60 bg-gray-50 cursor-not-allowed{% endif %}">
+                <input type="checkbox" name="resource_ids" value="{{ r.id }}" class="rounded border-gray-300"
+                       {% if r.id in selected_resource_ids %}checked{% endif %}
+                       {% if user_org_role != 'owner' or r.cc_disabled %}disabled{% endif %}>
+                <span class="text-sm text-gray-800">{{ r.name }}</span>
+                {% if r.cc_disabled %}<span class="text-xs text-gray-500">(in use)</span>{% endif %}
+                {% if not r.is_active %}<span class="text-xs text-gray-500">(inactive)</span>{% endif %}
+                {% if r.cc_max_services != None %}
+                  <span class="ml-auto text-xs text-gray-500">
+                    {% if r.cc_max_services == 0 %}
+                      Unlimited
+                    {% else %}
+                      {{ r.cc_used_services|default:0 }}/{{ r.cc_max_services }}
+                    {% endif %}
+                  </span>
+                {% endif %}
+              </label>
+            {% endfor %}
+          </div>
+          <p class="mt-2 text-xs text-gray-500">Tip: link at least 2 resources if you want this service to utilize multiple spaces.</p>
+        {% else %}
+          <div class="text-sm text-gray-600">No resources created yet. Create some space capacity first, then come back here to link them.</div>
+        {% endif %}
+      {% else %}
+        <p class="text-sm text-gray-600">Facility resources are available on the Team plan.</p>
+      {% endif %}
     </div>
 
     <script>
@@ -575,6 +697,7 @@
       // Also keep the increment in-sync with the Day Schedule modal via localStorage ('client_view_settings').
       (function(){
         try {
+          const CAN_USE_PRO_TEAM = {{ can_use_pro_team|yesno:'true,false' }};
           const fixed = document.getElementById('use_fixed_increment');
           const squish = document.getElementById('allow_squished_bookings');
           const incInput = document.getElementById('time_increment_minutes');
@@ -591,7 +714,7 @@
           function updateState() {
             const disabled = fixed.checked;
             if (squish) {
-              try { squish.disabled = disabled; } catch(e){}
+              try { squish.disabled = (!CAN_USE_PRO_TEAM) ? true : disabled; } catch(e){}
               if (parentLabel) parentLabel.classList.toggle('squish-disabled-label', disabled);
             }
             if (incInput) {
@@ -780,25 +903,31 @@
       <div class="grid grid-cols-2 gap-4 mt-4">
          <div>
            <label class="block text-sm font-medium text-gray-700">Buffer Time Post Service Appointment</label>
-           <div class="mt-1 flex items-center gap-2">
-             <input id="buffer_hours" type="number" min="0" class="cc-field w-24" placeholder="Hours">
-             <span class="text-sm text-gray-600">Hours</span>
-             <input id="buffer_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes">
-             <span class="text-sm text-gray-600">Minutes</span>
+           <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+             <div class="mt-1 flex items-center gap-2">
+                 <input id="buffer_hours" type="number" min="0" class="cc-field w-24" placeholder="Hours" {% if not can_use_pro_team %}disabled{% endif %}>
+               <span class="text-sm text-gray-600">Hours</span>
+                 <input id="buffer_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes" {% if not can_use_pro_team %}disabled{% endif %}>
+               <span class="text-sm text-gray-600">Minutes</span>
+             </div>
+             {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
            </div>
-           <input type="hidden" name="buffer_after" id="buffer_hidden" value="{{ service.buffer_after }}">
+           <input type="hidden" name="buffer_after" id="buffer_hidden" value="{% if can_use_pro_team %}{{ service.buffer_after }}{% else %}0{% endif %}">
            <p class="mt-1 text-xs text-gray-500">Enter buffer time after appointment; saved as total minutes.</p>
          </div>
         <div>
           <label class="block text-sm font-medium text-gray-700">Allow appointment to end after availability?</label>
           <div class="mt-2">
-            <label class="inline-flex items-center">
-              <!-- hidden fallback ensures a value is always posted even when unchecked -->
-              <input type="hidden" name="allow_ends_after_availability" value="0">
-              <input type="checkbox" name="allow_ends_after_availability" value="1" {% if service.allow_ends_after_availability %}checked{% endif %}
-                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-              <span class="ml-2 text-sm text-gray-700">Allow clients to book slots that start before the availability end even if they finish after it.</span>
-            </label>
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+              <label class="inline-flex items-center">
+                <!-- hidden fallback ensures a value is always posted even when unchecked -->
+                <input type="hidden" name="allow_ends_after_availability" value="0">
+                <input type="checkbox" name="allow_ends_after_availability" value="1" {% if service.allow_ends_after_availability %}checked{% endif %}
+                         class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                <span class="ml-2 text-sm text-gray-700">Allow clients to book slots that start before the availability end even if they finish after it.</span>
+              </label>
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
           </div>
           <p class="mt-1 text-xs text-gray-500">Enable to allow the final time slot to finish after your daily availability end.</p>
         </div>
@@ -808,14 +937,20 @@
     <div class="grid grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium text-gray-700">How soon can clients book before the appointment? (In Hours)</label>
-       <input name="min_notice_hours" type="number" value="{{ service.min_notice_hours }}" min="0"
-         class="cc-field mt-1 w-full" />
+      <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+         <input name="min_notice_hours" type="number" value="{% if can_use_pro_team %}{{ service.min_notice_hours }}{% else %}24{% endif %}" min="0"
+           class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+         {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+       </div>
        <p class="mt-2 text-xs text-gray-500">Prevent last‑minute bookings (e.g. 24 = one day).</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700">How far ahead can clients book? (In Days)</label>
-       <input name="max_booking_days" type="number" value="{{ service.max_booking_days }}" min="1"
-         class="cc-field mt-1 w-full" />
+      <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+         <input name="max_booking_days" type="number" value="{% if can_use_pro_team %}{{ service.max_booking_days }}{% else %}30{% endif %}" min="1"
+           class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+         {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+       </div>
        <p class="mt-2 text-xs text-gray-500">Limit how far out clients can book.</p>
       </div>
     </div>
@@ -834,21 +969,27 @@
     <div class="section-card">
       <h2 class="text-base font-semibold">Refund Policy</h2>
         <div class="flex items-center mt-3">
-          <input type="checkbox" name="refunds_allowed" id="refunds_allowed" {% if service.refunds_allowed %}checked{% endif %}
+          <input type="checkbox" name="refunds_allowed" id="refunds_allowed" checked disabled
                  class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
           <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
         </div>
         <div class="refund-policy-controls mt-3">
           <div>
             <label class="block text-sm font-medium text-gray-700">Refund Cutoff (Hours)</label>
-            <input name="refund_cutoff_hours" type="number" value="{{ service.refund_cutoff_hours }}" min="0"
-                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">
-            <p class="mt-1 text-xs text-gray-500">Minimum 1 hour when refunds are enabled. Set to 0 by unchecking "Allow refunds".</p>
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+              <input name="refund_cutoff_hours" type="number" value="{% if can_use_pro_team %}{{ service.refund_cutoff_hours }}{% else %}24{% endif %}" min="1"
+                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" {% if not can_use_pro_team %}disabled{% endif %}>
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
+            <p class="mt-1 text-xs text-gray-500">Inside this window, refunds are not permitted.</p>
           </div>
           <div class="mt-3">
             <label class="block text-sm font-medium text-gray-700">Custom Refund Policy Text</label>
-            <textarea name="refund_policy_text" rows="3"
-                      class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm">{{ service.refund_policy_text }}</textarea>
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+              <textarea name="refund_policy_text" rows="3"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm" {% if not can_use_pro_team %}disabled{% endif %}>{{ service.refund_policy_text }}</textarea>
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
           </div>
         </div>
     </div>
@@ -867,7 +1008,11 @@
         {% endif %}
 
         <div class="mt-2 text-center">
-          <div class="text-xs text-gray-500">These weekly service availability settings are interchangeable with the Calendar page (when viewing this service). You can update them in either place.</div>
+          {% if not can_edit_service_availability %}
+            <div class="text-xs text-gray-500">With one active service during trial, availability is managed by your Calendar availability.</div>
+          {% else %}
+            <div class="text-xs text-gray-500">These weekly service availability settings are interchangeable with the Calendar page (when viewing this service). You can update them in either place.</div>
+          {% endif %}
           <a id="cc-open-calendar-from-service" href="{% url 'calendar_app:calendar' org.slug %}"
              class="inline-flex items-center px-3 py-2 mt-2 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50">
             Open in Calendar
@@ -1330,6 +1475,22 @@
     const form = document.querySelector('form.cc-form');
     if (!btns.length || !form) return;
 
+    const savingOverlay = document.getElementById('svc-saving-overlay');
+    function setSaving(isSaving){
+      try{
+        if (!savingOverlay) return;
+        if (isSaving){
+          savingOverlay.classList.add('active');
+          savingOverlay.setAttribute('aria-hidden', 'false');
+          try{ document.documentElement.setAttribute('aria-busy', 'true'); }catch(e){}
+        } else {
+          savingOverlay.classList.remove('active');
+          savingOverlay.setAttribute('aria-hidden', 'true');
+          try{ document.documentElement.removeAttribute('aria-busy'); }catch(e){}
+        }
+      }catch(e){}
+    }
+
     function getCsrf(){
       const el = form.querySelector('input[name=csrfmiddlewaretoken]');
       return el ? el.value : '';
@@ -1652,6 +1813,7 @@
 
         function showErrorBanner(msg){
           try{
+            try{ setSaving(false); }catch(e){}
             hideSavedBanner();
             let el = document.getElementById('svc-error-banner');
             if (!el){
@@ -1679,6 +1841,9 @@
         try{ const prior = document.getElementById('svc-error-banner'); if (prior) prior.style.display = 'none'; }catch(e){}
         hideSavedBanner();
 
+        // Show loading overlay during preview/apply.
+        try{ setSaving(true); }catch(e){}
+
         const payload = serializeFormToPayload();
         const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
         const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
@@ -1696,6 +1861,7 @@
               window.location.href = base + '?saved=1';
               return true;
             }
+            try{ setSaving(false); }catch(e){}
             return false;
           } catch (err) {
             showErrorBanner((err && err.message) ? err.message : String(err));
@@ -1706,25 +1872,33 @@
         const preview = await postJson(previewUrl, payload);
         if (!preview || preview.status !== 'ok'){
           const ok = await applyAndRedirect(payload);
-          if (!ok) form.submit();
+          if (!ok) {
+            try{ setSaving(false); }catch(e){}
+            form.submit();
+          }
           return;
         }
 
         const conflicts = preview.conflicts || {};
         if (Object.keys(conflicts).length === 0){
           const ok = await applyAndRedirect(payload);
-          if (!ok) form.submit();
+          if (!ok) {
+            try{ setSaving(false); }catch(e){}
+            form.submit();
+          }
           return;
         }
 
         showModal(conflicts, payload, window.__svc_current && !!window.__svc_current.use_fixed_increment, async function(){
           const ok = await applyAndRedirect(payload);
           if (!ok) {
+            try{ setSaving(false); }catch(e){}
             try { form.submit(); } catch(e){ window.location.reload(); }
           }
         });
       } catch (e){
         console.warn('preview failed', e);
+        try{ setSaving(false); }catch(_){ }
         try { form.submit(); } catch (err){ window.location.reload(); }
       }
     }
@@ -1834,12 +2008,14 @@
   // Toggle greying/disabled state of refund cutoff & policy when checkbox toggles
   (function(){
     try{
+      const CAN_USE_PRO_TEAM = {{ can_use_pro_team|yesno:'true,false' }};
       const chk = document.getElementById('refunds_allowed');
       const wrapper = document.querySelector('.refund-policy-controls');
       if (!chk || !wrapper) return;
       const inputs = wrapper.querySelectorAll('input, textarea');
       function update(){
-        const enabled = !!chk.checked;
+        // Refunds are always on, but advanced refund settings are Pro+.
+        const enabled = CAN_USE_PRO_TEAM && !!chk.checked;
         inputs.forEach(i => {
           try{ i.disabled = !enabled; }catch(e){}
         });
@@ -1997,5 +2173,65 @@
 
   } catch (e){ console.warn('svc view btn dirty wiring failed', e); }
 })();
+</script>
+
+<div id="ccAdvancedUpgradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10050;">
+  <div style="background:#fff; border-radius:12px; width:min(520px, 92vw); padding:18px 18px 16px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.25);">
+    <div style="font-weight:800; font-size:1.05rem; margin-bottom:8px; color:#111827;">Upgrade required</div>
+    <div style="color:#374151; font-size:0.95rem; line-height:1.35; margin-bottom:14px;">
+      A Pro subscription or higher is required to have access to the advanced settings features.
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:10px;">
+      <button id="ccAdvancedUpgradeCancelBtn" type="button" style="background:#e5e7eb; color:#111827; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">Cancel</button>
+      <button id="ccAdvancedUpgradeGoBtn" type="button" style="background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:800;">View pricing</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    try{
+      const CAN_USE_PRO_TEAM = {{ can_use_pro_team|yesno:'true,false' }};
+      if (CAN_USE_PRO_TEAM) return;
+      const PRICING_URL = "{% url 'calendar_app:pricing_page' org.slug %}";
+
+      function openModal(){
+        const modal = document.getElementById('ccAdvancedUpgradeModal');
+        const cancelBtn = document.getElementById('ccAdvancedUpgradeCancelBtn');
+        const goBtn = document.getElementById('ccAdvancedUpgradeGoBtn');
+        if (!modal || !cancelBtn || !goBtn){
+          const go = confirm('A Pro subscription or higher is required to have access to the advanced settings features.\n\nPress OK to view pricing, or Cancel to stay here.');
+          if (go) { try { window.location.href = PRICING_URL; } catch(e) {} }
+          return;
+        }
+        modal.style.display = 'flex';
+        function close(){ try{ modal.style.display = 'none'; }catch(e){} }
+        cancelBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} close(); };
+        goBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} try{ window.location.href = PRICING_URL; }catch(err){} };
+        modal.onclick = function(e){ try{ if (e && e.target === modal) close(); }catch(err){} };
+        try{
+          document.addEventListener('keydown', function onKey(e){
+            try{ if (e && e.key === 'Escape') close(); }catch(err){}
+          }, { once: true });
+        }catch(e){}
+      }
+
+      document.querySelectorAll('[data-cc-adv-lock]').forEach(function(el){
+        el.addEventListener('click', function(e){
+          try{ e.preventDefault(); e.stopPropagation(); }catch(err){}
+          openModal();
+        });
+        el.addEventListener('keydown', function(e){
+          try{
+            if (!e) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openModal();
+            }
+          }catch(err){}
+        });
+      });
+    }catch(e){ /* ignore */ }
+  })();
 </script>
 {% endblock %}

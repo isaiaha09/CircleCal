@@ -18,6 +18,21 @@
   @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
   .section-card { background:#fff; border:1px solid #e6edf3; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
   .section-title { font-size:1rem; font-weight:600; margin-bottom:0.5rem; }
+
+  /* Locked advanced settings overlay */
+  .cc-adv-lock-wrap { position: relative; }
+  .cc-adv-lock-wrap.cc-adv-locked,
+  .cc-adv-lock-wrap.cc-adv-locked * {
+    cursor: default !important;
+  }
+  .cc-adv-lock-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    background: rgba(255, 255, 255, 0.01);
+    cursor: default;
+    border-radius: 0.5rem;
+  }
 </style>
 {% endblock %}
 
@@ -217,18 +232,24 @@
         <div class="grid sm:grid-cols-2 gap-6">
           <div>
             <!-- Prep buffer removed: buffer_before is deprecated and not used by availability/overlap logic -->
-            <label class="block text-sm font-medium text-gray-700">Cleanup Buffer (minutes)</label>
-            <input name="buffer_after" type="number" value="0" min="0"
-              class="cc-field mt-1 w-full" />
+            <label class="block text-sm font-medium text-gray-700">Buffer Time Post-Service Appointment (minutes)</label>
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+              <input name="buffer_after" type="number" value="0" min="0" {% if not can_use_pro_team %}disabled{% endif %}
+                class="cc-field mt-1 w-full" />
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
             <p class="mt-2 text-xs text-gray-500">Blocks time after each booking.</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Allow appointment to end after availability?</label>
             <div class="mt-2">
-              <label class="inline-flex items-center">
-                <input type="checkbox" name="allow_ends_after_availability" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                <span class="ml-2 text-sm text-gray-700">Allow clients to book a slot that starts inside availability even if the appointment ends after the availability window.</span>
-              </label>
+              <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
+                <label class="inline-flex items-center">
+                  <input type="checkbox" name="allow_ends_after_availability" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                  <span class="ml-2 text-sm text-gray-700">Allow clients to book a slot that starts inside availability even if the appointment ends after the availability window.</span>
+                </label>
+                {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+              </div>
             </div>
             <p class="mt-2 text-xs text-gray-500">If enabled, the last available time slot may finish after your configured daily availability end.</p>
           </div>
@@ -250,17 +271,23 @@
               <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
             </div>
             <div>
-              <label class="inline-flex items-center">
-                <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
-              </label>
+              <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
+                <label class="inline-flex items-center">
+                  <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                  <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
+                </label>
+                {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+              </div>
               <p class="mt-1 text-xs text-gray-500">When enabled, clients will only see anchors spaced by the service duration plus cleanup buffer.</p>
             </div>
             <div>
-              <label class="inline-flex items-center">
-                <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
-              </label>
+              <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
+                <label class="inline-flex items-center">
+                  <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                  <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
+                </label>
+                {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+              </div>
               <p class="mt-1 text-xs text-gray-500">When enabled, the system will allow bookings that fit the service duration even if they don't satisfy the configured buffers. Owners will receive a notification when such bookings occur.</p>
             </div>
           </div>
@@ -269,18 +296,25 @@
         <div class="grid sm:grid-cols-2 gap-6">
           <div>
             <label class="block text-sm font-medium text-gray-700">Min Notice (hours)</label>
-            <input name="min_notice_hours" type="number" value="1" min="0"
-              class="cc-field mt-1 w-full" />
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+              <input name="min_notice_hours" type="number" value="24" min="0"
+                class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
             <p class="mt-2 text-xs text-gray-500">Prevent last‑minute bookings (e.g. 24 = one day).</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Max Advance (days)</label>
-            <input name="max_booking_days" type="number" value="30" min="1"
-              class="cc-field mt-1 w-full" />
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+              <input name="max_booking_days" type="number" value="30" min="1"
+                class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
             <p class="mt-2 text-xs text-gray-500">Limit how far out clients can book.</p>
           </div>
         </div>
 
+        {% if is_team_plan %}
         <!-- Assign service to one or more team members (Team plan users) -->
         <div class="section-card">
           <div class="section-title">Assign to team members</div>
@@ -433,22 +467,29 @@
             })();
           </script>
         </div>
+        {% endif %}
 
         <!-- Refund Policy -->
         <div class="border-t pt-6 space-y-4">
           <h2 class="text-base font-semibold">Refund Policy (Service)</h2>
           <div class="flex items-center">
-            <input type="checkbox" name="refunds_allowed" id="refunds_allowed" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            <input type="checkbox" name="refunds_allowed" id="refunds_allowed" checked disabled class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
             <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
-            <input name="refund_cutoff_hours" type="number" value="24" min="0" class="cc-field mt-1 w-full" />
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+              <input name="refund_cutoff_hours" type="number" value="24" min="1" class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
             <p class="mt-2 text-xs text-gray-500">Inside this window, refunds are not permitted.</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Custom refund policy text</label>
-            <textarea name="refund_policy_text" rows="3" class="cc-field mt-1 w-full" placeholder="Optional. Shown to clients in emails and pages."></textarea>
+            <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+              <textarea name="refund_policy_text" rows="3" class="cc-field mt-1 w-full" placeholder="Optional. Shown to clients in emails and pages." {% if not can_use_pro_team %}disabled{% endif %}></textarea>
+              {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+            </div>
           </div>
         </div>
 
@@ -474,7 +515,7 @@
         </ul>
       </div>
       <div class="bg-blue-50 border border-blue-200 rounded-xl p-6 text-sm text-blue-700">
-        Need recurring packages or group sessions? Upgrade to Pro for advanced booking logic.
+        Upgrade to Pro or higher for advanced booking logic.
       </div>
     </div>
   </div>
@@ -486,6 +527,19 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<div id="ccAdvancedUpgradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10050;">
+  <div style="background:#fff; border-radius:12px; width:min(520px, 92vw); padding:18px 18px 16px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.25);">
+    <div style="font-weight:800; font-size:1.05rem; margin-bottom:8px; color:#111827;">Upgrade required</div>
+    <div style="color:#374151; font-size:0.95rem; line-height:1.35; margin-bottom:14px;">
+      A Pro subscription or higher is required to have access to the advanced settings features.
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:10px;">
+      <button id="ccAdvancedUpgradeCancelBtn" type="button" style="background:#e5e7eb; color:#111827; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">Cancel</button>
+      <button id="ccAdvancedUpgradeGoBtn" type="button" style="background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:800;">View pricing</button>
+    </div>
+  </div>
+</div>
+
 <script>
   function slugify(str){
     return str.toString().trim().toLowerCase()
@@ -503,5 +557,51 @@
     slugPreview.setAttribute('title', full); // hover shows full slug
   });
 </script>
-  </script>
+
+<script>
+  (function(){
+    try{
+      const CAN_USE_PRO_TEAM = {{ can_use_pro_team|yesno:'true,false' }};
+      if (CAN_USE_PRO_TEAM) return;
+      const PRICING_URL = "{% url 'calendar_app:pricing_page' org.slug %}";
+
+      function openModal(){
+        const modal = document.getElementById('ccAdvancedUpgradeModal');
+        const cancelBtn = document.getElementById('ccAdvancedUpgradeCancelBtn');
+        const goBtn = document.getElementById('ccAdvancedUpgradeGoBtn');
+        if (!modal || !cancelBtn || !goBtn){
+          const go = confirm('A Pro subscription or higher is required to have access to the advanced settings features.\n\nPress OK to view pricing, or Cancel to stay here.');
+          if (go) { try { window.location.href = PRICING_URL; } catch(e) {} }
+          return;
+        }
+        modal.style.display = 'flex';
+        function close(){ try{ modal.style.display = 'none'; }catch(e){} }
+        cancelBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} close(); };
+        goBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} try{ window.location.href = PRICING_URL; }catch(err){} };
+        modal.onclick = function(e){ try{ if (e && e.target === modal) close(); }catch(err){} };
+        try{
+          document.addEventListener('keydown', function onKey(e){
+            try{ if (e && e.key === 'Escape') close(); }catch(err){}
+          }, { once: true });
+        }catch(e){}
+      }
+
+      document.querySelectorAll('[data-cc-adv-lock]').forEach(function(el){
+        el.addEventListener('click', function(e){
+          try{ e.preventDefault(); e.stopPropagation(); }catch(err){}
+          openModal();
+        });
+        el.addEventListener('keydown', function(e){
+          try{
+            if (!e) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openModal();
+            }
+          }catch(err){}
+        });
+      });
+    }catch(e){ /* ignore */ }
+  })();
+</script>
 {% endblock %}

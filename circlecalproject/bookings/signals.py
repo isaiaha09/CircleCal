@@ -25,7 +25,14 @@ def send_cancellation_email(sender, instance, **kwargs):
     """Send cancellation email when booking is deleted."""
     # Per-date overrides (service NULL) are internal schedule annotations.
     # They should not generate customer cancellation emails.
-    if getattr(instance, 'service', None) is None:
+    # Use service_id to avoid triggering a Service fetch (which can raise
+    # DoesNotExist during cascading deletes).
+    if getattr(instance, 'service_id', None) is None:
+        return
+    # If organization is missing (inconsistent DB or cascading org delete),
+    # do not attempt to email.
+    org_id = getattr(instance, 'organization_id', None)
+    if not org_id or not Organization.objects.filter(id=org_id).exists():
         return
     if instance.client_email and not instance.is_blocking:
         try:
@@ -57,10 +64,27 @@ def _org_local_date_for(dt, org):
 
 
 def _maybe_remove_freeze(booking_instance):
-    svc = booking_instance.service
+    # Use service_id and safe lookup so this cleanup never crashes if the
+    # Service row is already deleted (e.g., cascading org delete).
+    service_id = getattr(booking_instance, 'service_id', None)
+    if not service_id:
+        return
+    try:
+        from .models import Service
+        svc = Service.objects.filter(id=service_id).first()
+    except Exception:
+        return
     if not svc:
         return
-    org = booking_instance.organization
+    org_id = getattr(booking_instance, 'organization_id', None)
+    if not org_id:
+        return
+    try:
+        org = Organization.objects.filter(id=org_id).first()
+    except Exception:
+        return
+    if not org:
+        return
     try:
         target_date = _org_local_date_for(booking_instance.start, org)
     except Exception:
@@ -106,8 +130,17 @@ def booking_post_delete_audit(sender, instance, **kwargs):
         try:
             # Per-date overrides (service NULL) are internal schedule annotations.
             # Do not show them in the "Deleted bookings" audit trail.
-            if getattr(instance, 'service', None) is None:
+            service_id = getattr(instance, 'service_id', None)
+            if service_id is None:
                 return
+
+            svc = None
+            try:
+                # May raise Service.DoesNotExist during cascading deletes.
+                svc = instance.service
+            except Exception:
+                svc = None
+
             snapshot = {
                 'id': instance.id,
                 'public_ref': getattr(instance, 'public_ref', None),
@@ -117,8 +150,8 @@ def booking_post_delete_audit(sender, instance, **kwargs):
                 'client_name': getattr(instance, 'client_name', None),
                 'client_email': getattr(instance, 'client_email', None),
                 'is_blocking': bool(getattr(instance, 'is_blocking', False)),
-                'service_id': instance.service.id if getattr(instance, 'service', None) else None,
-                'service_slug': instance.service.slug if getattr(instance, 'service', None) else None,
+                'service_id': service_id,
+                'service_slug': getattr(svc, 'slug', None),
                 'created_at': instance.created_at.isoformat() if getattr(instance, 'created_at', None) else None,
             }
 
@@ -130,12 +163,19 @@ def booking_post_delete_audit(sender, instance, **kwargs):
             else:
                 event_type = AuditBooking.EVENT_DELETED
 
+            org_id = getattr(instance, 'organization_id', None)
+            if not org_id:
+                return
+            org = Organization.objects.filter(id=org_id).first()
+            if not org:
+                return
+
             AuditBooking.objects.create(
-                organization=instance.organization,
+                organization=org,
                 booking_id=instance.id,
                 event_type=event_type,
                 booking_snapshot=snapshot,
-                service=instance.service if getattr(instance, 'service', None) else None,
+                service=svc,
                 start=instance.start if getattr(instance, 'start', None) else None,
                 end=instance.end if getattr(instance, 'end', None) else None,
                 client_name=getattr(instance, 'client_name', ''),

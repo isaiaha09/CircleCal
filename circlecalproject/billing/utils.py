@@ -10,6 +10,11 @@ MULTIPLE_SERVICE_PLANS = {PRO_SLUG, TEAM_SLUG}
 MULTI_STAFF_PLANS = {TEAM_SLUG}
 
 
+def can_use_resources(org: Organization) -> bool:
+    """Facility resource booking (rooms/cages) is a Team-only feature."""
+    return get_plan_slug(org) == TEAM_SLUG
+
+
 def get_subscription(org: Organization) -> Subscription | None:
     try:
         return org.subscription
@@ -30,6 +35,11 @@ def can_edit_weekly_availability(org: Organization) -> bool:
 
 
 def can_add_service(org: Organization) -> bool:
+    sub = get_subscription(org)
+    # Trialing is treated like Basic for feature gates.
+    if sub and getattr(sub, "status", "") == "trialing":
+        return org.services.filter(is_active=True).count() < 1
+
     slug = get_plan_slug(org)
     if slug in MULTIPLE_SERVICE_PLANS:
         return True

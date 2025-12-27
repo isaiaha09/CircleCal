@@ -3,6 +3,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_datetime
 from django.utils.timezone import make_aware
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -12,10 +13,10 @@ from typing import Optional
 from accounts.models import Business as Organization
 from accounts.models import Membership
 from bookings.models import Service
+from bookings.models import FacilityResource, ServiceResource
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
-from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.core.mail import send_mail
 from datetime import timedelta
@@ -25,7 +26,41 @@ from bookings.models import ServiceAssignment
 from calendar_app.utils import user_has_role  # <-- single source of truth
 from calendar_app.permissions import require_roles
 from billing.utils import get_subscription
-from billing.utils import get_plan_slug, TEAM_SLUG
+from billing.utils import get_plan_slug, TEAM_SLUG, PRO_SLUG
+
+
+def _can_use_per_date_overrides(org: Organization) -> bool:
+    """Per-date overrides are available on Pro/Team only (not Trial/Basic)."""
+    try:
+        plan_slug = get_plan_slug(org)
+        if plan_slug not in {PRO_SLUG, TEAM_SLUG}:
+            return False
+        sub = get_subscription(org)
+        if sub and getattr(sub, 'status', '') == 'trialing':
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _trial_single_active_service(org: Organization) -> bool:
+    """True when trial onboarding should use Calendar (org weekly) availability.
+
+    Requirement: when only one service is active (trial), per-service availability
+    should be disabled and availability should follow calendar.html (org weekly).
+    """
+    try:
+        sub = get_subscription(org)
+        if not sub or getattr(sub, 'status', '') != 'trialing':
+            return False
+    except Exception:
+        return False
+
+    try:
+        return org.services.filter(is_active=True).count() <= 1
+    except Exception:
+        # Be conservative: if we can't count, don't change behavior.
+        return False
 
 
 def _active_service_freeze_for_date(org, service, target_date, org_tz):
@@ -106,6 +141,9 @@ def _member_weekly_windows_for_date(org, membership, date_obj, org_tz):
 
 def _service_has_explicit_weekly(service):
     try:
+        org = getattr(service, 'organization', None)
+        if org and _trial_single_active_service(org):
+            return False
         return service.weekly_availability.filter(is_active=True).exists()
     except Exception:
         return False
@@ -123,6 +161,10 @@ def _service_requires_explicit_weekly(org, service: Optional[Service]):
     In these cases, an empty service schedule means "no availability".
     """
     if not service:
+        return False
+
+    # Trial single-service onboarding: always fall back to org weekly availability.
+    if _trial_single_active_service(org):
         return False
 
     try:
@@ -156,6 +198,13 @@ def _service_requires_explicit_weekly(org, service: Optional[Service]):
 
 
 def _service_weekly_windows_for_date(service, date_obj, org_tz):
+    try:
+        org = getattr(service, 'organization', None)
+        if org and _trial_single_active_service(org):
+            return []
+    except Exception:
+        pass
+
     weekday = date_obj.weekday()
     try:
         rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
@@ -327,7 +376,83 @@ def booking_to_event(bk: Booking):
         # be resilient to any model quirks
         pass
 
+    # Facility resource assignment (cage/room/etc) - Team plan only
+    try:
+        org = getattr(bk, 'organization', None)
+        from billing.utils import can_use_resources
+        if org and can_use_resources(org) and getattr(bk, 'resource_id', None):
+            event['extendedProps']['resource_id'] = bk.resource_id
+            event['extendedProps']['resource_name'] = getattr(getattr(bk, 'resource', None), 'name', None)
+    except Exception:
+        pass
+
     return event
+
+
+def _service_resource_ids(service: Optional[Service]):
+    """Return list of facility resource IDs allowed for this service."""
+    if not service:
+        return []
+    # Team-plan only: treat as if no resources exist on other plans.
+    try:
+        org = getattr(service, 'organization', None)
+        if org is not None:
+            from billing.utils import can_use_resources
+            if not can_use_resources(org):
+                return []
+    except Exception:
+        # Be conservative: if billing cannot be evaluated, disable resources.
+        return []
+    try:
+        return list(
+            ServiceResource.objects.filter(service=service, resource__is_active=True)
+            .values_list('resource_id', flat=True)
+        )
+    except Exception:
+        return []
+
+
+def _resource_overlaps_any_booking(org: Organization, start_dt, end_dt, service: Optional[Service], resource_id: int) -> bool:
+    """True if the given resource is busy for the candidate window."""
+    if not resource_id:
+        return True
+    # Reuse the overlap logic but scope the candidates to a specific resource.
+    return _has_overlap(org, start_dt, end_dt, service=service, resource_id=int(resource_id))
+
+
+def _find_available_resource_id(org: Organization, service: Service, start_dt, end_dt) -> Optional[int]:
+    """Return an available resource_id for this service/slot, else None.
+
+    If the service has no resource links configured, returns None.
+    """
+    resource_ids = _service_resource_ids(service)
+    if not resource_ids:
+        return None
+
+    for rid in resource_ids:
+        if not _resource_overlaps_any_booking(org, start_dt, end_dt, service=service, resource_id=rid):
+            return int(rid)
+    return None
+
+
+def _validate_resource_for_service(org: Organization, service: Service, resource_id: Optional[int]) -> Optional[FacilityResource]:
+    """Return FacilityResource if it belongs to org and is allowed for service (when configured)."""
+    if not resource_id:
+        return None
+
+    try:
+        res = FacilityResource.objects.filter(id=int(resource_id), organization=org, is_active=True).first()
+    except Exception:
+        return None
+    if not res:
+        return None
+
+    allowed_ids = _service_resource_ids(service)
+    # If no resource links configured, treat as "service does not use discrete resources".
+    if not allowed_ids:
+        return None
+
+    return res if res.id in allowed_ids else None
 
 
 def _anchors_for_date(org, service, day_date, org_tz, total_length):
@@ -340,9 +465,15 @@ def _anchors_for_date(org, service, day_date, org_tz, total_length):
 
     # Determine base windows for that weekday
     weekday = day_date.weekday()
-    svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+    try:
+        if _trial_single_active_service(org):
+            svc_rows = None
+        else:
+            svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+    except Exception:
+        svc_rows = None
     base_windows = []
-    if svc_rows.exists():
+    if svc_rows and svc_rows.exists():
         for w in svc_rows.order_by('start_time'):
             w_start = datetime(day_date.year, day_date.month, day_date.day, w.start_time.hour, w.start_time.minute, tzinfo=org_tz)
             w_end = datetime(day_date.year, day_date.month, day_date.day, w.end_time.hour, w.end_time.minute, tzinfo=org_tz)
@@ -385,7 +516,7 @@ def _require_org_and_role(request, roles=("owner", "admin", "manager", "staff"))
     return org, None
 
 
-def _has_overlap(org, start_dt, end_dt, service=None):
+def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int] = None):
     """
     Prevent overlapping bookings inside the same organization.
     If `service` is provided, take its `buffer_before` and `buffer_after` into account
@@ -444,6 +575,12 @@ def _has_overlap(org, start_dt, end_dt, service=None):
         is_blocking=False,
         start__lt=end_utc + buf_after_td,
     )
+
+    # When a resource is specified, only treat that resource as conflicting.
+    # This enables discrete facility booking (cage/room) where different resources
+    # can be booked concurrently.
+    if resource_id is not None:
+        candidate_qs = candidate_qs.filter(resource_id=int(resource_id))
 
     for b in candidate_qs:
         # Normalize booking times to UTC if possible
@@ -689,7 +826,10 @@ def is_within_availability(org, start_dt, end_dt, service=None):
         # own schedule (unassigned/shared/partitioned solo). In that case, days
         # with no service rows should be unavailable (do NOT fall back to org weekly).
         try:
-            svc_has_any = service.weekly_availability.filter(is_active=True).exists()
+            if _trial_single_active_service(org):
+                svc_has_any = False
+            else:
+                svc_has_any = service.weekly_availability.filter(is_active=True).exists()
         except Exception:
             svc_has_any = False
 
@@ -701,7 +841,10 @@ def is_within_availability(org, start_dt, end_dt, service=None):
         svc_is_scoped = bool(svc_has_any or svc_requires_explicit)
 
         try:
-            svc_rows = service.weekly_availability.filter(is_active=True, weekday=start_dt.weekday())
+            if _trial_single_active_service(org):
+                svc_rows = None
+            else:
+                svc_rows = service.weekly_availability.filter(is_active=True, weekday=start_dt.weekday())
         except Exception:
             svc_rows = None
 
@@ -870,8 +1013,27 @@ def create_booking(request, org_slug):
         # enforce that the requested booking doesn't overlap existing bookings
         # when considering the service's buffers.
 
-    # Overlap check (buffer-aware when `service` provided)
-    overlap_result = _has_overlap(org, start_dt, end_dt, service=service)
+    # Resource selection/validation (optional)
+    requested_resource_id = data.get('resource_id')
+    selected_resource = None
+    selected_resource_id = None
+    # If the service is configured with facility resources, either validate the requested
+    # resource or auto-assign an available one.
+    svc_resource_ids = _service_resource_ids(service)
+    if svc_resource_ids:
+        if requested_resource_id is not None:
+            selected_resource = _validate_resource_for_service(org, service, requested_resource_id)
+            if not selected_resource:
+                return HttpResponseBadRequest('Invalid or unavailable resource for this service.')
+            selected_resource_id = selected_resource.id
+        else:
+            selected_resource_id = _find_available_resource_id(org, service, start_dt, end_dt)
+            if not selected_resource_id:
+                return HttpResponseBadRequest('No facility resources are available for that time slot.')
+
+    # Overlap check (buffer-aware when `service` provided). If this service uses
+    # discrete resources, scope overlap checks to the selected resource.
+    overlap_result = _has_overlap(org, start_dt, end_dt, service=service, resource_id=selected_resource_id)
     squish_warning = None
     if overlap_result:
         # If the service allows 'squished' bookings, permit creation but add a non-blocking warning
@@ -900,6 +1062,7 @@ def create_booking(request, org_slug):
         client_name=data.get('client_name', ''),
         client_email=data.get('client_email', ''),
         is_blocking=False,   # service bookings are never "blocking" events
+        resource_id=selected_resource_id,
     )
     resp = {
         'status': 'ok',
@@ -932,6 +1095,9 @@ def batch_create(request, org_slug):
     org, err = _require_org_and_role(request)
     if err:
         return err
+
+    if not _can_use_per_date_overrides(org):
+        return JsonResponse({'error': 'Per-date overrides are available on the Pro or Team plan.'}, status=403)
 
     try:
         data = json.loads(request.body.decode('utf-8'))
@@ -1126,6 +1292,9 @@ def batch_delete(request, org_slug):
     if err:
         return err
 
+    if not _can_use_per_date_overrides(org):
+        return JsonResponse({'error': 'Per-date overrides are available on the Pro or Team plan.'}, status=403)
+
     try:
         data = json.loads(request.body.decode('utf-8'))
     except Exception:
@@ -1213,6 +1382,8 @@ def public_service_page(request, org_slug, service_slug):
     if not service:
         return redirect(reverse('bookings:public_org_page', args=[org.slug]))
 
+    show_with_line = (get_plan_slug(org) == TEAM_SLUG)
+
     if request.method == "POST":
         client_name = request.POST.get("client_name")
         client_email = request.POST.get("client_email")
@@ -1254,7 +1425,9 @@ def public_service_page(request, org_slug, service_slug):
         if conflict:
             return render(request, "public/public_service_page.html", {
                 "org": org,
+                "services": services,
                 "service": service,
+                "show_with_line": show_with_line,
                 "error": "Sorry, that time was just booked. Please choose another slot.",
             })
 
@@ -1430,29 +1603,34 @@ def public_service_page(request, org_slug, service_slug):
             trialing_active = True
             trial_end_date = subscription.trial_end
     
-    # Attach assigned member display names to services for client UI
-    try:
-        from .models import ServiceAssignment
-        ass_qs = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user__profile', 'service', 'membership__user')
-        ass_map = {}
-        for sa in ass_qs:
-            sslug = sa.service.slug
-            user = getattr(sa.membership, 'user', None)
-            name = ''
-            try:
-                profile = getattr(user, 'profile', None)
-                if profile and getattr(profile, 'display_name', None):
-                    name = profile.display_name
-                else:
-                    full = user.get_full_name() if getattr(user, 'get_full_name', None) else ''
-                    name = full if full else getattr(user, 'email', '')
-            except Exception:
-                name = getattr(user, 'email', '')
-            ass_map.setdefault(sslug, []).append(name)
-        for s in services:
-            s.assigned_names = ', '.join(ass_map.get(s.slug, []))
-        service.assigned_names = ', '.join(ass_map.get(service.slug, []))
-    except Exception:
+    # Attach assigned member display names to services for client UI (Team plan only)
+    if show_with_line:
+        try:
+            from .models import ServiceAssignment
+            ass_qs = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user__profile', 'service', 'membership__user')
+            ass_map = {}
+            for sa in ass_qs:
+                sslug = sa.service.slug
+                user = getattr(sa.membership, 'user', None)
+                name = ''
+                try:
+                    profile = getattr(user, 'profile', None)
+                    if profile and getattr(profile, 'display_name', None):
+                        name = profile.display_name
+                    else:
+                        full = user.get_full_name() if getattr(user, 'get_full_name', None) else ''
+                        name = full if full else getattr(user, 'email', '')
+                except Exception:
+                    name = getattr(user, 'email', '')
+                ass_map.setdefault(sslug, []).append(name)
+            for s in services:
+                s.assigned_names = ', '.join(ass_map.get(s.slug, []))
+            service.assigned_names = ', '.join(ass_map.get(service.slug, []))
+        except Exception:
+            for s in services:
+                s.assigned_names = ''
+            service.assigned_names = ''
+    else:
         for s in services:
             s.assigned_names = ''
         service.assigned_names = ''
@@ -1466,7 +1644,10 @@ def public_service_page(request, org_slug, service_slug):
     service_weekly_map = {}
     for s in services:
         try:
-            svc_has_any = s.weekly_availability.filter(is_active=True).exists()
+            if _trial_single_active_service(org):
+                svc_has_any = False
+            else:
+                svc_has_any = s.weekly_availability.filter(is_active=True).exists()
         except Exception:
             svc_has_any = False
 
@@ -1479,7 +1660,10 @@ def public_service_page(request, org_slug, service_slug):
         per_day = []
         for ui in range(7):
             model_wd = (ui - 1) % 7  # convert UI 0=Sun..6=Sat -> model 0=Mon..6=Sun
-            svc_rows = list(s.weekly_availability.filter(is_active=True, weekday=model_wd).order_by('start_time'))
+            if _trial_single_active_service(org):
+                svc_rows = []
+            else:
+                svc_rows = list(s.weekly_availability.filter(is_active=True, weekday=model_wd).order_by('start_time'))
             if svc_rows:
                 per_day.append([f"{r.start_time.strftime('%H:%M')}-{r.end_time.strftime('%H:%M')}" for r in svc_rows])
             else:
@@ -1503,6 +1687,7 @@ def public_service_page(request, org_slug, service_slug):
         "service": service,
         "trialing_active": trialing_active,
         "trial_end_date": trial_end_date,
+        "show_with_line": show_with_line,
         "service_weekly_map_json": json.dumps(service_weekly_map),
         # Support reschedule GET params to prefill client info and attach reschedule metadata
         'reschedule_source': request.GET.get('reschedule_source') or request.GET.get('source'),
@@ -1510,9 +1695,6 @@ def public_service_page(request, org_slug, service_slug):
         'prefill_client_name': request.GET.get('client_name') or '',
         'prefill_client_email': request.GET.get('client_email') or '',
     })
-
-
-
 
 def booking_success(request, org_slug, service_slug, booking_id):
     org = get_object_or_404(Organization, slug=org_slug)
@@ -1523,7 +1705,6 @@ def booking_success(request, org_slug, service_slug, booking_id):
         "service": service,
         "booking": booking,
     })
-
 
 @require_http_methods(["GET"])
 def reschedule_booking(request, booking_id):
@@ -1618,10 +1799,6 @@ def create_service(request, org_slug):
         return redirect("services_page", org_slug=org.slug)
 
     return render(request, "calendar/create_service.html", { "org": org })
-
-
-
-
 
 
 
@@ -1826,7 +2003,10 @@ def service_availability(request, org_slug, service_slug):
             # IMPORTANT: if a service has any active service-weekly rows, it is
             # restricted to ONLY those days/times (no per-day fallback to org weekly).
             try:
-                svc_has_any = service.weekly_availability.filter(is_active=True).exists()
+                if _trial_single_active_service(org):
+                    svc_has_any = False
+                else:
+                    svc_has_any = service.weekly_availability.filter(is_active=True).exists()
             except Exception:
                 svc_has_any = False
 
@@ -1837,8 +2017,12 @@ def service_availability(request, org_slug, service_slug):
 
             svc_is_scoped = bool(svc_has_any or svc_requires_explicit)
 
-            svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
-            if svc_rows.exists():
+            if _trial_single_active_service(org):
+                svc_rows = None
+            else:
+                svc_rows = service.weekly_availability.filter(is_active=True, weekday=weekday)
+
+            if svc_rows and svc_rows.exists():
                 base_windows = []
                 for w in svc_rows.order_by('start_time'):
                     w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
@@ -1880,6 +2064,10 @@ def service_availability(request, org_slug, service_slug):
             display_inc = timedelta(minutes=service.duration)
 
     slot_increment = display_inc
+
+    # If this service is configured with discrete facility resources (cages/rooms),
+    # availability should be computed as "any resource free" rather than org-wide capacity=1.
+    svc_resource_ids = _service_resource_ids(service)
 
     for win_start, win_end in base_windows:
         # Keep windows even if their early portion violates min notice; we'll just skip early slots.
@@ -1948,6 +2136,69 @@ def service_availability(request, org_slug, service_slug):
         # duration; otherwise respect the full spacing (duration + buffer_after)
         min_needed = duration if allow_ends_after else (total_length if apply_edge_buffers else duration)
         if window_end - win_start < min_needed:
+            continue
+
+        # Resource-aware availability: iterate candidate slots and include them when
+        # at least one allowed resource is available.
+        if svc_resource_ids:
+            if apply_edge_buffers:
+                slot_increment = total_length
+            else:
+                slot_increment = display_inc
+
+            slot_start = win_start.replace(second=0, microsecond=0)
+            while slot_start < window_end:
+                slot_end = slot_start + duration
+
+                # If owner disallows ending after availability, make sure slot fits in window
+                if not allow_ends_after:
+                    needed = (total_length if apply_edge_buffers else duration)
+                    if slot_start + needed > window_end:
+                        break
+
+                    # If service does NOT allow squished bookings, ensure candidate's
+                    # post-buffer does not violate the window edge.
+                    if not allow_squished:
+                        try:
+                            cand_end_plus = slot_end + buffer_after
+                        except Exception:
+                            cand_end_plus = slot_end
+                        try:
+                            ends_at_window = (slot_end == window_end)
+                        except Exception:
+                            ends_at_window = False
+                        if not ends_at_window and cand_end_plus > window_end:
+                            slot_start += slot_increment
+                            continue
+
+                # Weekly availability enforcement
+                if not availability_override_windows and not is_within_availability(org, slot_start, slot_end, service):
+                    slot_start += slot_increment
+                    continue
+
+                # Min notice handling
+                try:
+                    if slot_start < earliest_allowed:
+                        slot_start += slot_increment
+                        continue
+                except Exception:
+                    pass
+
+                # Facility resource enforcement: require at least one free resource.
+                if _find_available_resource_id(org, service, slot_start, slot_end) is None:
+                    slot_start += slot_increment
+                    continue
+
+                slot_info = {
+                    "start": slot_start.isoformat(),
+                    "end": slot_end.isoformat(),
+                    "used_freeze": bool(freeze),
+                    "freeze_date": (freeze.date.isoformat() if freeze and getattr(freeze, 'date', None) else None),
+                }
+                available_slots.append(slot_info)
+
+                slot_start += slot_increment
+
             continue
 
         # Build a list of busy intervals (with after-buffers applied) that intersect this window
@@ -2083,45 +2334,22 @@ def service_effective_settings(request, org_slug, service_slug):
     except Exception:
         target_date = None
 
-    # Default to org-local today if no valid date provided
+    try:
+        org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+    except Exception:
+        org_tz = timezone.get_current_timezone()
+
     if not target_date:
-        try:
-            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
-        except Exception:
-            org_tz = timezone.get_current_timezone()
         target_date = timezone.now().astimezone(org_tz).date()
 
-    # Try to locate a freeze for this service/date
+    freeze = None
     try:
-        from bookings.models import ServiceSettingFreeze
-        freeze = ServiceSettingFreeze.objects.filter(service=service, date=target_date).first()
-        # If a freeze exists but there are no bookings on that date anymore
-        # (for example bookings were deleted/cancelled), ignore the freeze so
-        # the date becomes malleable again.
-        if freeze:
-            try:
-                # Determine org-local day range for the target_date
-                try:
-                    org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
-                except Exception:
-                    org_tz = timezone.get_current_timezone()
-                day_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0)
-                if day_start.tzinfo is None:
-                    day_start = make_aware(day_start, org_tz)
-                day_end = day_start + timedelta(days=1)
-                # If there are no bookings for this service in that day window, ignore the freeze
-                has_bookings = Booking.objects.filter(service=service, organization=org, start__gte=day_start, start__lt=day_end).exists()
-                if not has_bookings:
-                    freeze = None
-            except Exception:
-                # If anything goes wrong checking bookings, fall back to honoring the freeze
-                pass
+        freeze = _active_service_freeze_for_date(org, service, target_date, org_tz)
     except Exception:
         freeze = None
 
-    if freeze and isinstance(freeze.frozen_settings, dict):
+    if freeze and isinstance(getattr(freeze, 'frozen_settings', None), dict):
         out = dict(freeze.frozen_settings)
-        # Ensure types are normalized
         out['use_fixed_increment'] = bool(out.get('use_fixed_increment', False))
         out['allow_ends_after_availability'] = bool(out.get('allow_ends_after_availability', False))
         out['allow_squished_bookings'] = bool(out.get('allow_squished_bookings', False))
@@ -2135,10 +2363,8 @@ def service_effective_settings(request, org_slug, service_slug):
             'allow_squished_bookings': bool(getattr(service, 'allow_squished_bookings', False)),
         }
 
-    # Include service id/slug for convenience
     out['service_id'] = service.id
     out['service_slug'] = service.slug
-
     return JsonResponse(out)
 
 
@@ -2204,7 +2430,10 @@ def batch_availability_summary(request, org_slug, service_slug):
     # If this service is explicitly scoped (has any active service-weekly rows OR
     # is unassigned/shared/partitioned), days without service rows are unavailable.
     try:
-        svc_has_any_weekly = service.weekly_availability.filter(is_active=True).exists()
+        if _trial_single_active_service(org):
+            svc_has_any_weekly = False
+        else:
+            svc_has_any_weekly = service.weekly_availability.filter(is_active=True).exists()
     except Exception:
         svc_has_any_weekly = False
 
@@ -2301,7 +2530,10 @@ def batch_availability_summary(request, org_slug, service_slug):
                         continue
             else:
                 try:
-                    svc_rows = service.weekly_availability.filter(is_active=True, weekday=day_start.weekday()).order_by('start_time')
+                    if _trial_single_active_service(org):
+                        svc_rows = None
+                    else:
+                        svc_rows = service.weekly_availability.filter(is_active=True, weekday=day_start.weekday()).order_by('start_time')
                 except Exception:
                     svc_rows = None
 

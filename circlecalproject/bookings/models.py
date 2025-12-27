@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -59,12 +60,73 @@ class Service(models.Model):
     refund_policy_text = models.TextField(blank=True, help_text="Optional custom refund policy text shown to clients.")
 
     def __str__(self):
-        return f"{self.name} ({self.organization.name})"
+        try:
+            org_name = self.organization.name
+        except Exception:
+            org_name = f"org_id={self.organization_id}"
+        return f"{self.name} ({org_name})"
 
     class Meta:
         indexes = [
             models.Index(fields=["organization", "is_active"]),
         ]
+
+
+class FacilityResource(models.Model):
+    """A discrete bookable facility resource (e.g., Cage #1, Room A).
+
+    Resources are organization-scoped and can be linked to one or more Services.
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="facility_resources"
+    )
+    name = models.CharField(max_length=120)
+    slug = models.SlugField()
+    is_active = models.BooleanField(default=True)
+    # How many distinct services may link to this resource.
+    # - 1 means exclusive to one service (default)
+    # - 2+ allows sharing across a fixed number of services
+    # - 0 means unlimited sharing
+    max_services = models.IntegerField(
+        default=1,
+        validators=[MinValueValidator(0)],
+        help_text="Maximum number of services that can link to this resource (0 = unlimited).",
+    )
+
+    class Meta:
+        unique_together = ("organization", "slug")
+        indexes = [
+            models.Index(fields=["organization", "is_active"]),
+        ]
+
+    def __str__(self):
+        try:
+            org_slug = self.organization.slug
+        except Exception:
+            org_slug = f"org_id={self.organization_id}"
+        return f"{self.name} ({org_slug})"
+
+
+class ServiceResource(models.Model):
+    """Links a Service to allowed facility resources."""
+    service = models.ForeignKey(
+        'Service', on_delete=models.CASCADE, related_name='resource_links'
+    )
+    resource = models.ForeignKey(
+        'FacilityResource', on_delete=models.CASCADE, related_name='service_links'
+    )
+
+    class Meta:
+        unique_together = ("service", "resource")
+        indexes = [
+            models.Index(fields=["service"]),
+            models.Index(fields=["resource"]),
+        ]
+
+    def __str__(self):
+        # Avoid dereferencing potentially-orphaned FKs during admin delete
+        # confirmation, which can raise DoesNotExist.
+        return f"service_id={self.service_id} -> resource_id={self.resource_id}"
 
 
 
@@ -99,6 +161,15 @@ class Booking(models.Model):
         null=True,
         blank=True,
         related_name='assigned_bookings'
+    )
+
+    # Optional discrete facility resource assignment (cage/room/etc).
+    resource = models.ForeignKey(
+        'FacilityResource',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bookings'
     )
 
     def __str__(self):
@@ -139,7 +210,11 @@ class OrgSettings(models.Model):
     org_refund_policy_text = models.TextField(blank=True)
 
     def __str__(self):
-        return f"Settings for {self.organization.name}"
+        try:
+            org_name = self.organization.name
+        except Exception:
+            org_name = f"org_id={self.organization_id}"
+        return f"Settings for {org_name}"
 
 
 class WeeklyAvailability(models.Model):
@@ -161,7 +236,11 @@ class WeeklyAvailability(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.organization.slug} {self.weekday} {self.start_time}-{self.end_time}"
+        try:
+            org_slug = self.organization.slug
+        except Exception:
+            org_slug = f"org_id={self.organization_id}"
+        return f"{org_slug} {self.weekday} {self.start_time}-{self.end_time}"
 
     def clean(self):
         if self.end_time <= self.start_time:
@@ -186,7 +265,9 @@ class ServiceWeeklyAvailability(models.Model):
         ]
 
     def __str__(self):
-        return f"svc-{self.service.id} {self.weekday} {self.start_time}-{self.end_time}"
+        # Use *_id to avoid triggering a DB fetch (and possible DoesNotExist)
+        # when rows are inconsistent.
+        return f"svc-{self.service_id} {self.weekday} {self.start_time}-{self.end_time}"
 
     def clean(self):
         if self.end_time <= self.start_time:
@@ -265,7 +346,9 @@ class ServiceSettingFreeze(models.Model):
         unique_together = ('service', 'date')
 
     def __str__(self):
-        return f"Freeze for {self.service} on {self.date}"
+        # Avoid dereferencing service FK; admin delete confirmation calls str()
+        # on related objects and should not crash if data is inconsistent.
+        return f"Freeze for service_id={self.service_id} on {self.date}"
 
 
 class ServiceAssignment(models.Model):
@@ -283,7 +366,8 @@ class ServiceAssignment(models.Model):
         unique_together = ('service', 'membership')
 
     def __str__(self):
-        return f"{self.service} assigned to {self.membership}"
+        # service may be missing in an inconsistent DB; use IDs to keep str() safe.
+        return f"service_id={self.service_id} assigned to membership_id={self.membership_id}"
 
 
 class AuditBooking(models.Model):

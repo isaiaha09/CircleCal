@@ -8,7 +8,7 @@ import json
 from django.utils.text import slugify
 from django.middleware.csrf import get_token
 from accounts.models import Business as Organization, Membership, Invite
-from bookings.models import Booking, Service, ServiceSettingFreeze, AuditBooking
+from bookings.models import Booking, Service, ServiceSettingFreeze, AuditBooking, FacilityResource, ServiceResource
 from bookings.views import _has_overlap
 from bookings.models import WeeklyAvailability, ServiceWeeklyAvailability, MemberWeeklyAvailability
 from django.db import transaction
@@ -31,6 +31,193 @@ from bookings.emails import send_booking_confirmation
 from django.db.models import Count
 from django.core.mail import send_mail
 from calendar_app.forms import ContactForm
+
+
+def _unique_resource_slug_for_org(org: Organization, base_slug: str, exclude_id: int = None) -> str:
+    base_slug = (base_slug or '').strip() or get_random_string(8)
+    slug_candidate = base_slug
+    counter = 1
+    qs = FacilityResource.objects.filter(organization=org)
+    if exclude_id is not None:
+        qs = qs.exclude(id=exclude_id)
+    while qs.filter(slug=slug_candidate).exists():
+        slug_candidate = f"{base_slug}-{counter}"
+        counter += 1
+    return slug_candidate
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+@require_roles(['owner'])
+def resources_page(request, org_slug):
+    """Owner-facing management for facility resources (cages/rooms/etc)."""
+    org = request.organization
+    try:
+        from billing.utils import can_use_resources
+        if not can_use_resources(org):
+            messages.error(request, 'Resources are available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        # If billing is unavailable, fail closed (do not expose Team-only feature)
+        messages.error(request, 'Resources are available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    resources = list(FacilityResource.objects.filter(organization=org).order_by('name', 'id'))
+
+    # Annotate usage so the UI can prevent deactivation when in use.
+    try:
+        res_ids = [r.id for r in resources]
+        usage_qs = (
+            ServiceResource.objects
+            .filter(resource_id__in=res_ids)
+            .values('resource_id')
+            .annotate(ct=Count('service_id', distinct=True))
+        )
+        usage = {row['resource_id']: int(row.get('ct') or 0) for row in usage_qs}
+    except Exception:
+        usage = {}
+    for r in resources:
+        try:
+            r.cc_service_count = int(usage.get(r.id, 0))
+        except Exception:
+            r.cc_service_count = 0
+
+    # Be defensive: avoid touching new fields if migrations aren't applied yet.
+    try:
+        resource_field_names = [f.name for f in FacilityResource._meta.get_fields()]
+    except Exception:
+        resource_field_names = []
+    has_max_services = 'max_services' in resource_field_names
+
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        slug_input = (request.POST.get('slug') or '').strip()
+        is_active = request.POST.get('is_active') is not None
+        max_services_raw = request.POST.get('max_services')
+
+        if not name:
+            messages.error(request, 'Resource name is required.')
+        else:
+            base_slug = slugify(slug_input or name) or get_random_string(8)
+            slug_val = _unique_resource_slug_for_org(org, base_slug)
+            create_kwargs = dict(
+                organization=org,
+                name=name,
+                slug=slug_val,
+                is_active=is_active,
+            )
+            if has_max_services:
+                try:
+                    ms = int(max_services_raw) if (max_services_raw is not None and str(max_services_raw).strip() != '') else 1
+                except Exception:
+                    ms = 1
+                if ms < 0:
+                    ms = 1
+                create_kwargs['max_services'] = ms
+            FacilityResource.objects.create(**create_kwargs)
+            messages.success(request, 'Resource created.')
+            return redirect('calendar_app:resources_page', org_slug=org.slug)
+
+    return render(request, 'calendar_app/resources.html', {
+        'org': org,
+        'resources': resources,
+    })
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+@require_roles(['owner'])
+def edit_resource(request, org_slug, resource_id):
+    org = request.organization
+    try:
+        from billing.utils import can_use_resources
+        if not can_use_resources(org):
+            messages.error(request, 'Resources are available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        messages.error(request, 'Resources are available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    resource = get_object_or_404(FacilityResource, id=resource_id, organization=org)
+
+    # Be defensive: avoid touching new fields if migrations aren't applied yet.
+    try:
+        resource_field_names = [f.name for f in FacilityResource._meta.get_fields()]
+    except Exception:
+        resource_field_names = []
+    has_max_services = 'max_services' in resource_field_names
+
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        slug_input = (request.POST.get('slug') or '').strip()
+        is_active = request.POST.get('is_active') is not None
+        max_services_raw = request.POST.get('max_services')
+
+        if not name:
+            messages.error(request, 'Resource name is required.')
+        else:
+            # Block deactivation if this resource is linked to any services.
+            if (not is_active) and bool(getattr(resource, 'is_active', True)):
+                try:
+                    in_use = ServiceResource.objects.filter(resource=resource).exists()
+                except Exception:
+                    in_use = False
+                if in_use:
+                    messages.error(request, 'This resource is currently linked to a service. Unlink it from all services before making it inactive.')
+                    return redirect('calendar_app:edit_resource', org_slug=org.slug, resource_id=resource.id)
+
+            base_slug = slugify(slug_input or name) or get_random_string(8)
+            resource.name = name
+            resource.slug = _unique_resource_slug_for_org(org, base_slug, exclude_id=resource.id)
+            resource.is_active = is_active
+            if has_max_services:
+                try:
+                    ms = int(max_services_raw) if (max_services_raw is not None and str(max_services_raw).strip() != '') else getattr(resource, 'max_services', 1)
+                except Exception:
+                    ms = getattr(resource, 'max_services', 1) or 1
+                if ms < 0:
+                    ms = getattr(resource, 'max_services', 1) or 1
+                try:
+                    resource.max_services = ms
+                except Exception:
+                    pass
+            resource.save()
+            messages.success(request, 'Resource updated.')
+            return redirect('calendar_app:resources_page', org_slug=org.slug)
+
+    return render(request, 'calendar_app/edit_resource.html', {
+        'org': org,
+        'resource': resource,
+    })
+
+
+@login_required
+@require_http_methods(['POST'])
+@require_roles(['owner'])
+def toggle_resource_active(request, org_slug, resource_id):
+    org = request.organization
+    try:
+        from billing.utils import can_use_resources
+        if not can_use_resources(org):
+            messages.error(request, 'Resources are available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        messages.error(request, 'Resources are available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    resource = get_object_or_404(FacilityResource, id=resource_id, organization=org)
+    current = bool(getattr(resource, 'is_active', True))
+    next_val = (not current)
+    if current and (not next_val):
+        # Block deactivation if this resource is linked to any services.
+        try:
+            in_use = ServiceResource.objects.filter(resource=resource).exists()
+        except Exception:
+            in_use = False
+        if in_use:
+            messages.error(request, 'This resource is currently linked to a service. Unlink it from all services before making it inactive.')
+            return redirect('calendar_app:resources_page', org_slug=org.slug)
+
+    resource.is_active = next_val
+    resource.save(update_fields=['is_active'])
+    return redirect('calendar_app:resources_page', org_slug=org.slug)
 
 
 @require_http_methods(['POST'])
@@ -391,6 +578,67 @@ def apply_service_update(request, org_slug, service_id):
     if not payload.get('confirm'):
         return HttpResponseBadRequest('Must include confirm=true to apply changes')
 
+    # Validate facility resource selection (Team plan + owner only) before doing
+    # any side effects (like freeze creation) or persisting service changes.
+    desired_resource_ids = None
+    try:
+        if user_has_role(request.user, org, 'owner'):
+            from billing.utils import can_use_resources
+            if can_use_resources(org):
+                posted = payload.get('resource_ids', [])
+                if posted is None:
+                    posted = []
+                if not isinstance(posted, list):
+                    posted = [posted]
+
+                desired = set()
+                for v in posted:
+                    try:
+                        rid = int(v)
+                    except Exception:
+                        continue
+                    if FacilityResource.objects.filter(id=rid, organization=org).exists():
+                        desired.add(rid)
+
+                # Capacity validation: prevent selecting resources that are already
+                # linked to too many other services.
+                invalid = []
+                existing_ids = set(ServiceResource.objects.filter(service=svc).values_list('resource_id', flat=True))
+                # Fetch resources in bulk; be defensive if migrations missing.
+                resources = list(FacilityResource.objects.filter(organization=org, id__in=list(desired)))
+                res_by_id = {r.id: r for r in resources}
+
+                for rid in desired:
+                    r = res_by_id.get(rid)
+                    if not r:
+                        continue
+                    # Default to exclusive if the field doesn't exist yet.
+                    try:
+                        max_services = int(getattr(r, 'max_services', 1) or 0)
+                    except Exception:
+                        max_services = 1
+                    if max_services == 0:
+                        continue
+
+                    # Count distinct other services (excluding this svc) using this resource.
+                    try:
+                        other_service_count = ServiceResource.objects.filter(resource_id=rid).exclude(service=svc).values('service_id').distinct().count()
+                    except Exception:
+                        other_service_count = 0
+
+                    if other_service_count >= max_services and (rid not in existing_ids):
+                        invalid.append(r.name)
+
+                if invalid:
+                    msg = 'These resources are already in use by other services: ' + ', '.join(invalid) + '.'
+                    return JsonResponse({'status': 'error', 'error': msg}, status=400)
+
+                desired_resource_ids = desired
+    except Exception:
+        # If billing/permissions/field lookups fail, fail closed: do not block saving
+        # the service, but also do not change resource wiring.
+        desired_resource_ids = None
+
     # Determine horizon similar to preview
     try:
         org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
@@ -633,6 +881,24 @@ def apply_service_update(request, org_slug, service_id):
             # Field may not exist if migrations not applied
             continue
     svc.save()
+
+    # Sync facility resources allowed for this service (Team plan + owner only).
+    # Use `desired_resource_ids` computed above (already validated for capacity).
+    try:
+        if desired_resource_ids is not None:
+            existing_ids = set(ServiceResource.objects.filter(service=svc).values_list('resource_id', flat=True))
+            to_add = set(desired_resource_ids) - existing_ids
+            to_remove = existing_ids - set(desired_resource_ids)
+
+            for rid in to_add:
+                try:
+                    ServiceResource.objects.create(service=svc, resource_id=rid)
+                except Exception:
+                    continue
+            if to_remove:
+                ServiceResource.objects.filter(service=svc, resource_id__in=list(to_remove)).delete()
+    except Exception:
+        pass
 
     # Sync service assignments (assigned_members).
     try:
@@ -891,6 +1157,22 @@ def _build_service_weekly_map(service):
         - When the member has multiple solo services with mixed scheduling settings,
           do NOT assume inheritance (availability must be explicitly partitioned).
     """
+    # Trial onboarding rule: when the org has only one active service, the service
+    # schedule should follow Calendar (org weekly availability) rather than
+    # per-service weekly rows.
+    try:
+        from billing.utils import get_subscription
+        subscription = get_subscription(service.organization)
+        if subscription and getattr(subscription, 'status', '') == 'trialing':
+            try:
+                active_ct = Service.objects.filter(organization=service.organization, is_active=True).count()
+            except Exception:
+                active_ct = 0
+            if active_ct <= 1:
+                return _build_org_weekly_map(service.organization)
+    except Exception:
+        pass
+
     rows = service.weekly_availability.filter(is_active=True).order_by('weekday', 'start_time')
     svc_map = [[] for _ in range(7)]
     has_rows = False
@@ -943,6 +1225,21 @@ def _service_availability_applicability(org, service):
         - The service has exactly one assigned team member AND that member has multiple
             solo services (so per-service partitioning is required).
     """
+    # Trial onboarding rule: when only one active service exists, per-service
+    # availability is disabled and availability follows the Calendar (org weekly).
+    try:
+        from billing.utils import get_subscription
+        subscription = get_subscription(org)
+        if subscription and getattr(subscription, 'status', '') == 'trialing':
+            try:
+                active_ct = Service.objects.filter(organization=org, is_active=True).count()
+            except Exception:
+                active_ct = 0
+            if active_ct <= 1:
+                return False, "With only one active service, availability follows your Calendar availability. Create a second active service to enable per-service availability."
+    except Exception:
+        pass
+
     try:
         from bookings.models import ServiceAssignment
     except Exception:
@@ -1059,6 +1356,22 @@ def _service_requires_explicit_weekly(org, service):
     """
     if not service:
         return False
+
+    # Trial onboarding rule: when the org has only one active service, availability
+    # follows Calendar (org weekly availability) and we do NOT require explicit
+    # per-service weekly windows.
+    try:
+        from billing.utils import get_subscription
+        subscription = get_subscription(org)
+        if subscription and getattr(subscription, 'status', '') == 'trialing':
+            try:
+                active_ct = Service.objects.filter(organization=org, is_active=True).count()
+            except Exception:
+                active_ct = 0
+            if active_ct <= 1:
+                return False
+    except Exception:
+        pass
     try:
         from bookings.models import ServiceAssignment
     except Exception:
@@ -1100,6 +1413,18 @@ def _service_has_effective_weekly_availability_for_activation(org, service):
     """
     if not service:
         return False
+
+    # Trial/Basic onboarding: do not block activation due to weekly-availability setup.
+    # Requirement: new trial users should have their first service active by default.
+    try:
+        from billing.utils import get_plan_slug, BASIC_SLUG, get_subscription
+        plan_slug = get_plan_slug(org)
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        if plan_slug == BASIC_SLUG or is_trialing:
+            return True
+    except Exception:
+        pass
 
     # If the service is explicitly scoped, it must have service-weekly rows.
     try:
@@ -1568,11 +1893,48 @@ def post_login_redirect(request):
     return redirect("calendar_app:choose_business")
 
 
+@login_required
+@require_roles(['owner', 'admin', 'manager', 'staff'])
 def calendar_view(request, org_slug):
     org = request.organization
     if not org:
         # handle no organization (redirect to signup or choose business)
         return redirect('calendar_app:choose_business')
+
+    # Trial/Basic/Pro: calendar is owner-only. Team plan enables staff access.
+    is_team = False
+    try:
+        from billing.utils import can_add_staff
+        is_team = bool(can_add_staff(org))
+    except Exception:
+        is_team = False
+
+    # Per-date overrides are available on Pro/Team only (not Trial/Basic).
+    can_use_overrides = False
+    try:
+        from billing.utils import get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        plan_slug = get_plan_slug(org)
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        can_use_overrides = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
+    except Exception:
+        can_use_overrides = False
+
+    if (not is_team) and (not user_has_role(request.user, org, ['owner'])):
+        messages.error(request, 'Calendar access is available to the business owner only on your current plan.')
+        return redirect('calendar_app:dashboard', org_slug=org.slug)
+
+    # Per-date overrides are Pro/Team only (not Trial/Basic).
+    can_use_overrides = False
+    try:
+        from billing.utils import get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        plan_slug = get_plan_slug(org)
+        subscription = get_subscription(org)
+        is_trialing = bool(subscription and getattr(subscription, 'status', '') == 'trialing')
+        can_use_overrides = (not is_trialing) and (plan_slug in {PRO_SLUG, TEAM_SLUG})
+    except Exception:
+        # Fail closed if billing is unavailable
+        can_use_overrides = False
     # Serialize weekly availability so the front-end can pre-populate defaultAvailability.
     # Structure: array of objects: [{"day_of_week": 0, "ranges": ["09:00-12:00","13:00-17:00"], "unavailable": false}, ...]
     weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).order_by('weekday', 'start_time')
@@ -1599,15 +1961,27 @@ def calendar_view(request, org_slug):
     # Internal calendar is a management view: include inactive services so owners
     # can see/edit them (public pages still filter to active-only).
     services_qs = Service.objects.filter(organization=org).order_by('name')
+    trial_single_service_mode = False
+    try:
+        from billing.utils import get_subscription
+        sub = get_subscription(org)
+        if sub and getattr(sub, 'status', '') == 'trialing':
+            try:
+                trial_single_service_mode = (Service.objects.filter(organization=org, is_active=True).count() <= 1)
+            except Exception:
+                trial_single_service_mode = False
+    except Exception:
+        trial_single_service_mode = False
     services = []
     for s in services_qs:
         assigned_members = []
-        try:
-            # ServiceAssignment has related_name='assignments'
-            assigned_members = list(s.assignments.all().values_list('membership_id', flat=True))
-        except Exception:
-            # If migrations not applied / table missing, fail closed (treat as unassigned)
-            assigned_members = []
+        if is_team:
+            try:
+                # ServiceAssignment has related_name='assignments'
+                assigned_members = list(s.assignments.all().values_list('membership_id', flat=True))
+            except Exception:
+                # If migrations not applied / table missing, fail closed (treat as unassigned)
+                assigned_members = []
         services.append({
             'id': s.id,
             'name': s.name,
@@ -1620,7 +1994,7 @@ def calendar_view(request, org_slug):
             'allow_ends_after_availability': bool(getattr(s, 'allow_ends_after_availability', False)),
             # Provide a simple weekly availability map for the client to compute next-available dates
             'weekly_map': _build_service_weekly_map(s),
-            'has_service_weekly_windows': bool(s.weekly_availability.filter(is_active=True).exists()),
+            'has_service_weekly_windows': (False if trial_single_service_mode else bool(s.weekly_availability.filter(is_active=True).exists())),
             # assigned_members: list of membership ids allowed to deliver this service
             'assigned_members': assigned_members,
         })
@@ -1632,15 +2006,6 @@ def calendar_view(request, org_slug):
     # Support auto-opening the Day Schedule modal via query params
     auto_open_service = request.GET.get('open_day_schedule_for', '')
     auto_open_date = request.GET.get('open_day_schedule_date', '')
-
-    # Determine whether org is on a Team plan (allows multi-staff features)
-    is_team = False
-    try:
-        from billing.utils import can_add_staff
-        is_team = bool(can_add_staff(org))
-    except Exception:
-        # Fail closed: assume False if billing unavailable
-        is_team = False
 
     return render(request, "calendar_app/calendar.html", {
         'organization': org,
@@ -1656,6 +2021,7 @@ def calendar_view(request, org_slug):
         'services_json': services_json,
         'members_list': list(Membership.objects.filter(organization=org, is_active=True).values('id','user__first_name','user__last_name','user__email')),
         'is_team_plan': is_team,
+        'can_use_overrides': can_use_overrides,
         # Default member id for selector: prefer membership row for organization owner, otherwise first active membership id
         'default_member_id': (lambda org_obj: (lambda owner_mem: owner_mem if owner_mem is not None else (Membership.objects.filter(organization=org_obj, is_active=True).values_list('id', flat=True).first()))(Membership.objects.filter(organization=org_obj, is_active=True, user=getattr(org_obj, 'owner', None)).values_list('id', flat=True).first()))(org),
         'auto_open_service': auto_open_service,
@@ -1681,12 +2047,29 @@ def _snapshot_weekly_windows_for_service_date(org, service, date_obj):
         return []
 
     # Prefer explicit service weekly windows if present for that weekday.
+    # Trial onboarding rule: when the org has only one active service, treat the
+    # service schedule as org-scoped (calendar) regardless of service rows.
+    skip_service_weekly = False
     try:
-        svc_rows = service.weekly_availability.filter(is_active=True, weekday=wd).order_by('start_time')
-        if svc_rows.exists():
-            return [{'start': r.start_time.strftime('%H:%M'), 'end': r.end_time.strftime('%H:%M')} for r in svc_rows]
+        from billing.utils import get_subscription
+        subscription = get_subscription(org)
+        if subscription and getattr(subscription, 'status', '') == 'trialing':
+            try:
+                active_ct = Service.objects.filter(organization=org, is_active=True).count()
+            except Exception:
+                active_ct = 0
+            if active_ct <= 1:
+                skip_service_weekly = True
     except Exception:
-        pass
+        skip_service_weekly = False
+
+    if not skip_service_weekly:
+        try:
+            svc_rows = service.weekly_availability.filter(is_active=True, weekday=wd).order_by('start_time')
+            if svc_rows.exists():
+                return [{'start': r.start_time.strftime('%H:%M'), 'end': r.end_time.strftime('%H:%M')} for r in svc_rows]
+        except Exception:
+            pass
 
     # Org defaults
     try:
@@ -1817,6 +2200,15 @@ def save_availability(request, slug):
             return HttpResponseForbidden(msg or "Upgrade required for weekly availability edits.")
     except Exception:
         # Fail open if billing module unavailable
+        pass
+
+    # Trial/Basic/Pro: calendar (and its availability editor) is owner-only.
+    try:
+        from billing.utils import can_add_staff
+        if (not can_add_staff(org)) and (not user_has_role(request.user, org, ['owner'])):
+            return HttpResponseForbidden('Calendar access is available to the business owner only on your current plan.')
+    except Exception:
+        # If billing evaluation fails, do not block.
         pass
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -2597,8 +2989,9 @@ def dashboard(request, org_slug):
     memberships = request.user.memberships.select_related("organization")
 
     # Provide subscription/trial info for conditional portal link
-    from billing.utils import get_subscription
+    from billing.utils import get_subscription, get_plan_slug
     subscription = get_subscription(org)
+    plan_slug = get_plan_slug(org)
     trialing_active = False
     if subscription and subscription.status == "trialing" and subscription.trial_end and subscription.trial_end > timezone.now():
         trialing_active = True
@@ -2614,6 +3007,7 @@ def dashboard(request, org_slug):
         "memberships": memberships,
         "org": org,
         "subscription": subscription,
+        "plan_slug": plan_slug,
         "trialing_active": trialing_active,
         "has_availability": has_availability,
     })
@@ -2647,6 +3041,11 @@ def org_refund_settings(request, org_slug):
 @require_roles(["owner", "admin"])
 def create_service(request, org_slug):
     org = get_object_or_404(Organization, slug=org_slug)
+    try:
+        from billing.utils import can_add_staff
+        is_team_plan = bool(can_add_staff(org))
+    except Exception:
+        is_team_plan = False
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
         # Auto-generate slug from name if not provided
@@ -2669,6 +3068,12 @@ def create_service(request, org_slug):
             min_notice_hours=int(request.POST.get("min_notice_hours", 1)),
             max_booking_days=int(request.POST.get("max_booking_days", 30)),
         )
+        # Make new services active by default during onboarding.
+        # (This view is retained for legacy routes; the main /bus/ flow already sets is_active=True.)
+        try:
+            svc_kwargs['is_active'] = True
+        except Exception:
+            pass
         field_names = [f.name for f in Service._meta.get_fields()]
         if 'allow_ends_after_availability' in field_names:
             svc_kwargs['allow_ends_after_availability'] = request.POST.get('allow_ends_after_availability') is not None
@@ -2683,32 +3088,33 @@ def create_service(request, org_slug):
         svc.refund_policy_text = request.POST.get("refund_policy_text", "").strip()
         svc.save()
 
-        # Persist any assigned members posted from the form (optional)
-        try:
-            from bookings.models import ServiceAssignment
-            from accounts.models import Membership
-            posted = request.POST.getlist('assigned_members') or []
-            desired = set()
-            for v in posted:
-                try:
-                    iv = int(v)
-                    if Membership.objects.filter(id=iv, organization=org).exists():
-                        desired.add(iv)
-                except Exception:
-                    continue
-            for mid in desired:
-                try:
-                    mem = Membership.objects.get(id=mid, organization=org)
-                    ServiceAssignment.objects.create(service=svc, membership=mem)
-                except Exception:
-                    continue
-        except Exception:
-            pass
+        # Persist assigned members only on Team plan
+        if is_team_plan:
+            try:
+                from bookings.models import ServiceAssignment
+                from accounts.models import Membership
+                posted = request.POST.getlist('assigned_members') or []
+                desired = set()
+                for v in posted:
+                    try:
+                        iv = int(v)
+                        if Membership.objects.filter(id=iv, organization=org).exists():
+                            desired.add(iv)
+                    except Exception:
+                        continue
+                for mid in desired:
+                    try:
+                        mem = Membership.objects.get(id=mid, organization=org)
+                        ServiceAssignment.objects.create(service=svc, membership=mem)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
 
         messages.success(request, "Service created.")
         return redirect("calendar_app:dashboard", org_slug=org.slug)
 
-    return render(request, "calendar_app/create_service.html", { "org": org })
+    return render(request, "calendar_app/create_service.html", { "org": org, "is_team_plan": is_team_plan })
 
 
 @require_http_methods(["GET", "POST"])
@@ -2716,6 +3122,11 @@ def create_service(request, org_slug):
 def edit_service(request, org_slug, service_id):
     org = get_object_or_404(Organization, slug=org_slug)
     service = get_object_or_404(Service, id=service_id, organization=org)
+    try:
+        from billing.utils import can_add_staff
+        is_team_plan = bool(can_add_staff(org))
+    except Exception:
+        is_team_plan = False
     # Check whether the DB field exists so we avoid touching it when not migrated
     field_names = [f.name for f in Service._meta.get_fields()]
     field_present = 'allow_ends_after_availability' in field_names
@@ -2789,41 +3200,42 @@ def edit_service(request, org_slug, service_id):
             pass
 
         service.save()
-        # Update service assignments (which memberships are allowed to deliver this service)
-        try:
-            from bookings.models import ServiceAssignment
-            # Accept either select-posted values or multiple same-name inputs
-            posted = request.POST.getlist('assigned_members') or []
-            # Normalize to ints, ignore invalid
-            desired = set()
-            from accounts.models import Membership
-            for v in posted:
-                try:
-                    iv = int(v)
-                    # ensure membership belongs to this org
-                    if Membership.objects.filter(id=iv, organization=org).exists():
-                        desired.add(iv)
-                except Exception:
-                    continue
+        # Update service assignments only on Team plan
+        if is_team_plan:
+            try:
+                from bookings.models import ServiceAssignment
+                # Accept either select-posted values or multiple same-name inputs
+                posted = request.POST.getlist('assigned_members') or []
+                # Normalize to ints, ignore invalid
+                desired = set()
+                from accounts.models import Membership
+                for v in posted:
+                    try:
+                        iv = int(v)
+                        # ensure membership belongs to this org
+                        if Membership.objects.filter(id=iv, organization=org).exists():
+                            desired.add(iv)
+                    except Exception:
+                        continue
 
-            existing_qs = ServiceAssignment.objects.filter(service=service)
-            existing_ids = set(existing_qs.values_list('membership_id', flat=True))
+                existing_qs = ServiceAssignment.objects.filter(service=service)
+                existing_ids = set(existing_qs.values_list('membership_id', flat=True))
 
-            to_add = desired - existing_ids
-            to_remove = existing_ids - desired
+                to_add = desired - existing_ids
+                to_remove = existing_ids - desired
 
-            for mid in to_add:
-                try:
-                    mem = Membership.objects.get(id=mid, organization=org)
-                    ServiceAssignment.objects.create(service=service, membership=mem)
-                except Exception:
-                    continue
+                for mid in to_add:
+                    try:
+                        mem = Membership.objects.get(id=mid, organization=org)
+                        ServiceAssignment.objects.create(service=service, membership=mem)
+                    except Exception:
+                        continue
 
-            if to_remove:
-                ServiceAssignment.objects.filter(service=service, membership_id__in=list(to_remove)).delete()
-        except Exception:
-            # If migrations not applied or model missing, fail silently
-            pass
+                if to_remove:
+                    ServiceAssignment.objects.filter(service=service, membership_id__in=list(to_remove)).delete()
+            except Exception:
+                # If migrations not applied or model missing, fail silently
+                pass
         service.refresh_from_db()
         messages.success(request, "Service updated.")
         # Post-Redirect-Get: redirect so the saved state is authoritative and URL/query params propagate
@@ -2838,14 +3250,15 @@ def edit_service(request, org_slug, service_id):
         has_bookings = False
     can_edit_slug = not has_bookings
 
-    # Determine assigned member ids for template pre-selection
+    # Determine assigned member ids for template pre-selection (Team plan only)
     assigned_member_ids = []
-    try:
-        from bookings.models import ServiceAssignment
-        assigned_member_ids = list(ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True))
-        assigned_member_ids = [str(x) for x in assigned_member_ids]
-    except Exception:
-        assigned_member_ids = []
+    if is_team_plan:
+        try:
+            from bookings.models import ServiceAssignment
+            assigned_member_ids = list(ServiceAssignment.objects.filter(service=service).values_list('membership_id', flat=True))
+            assigned_member_ids = [str(x) for x in assigned_member_ids]
+        except Exception:
+            assigned_member_ids = []
 
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
@@ -2853,12 +3266,23 @@ def edit_service(request, org_slug, service_id):
         'needs_migration': not field_present,
         'can_edit_slug': can_edit_slug,
         'assigned_member_ids': assigned_member_ids,
+        'is_team_plan': is_team_plan,
     })
 
 
 
 def team_dashboard(request, org_slug):
     org = request.organization
+
+    # Team plan required
+    try:
+        from billing.utils import can_add_staff
+        if not can_add_staff(org):
+            messages.error(request, 'Staff portal is available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        messages.error(request, 'Staff portal is available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     # Only owners and admins can view/manage team
     if not user_has_role(request.user, org, ["owner", "admin"]):
@@ -2874,6 +3298,16 @@ def team_dashboard(request, org_slug):
 
 def invite_member(request, org_slug):
     org = request.organization
+
+    # Team plan required
+    try:
+        from billing.utils import can_add_staff
+        if not can_add_staff(org):
+            messages.error(request, 'Staff portal is available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        messages.error(request, 'Staff portal is available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     if not user_has_role(request.user, org, ["owner", "admin"]):
         return HttpResponseForbidden("No permission.")
@@ -2948,6 +3382,16 @@ def invite_member(request, org_slug):
 def remove_member(request, org_slug, member_id):
     org = request.organization
 
+    # Team plan required
+    try:
+        from billing.utils import can_add_staff
+        if not can_add_staff(org):
+            messages.error(request, 'Staff portal is available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        messages.error(request, 'Staff portal is available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
+
     if not user_has_role(request.user, org, ["owner", "admin"]):
         return HttpResponseForbidden("No permission.")
 
@@ -2962,6 +3406,16 @@ def remove_member(request, org_slug, member_id):
 
 def update_member_role(request, org_slug, member_id):
     org = request.organization
+
+    # Team plan required
+    try:
+        from billing.utils import can_add_staff
+        if not can_add_staff(org):
+            messages.error(request, 'Staff portal is available on the Team plan only.')
+            return redirect('calendar_app:pricing_page', org_slug=org.slug)
+    except Exception:
+        messages.error(request, 'Staff portal is available on the Team plan only.')
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     if not user_has_role(request.user, org, ["owner", "admin"]):
         return HttpResponseForbidden("Not allowed.")
@@ -2980,6 +3434,16 @@ def update_member_role(request, org_slug, member_id):
 
 def accept_invite(request, token):
     invite = get_object_or_404(Invite, token=token)
+
+    # Team plan required
+    try:
+        from billing.utils import can_add_staff
+        if not can_add_staff(invite.organization):
+            messages.error(request, 'This business is not on the Team plan. Staff invites are disabled.')
+            return redirect('calendar_app:pricing_page', org_slug=invite.organization.slug)
+    except Exception:
+        messages.error(request, 'This business is not on the Team plan. Staff invites are disabled.')
+        return redirect('calendar_app:pricing_page', org_slug=invite.organization.slug)
 
     # If user is already authenticated, just create the membership and redirect
     if request.user.is_authenticated:
@@ -3129,7 +3593,8 @@ def signup(request):
     return render(request, "registration/signup.html", {"form": form})
 
 def logout(request):
-    logout(request)
+    from django.contrib.auth import logout as auth_logout
+    auth_logout(request)
     return redirect('/')
 
 
@@ -3146,6 +3611,19 @@ def services_page(request, org_slug):
     """
     org = request.organization
     services = list(Service.objects.filter(organization=org).order_by('name'))
+
+    can_add_more_services = True
+    try:
+        from billing.utils import can_add_service
+        can_add_more_services = bool(can_add_service(org))
+    except Exception:
+        can_add_more_services = True
+
+    upgrade_prompt = None
+    try:
+        upgrade_prompt = request.session.pop('cc_upgrade_prompt', None)
+    except Exception:
+        upgrade_prompt = None
 
     # Attach assigned member display names to each service for template rendering
     try:
@@ -3182,6 +3660,9 @@ def services_page(request, org_slug):
     return render(request, "calendar_app/services.html", {
         "org": org,
         "services": services,
+        "can_add_more_services": can_add_more_services,
+        "show_upgrade_modal": bool(upgrade_prompt == 'service_limit'),
+        "upgrade_prompt_reason": upgrade_prompt,
     })
 
 
@@ -3194,14 +3675,31 @@ def create_service(request, org_slug):
     """
     org = request.organization
 
+    # Pro/Team feature gate: advanced service settings + editable refund policy fields.
+    is_team_plan = False
+    can_use_pro_team = False
+    try:
+        from billing.utils import can_add_staff, get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        is_team_plan = bool(can_add_staff(org))
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        plan_slug = get_plan_slug(org)
+        can_use_pro_team = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
+    except Exception:
+        is_team_plan = False
+        can_use_pro_team = False
+
     if request.method == "POST":
         # Plan enforcement: Basic only allows 1 active service
         try:
             from billing.utils import enforce_service_limit
             ok, msg = enforce_service_limit(org)
             if not ok:
-                messages.error(request, msg or "Upgrade required to add more services.")
-                return redirect(f"/bus/{org.slug}/services/")
+                try:
+                    request.session['cc_upgrade_prompt'] = 'service_limit'
+                except Exception:
+                    pass
+                return redirect("calendar_app:services_page", org_slug=org.slug)
         except Exception:
             # Fail open if billing utils not available
             pass
@@ -3213,7 +3711,7 @@ def create_service(request, org_slug):
         price_raw = request.POST.get("price") or "0"
         buffer_before_raw = request.POST.get("buffer_before") or "0"
         buffer_after_raw = request.POST.get("buffer_after") or "0"
-        min_notice_hours_raw = request.POST.get("min_notice_hours") or "1"
+        min_notice_hours_raw = request.POST.get("min_notice_hours") or "24"
         max_booking_days_raw = request.POST.get("max_booking_days") or "30"
 
         if not name:
@@ -3256,6 +3754,10 @@ def create_service(request, org_slug):
             except ValueError:
                 messages.error(request, "Numeric fields must be valid numbers.")
             else:
+                # Trial/Basic: lock min notice + max advance.
+                if not can_use_pro_team:
+                    min_notice_hours = 24
+                    max_booking_days = 30
                 svc = Service.objects.create(
                     organization=org,
                     name=name,
@@ -3264,7 +3766,7 @@ def create_service(request, org_slug):
                     duration=duration,
                     price=price,
                     buffer_before=buffer_before,
-                    buffer_after=buffer_after,
+                    buffer_after=(buffer_after if can_use_pro_team else 0),
                     min_notice_hours=min_notice_hours,
                     max_booking_days=max_booking_days,
                     is_active=True,
@@ -3274,15 +3776,35 @@ def create_service(request, org_slug):
                     svc.time_increment_minutes = int(request.POST.get('time_increment_minutes', svc.time_increment_minutes if hasattr(svc, 'time_increment_minutes') else 30))
                 except Exception:
                     svc.time_increment_minutes = 30
-                svc.use_fixed_increment = request.POST.get('use_fixed_increment') is not None
-                svc.allow_squished_bookings = request.POST.get('allow_squished_bookings') is not None
-                # Refund fields
-                svc.refunds_allowed = request.POST.get("refunds_allowed") is not None
+                # Advanced settings: Pro/Team only
+                svc.use_fixed_increment = (request.POST.get('use_fixed_increment') is not None) if can_use_pro_team else False
+                svc.allow_squished_bookings = (request.POST.get('allow_squished_bookings') is not None) if can_use_pro_team else False
                 try:
-                    svc.refund_cutoff_hours = int(request.POST.get("refund_cutoff_hours", svc.refund_cutoff_hours))
+                    if hasattr(svc, 'allow_ends_after_availability'):
+                        svc.allow_ends_after_availability = (request.POST.get('allow_ends_after_availability') is not None) if can_use_pro_team else False
                 except Exception:
                     pass
-                svc.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+
+                # Refund policy: always on; cutoff/text editable only on Pro/Team.
+                try:
+                    svc.refunds_allowed = True
+                except Exception:
+                    pass
+                if can_use_pro_team:
+                    try:
+                        svc.refund_cutoff_hours = int(request.POST.get("refund_cutoff_hours", svc.refund_cutoff_hours))
+                    except Exception:
+                        pass
+                    svc.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+                else:
+                    try:
+                        svc.refund_cutoff_hours = 24
+                    except Exception:
+                        pass
+                    try:
+                        svc.refund_policy_text = ""
+                    except Exception:
+                        pass
                 svc.save()
 
                 # Persist service assignments (which memberships can deliver this service)
@@ -3314,6 +3836,8 @@ def create_service(request, org_slug):
     # GET or form error → show empty/default form
     return render(request, "calendar_app/create_service.html", {
         "org": org,
+        "is_team_plan": is_team_plan,
+        "can_use_pro_team": can_use_pro_team,
     })
 
 
@@ -3326,6 +3850,125 @@ def edit_service(request, org_slug, service_id):
     """
     org = request.organization
     service = get_object_or_404(Service, id=service_id, organization=org)
+
+    # Pro/Team feature gate: advanced service settings + editable refund policy fields.
+    is_team_plan = False
+    can_use_pro_team = False
+    try:
+        from billing.utils import can_add_staff, get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        is_team_plan = bool(can_add_staff(org))
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        plan_slug = get_plan_slug(org)
+        can_use_pro_team = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
+    except Exception:
+        is_team_plan = False
+        can_use_pro_team = False
+
+    # Refund policy is always-on for all plans.
+    try:
+        if hasattr(service, 'refunds_allowed') and (not bool(getattr(service, 'refunds_allowed', False))):
+            service.refunds_allowed = True
+            update_fields = ['refunds_allowed']
+            try:
+                if hasattr(service, 'refund_cutoff_hours') and int(getattr(service, 'refund_cutoff_hours', 0) or 0) < 1:
+                    service.refund_cutoff_hours = 24
+                    update_fields.append('refund_cutoff_hours')
+            except Exception:
+                pass
+            service.save(update_fields=update_fields)
+    except Exception:
+        pass
+
+    # Enforce locked values for non-Pro/Team so runtime behavior matches the UI.
+    if not can_use_pro_team:
+        update_fields = []
+        try:
+            if getattr(service, 'use_fixed_increment', False):
+                service.use_fixed_increment = False
+                update_fields.append('use_fixed_increment')
+        except Exception:
+            pass
+        try:
+            if getattr(service, 'allow_squished_bookings', False):
+                service.allow_squished_bookings = False
+                update_fields.append('allow_squished_bookings')
+        except Exception:
+            pass
+        try:
+            if hasattr(service, 'allow_ends_after_availability') and getattr(service, 'allow_ends_after_availability', False):
+                service.allow_ends_after_availability = False
+                update_fields.append('allow_ends_after_availability')
+        except Exception:
+            pass
+        try:
+            if int(getattr(service, 'buffer_after', 0) or 0) != 0:
+                service.buffer_after = 0
+                update_fields.append('buffer_after')
+        except Exception:
+            pass
+        try:
+            if hasattr(service, 'min_notice_hours') and int(getattr(service, 'min_notice_hours', 0) or 0) != 24:
+                service.min_notice_hours = 24
+                update_fields.append('min_notice_hours')
+        except Exception:
+            pass
+        try:
+            if hasattr(service, 'max_booking_days') and int(getattr(service, 'max_booking_days', 0) or 0) != 30:
+                service.max_booking_days = 30
+                update_fields.append('max_booking_days')
+        except Exception:
+            pass
+        try:
+            if hasattr(service, 'refunds_allowed') and (not bool(getattr(service, 'refunds_allowed', False))):
+                service.refunds_allowed = True
+                update_fields.append('refunds_allowed')
+        except Exception:
+            pass
+        try:
+            if hasattr(service, 'refund_cutoff_hours') and int(getattr(service, 'refund_cutoff_hours', 0) or 0) != 24:
+                service.refund_cutoff_hours = 24
+                update_fields.append('refund_cutoff_hours')
+        except Exception:
+            pass
+        try:
+            if hasattr(service, 'refund_policy_text') and (getattr(service, 'refund_policy_text', '') or '') != '':
+                service.refund_policy_text = ''
+                update_fields.append('refund_policy_text')
+        except Exception:
+            pass
+        if update_fields:
+            try:
+                service.save(update_fields=list(dict.fromkeys(update_fields)))
+            except Exception:
+                pass
+
+    # Trial/Basic guardrail: these orgs effectively operate in a single-service mode.
+    # Ensure the org cannot end up with zero active services (which breaks the public page).
+    # If this service is currently inactive and there are no other active services, force it active.
+    try:
+        from billing.utils import get_plan_slug, BASIC_SLUG, get_subscription
+        plan_slug = get_plan_slug(org)
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        if plan_slug == BASIC_SLUG or is_trialing:
+            active_ct = Service.objects.filter(organization=org, is_active=True).count()
+            if active_ct == 0 and not bool(getattr(service, 'is_active', False)):
+                service.is_active = True
+                service.save(update_fields=['is_active'])
+                try:
+                    messages.info(request, 'Your service was set active to keep your public booking page available.')
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Team-only feature gate: facility resources
+    try:
+        from billing.utils import can_use_resources
+        can_use_facility_resources = bool(can_use_resources(org))
+    except Exception:
+        can_use_facility_resources = False
 
     # Keep UI truthful: if a service has no weekly availability (overrides don't count), it cannot remain active.
     try:
@@ -3384,9 +4027,10 @@ def edit_service(request, org_slug, service_id):
                 service.duration = duration
                 service.price = price
                 service.buffer_before = buffer_before
-                service.buffer_after = buffer_after
-                service.min_notice_hours = min_notice_hours
-                service.max_booking_days = max_booking_days
+                service.buffer_after = buffer_after if can_use_pro_team else 0
+                # Trial/Basic: lock min notice + max advance.
+                service.min_notice_hours = min_notice_hours if can_use_pro_team else 24
+                service.max_booking_days = max_booking_days if can_use_pro_team else 30
                 service.is_active = requested_active
 
                 # Per-service slot settings
@@ -3394,13 +4038,21 @@ def edit_service(request, org_slug, service_id):
                     service.time_increment_minutes = int(request.POST.get('time_increment_minutes', service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30))
                 except Exception:
                     service.time_increment_minutes = 30
-                service.use_fixed_increment = request.POST.get('use_fixed_increment') is not None
-                service.allow_squished_bookings = request.POST.get('allow_squished_bookings') is not None
+                service.use_fixed_increment = (request.POST.get('use_fixed_increment') is not None) if can_use_pro_team else False
+                service.allow_squished_bookings = (request.POST.get('allow_squished_bookings') is not None) if can_use_pro_team else False
+                try:
+                    if hasattr(service, 'allow_ends_after_availability'):
+                        service.allow_ends_after_availability = (request.POST.get('allow_ends_after_availability') is not None) if can_use_pro_team else False
+                except Exception:
+                    pass
 
-                # Refund fields
-                service.refunds_allowed = request.POST.get("refunds_allowed") is not None
-                cutoff_raw = request.POST.get("refund_cutoff_hours")
-                if service.refunds_allowed:
+                # Refund policy: always on; cutoff/text editable only on Pro/Team.
+                try:
+                    service.refunds_allowed = True
+                except Exception:
+                    pass
+                if can_use_pro_team:
+                    cutoff_raw = request.POST.get("refund_cutoff_hours")
                     # When refunds are allowed, require cutoff >= 1
                     if cutoff_raw is not None and cutoff_raw != "":
                         try:
@@ -3414,11 +4066,16 @@ def edit_service(request, org_slug, service_id):
                     else:
                         # Default to 24 if not provided
                         service.refund_cutoff_hours = max(1, service.refund_cutoff_hours or 24)
+                    service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
                 else:
-                    # If refunds are not allowed, cutoff is 0
-                    service.refund_cutoff_hours = 0
-
-                service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+                    try:
+                        service.refund_cutoff_hours = 24
+                    except Exception:
+                        pass
+                    try:
+                        service.refund_policy_text = ""
+                    except Exception:
+                        pass
 
                 # New rule: block activating a service unless it has weekly availability.
                 # Per-date overrides do not count.
@@ -3456,8 +4113,8 @@ def edit_service(request, org_slug, service_id):
                     new_time_increment = int(request.POST.get('time_increment_minutes', service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30))
                 except Exception:
                     new_time_increment = service.time_increment_minutes if hasattr(service, 'time_increment_minutes') else 30
-                new_use_fixed = request.POST.get('use_fixed_increment') is not None
-                new_allow_squished = request.POST.get('allow_squished_bookings') is not None
+                new_use_fixed = (request.POST.get('use_fixed_increment') is not None) if can_use_pro_team else False
+                new_allow_squished = (request.POST.get('allow_squished_bookings') is not None) if can_use_pro_team else False
 
                 # Conflict detection with other services (sharing overlapping weekly windows)
                 conflict_services = []
@@ -3538,6 +4195,76 @@ def edit_service(request, org_slug, service_id):
                         mid = None
                     if mid is not None and can_edit_service_availability:
                         service_availability_member_name = _get_single_assignee_display_name(org, service)
+
+                    # Keep the same activation flags as the normal GET render so
+                    # the template stays stable on this "conflicts" re-render.
+                    try:
+                        other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
+                    except Exception:
+                        other_active = 0
+                    is_only_active_service = bool(getattr(service, 'is_active', False)) and (other_active == 0)
+                    try:
+                        can_activate_service = bool(_service_has_effective_weekly_availability_for_activation(org, service))
+                    except Exception:
+                        can_activate_service = True
+                    activation_locked = (not can_activate_service) and (not getattr(service, 'is_active', False))
+                    activation_lock_reason = "Add weekly availability (overrides don’t count) to activate this service." if activation_locked else ""
+                    try:
+                        activation_requires_service_weekly = bool(_service_requires_explicit_weekly(org, service))
+                    except Exception:
+                        activation_requires_service_weekly = False
+
+                    # Facility resources context (Team-only). Use posted values
+                    # so checkbox selections don't disappear on re-render.
+                    if can_use_facility_resources:
+                        try:
+                            facility_resources = list(FacilityResource.objects.filter(organization=org).order_by('-is_active', 'name', 'id'))
+                        except Exception:
+                            facility_resources = []
+
+                        if user_has_role(request.user, org, 'owner'):
+                            posted_ids = request.POST.getlist('resource_ids') or []
+                            selected_resource_ids = []
+                            for v in posted_ids:
+                                try:
+                                    selected_resource_ids.append(int(v))
+                                except Exception:
+                                    continue
+                        else:
+                            try:
+                                selected_resource_ids = list(ServiceResource.objects.filter(service=service).values_list('resource_id', flat=True))
+                            except Exception:
+                                selected_resource_ids = []
+
+                        # Annotate each resource with capacity/disabled flags for the UI.
+                        try:
+                            res_ids = [r.id for r in facility_resources]
+                            counts_qs = (
+                                ServiceResource.objects
+                                .filter(resource_id__in=res_ids)
+                                .values('resource_id')
+                                .annotate(ct=Count('service_id', distinct=True))
+                            )
+                            counts = {row['resource_id']: int(row.get('ct') or 0) for row in counts_qs}
+                        except Exception:
+                            counts = {}
+
+                        for r in facility_resources:
+                            rid = getattr(r, 'id', None)
+                            used = int(counts.get(rid, 0))
+                            try:
+                                max_services = int(getattr(r, 'max_services', 1) or 0)
+                            except Exception:
+                                max_services = 1
+                            is_selected = (rid in selected_resource_ids)
+                            at_capacity = (max_services != 0) and (used >= max_services)
+                            r.cc_max_services = max_services
+                            r.cc_used_services = used
+                            r.cc_disabled = bool(at_capacity and (not is_selected))
+                    else:
+                        facility_resources = []
+                        selected_resource_ids = []
+
                     return render(request, "calendar_app/edit_service.html", {
                         "org": org,
                         "service": service,
@@ -3548,6 +4275,15 @@ def edit_service(request, org_slug, service_id):
                         'can_edit_service_availability': can_edit_service_availability,
                         'service_availability_disabled_reason': service_availability_disabled_reason,
                         'service_availability_member_name': service_availability_member_name,
+                        'facility_resources': facility_resources,
+                        'selected_resource_ids': selected_resource_ids,
+                        'can_use_facility_resources': can_use_facility_resources,
+                        "is_only_active_service": is_only_active_service,
+                        "activation_locked": activation_locked,
+                        "activation_lock_reason": activation_lock_reason,
+                        "activation_requires_service_weekly": activation_requires_service_weekly,
+                        'is_team_plan': is_team_plan,
+                        'can_use_pro_team': can_use_pro_team,
                     })
 
                 # Persist changes (and optionally apply to conflicts)
@@ -3659,6 +4395,63 @@ def edit_service(request, org_slug, service_id):
                     # Fail open if model/migration missing
                     pass
 
+                # Sync facility resources allowed for this service
+                try:
+                    # Only the business owner can change facility resource wiring.
+                    if not user_has_role(request.user, org, 'owner'):
+                        raise Exception('Not permitted')
+                    if not can_use_facility_resources:
+                        raise Exception('Resources not available on this plan')
+                    posted = request.POST.getlist('resource_ids') or []
+                    desired = set()
+                    for v in posted:
+                        try:
+                            rid = int(v)
+                        except Exception:
+                            continue
+                        if FacilityResource.objects.filter(id=rid, organization=org).exists():
+                            desired.add(rid)
+
+                    # Capacity validation (max_services) — do not allow selecting a resource
+                    # that is already linked to too many other services.
+                    invalid = []
+                    existing_ids = set(ServiceResource.objects.filter(service=service).values_list('resource_id', flat=True))
+                    resources = list(FacilityResource.objects.filter(organization=org, id__in=list(desired)))
+                    res_by_id = {r.id: r for r in resources}
+                    for rid in desired:
+                        r = res_by_id.get(rid)
+                        if not r:
+                            continue
+                        try:
+                            max_services = int(getattr(r, 'max_services', 1) or 0)
+                        except Exception:
+                            max_services = 1
+                        if max_services == 0:
+                            continue
+                        try:
+                            other_service_count = ServiceResource.objects.filter(resource_id=rid).exclude(service=service).values('service_id').distinct().count()
+                        except Exception:
+                            other_service_count = 0
+                        if other_service_count >= max_services and (rid not in existing_ids):
+                            invalid.append(r.name)
+                    if invalid:
+                        messages.error(request, 'These resources are already in use by other services: ' + ', '.join(invalid) + '.')
+                        raise Exception('capacity violation')
+
+                    existing_qs = ServiceResource.objects.filter(service=service)
+                    existing_ids = set(existing_qs.values_list('resource_id', flat=True))
+                    to_add = desired - existing_ids
+                    to_remove = existing_ids - desired
+                    for rid in to_add:
+                        try:
+                            ServiceResource.objects.create(service=service, resource_id=rid)
+                        except Exception:
+                            continue
+                    if to_remove:
+                        ServiceResource.objects.filter(service=service, resource_id__in=list(to_remove)).delete()
+                except Exception:
+                    pass
+
                 if conflict_services and apply_to_conflicts:
                     # Apply slot fields to conflicting services
                     others_qs = Service.objects.filter(organization=org).exclude(id=service.id)
@@ -3669,6 +4462,11 @@ def edit_service(request, org_slug, service_id):
                                     other.time_increment_minutes = new_time_increment
                                     other.use_fixed_increment = new_use_fixed
                                     other.allow_squished_bookings = new_allow_squished
+                                    try:
+                                        if hasattr(other, 'allow_ends_after_availability'):
+                                            other.allow_ends_after_availability = getattr(service, 'allow_ends_after_availability', False)
+                                    except Exception:
+                                        pass
                                     other.save()
                                     break
                 # Handle per-service weekly availability fields.
@@ -3784,7 +4582,7 @@ def edit_service(request, org_slug, service_id):
         other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
     except Exception:
         other_active = 0
-    is_only_active_service = (other_active == 0)
+    is_only_active_service = bool(getattr(service, 'is_active', False)) and (other_active == 0)
 
     # Activation lock: disable toggling on when the service has no weekly availability.
     # Overrides do not count.
@@ -3839,6 +4637,47 @@ def edit_service(request, org_slug, service_id):
     if mid is not None and can_edit_service_availability:
         service_availability_member_name = _get_single_assignee_display_name(org, service)
 
+    # Facility resources selection context (Team-only)
+    if can_use_facility_resources:
+        try:
+            facility_resources = list(FacilityResource.objects.filter(organization=org).order_by('-is_active', 'name', 'id'))
+        except Exception:
+            facility_resources = []
+        try:
+            selected_resource_ids = list(ServiceResource.objects.filter(service=service).values_list('resource_id', flat=True))
+        except Exception:
+            selected_resource_ids = []
+
+        # Annotate each resource with capacity/disabled flags for the UI.
+        try:
+            res_ids = [r.id for r in facility_resources]
+            counts_qs = (
+                ServiceResource.objects
+                .filter(resource_id__in=res_ids)
+                .values('resource_id')
+                .annotate(ct=Count('service_id', distinct=True))
+            )
+            counts = {row['resource_id']: int(row.get('ct') or 0) for row in counts_qs}
+        except Exception:
+            counts = {}
+
+        for r in facility_resources:
+            rid = getattr(r, 'id', None)
+            used = int(counts.get(rid, 0))
+            try:
+                max_services = int(getattr(r, 'max_services', 1) or 0)
+            except Exception:
+                max_services = 1
+            is_selected = (rid in selected_resource_ids)
+            at_capacity = (max_services != 0) and (used >= max_services)
+            # Disable only if at capacity and not currently selected by this service.
+            r.cc_max_services = max_services
+            r.cc_used_services = used
+            r.cc_disabled = bool(at_capacity and (not is_selected))
+    else:
+        facility_resources = []
+        selected_resource_ids = []
+
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
@@ -3852,6 +4691,11 @@ def edit_service(request, org_slug, service_id):
         'can_edit_service_availability': can_edit_service_availability,
         'service_availability_disabled_reason': service_availability_disabled_reason,
         'service_availability_member_name': service_availability_member_name,
+        'facility_resources': facility_resources,
+        'selected_resource_ids': selected_resource_ids,
+        'can_use_facility_resources': can_use_facility_resources,
+        'is_team_plan': is_team_plan,
+        'can_use_pro_team': can_use_pro_team,
     })
 
 

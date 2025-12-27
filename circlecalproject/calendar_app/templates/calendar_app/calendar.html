@@ -805,6 +805,25 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     pointer-events: none;
 }
 
+/* Pro/Team-only feature: when locked, keep visible but greyed out */
+.cc-overrides-disabled {
+    opacity: 0.55;
+}
+.cc-overrides-disabled * {
+    pointer-events: none;
+}
+.cc-overrides-lock-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    background: transparent;
+    pointer-events: auto;
+}
+.cc-overrides-disabled button,
+.cc-overrides-disabled a {
+    cursor: not-allowed;
+}
+
 /* Overrides table visuals */
 #overridesTable {
     border-collapse: separate;
@@ -1200,11 +1219,18 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 <!-- Controls will be overlaid inside the calendar area -->
 <!-- Removed mobile/medium @media rules that targeted the Default Weekly Availability UI -->
 <!-- Per-date Overrides Table - Modern Card (moved to top) -->
-<div id="overridesContainer" style="margin-top:24px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+<div id="overridesContainer" class="{% if not can_use_overrides %}cc-overrides-disabled{% endif %}" style="margin-top:24px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+    {% if not can_use_overrides %}
+        <div class="cc-overrides-lock-overlay" aria-hidden="true"></div>
+    {% endif %}
     <h3 id="overridesHeader" class="overrides-header" style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">
         <span class="overrides-base" style="font-weight:600;">Per-date Overrides for </span>
-        <span id="overridesHeaderSelection" class="overrides-month" style="color:var(--primary-600); font-size:inherit;"></span>
-        <span style="color:var(--gray-600);"> in </span>
+                {% if is_team_plan %}
+                    <span id="overridesHeaderSelection" class="overrides-month" style="color:var(--primary-600); font-size:inherit;"></span>
+                    <span style="color:var(--gray-600);"> in </span>
+                {% else %}
+                    <span id="overridesHeaderSelection" style="display:none;"></span>
+                {% endif %}
         <span id="overridesHeaderMonth" class="overrides-month" style="color:var(--primary-600);"></span>
     </h3>
     <div id="overridesTableWrapper" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
@@ -1235,9 +1261,11 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                         Open Edit Service
                     </a>
                 </div>
-                <div id="cc-weekly-interchange-note" style="margin:0 0 14px 0; font-size:13px; color:var(--gray-600); line-height:1.4;">
-                    Tip: When you select a service scope, this weekly schedule is interchangeable with that service’s availability on the Edit Service page.
-                </div>
+                {% if is_team_plan %}
+                    <div id="cc-weekly-interchange-note" style="margin:0 0 14px 0; font-size:13px; color:var(--gray-600); line-height:1.4;">
+                        Tip: When you select a service scope, this weekly schedule is interchangeable with that service’s availability on the Edit Service page.
+                    </div>
+                {% endif %}
     <table style="width:100%; border-collapse:collapse;">
         <thead>
         <tr style="border-bottom:2px solid var(--gray-200); background:var(--gray-50);">
@@ -1515,6 +1543,20 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
               style="background:var(--gray-200); color:var(--gray-700); border:none; padding:12px 24px; border-radius:10px; cursor:pointer; font-weight:600; transition:all 0.2s ease;">Cancel</button>
     </div>    
   </div>
+</div>
+
+<!-- =============================== -->
+<!-- Overrides Upgrade Required Modal -->
+<!-- =============================== -->
+<div id="ccOverridesUpgradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10050;">
+    <div style="background:white; padding:28px; border-radius:20px; width:440px; max-width:92vw; text-align:left; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); animation:modalSlideUp 0.3s ease-out;">
+        <h3 style="margin:0 0 10px 0; font-size:20px; font-weight:800; color:var(--gray-900);">Upgrade required</h3>
+        <p style="margin:0; font-size:14px; color:var(--gray-600); line-height:1.5;">A higher subscription plan is required to override days.</p>
+        <div style="margin-top:20px; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
+            <button id="ccOverridesUpgradeCancelBtn" type="button" style="background:var(--gray-200); color:var(--gray-700); border:none; padding:10px 16px; border-radius:10px; cursor:pointer; font-weight:700; transition:all 0.2s ease;">Cancel</button>
+            <button id="ccOverridesUpgradeGoBtn" type="button" style="background:var(--primary-500); color:white; border:none; padding:10px 16px; border-radius:10px; cursor:pointer; font-weight:700; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.1);">View pricing</button>
+        </div>
+    </div>
 </div>
 
 
@@ -2495,6 +2537,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const SERVICES = {{ services_json|default:"[]"|safe }} || [];
         const MEMBERS = {{ members_list|default:'[]'|safe }} || [];
         const IS_TEAM = {{ is_team_plan|yesno:'true,false' }};
+        const CAN_USE_OVERRIDES = {{ can_use_overrides|yesno:'true,false' }};
+        const PRICING_URL = "{% url 'calendar_app:pricing_page' organization.slug %}";
         // Selected member id (string). Defaults to saved selection or provided default_member_id or first member id.
         const DEFAULT_MEMBER = {{ default_member_id|default:'null' }};
         const _stored_selected = localStorage.getItem('cc_selected_member');
@@ -2506,6 +2550,108 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         // Visible services after filtering by selected member
         let VISIBLE_SERVICES = [];
+
+        function ccPromptOverridesUpgrade() {
+            try {
+                const modal = document.getElementById('ccOverridesUpgradeModal');
+                const cancelBtn = document.getElementById('ccOverridesUpgradeCancelBtn');
+                const goBtn = document.getElementById('ccOverridesUpgradeGoBtn');
+
+                // Fallback if the modal HTML isn't present for some reason
+                if (!modal || !cancelBtn || !goBtn) {
+                    const msg = 'A higher subscription plan is required to override days.';
+                    const go = confirm(msg + "\n\nPress OK to view pricing, or Cancel to stay on the calendar.");
+                    if (go) {
+                        try { window.location.href = PRICING_URL; } catch (e) {}
+                    }
+                    return false;
+                }
+
+                // Show
+                modal.style.display = 'flex';
+
+                let cleaned = false;
+                function cleanup() {
+                    if (cleaned) return;
+                    cleaned = true;
+                    try { cancelBtn.onclick = null; } catch (e) {}
+                    try { goBtn.onclick = null; } catch (e) {}
+                    try { modal.onclick = null; } catch (e) {}
+                    try { document.removeEventListener('keydown', onKey); } catch (e) {}
+                }
+                function close() {
+                    try { modal.style.display = 'none'; } catch (e) {}
+                    cleanup();
+                }
+                function onKey(e) {
+                    try {
+                        if (e && e.key === 'Escape') close();
+                    } catch (err) {}
+                }
+
+                cancelBtn.onclick = (e) => {
+                    try { e.preventDefault(); } catch (err) {}
+                    close();
+                };
+                goBtn.onclick = (e) => {
+                    try { e.preventDefault(); } catch (err) {}
+                    try { window.location.href = PRICING_URL; } catch (err) {}
+                };
+                // Click outside the dialog -> cancel
+                modal.onclick = (e) => {
+                    try {
+                        if (e && e.target === modal) close();
+                    } catch (err) {}
+                };
+                try { document.addEventListener('keydown', onKey); } catch (e) {}
+            } catch (e) {
+                const msg = 'A higher subscription plan is required to override days.';
+                const go = confirm(msg + "\n\nPress OK to view pricing, or Cancel to stay on the calendar.");
+                if (go) {
+                    try { window.location.href = PRICING_URL; } catch (err) {}
+                }
+            }
+            return false;
+        }
+
+        // Hard-stop any background/legacy flows that try to hit the per-date override endpoints
+        // when the plan doesn't allow it, and show the upgrade prompt instead.
+        (function ccGuardOverrideEndpoints(){
+            if (CAN_USE_OVERRIDES) return;
+            try {
+                const _fetch = window.fetch;
+                if (typeof _fetch !== 'function') return;
+                window.fetch = function(input, init){
+                    try {
+                        const url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                        if (url && (url.includes(`/bus/${orgSlug}/bookings/batch_create/`) || url.includes(`/bus/${orgSlug}/bookings/batch_delete/`))) {
+                            ccPromptOverridesUpgrade();
+                            return Promise.reject(new Error('Per-date overrides are locked by plan'));
+                        }
+                    } catch (e) {}
+                    return _fetch.apply(this, arguments);
+                };
+            } catch (e) {}
+        })();
+
+        function ccEnforceOverridesLock() {
+            if (CAN_USE_OVERRIDES) return;
+            // Keep the section visible but greyed out.
+            const oc = document.getElementById('overridesContainer');
+            if (oc) {
+                try { oc.classList.add('cc-overrides-disabled'); } catch (e) {}
+                // Intercept attempts from within the overrides section (any click).
+                // The overlay + pointer-events CSS blocks interaction; this click handler provides the prompt.
+                try {
+                    oc.addEventListener('click', (evt) => {
+                        evt.preventDefault();
+                        evt.stopPropagation();
+                        ccPromptOverridesUpgrade();
+                    }, true);
+                } catch (e) {}
+            }
+        }
+        try { ccEnforceOverridesLock(); } catch(e) {}
 
         // Ensure each service has a weekly_map array (server should provide this, but keep a defensive fallback).
         try{
@@ -4634,6 +4780,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Bulk edit modal using the existing timeModal
     async function openBulkEditModal(dates, initRanges) {
+        if (!CAN_USE_OVERRIDES) {
+            ccPromptOverridesUpgrade();
+            return;
+        }
         const modal = document.getElementById('timeModal');
         const rangesContainer = document.getElementById('modalRangesContainer');
         const addBtn = document.getElementById('addModalRangeBtn');
@@ -4724,6 +4874,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Open a small modal to make a single (previously-unavailable) date available
     function openMakeAvailableModal(dateStr) {
+        if (!CAN_USE_OVERRIDES) {
+            ccPromptOverridesUpgrade();
+            return;
+        }
         const modal = document.getElementById('timeModal');
         const rangesContainer = document.getElementById('modalRangesContainer');
         const addBtn = document.getElementById('addModalRangeBtn');
@@ -4816,6 +4970,13 @@ document.addEventListener('DOMContentLoaded', function() {
             function restoreMake() { if (restoredMake) return; restoredMake = true; makeUnavailableBtn.onclick = prevMakeUnavailable; }
 
             makeUnavailableBtn.onclick = async () => {
+                if (!CAN_USE_OVERRIDES) {
+                    ccPromptOverridesUpgrade();
+                    try { modal.style.display = 'none'; } catch (e) {}
+                    restoreHandlers();
+                    restoreMake();
+                    return;
+                }
                 if (!confirm(`Mark ${dateStr} as unavailable? This will block the whole day.`)) return;
                 try {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) }) });
@@ -4838,6 +4999,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Save: collect ranges and create per-date overrides for this single date
         saveBtnEl.onclick = async () => {
+            if (!CAN_USE_OVERRIDES) {
+                ccPromptOverridesUpgrade();
+                try { modal.style.display = 'none'; } catch (e) {}
+                restoreHandlers();
+                return;
+            }
             const rows = Array.from(rangesContainer.querySelectorAll('.modal-range-row'));
             const ranges = [];
             for (const r of rows) {
@@ -5803,6 +5970,11 @@ document.addEventListener('DOMContentLoaded', function() {
             alert("Drag to highlight multiple days on the calendar. Select only one to view the schedule for that day. Select a past date to view previous bookings for records.");
             return; // stop further execution
         }
+
+        // Trial/Basic: per-date overrides are not available. Keep this modal view-only.
+        if (typeof ccEnforceOverridesLock === 'function') {
+            try { ccEnforceOverridesLock(); } catch(e) {}
+        }
         
 
         const modal = document.getElementById('timeModal');
@@ -5951,6 +6123,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (isUnavailable && !isPastDate(dates[0])) {
                         makeAvailableBtn.style.display = 'inline-block';
                         makeAvailableBtn.onclick = async () => {
+                            if (!CAN_USE_OVERRIDES) {
+                                ccPromptOverridesUpgrade();
+                                return;
+                            }
                             if (!confirm(`Make ${dates[0]} available and open editor?`)) return;
                             try {
                                 const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
@@ -6210,6 +6386,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         modal.style.display = 'flex';
+
+        // Final UI lock after any conditional button toggles above.
+        if (typeof ccEnforceOverridesLock === 'function') {
+            try { ccEnforceOverridesLock(); } catch(e) {}
+        }
 
         // Handle "View Day Schedule"
         viewDayBtn.onclick = () => {

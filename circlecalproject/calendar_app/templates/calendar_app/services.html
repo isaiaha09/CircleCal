@@ -6,6 +6,7 @@
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold text-gray-900">Services</h1>
         <a href="{% url 'calendar_app:create_service' org.slug %}" 
+           {% if not can_add_more_services %}data-cc-service-limit="1"{% endif %}
            class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
             + Create Service
         </a>
@@ -85,4 +86,70 @@
         </a>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<div id="ccServiceLimitUpgradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10050;">
+    <div style="background:#fff; border-radius:12px; width:min(520px, 92vw); padding:18px 18px 16px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.25);">
+        <div style="font-weight:800; font-size:1.05rem; margin-bottom:8px; color:#111827;">Upgrade required</div>
+        <div style="color:#374151; font-size:0.95rem; line-height:1.35; margin-bottom:14px;">
+            Your current plan only allows 1 service. Upgrade to add more services.
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <button id="ccServiceLimitUpgradeCancelBtn" type="button" style="background:#e5e7eb; color:#111827; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">Cancel</button>
+            <button id="ccServiceLimitUpgradeGoBtn" type="button" style="background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:800;">View pricing</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function(){
+        try{
+            const PRICING_URL = "{% url 'calendar_app:pricing_page' org.slug %}";
+            const shouldAutoOpen = {{ show_upgrade_modal|yesno:'true,false' }};
+
+            function openModal(){
+                const modal = document.getElementById('ccServiceLimitUpgradeModal');
+                const cancelBtn = document.getElementById('ccServiceLimitUpgradeCancelBtn');
+                const goBtn = document.getElementById('ccServiceLimitUpgradeGoBtn');
+                if (!modal || !cancelBtn || !goBtn){
+                    const go = confirm('Your current plan only allows 1 service.\n\nPress OK to view pricing, or Cancel to stay here.');
+                    if (go) { try { window.location.href = PRICING_URL; } catch(e) {} }
+                    return;
+                }
+                modal.style.display = 'flex';
+                function close(){ try{ modal.style.display = 'none'; }catch(e){} }
+                cancelBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} close(); };
+                goBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} try{ window.location.href = PRICING_URL; }catch(err){} };
+                modal.onclick = function(e){ try{ if (e && e.target === modal) close(); }catch(err){} };
+                try{
+                    document.addEventListener('keydown', function onKey(e){
+                        try{ if (e && e.key === 'Escape') close(); }catch(err){}
+                    }, { once: true });
+                }catch(e){}
+            }
+
+            // Intercept attempts to create a second service on Basic/Trial
+            document.querySelectorAll('[data-cc-service-limit]').forEach(function(el){
+                el.addEventListener('click', function(e){
+                    try{ e.preventDefault(); e.stopPropagation(); }catch(err){}
+                    openModal();
+                });
+                el.addEventListener('keydown', function(e){
+                    try{
+                        if (!e) return;
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openModal();
+                        }
+                    }catch(err){}
+                });
+            });
+
+            if (shouldAutoOpen) {
+                openModal();
+            }
+        }catch(e){ /* ignore */ }
+    })();
+</script>
 {% endblock %}
