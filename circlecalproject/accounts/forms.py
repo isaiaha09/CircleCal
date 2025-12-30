@@ -69,6 +69,18 @@ class ProfileForm(forms.ModelForm):
         if avatar:
             if Image is None:
                 raise forms.ValidationError("Server error: image processing library not installed; please install Pillow.")
+
+            # Guardrails for avatar uploads (kept intentionally conservative)
+            max_bytes = int(getattr(settings, "AVATAR_MAX_UPLOAD_BYTES", 5 * 1024 * 1024))  # default: 5 MB
+            max_px = int(getattr(settings, "AVATAR_MAX_PIXELS", 512))  # default: 512x512 bounding box
+
+            try:
+                uploaded_size = int(getattr(avatar, "size", 0) or 0)
+            except Exception:
+                uploaded_size = 0
+            if uploaded_size and uploaded_size > max_bytes:
+                raise forms.ValidationError("Please upload an image smaller than 5 MB.")
+
             # Validate mime type early
             allowed_types = {"image/jpeg", "image/png", "image/webp"}
             content_type = getattr(avatar, "content_type", None)
@@ -80,8 +92,69 @@ class ProfileForm(forms.ModelForm):
                 img = Image.open(avatar)
                 img.load()
 
+                # Ensure EXIF orientation is honored (common for phone photos)
+                try:
+                    from PIL import ImageOps  # type: ignore
+                    img = ImageOps.exif_transpose(img)
+                except Exception:
+                    pass
+
+                # Validate file format if Pillow can detect it
+                fmt = (getattr(img, "format", None) or "").upper()
+                if fmt and fmt not in {"JPEG", "JPG", "PNG", "WEBP"}:
+                    raise forms.ValidationError("Please upload a JPG, PNG, or WebP image.")
+
                 width, height = img.size
                 # No orientation restriction; client-side cropper enforces square output
+
+                # Normalize: resize to a reasonable avatar size (keeps aspect ratio)
+                try:
+                    img.thumbnail((max_px, max_px))
+                except Exception:
+                    # If thumbnail fails, keep original but still proceed to moderation
+                    pass
+
+                # Re-encode to keep files small and consistent.
+                # - Use PNG only when alpha/transparency is present.
+                # - Otherwise use JPEG for better compression.
+                has_alpha = False
+                try:
+                    if img.mode in ("RGBA", "LA"):
+                        has_alpha = True
+                    elif img.mode == "P":
+                        has_alpha = "transparency" in (img.info or {})
+                except Exception:
+                    has_alpha = False
+
+                from io import BytesIO
+                from django.core.files.uploadedfile import SimpleUploadedFile
+
+                out = BytesIO()
+                if has_alpha:
+                    # Ensure a sane mode for PNG
+                    if img.mode not in ("RGBA", "LA"):
+                        try:
+                            img = img.convert("RGBA")
+                        except Exception:
+                            pass
+                    img.save(out, format="PNG", optimize=True)
+                    out_name = "profile_pic.png"
+                    out_type = "image/png"
+                else:
+                    # JPEG cannot store alpha; ensure RGB
+                    if img.mode != "RGB":
+                        try:
+                            img = img.convert("RGB")
+                        except Exception:
+                            pass
+                    img.save(out, format="JPEG", quality=85, optimize=True, progressive=True)
+                    out_name = "profile_pic.jpg"
+                    out_type = "image/jpeg"
+
+                out.seek(0)
+                avatar = SimpleUploadedFile(out_name, out.read(), content_type=out_type)
+                # Keep cleaned_data consistent for downstream consumers
+                self.cleaned_data["avatar"] = avatar
 
             except UnidentifiedImageError:
                 raise forms.ValidationError("Unsupported or corrupted image file.")
@@ -104,9 +177,11 @@ class ProfileForm(forms.ModelForm):
                     raise forms.ValidationError("Image moderation is temporarily unavailable. Please try again later.")
             elif detector:
                 try:
-                    img_for_check = img
-                    if img.mode not in ("RGB", "L"):
-                        img_for_check = img.convert("RGB")
+                    # Re-open the normalized avatar for moderation (ensures pointer is correct)
+                    img_for_check = Image.open(avatar)
+                    img_for_check.load()
+                    if img_for_check.mode not in ("RGB", "L"):
+                        img_for_check = img_for_check.convert("RGB")
                     # Windows-safe temp file pattern: mkstemp then close handle
                     fd, temp_path = tempfile.mkstemp(suffix='.jpg')
                     os.close(fd)

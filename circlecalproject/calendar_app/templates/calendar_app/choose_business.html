@@ -36,7 +36,11 @@
         <div class="org-list">
             {% for org in organizations %}
                 <div class="org-card">
-                    <a href="{% url 'calendar_app:dashboard' org.slug %}" class="org-card-link">
+                    {% if upgrade_plan_id %}
+                        <a href="{% url 'billing:embedded_checkout_page' org.slug upgrade_plan_id %}" class="org-card-link">
+                    {% else %}
+                        <a href="{% url 'calendar_app:dashboard' org.slug %}" class="org-card-link">
+                    {% endif %}
                         <div class="org-logo">{{ org.name|slice:":1"|upper }}</div>
                         <div class="org-name">{{ org.name }}</div>
                         {% if org.members.all %}

@@ -8,6 +8,12 @@
   <h1 class="text-xl md:text-2xl font-semibold mb-3 md:mb-4">Billing Management</h1>
   <p class="text-xs md:text-sm text-gray-600 mb-4 md:mb-6">Manage subscription, payment methods, and invoices for <strong>{{ org.name }}</strong>.</p>
 
+  {% if checkout_status == 'success' %}
+    <div id="cc-checkout-success" class="mb-4 p-3 rounded border-l-4 border-green-400 bg-green-50 text-sm text-green-800">
+      Payment received — updating your subscription now…
+    </div>
+  {% endif %}
+
   <!-- Preview modal (hidden by default) -->
   <div id="cc-preview-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4">
@@ -113,6 +119,10 @@
             {% elif upcoming_invoice %}
               <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
             {% endif %}
+
+            {% if not trial_remaining_seconds and next_billing_iso %}
+              <div class="text-sm mt-2"><strong>Next charge in:</strong> <span id="nextChargeCountdown">—</span></div>
+            {% endif %}
           </div>
           <div class="flex items-center gap-2">
             {% if subscription.cancel_at_period_end %}
@@ -128,7 +138,7 @@
           </div>
         </div>
         {% if trial_remaining_seconds %}
-          <div class="text-sm mt-2"><strong>Trial:</strong> <span id="trialCountdown"></span> remaining (ends {{ subscription.trial_end|date:"M j, Y g:i A" }})</div>
+          <div class="text-sm mt-2"><strong>Trial:</strong> <span id="trialCountdown">{{ trial_remaining_days }} day(s)</span> remaining (ends {{ subscription.trial_end|date:"M j, Y g:i A" }})</div>
         {% elif subscription.trial_end %}
           <div class="mt-2"><strong>Trial Ends:</strong> {{ subscription.trial_end|date:"M j, Y g:i A" }}</div>
         {% endif %}
@@ -911,6 +921,8 @@
   const publishableKey = "{{ stripe_publishable_key }}";
   const orgSlug = "{{ org.slug }}";
   const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || getCookie('csrftoken');
+  const checkoutStatus = "{{ checkout_status|default:''|escapejs }}";
+  const checkoutSubId = "{{ checkout_sub_id|default:''|escapejs }}";
 
   function getCookie(name) {
     let cookieValue = null;
@@ -926,6 +938,28 @@
     }
     return cookieValue;
   }
+
+  // If we just returned from embedded checkout, sync subscription immediately (local dev often has no webhooks).
+  (async function(){
+    try {
+      if (checkoutStatus === 'success') {
+        try { showToast('success', 'Payment received — updating subscription…', 4200); } catch(e) {}
+      }
+      if (checkoutStatus === 'success' && checkoutSubId) {
+        await fetch(`/billing/api/bus/${orgSlug}/subscription/sync/${encodeURIComponent(String(checkoutSubId))}/`, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrftoken },
+          credentials: 'same-origin',
+        });
+        // Reload without query params so refreshes show clean URLs and updated plan.
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.location.replace(cleanUrl);
+      }
+    } catch(e) {
+      try { console.error('checkout sync failed', e); } catch(err) {}
+      try { showToast('error', 'Payment succeeded, but syncing is still processing. Refresh in a moment.', 5200); } catch(e2) {}
+    }
+  })();
 
   // Small helper to highlight and briefly pulse an element to draw attention
   function highlightAndPulse(el) {
@@ -1677,8 +1711,9 @@
   // Trial countdown
   const trialSeconds = {{ trial_remaining_seconds|default:"null" }};
   const trialEndIso = "{{ trial_end_iso|default:"" }}";
-  if (trialSeconds && document.getElementById('trialCountdown')) {
+  if (trialSeconds && (document.getElementById('trialCountdown') || document.getElementById('trialSummary'))) {
     const el = document.getElementById('trialCountdown');
+    const summaryEl = document.getElementById('trialSummary');
     function fmt(seconds) {
       const d = Math.floor(seconds / 86400);
       const h = Math.floor((seconds % 86400)/3600);
@@ -1692,12 +1727,66 @@
       return parts.join(' ');
     }
     let remain = trialSeconds;
-    el.textContent = fmt(remain);
+    const render = function(){
+      const txt = fmt(remain);
+      if (el) el.textContent = txt;
+      if (summaryEl) summaryEl.textContent = txt;
+    };
+    render();
     const timer = setInterval(()=>{
       remain -= 1;
-      if (remain <= 0) { clearInterval(timer); el.textContent = 'ending...'; window.location.reload(); }
-      else { el.textContent = fmt(remain); }
+      if (remain <= 0) {
+        clearInterval(timer);
+        if (el) el.textContent = 'ending...';
+        if (summaryEl) summaryEl.textContent = 'ending...';
+        window.location.reload();
+      } else {
+        render();
+      }
     },1000);
+  }
+
+  // Next charge / period end countdown (non-trial)
+  const nextBillingIso = "{{ next_billing_iso|default:"" }}";
+  if (!trialSeconds && nextBillingIso && document.getElementById('nextChargeCountdown')) {
+    const el = document.getElementById('nextChargeCountdown');
+    function fmt(seconds) {
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400)/3600);
+      const m = Math.floor((seconds % 3600)/60);
+      const s = seconds % 60;
+      let parts = [];
+      if (d>0) parts.push(d + 'd');
+      parts.push(String(h).padStart(2,'0') + 'h');
+      parts.push(String(m).padStart(2,'0') + 'm');
+      parts.push(String(s).padStart(2,'0') + 's');
+      return parts.join(' ');
+    }
+    function parseIso(s) {
+      try {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d;
+      } catch (e) {}
+      return null;
+    }
+    const target = parseIso(nextBillingIso);
+    if (target) {
+      function tick(){
+        const now = new Date();
+        const diff = Math.floor((target.getTime() - now.getTime()) / 1000);
+        if (diff <= 0) {
+          el.textContent = 'due soon';
+          return false;
+        }
+        el.textContent = fmt(diff);
+        return true;
+      }
+      tick();
+      const timer = setInterval(function(){
+        const ok = tick();
+        if (!ok) clearInterval(timer);
+      }, 1000);
+    }
   }
 })();
 </script>

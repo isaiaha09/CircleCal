@@ -1,26 +1,136 @@
 from .settings import *
 
+import os
+from urllib.parse import urlparse, parse_qs
+
 # Production-like defaults (safe for local testing)
 DEBUG = False
 
-# While developing without a domain, allow localhost
-ALLOWED_HOSTS = ['www.circlecal.app','circlecal.app','127.0.0.1', 'localhost', 'nonpendant-profligately-tessa.ngrok-free.dev']
-CSRF_TRUSTED_ORIGINS = ['https://circlecal.app', 'https://www.circlecal.app']
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_csv(name: str, default_list: list[str]) -> list[str]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default_list
+    items = [p.strip() for p in str(raw).split(",")]
+    return [p for p in items if p]
+
+
+# Hosts / CSRF must be explicit in production.
+# You can override via env vars:
+#   ALLOWED_HOSTS=www.circlecal.app,circlecal.app
+#   CSRF_TRUSTED_ORIGINS=https://circlecal.app,https://www.circlecal.app
+ALLOWED_HOSTS = _env_csv(
+    "ALLOWED_HOSTS",
+    [
+        "www.circlecal.app",
+        "circlecal.app",
+    ],
+)
+CSRF_TRUSTED_ORIGINS = _env_csv(
+    "CSRF_TRUSTED_ORIGINS",
+    [
+        "https://circlecal.app",
+        "https://www.circlecal.app",
+    ],
+)
+
+
+# --- Database (Render-friendly) ---
+#
+# If DATABASE_URL is provided (Render Postgres does this), switch to Postgres.
+# Otherwise fall back to whatever base settings configured (SQLite for local).
+_database_url = os.getenv("DATABASE_URL")
+if _database_url:
+    parsed = urlparse(_database_url)
+    if parsed.scheme not in ("postgres", "postgresql"):
+        raise RuntimeError(f"Unsupported DATABASE_URL scheme: {parsed.scheme!r}")
+
+    # urlparse yields path like "/dbname"
+    db_name = (parsed.path or "").lstrip("/")
+    query = parse_qs(parsed.query or "")
+    sslmode = (query.get("sslmode") or [None])[0]
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": db_name,
+            "USER": parsed.username or "",
+            "PASSWORD": parsed.password or "",
+            "HOST": parsed.hostname or "",
+            "PORT": str(parsed.port or ""),
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        }
+    }
+    if sslmode:
+        DATABASES["default"]["OPTIONS"] = {"sslmode": sslmode}
 
 # Secure cookies (effective when served over HTTPS)
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False
+SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "Lax")
 
-# Redirect HTTP to HTTPS (toggle off locally if needed)
-SECURE_SSL_REDIRECT = False
 
-# HSTS (enable only behind HTTPS in real prod)
-SECURE_HSTS_SECONDS = 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-SECURE_HSTS_PRELOAD = False
+# If deployed behind a reverse proxy (Render/Nginx), Django should trust
+# X-Forwarded-Proto so it can correctly detect HTTPS.
+if _env_bool("USE_X_FORWARDED_PROTO", True):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+
+# Redirect HTTP to HTTPS.
+# Set SECURE_SSL_REDIRECT=0 only if your reverse proxy/load balancer handles redirects.
+SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
+
+# HSTS (only enable if your entire site is served over HTTPS).
+# Defaults are "real prod" safe; override via env vars if needed.
+try:
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
+except Exception:
+    SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", False)
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = 'same-origin'
+
+
+# Static files: optional WhiteNoise (useful on platforms like Render)
+_enable_whitenoise = _env_bool("ENABLE_WHITENOISE", True)
+if _enable_whitenoise:
+    try:
+        import whitenoise  # noqa: F401
+
+        # Use WhiteNoise's hashed+compressed static file storage in production.
+        # This gives long-term caching and will fail loudly if a referenced
+        # static asset is missing during `collectstatic`.
+        STORAGES = {
+            "default": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+            },
+            "staticfiles": {
+                "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+            },
+        }
+
+        if isinstance(MIDDLEWARE, (list, tuple)):
+            _mw = list(MIDDLEWARE)
+            # Insert right after SecurityMiddleware when present.
+            if "django.middleware.security.SecurityMiddleware" in _mw and "whitenoise.middleware.WhiteNoiseMiddleware" not in _mw:
+                idx = _mw.index("django.middleware.security.SecurityMiddleware") + 1
+                _mw.insert(idx, "whitenoise.middleware.WhiteNoiseMiddleware")
+            elif "whitenoise.middleware.WhiteNoiseMiddleware" not in _mw:
+                _mw.insert(0, "whitenoise.middleware.WhiteNoiseMiddleware")
+            MIDDLEWARE = _mw
+    except Exception:
+        pass
 
 # Use robust password validators from base settings
 # Logging

@@ -2775,8 +2775,24 @@ def choose_business(request):
 
     organizations = [m.organization for m in memberships]
 
+    upgrade_plan_id = None
+    try:
+        raw = (request.GET.get('plan_id') or '').strip()
+        if raw:
+            upgrade_plan_id = int(raw)
+            # Validate plan exists and is active (fail closed to normal behavior).
+            try:
+                from billing.models import Plan
+                if not Plan.objects.filter(id=upgrade_plan_id, is_active=True).exists():
+                    upgrade_plan_id = None
+            except Exception:
+                upgrade_plan_id = None
+    except Exception:
+        upgrade_plan_id = None
+
     resp = render(request, "calendar_app/choose_business.html", {
-        "organizations": organizations
+        "organizations": organizations,
+        "upgrade_plan_id": upgrade_plan_id,
     })
     # Preserve returning users to this page if they logout mid-onboarding
     try:
@@ -3785,18 +3801,40 @@ def create_service(request, org_slug):
                 except Exception:
                     pass
 
-                # Refund policy: always on; cutoff/text editable only on Pro/Team.
-                try:
-                    svc.refunds_allowed = True
-                except Exception:
-                    pass
+                # Refund policy: Pro/Team can toggle; Basic/Trial locked.
                 if can_use_pro_team:
+                    refunds_allowed = (request.POST.get("refunds_allowed") is not None)
                     try:
-                        svc.refund_cutoff_hours = int(request.POST.get("refund_cutoff_hours", svc.refund_cutoff_hours))
+                        svc.refunds_allowed = refunds_allowed
                     except Exception:
                         pass
-                    svc.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+                    if refunds_allowed:
+                        try:
+                            cutoff_val = int(request.POST.get("refund_cutoff_hours") or 24)
+                            if cutoff_val < 1:
+                                cutoff_val = 1
+                            svc.refund_cutoff_hours = cutoff_val
+                        except Exception:
+                            pass
+                        try:
+                            svc.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            svc.refund_cutoff_hours = 0
+                        except Exception:
+                            pass
+                        try:
+                            svc.refund_policy_text = ""
+                        except Exception:
+                            pass
                 else:
+                    # Locked behavior for Basic/Trial: refunds on, cutoff fixed, no custom text.
+                    try:
+                        svc.refunds_allowed = True
+                    except Exception:
+                        pass
                     try:
                         svc.refund_cutoff_hours = 24
                     except Exception:
@@ -3865,20 +3903,21 @@ def edit_service(request, org_slug, service_id):
         is_team_plan = False
         can_use_pro_team = False
 
-    # Refund policy is always-on for all plans.
-    try:
-        if hasattr(service, 'refunds_allowed') and (not bool(getattr(service, 'refunds_allowed', False))):
-            service.refunds_allowed = True
-            update_fields = ['refunds_allowed']
-            try:
-                if hasattr(service, 'refund_cutoff_hours') and int(getattr(service, 'refund_cutoff_hours', 0) or 0) < 1:
-                    service.refund_cutoff_hours = 24
-                    update_fields.append('refund_cutoff_hours')
-            except Exception:
-                pass
-            service.save(update_fields=update_fields)
-    except Exception:
-        pass
+    # Keep Basic/Trial behavior consistent with UI: refunds always on (locked).
+    if not can_use_pro_team:
+        try:
+            if hasattr(service, 'refunds_allowed') and (not bool(getattr(service, 'refunds_allowed', False))):
+                service.refunds_allowed = True
+                update_fields = ['refunds_allowed']
+                try:
+                    if hasattr(service, 'refund_cutoff_hours') and int(getattr(service, 'refund_cutoff_hours', 0) or 0) < 1:
+                        service.refund_cutoff_hours = 24
+                        update_fields.append('refund_cutoff_hours')
+                except Exception:
+                    pass
+                service.save(update_fields=update_fields)
+        except Exception:
+            pass
 
     # Enforce locked values for non-Pro/Team so runtime behavior matches the UI.
     if not can_use_pro_team:
@@ -4046,28 +4085,44 @@ def edit_service(request, org_slug, service_id):
                 except Exception:
                     pass
 
-                # Refund policy: always on; cutoff/text editable only on Pro/Team.
-                try:
-                    service.refunds_allowed = True
-                except Exception:
-                    pass
+                # Refund policy: Pro/Team can toggle; Basic/Trial locked.
                 if can_use_pro_team:
-                    cutoff_raw = request.POST.get("refund_cutoff_hours")
-                    # When refunds are allowed, require cutoff >= 1
-                    if cutoff_raw is not None and cutoff_raw != "":
-                        try:
-                            cutoff_val = int(cutoff_raw)
-                            if cutoff_val < 1:
-                                messages.error(request, "Refund cutoff must be at least 1 hour when refunds are allowed.")
-                                cutoff_val = 1
-                            service.refund_cutoff_hours = cutoff_val
-                        except ValueError:
-                            messages.error(request, "Invalid value for refund_cutoff_hours.")
+                    refunds_allowed = (request.POST.get("refunds_allowed") is not None)
+                    try:
+                        service.refunds_allowed = refunds_allowed
+                    except Exception:
+                        pass
+                    if refunds_allowed:
+                        cutoff_raw = request.POST.get("refund_cutoff_hours")
+                        # When refunds are allowed, require cutoff >= 1
+                        if cutoff_raw is not None and cutoff_raw != "":
+                            try:
+                                cutoff_val = int(cutoff_raw)
+                                if cutoff_val < 1:
+                                    messages.error(request, "Refund cutoff must be at least 1 hour when refunds are allowed.")
+                                    cutoff_val = 1
+                                service.refund_cutoff_hours = cutoff_val
+                            except ValueError:
+                                messages.error(request, "Invalid value for refund_cutoff_hours.")
+                        else:
+                            # Default to 24 if not provided
+                            service.refund_cutoff_hours = max(1, service.refund_cutoff_hours or 24)
+                        service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
                     else:
-                        # Default to 24 if not provided
-                        service.refund_cutoff_hours = max(1, service.refund_cutoff_hours or 24)
-                    service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
+                        try:
+                            service.refund_cutoff_hours = 0
+                        except Exception:
+                            pass
+                        try:
+                            service.refund_policy_text = ""
+                        except Exception:
+                            pass
                 else:
+                    # Locked behavior for Basic/Trial: refunds on, cutoff fixed, no custom text.
+                    try:
+                        service.refunds_allowed = True
+                    except Exception:
+                        pass
                     try:
                         service.refund_cutoff_hours = 24
                     except Exception:

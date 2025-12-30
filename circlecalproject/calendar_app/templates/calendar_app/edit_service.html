@@ -968,10 +968,17 @@
     <!-- Refund Policy -->
     <div class="section-card">
       <h2 class="text-base font-semibold">Refund Policy</h2>
-        <div class="flex items-center mt-3">
-          <input type="checkbox" name="refunds_allowed" id="refunds_allowed" checked disabled
-                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-          <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
+        <div class="mt-3">
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
+            <label class="inline-flex items-center">
+              <input type="checkbox" name="refunds_allowed" id="refunds_allowed" value="1"
+                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                     {% if service.refunds_allowed %}checked{% endif %}
+                     {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="ml-2 text-sm text-gray-700">Allow refunds for this service</span>
+            </label>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
         </div>
         <div class="refund-policy-controls mt-3">
           <div>

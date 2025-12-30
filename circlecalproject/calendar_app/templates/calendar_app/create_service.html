@@ -472,9 +472,12 @@
         <!-- Refund Policy -->
         <div class="border-t pt-6 space-y-4">
           <h2 class="text-base font-semibold">Refund Policy (Service)</h2>
-          <div class="flex items-center">
-            <input type="checkbox" name="refunds_allowed" id="refunds_allowed" checked disabled class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-            <label for="refunds_allowed" class="ml-2 text-sm text-gray-700">Allow refunds for this service</label>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
+            <label class="inline-flex items-center">
+              <input type="checkbox" name="refunds_allowed" id="refunds_allowed" value="1" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="ml-2 text-sm text-gray-700">Allow refunds for this service</span>
+            </label>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
@@ -492,6 +495,26 @@
             </div>
           </div>
         </div>
+
+        <script>
+          // Refund policy fields: only editable on Pro/Team, and only when refunds are enabled.
+          (function(){
+            try{
+              const CAN_USE_PRO_TEAM = {{ can_use_pro_team|yesno:'true,false' }};
+              const chk = document.getElementById('refunds_allowed');
+              const cutoff = document.querySelector('input[name="refund_cutoff_hours"]');
+              const text = document.querySelector('textarea[name="refund_policy_text"]');
+              if (!chk || !cutoff || !text) return;
+              function update(){
+                const enabled = CAN_USE_PRO_TEAM && !!chk.checked;
+                try{ cutoff.disabled = !enabled; }catch(e){}
+                try{ text.disabled = !enabled; }catch(e){}
+              }
+              chk.addEventListener('change', update);
+              update();
+            }catch(e){ /* ignore */ }
+          })();
+        </script>
 
         <div class="flex items-center justify-between pt-2">
           <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>

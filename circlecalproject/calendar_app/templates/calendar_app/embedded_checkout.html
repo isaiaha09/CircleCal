@@ -4,9 +4,63 @@
 {% block content %}
 <div class="max-w-xl mx-auto py-10">
   <h1 class="text-3xl font-bold mb-2">Subscribe to {{ plan.name }}</h1>
-  <p class="text-gray-600 mb-6">{{ plan.description }}</p>
 
-  <div class="border rounded-lg p-6 shadow">
+  {% if is_change_flow and subscription and subscription.plan %}
+    <div class="mb-4 p-3 rounded border-l-4 border-blue-300 bg-blue-50 text-sm text-blue-800">
+      You are currently on <strong>{{ subscription.plan.name }}</strong>. Changing to <strong>{{ plan.name }}</strong> will follow the same upgrade/downgrade rules as the billing manager.
+    </div>
+  {% endif %}
+
+  <div class="border rounded-lg p-6 shadow mb-6 bg-white">
+    <div class="flex items-baseline justify-between gap-4">
+      <div>
+        <div class="text-sm font-semibold text-gray-900">Plan details</div>
+        <div class="text-xs text-gray-500">Review before payment</div>
+      </div>
+      <div class="text-right">
+        <div class="text-2xl font-extrabold text-gray-900">${{ plan.price|floatformat:2 }}</div>
+        <div class="text-xs text-gray-500">per month</div>
+      </div>
+    </div>
+
+    {% if plan.description %}
+      <p class="text-gray-600 mt-3">{{ plan.description }}</p>
+    {% endif %}
+
+    <ul class="text-sm text-gray-700 mt-4 space-y-2">
+      {% if plan.slug == 'basic' %}
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> 1 active service</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Up to 100 bookings/month</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Basic calendar</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Email support</li>
+      {% elif plan.slug == 'pro' %}
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Unlimited services</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Unlimited bookings</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Custom weekly availability</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Custom branding</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Payment processing</li>
+      {% elif plan.slug == 'team' %}
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Everything in Pro</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Multiple staff accounts</li>
+        <li class="flex items-start"><span class="text-green-600 mr-2">✓</span> Team management</li>
+      {% endif %}
+    </ul>
+
+    <div class="mt-4 flex items-center justify-between gap-3">
+      <a class="text-sm text-gray-500 hover:text-gray-700" href="{% url 'calendar_app:pricing_page' organization.slug %}">← Back to pricing</a>
+      <a class="text-sm text-blue-600 hover:text-blue-700 font-semibold" href="#payment">Continue to payment ↓</a>
+    </div>
+  </div>
+
+  <div id="payment" class="border rounded-lg p-6 shadow">
+    <div class="text-sm font-semibold text-gray-900 mb-3">Payment</div>
+
+    <div id="cc-saved-cards" class="mb-4 hidden">
+      <div class="text-xs font-semibold text-gray-700 mb-2">Saved cards</div>
+      <div id="cc-saved-cards-list" class="space-y-2"></div>
+      <div class="mt-2 text-xs text-gray-500">Select a saved card to pay, or choose “New card” to enter a different payment method.</div>
+    </div>
+
     <div id="loading" class="flex items-center gap-2 text-gray-600 mb-4">
       <svg class="animate-spin h-5 w-5 text-gray-500" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
@@ -14,7 +68,9 @@
       </svg>
       <span>Loading payment form…</span>
     </div>
-    <div id="payment-element"></div>
+    <div id="cc-new-card-wrap">
+      <div id="payment-element"></div>
+    </div>
     <button id="submit" class="mt-6 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" disabled>Confirm and Subscribe</button>
     <div id="message" class="mt-4 text-sm text-gray-600"></div>
   </div>
@@ -27,13 +83,353 @@
   const orgSlug = "{{ organization.slug }}";
   const planId = {{ plan.id }};
   const publishableKey = "{{ stripe_publishable_key }}";
+  const manageUrl = "{% url 'billing:manage_billing' organization.slug %}";
+  const isChangeFlow = {{ is_change_flow|yesno:"true,false" }};
 
   const stripe = Stripe(publishableKey);
   let elements;
 
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.startsWith(name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function fmtMoney(v) {
+    try {
+      const n = Number(v) || 0;
+      return '$' + n.toFixed(2);
+    } catch (e) {
+      return '$0.00';
+    }
+  }
+
+  function closePreviewModal(){
+    const modal = document.getElementById('cc-preview-modal');
+    if (!modal) return;
+    modal.classList.remove('flex');
+    modal.classList.add('hidden');
+  }
+
+  function openPreviewModal(preview){
+    const modal = document.getElementById('cc-preview-modal');
+    const linesEl = document.getElementById('cc-preview-lines');
+    const totalEl = document.getElementById('cc-preview-total');
+    const billingEl = document.getElementById('cc-preview-billing');
+    if (!modal || !linesEl || !totalEl || !billingEl) return;
+
+    linesEl.innerHTML = '';
+    const prorationLines = preview && preview.proration_lines ? preview.proration_lines : [];
+    if (!prorationLines.length) {
+      const d = document.createElement('div');
+      d.className = 'text-sm text-gray-600';
+      d.textContent = 'No immediate charge.';
+      linesEl.appendChild(d);
+    } else {
+      for (const ln of prorationLines) {
+        const row = document.createElement('div');
+        row.className = 'flex items-start justify-between gap-3 text-sm';
+        const left = document.createElement('div');
+        left.className = 'text-gray-800';
+        left.textContent = ln.description || 'Proration';
+        const right = document.createElement('div');
+        right.className = 'text-gray-900 font-semibold';
+        right.textContent = fmtMoney(ln.amount);
+        row.appendChild(left);
+        row.appendChild(right);
+        linesEl.appendChild(row);
+      }
+    }
+
+    totalEl.textContent = fmtMoney(preview && preview.proration_amount_dollars != null ? preview.proration_amount_dollars : 0);
+
+    if (preview && preview.billing_date) {
+      billingEl.textContent = preview.billing_date;
+    } else {
+      billingEl.textContent = '—';
+    }
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+
   async function init() {
     const msgEl = document.getElementById('message');
+    let selectedPmId = null; // null means "new card"
+
+    // For change-flow: allow entering a new card by mounting a SetupIntent Payment Element
+    // only when the user selects "New card".
+    let setupClientSecret = null;
+    let setupElements = null;
+    let setupPaymentElement = null;
+    let setupMounted = false;
+
+    async function ensureSetupElementMounted() {
+      if (!isChangeFlow) return;
+      if (setupMounted) return;
+      const loadingEl = document.getElementById('loading');
+      try {
+        if (loadingEl) loadingEl.style.display = '';
+        const csrftoken = getCookie('csrftoken');
+        const r = await fetch(`/billing/api/bus/${orgSlug}/payment_method/setup_intent/`, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrftoken },
+          credentials: 'same-origin',
+        });
+        if (!r.ok) {
+          const t = await r.text().catch(() => '');
+          throw new Error(t || 'Failed to initialize card form.');
+        }
+        const data = await r.json();
+        setupClientSecret = data.client_secret;
+        if (!setupClientSecret) throw new Error('Missing SetupIntent client secret.');
+
+        setupElements = stripe.elements({ clientSecret: setupClientSecret });
+        setupPaymentElement = setupElements.create('payment');
+        setupPaymentElement.mount('#payment-element');
+        setupMounted = true;
+      } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+      }
+    }
+
+    function setNewCardVisible(isVisible) {
+      const wrap = document.getElementById('cc-new-card-wrap');
+      if (!wrap) return;
+      wrap.style.display = isVisible ? '' : 'none';
+    }
+
+    function renderSavedCards(payload) {
+      const wrap = document.getElementById('cc-saved-cards');
+      const list = document.getElementById('cc-saved-cards-list');
+      if (!wrap || !list) return;
+
+      const cards = (payload && payload.data) ? payload.data : [];
+      const defaultPmId = (payload && payload.default_payment_method_id) ? String(payload.default_payment_method_id) : null;
+      if (!cards.length) {
+        wrap.classList.add('hidden');
+        return;
+      }
+
+      wrap.classList.remove('hidden');
+      list.innerHTML = '';
+
+      // Option: New card
+      const newChecked = !defaultPmId;
+      const newRow = document.createElement('label');
+      newRow.className = 'flex items-center justify-between gap-3 border rounded px-3 py-2 bg-white';
+      newRow.innerHTML = `
+        <div class="flex items-center gap-2">
+          <input type="radio" name="cc-pm" value="" ${newChecked ? 'checked' : ''} />
+          <div class="text-sm text-gray-800">New card</div>
+        </div>
+        <div class="text-xs text-gray-500">Enter a different card below</div>
+      `;
+      newRow.querySelector('input')?.addEventListener('change', () => {
+        selectedPmId = null;
+        setNewCardVisible(true);
+        // Change-flow only: mount a SetupIntent Payment Element so card fields appear.
+        ensureSetupElementMounted().catch(() => {});
+      });
+      list.appendChild(newRow);
+
+      for (const c of cards) {
+        const pmId = c.id;
+        const brand = (c.brand || '').toString();
+        const last4 = (c.last4 || '').toString();
+        const exp = (c.exp_month && c.exp_year) ? (`exp ${c.exp_month}/${c.exp_year}`) : '';
+        const isDefault = !!c.is_default;
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-3 border rounded px-3 py-2 bg-white';
+
+        const left = document.createElement('label');
+        left.className = 'flex items-center gap-2 cursor-pointer';
+        left.innerHTML = `
+          <input type="radio" name="cc-pm" value="${pmId}" ${defaultPmId && String(pmId) === defaultPmId ? 'checked' : ''} />
+          <div class="text-sm text-gray-800">**** ${last4} — ${brand}</div>
+          <div class="text-xs text-gray-500">${exp}</div>
+          ${isDefault ? '<span class="ml-2 text-[11px] px-2 py-0.5 rounded bg-green-100 text-green-800">Default</span>' : ''}
+        `;
+        left.querySelector('input')?.addEventListener('change', () => {
+          selectedPmId = pmId;
+          // If paying with saved card, hide the new-card entry form to reduce confusion.
+          setNewCardVisible(false);
+        });
+
+        const right = document.createElement('button');
+        right.type = 'button';
+        right.className = 'text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700';
+        right.textContent = isDefault ? 'Default' : 'Make default';
+        right.disabled = !!isDefault;
+        right.addEventListener('click', async () => {
+          const csrftoken = getCookie('csrftoken');
+          try {
+            right.disabled = true;
+            const r = await fetch(`/billing/api/bus/${orgSlug}/payment_method/default/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+              credentials: 'same-origin',
+              body: JSON.stringify({ payment_method_id: pmId }),
+            });
+            if (!r.ok) {
+              const t = await r.text().catch(()=> '');
+              try { showToast('error', t || 'Failed to set default card.', 4500); } catch(e) {}
+              right.disabled = false;
+              return;
+            }
+            try { showToast('success', 'Default card updated.', 2600); } catch(e) {}
+            // Refresh list so the "Default" pill moves
+            try {
+              const rr = await fetch(`/billing/api/bus/${orgSlug}/payment_method/list/`, { credentials: 'same-origin' });
+              if (rr.ok) {
+                const fresh = await rr.json();
+                renderSavedCards(fresh);
+              }
+            } catch(e) {}
+          } catch (e) {
+            try { showToast('error', 'Failed to set default card.', 4500); } catch(err) {}
+            right.disabled = false;
+          }
+        });
+
+        row.appendChild(left);
+        row.appendChild(right);
+        list.appendChild(row);
+      }
+
+      // Initialize visibility based on default selection.
+      if (defaultPmId) {
+        selectedPmId = defaultPmId;
+        setNewCardVisible(false);
+      } else {
+        selectedPmId = null;
+        setNewCardVisible(true);
+        ensureSetupElementMounted().catch(() => {});
+      }
+    }
+
     try {
+      // Always load saved cards so the payment method is apparent.
+      try {
+        const pmRes = await fetch(`/billing/api/bus/${orgSlug}/payment_method/list/`, { credentials: 'same-origin' });
+        if (pmRes.ok) {
+          const payload = await pmRes.json();
+          renderSavedCards(payload);
+        }
+      } catch (e) {}
+
+      // If this org already has a Stripe subscription, use the same
+      // preview/change flow as manage.html (upgrades immediate, downgrades scheduled).
+      if (isChangeFlow) {
+        const btn = document.getElementById('submit');
+        const loadingEl = document.getElementById('loading');
+
+        if (loadingEl) loadingEl.style.display = 'none';
+        // In change-flow we show saved cards and optionally a "New card" entry form.
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Preview and Confirm Change';
+        }
+
+        const previewBtn = btn;
+        previewBtn?.addEventListener('click', async () => {
+          previewBtn.disabled = true;
+          msgEl.textContent = 'Loading preview…';
+          try {
+            const res = await fetch(`/billing/api/bus/${orgSlug}/subscription/preview_change/${planId}/`, { credentials: 'same-origin' });
+            if (!res.ok) {
+              const t = await res.text();
+              msgEl.textContent = t ? ('Preview failed: ' + t) : 'Preview failed.';
+              previewBtn.disabled = false;
+              return;
+            }
+            const preview = await res.json();
+            msgEl.textContent = '';
+            openPreviewModal(preview);
+          } catch (e) {
+            msgEl.textContent = (e && e.message) ? e.message : 'Preview failed.';
+          } finally {
+            previewBtn.disabled = false;
+          }
+        });
+
+        document.getElementById('cc-preview-cancel')?.addEventListener('click', closePreviewModal);
+        document.getElementById('cc-preview-close')?.addEventListener('click', closePreviewModal);
+        document.getElementById('cc-preview-confirm')?.addEventListener('click', async () => {
+          const csrftoken = getCookie('csrftoken');
+          const confirmBtn = document.getElementById('cc-preview-confirm');
+          if (confirmBtn) confirmBtn.disabled = true;
+          msgEl.textContent = 'Applying change…';
+          try {
+            // If user selected a payment method, make it default first.
+            // If user selected "New card", confirm a SetupIntent to save it and then set it as default.
+            if (selectedPmId) {
+              await fetch(`/billing/api/bus/${orgSlug}/payment_method/default/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                credentials: 'same-origin',
+                body: JSON.stringify({ payment_method_id: selectedPmId }),
+              });
+            } else {
+              await ensureSetupElementMounted();
+              const setupRes = await stripe.confirmSetup({
+                elements: setupElements,
+                confirmParams: { return_url: window.location.href },
+                redirect: 'if_required',
+              });
+              if (setupRes && setupRes.error) {
+                msgEl.textContent = setupRes.error.message || 'Card setup failed.';
+                if (confirmBtn) confirmBtn.disabled = false;
+                return;
+              }
+              const pmId = setupRes && setupRes.setupIntent ? setupRes.setupIntent.payment_method : null;
+              if (pmId) {
+                await fetch(`/billing/api/bus/${orgSlug}/payment_method/default/`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                  credentials: 'same-origin',
+                  body: JSON.stringify({ payment_method_id: pmId }),
+                });
+              }
+            }
+
+            const res = await fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+              credentials: 'same-origin',
+              body: JSON.stringify({ start_immediately: true }),
+            });
+            if (!res.ok) {
+              const t = await res.text();
+              msgEl.textContent = t ? ('Change failed: ' + t) : 'Change failed.';
+              if (confirmBtn) confirmBtn.disabled = false;
+              return;
+            }
+            let data = null;
+            try { data = await res.json(); } catch(e) { data = null; }
+            closePreviewModal();
+            const msg = (data && data.message) ? data.message : 'Plan updated.';
+            try { showToast('success', msg, 4200); } catch(e) {}
+            window.location.assign(manageUrl);
+          } catch (e) {
+            msgEl.textContent = (e && e.message) ? e.message : 'Change failed.';
+            if (confirmBtn) confirmBtn.disabled = false;
+          }
+        });
+
+        return;
+      }
+
       const res = await fetch("{% url 'billing:create_embedded_subscription' organization.slug plan.id %}", {
         method: "POST",
         credentials: "same-origin",
@@ -59,6 +455,7 @@
 
       const data = await res.json();
       const clientSecret = data.client_secret;
+      const subscriptionId = data.subscription_id;
       if (!clientSecret) {
         msgEl.textContent = 'Failed to initialize Stripe: missing client secret.';
         return;
@@ -72,18 +469,89 @@
       document.getElementById('loading').style.display = 'none';
       document.getElementById('submit').disabled = false;
 
-      document.getElementById('submit').addEventListener('click', async () => {
-        document.getElementById('submit').disabled = true;
-        const { error } = await stripe.confirmPayment({
-          elements,
-          confirmParams: {
-            return_url: window.location.origin + "/bus/" + orgSlug + "/dashboard/?checkout=success",
-          }
-        });
-        if (error) {
-          msgEl.textContent = error.message || 'Payment failed. Please try again.';
-          document.getElementById('submit').disabled = false;
+      // New-subscription flow: show a preview modal (like manage.html) before confirming payment.
+      const submitBtn = document.getElementById('submit');
+
+      async function doConfirmPayment() {
+        const btn = submitBtn;
+        if (btn) btn.disabled = true;
+        const modalConfirmBtn = document.getElementById('cc-preview-confirm');
+        if (modalConfirmBtn) modalConfirmBtn.disabled = true;
+        msgEl.textContent = 'Confirming payment…';
+        try { if (typeof showLoading === 'function') showLoading(); } catch (e) {}
+
+        const returnUrl = window.location.origin + manageUrl + '?checkout=success&plan=' + encodeURIComponent(String(planId || '')) + (subscriptionId ? ('&sub=' + encodeURIComponent(String(subscriptionId))) : '');
+        let result = null;
+        if (selectedPmId) {
+          // Pay using an existing saved card without requiring Payment Element entry.
+          result = await stripe.confirmCardPayment(clientSecret, {
+            payment_method: selectedPmId,
+            return_url: returnUrl,
+          });
+        } else {
+          result = await stripe.confirmPayment({
+            elements,
+            confirmParams: { return_url: returnUrl },
+            redirect: 'if_required',
+          });
         }
+
+        if (result && result.error) {
+          msgEl.textContent = result.error.message || 'Payment failed. Please try again.';
+          if (btn) btn.disabled = false;
+          if (modalConfirmBtn) modalConfirmBtn.disabled = false;
+          try { if (typeof hideLoading === 'function') hideLoading(); } catch (e) {}
+          return;
+        }
+
+        // If Stripe didn't redirect (common for cards), we land here.
+        msgEl.textContent = 'Payment confirmed. Updating your subscription…';
+        try {
+          if (subscriptionId) {
+            await fetch(`/billing/api/bus/${orgSlug}/subscription/sync/${encodeURIComponent(String(subscriptionId))}/`, {
+              method: 'POST',
+              credentials: 'same-origin',
+            });
+          }
+        } catch (e) {}
+        window.location.assign(manageUrl + '?checkout=success' + (planId ? ('&plan=' + encodeURIComponent(String(planId))) : '') + (subscriptionId ? ('&sub=' + encodeURIComponent(String(subscriptionId))) : ''));
+      }
+
+      submitBtn?.addEventListener('click', async () => {
+        submitBtn.disabled = true;
+        msgEl.textContent = 'Preparing charge preview…';
+        try { if (typeof showLoading === 'function') showLoading(); } catch (e) {}
+        try {
+          // Fetch the just-created subscription's latest invoice so the user can
+          // confirm the exact amount due (taxes/discounts included).
+          if (subscriptionId) {
+            const r = await fetch(`/billing/api/bus/${orgSlug}/embedded/subscription/${encodeURIComponent(String(subscriptionId))}/preview_invoice/`, {
+              method: 'GET',
+              credentials: 'same-origin',
+            });
+            if (r.ok) {
+              const preview = await r.json();
+              msgEl.textContent = '';
+              openPreviewModal(preview);
+              // Wire confirm button to actually confirm payment.
+              const confirm = document.getElementById('cc-preview-confirm');
+              if (confirm) {
+                confirm.onclick = async function(){
+                  closePreviewModal();
+                  await doConfirmPayment();
+                };
+              }
+              try { if (typeof hideLoading === 'function') hideLoading(); } catch (e) {}
+              submitBtn.disabled = false;
+              return;
+            }
+          }
+        } catch (e) {
+          // Ignore preview failures; we'll proceed with payment confirmation.
+        }
+        try { if (typeof hideLoading === 'function') hideLoading(); } catch (e) {}
+        submitBtn.disabled = false;
+        await doConfirmPayment();
       });
     } catch (e) {
       try { console.error('Embedded checkout init failed', e); } catch (err) {}
@@ -92,6 +560,43 @@
   }
 
   init();
+</script>
+
+  <div id="cc-preview-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="p-4 border-b flex items-center justify-between">
+        <div>
+          <div class="text-lg font-semibold">Preview charge</div>
+          <div class="text-xs text-gray-500">Review charges before confirming</div>
+        </div>
+        <button id="cc-preview-close" class="text-gray-500 hover:text-gray-700">✕</button>
+      </div>
+      <div class="p-4">
+        <div class="text-sm font-medium mb-2">Immediate charges</div>
+        <div id="cc-preview-lines" class="space-y-2"></div>
+        <div class="mt-3 pt-3 border-t flex items-center justify-between text-sm">
+          <div class="font-semibold">Immediate due:</div>
+          <div class="font-bold" id="cc-preview-total">$0.00</div>
+        </div>
+        <div class="mt-1 flex items-center justify-between text-xs text-gray-500">
+          <div>Next billing date</div>
+          <div id="cc-preview-billing">—</div>
+        </div>
+      </div>
+      <div class="p-4 border-t flex justify-end gap-2">
+        <button id="cc-preview-cancel" class="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200">Cancel</button>
+        <button id="cc-preview-confirm" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // Close handlers for the shared preview modal.
+  (function(){
+    const close = function(){ try { closePreviewModal(); } catch(e) {} };
+    document.getElementById('cc-preview-cancel')?.addEventListener('click', close);
+    document.getElementById('cc-preview-close')?.addEventListener('click', close);
+  })();
 </script>
 <style>
   #payment-element { min-height: 160px; }

@@ -10,6 +10,8 @@ urlpatterns = [
     # Embedded Payment Element routes
     path("bus/<slug:org_slug>/embedded/<int:plan_id>/", views.embedded_checkout_page, name="embedded_checkout_page"),
     path("api/bus/<slug:org_slug>/embedded/<int:plan_id>/create", views.create_embedded_subscription, name="create_embedded_subscription"),
+    path("api/bus/<slug:org_slug>/embedded/subscription/<str:subscription_id>/preview_invoice/", views.preview_embedded_initial_invoice, name="preview_embedded_initial_invoice"),
+    path("api/bus/<slug:org_slug>/subscription/sync/<str:subscription_id>/", views.sync_subscription_from_stripe, name="sync_subscription_from_stripe"),
     # Billing management (custom embedded portal replacement)
     path("bus/<slug:org_slug>/manage/", views.manage_billing, name="manage_billing"),
     path("api/bus/<slug:org_slug>/payment_method/setup_intent/", views.create_setup_intent, name="create_setup_intent"),
