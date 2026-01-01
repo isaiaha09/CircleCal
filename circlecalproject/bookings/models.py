@@ -172,6 +172,19 @@ class Booking(models.Model):
         related_name='bookings'
     )
 
+    # Client payment tracking (public booking flow)
+    # - 'none' for free services
+    # - 'offline' for instructions-based methods (cash/Venmo/Zelle)
+    # - 'stripe' when Stripe Checkout is used
+    payment_method = models.CharField(max_length=20, blank=True, default='none', db_index=True)
+    # 'not_required' | 'offline_due' | 'pending' | 'paid'
+    payment_status = models.CharField(max_length=20, blank=True, default='not_required', db_index=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
+
+    # When a booking is created via the public reschedule flow, store the old booking id
+    # so we can defer reschedule cleanup/emails until payment clears (Stripe).
+    rescheduled_from_booking_id = models.IntegerField(null=True, blank=True, db_index=True)
+
     def __str__(self):
         return f"{self.title or 'Booking'} ({self.start.date()})"
 
@@ -193,6 +206,42 @@ class Booking(models.Model):
         super().save(*args, **kwargs)
 
 
+class PublicBookingIntent(models.Model):
+    """A short-lived intent created when a client starts a paid booking.
+
+    For Stripe payments, we create an intent first, then create the real Booking
+    only after Stripe confirms payment.
+    """
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='public_booking_intents')
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='public_booking_intents')
+
+    start = models.DateTimeField()
+    end = models.DateTimeField()
+    client_name = models.CharField(max_length=200, blank=True)
+    client_email = models.EmailField(blank=True)
+
+    # 'stripe' only for now (offline confirmations create Bookings immediately)
+    payment_method = models.CharField(max_length=20, blank=True, default='stripe', db_index=True)
+    # 'pending' | 'paid' | 'cancelled' | 'expired'
+    payment_status = models.CharField(max_length=20, blank=True, default='pending', db_index=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
+
+    # Reschedule support: defer cleanup until payment succeeds.
+    rescheduled_from_booking_id = models.IntegerField(null=True, blank=True, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['organization', 'created_at']),
+            models.Index(fields=['service', 'start']),
+        ]
+
+    def __str__(self):
+        return f"PublicBookingIntent {self.id} ({self.organization_id}) {self.start}"
+
+
 class OrgSettings(models.Model):
     organization = models.OneToOneField(
         Organization,
@@ -208,6 +257,11 @@ class OrgSettings(models.Model):
     org_refunds_allowed = models.BooleanField(default=True)
     org_refund_cutoff_hours = models.PositiveIntegerField(default=24)
     org_refund_policy_text = models.TextField(blank=True)
+
+    # Pro/Team: allow offline payment methods (instructions only).
+    # This is feature-gated in billing.utils.can_use_offline_payment_methods.
+    offline_payment_methods = models.JSONField(default=list, blank=True)
+    offline_payment_instructions = models.TextField(blank=True, default='')
 
     def __str__(self):
         try:

@@ -15,7 +15,7 @@ plans_data = [
         "max_bookings_per_month": 100,
         "allow_custom_branding": False,
         "allow_priority_support": False,
-        "allow_payment_processing": False,
+        "allow_payment_processing": True,
         "stripe_price_id": "price_1SZhx0ILdL6xY1r90SeZx55m",  # Set this after creating Stripe price
         "is_active": True,
     },

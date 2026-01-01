@@ -450,13 +450,56 @@
       <label class="block text-sm text-gray-700 mb-1">Email</label>
       <input type="email" name="client_email" required value="{{ prefill_client_email|default:'' }}" class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
 
+      <div id="paymentSection" class="mb-4" style="display:none;">
+        <label class="block text-sm text-gray-700 mb-2">Payment method</label>
+
+        <div class="space-y-2">
+          <label class="flex items-start gap-2">
+            <input type="radio" name="payment_method" value="stripe" checked>
+            <span class="text-sm text-gray-800">
+              Pay with card (Stripe)
+            </span>
+          </label>
+
+          {% if offline_methods_allowed %}
+            <label class="flex items-start gap-2">
+              <input type="radio" name="payment_method" value="offline">
+              <span class="text-sm text-gray-800">
+                Pay offline (cash/Venmo/Zelle)
+              </span>
+            </label>
+            <div id="offlineInstructions" class="text-xs text-gray-600 ml-6" style="display:none;">
+              {% if offline_instructions %}
+                {{ offline_instructions }}
+              {% else %}
+                Offline payment instructions will be shown after booking.
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+
+        <p class="text-xs text-gray-500 mt-2">Payment is only required for paid services.</p>
+      </div>
+
       <div class="modal-actions">
         <button type="button" id="backToSlotsBtn" class="px-4 py-2 text-sm md:text-base rounded border border-gray-300 text-gray-700 hover:bg-gray-100 flex-1 md:flex-none">Back</button>
         <button type="submit" id="bookNowBtn" class="bg-blue-600 text-white px-4 py-2 text-sm md:text-base rounded hover:bg-blue-700 flex-1 md:flex-none">Book now</button>
       </div>
     </form>
   </div>
+
+  <!-- Modal View 3: Embedded Stripe Checkout -->
+  <div class="modal-box" id="timeModalViewCheckout" style="display:none;">
+    <button class="modal-close" type="button" onclick="closeTimeModal()">×</button>
+    <h3 class="modal-title text-gray-900">Complete payment</h3>
+    <div id="embedded-checkout" class="mt-3"></div>
+    <div class="mt-3 text-xs text-gray-600">Secured by Stripe.</div>
+  </div>
 </div>
+
+{% if open_checkout %}
+<script src="https://js.stripe.com/v3/"></script>
+{% endif %}
 
 <script>
 // Global variable to track booked slots during this session
@@ -474,6 +517,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   const timeModal = document.getElementById("timeModal");
   const timeModalViewSlots = document.getElementById("timeModalViewSlots");
   const timeModalViewDetails = document.getElementById("timeModalViewDetails");
+  const timeModalViewCheckout = document.getElementById("timeModalViewCheckout");
   const selectedDateLabel = document.getElementById("selectedDateLabel");
   const selectedDateTimeLabel = document.getElementById("selectedDateTimeLabel");
   const timeSlots = document.getElementById("timeSlots");
@@ -487,6 +531,10 @@ document.addEventListener("DOMContentLoaded", async function () {
   const svcPrice = document.getElementById("svcPrice");
   const svcRefundLine = document.getElementById("svcRefundLine");
   const svcRefundText = document.getElementById("svcRefundText");
+  const paymentSection = document.getElementById('paymentSection');
+  const offlineInstructions = document.getElementById('offlineInstructions');
+
+  const offlineAllowed = {{ offline_methods_allowed|yesno:"true,false" }};
 
   const now = new Date();
   let currentMonth = now.getMonth();
@@ -494,6 +542,49 @@ document.addEventListener("DOMContentLoaded", async function () {
   // Render synchronization guards
   let renderToken = 0;
   let isRendering = false;
+
+  function updatePaymentSectionForServiceSlug(slug) {
+    if (!paymentSection) return;
+    let price = 0;
+    try {
+      const d = SERVICE_MAP[slug];
+      price = Number(d && d.price != null ? d.price : 0) || 0;
+    } catch (e) {
+      price = 0;
+    }
+
+    if (price > 0) {
+      paymentSection.style.display = '';
+    } else {
+      paymentSection.style.display = 'none';
+    }
+
+    // Default behavior: hide offline instructions until selected
+    if (offlineInstructions) offlineInstructions.style.display = 'none';
+
+    // If offline isn't allowed, ensure Stripe is selected
+    if (!offlineAllowed) {
+      const stripeRadio = paymentSection.querySelector('input[name="payment_method"][value="stripe"]');
+      if (stripeRadio) stripeRadio.checked = true;
+      return;
+    }
+
+    // Wire up toggling instructions
+    const selected = paymentSection.querySelector('input[name="payment_method"]:checked');
+    if (offlineInstructions) {
+      offlineInstructions.style.display = (selected && selected.value === 'offline') ? '' : 'none';
+    }
+  }
+
+  if (paymentSection) {
+    paymentSection.addEventListener('change', function (e) {
+      try {
+        if (!offlineInstructions) return;
+        const selected = paymentSection.querySelector('input[name="payment_method"]:checked');
+        offlineInstructions.style.display = (selected && selected.value === 'offline') ? '' : 'none';
+      } catch (err) {}
+    });
+  }
 
   // Render month header and circles
   // Store day summary globally for guards
@@ -918,8 +1009,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
       // Initialize details
       updateServiceDetails(serviceSelect.value);
+      updatePaymentSectionForServiceSlug(serviceSelect.value);
       serviceSelect.addEventListener('change', (e) => {
         updateServiceDetails(e.target.value);
+        updatePaymentSectionForServiceSlug(e.target.value);
       });
       // Include edge buffer preference (prefer server setting, allow local override)
       const edgeVal2 = (function(){
@@ -1161,6 +1254,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     timeModal.style.display = "none"; 
     // Reset to slots view when closing
     timeModalViewDetails.style.display = 'none';
+    if (timeModalViewCheckout) timeModalViewCheckout.style.display = 'none';
     timeModalViewSlots.style.display = 'block';
   }
   window.closeTimeModal = closeTimeModal;
@@ -1209,6 +1303,31 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
       // Form will submit normally and redirect
     });
+  }
+
+  // If this page load is a Stripe embedded-checkout continuation, open the modal and mount Stripe.
+  const openCheckout = {{ open_checkout|default:False|yesno:"true,false" }};
+  const stripePublishableKey = "{{ stripe_publishable_key|default:''|escapejs }}";
+  const stripeClientSecret = "{{ stripe_client_secret|default:''|escapejs }}";
+  if (openCheckout && stripePublishableKey && stripeClientSecret && timeModal && timeModalViewCheckout) {
+    try {
+      timeModalViewSlots.style.display = 'none';
+      timeModalViewDetails.style.display = 'none';
+      timeModalViewCheckout.style.display = 'block';
+      timeModal.style.display = 'flex';
+    } catch (e) {}
+
+    (async function () {
+      try {
+        if (typeof Stripe !== 'function') throw new Error('Stripe.js not loaded');
+        const stripe = Stripe(stripePublishableKey);
+        const checkout = await stripe.initEmbeddedCheckout({ clientSecret: stripeClientSecret });
+        checkout.mount('#embedded-checkout');
+      } catch (err) {
+        const wrap = document.getElementById('embedded-checkout');
+        if (wrap) wrap.innerHTML = '<div class="text-sm text-red-600">Unable to load payment form. Please refresh and try again.</div>';
+      }
+    })();
   }
 
   // Ensure header and grid start transparent, preventing any crossfade flash

@@ -10,6 +10,20 @@ MULTIPLE_SERVICE_PLANS = {PRO_SLUG, TEAM_SLUG}
 MULTI_STAFF_PLANS = {TEAM_SLUG}
 
 
+def can_use_offline_payment_methods(org: Organization) -> bool:
+    """Allow offering offline payment instructions (cash/Venmo/Zelle) to clients.
+
+    Requirement:
+    - Trial/Basic: Stripe only
+    - Pro/Team: Stripe + offline methods
+    """
+    sub = get_subscription(org)
+    # Treat trialing like Basic for payment method gating.
+    if sub and getattr(sub, "status", "") == "trialing":
+        return False
+    return get_plan_slug(org) in {PRO_SLUG, TEAM_SLUG}
+
+
 def can_use_resources(org: Organization) -> bool:
     """Facility resource booking (rooms/cages) is a Team-only feature."""
     return get_plan_slug(org) == TEAM_SLUG

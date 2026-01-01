@@ -23,10 +23,13 @@ from datetime import timedelta
 from bookings.models import Booking
 from bookings.models import WeeklyAvailability, OrgSettings
 from bookings.models import ServiceAssignment
+from bookings.models import PublicBookingIntent
 from calendar_app.utils import user_has_role  # <-- single source of truth
 from calendar_app.permissions import require_roles
 from billing.utils import get_subscription
 from billing.utils import get_plan_slug, TEAM_SLUG, PRO_SLUG
+from billing.utils import can_use_offline_payment_methods
+from billing.utils import can_use_offline_payment_methods
 
 
 def _can_use_per_date_overrides(org: Organization) -> bool:
@@ -328,6 +331,8 @@ def booking_to_event(bk: Booking):
             'client_name': bk.client_name,
             'client_email': bk.client_email,
             'is_blocking': bk.is_blocking,
+            'payment_method': getattr(bk, 'payment_method', None),
+            'payment_status': getattr(bk, 'payment_status', None),
             # Flag all overrides (service NULL) so frontend can reliably detect them after hard refresh
             'is_per_date': bk.service is None,
         }
@@ -1365,233 +1370,18 @@ def public_org_page(request, org_slug):
     return render(request, "public/public_org_page.html", {"org": org, "services": services})
 
 
-
-
-
-@require_http_methods(['GET', 'POST'])
-def public_service_page(request, org_slug, service_slug):
-    """
-    Public booking page for a single service.
-    GET  -> show calendar + booking modal
-    POST -> create a Booking for the selected time
-    """
-    org = get_object_or_404(Organization, slug=org_slug)
-    services = Service.objects.filter(organization=org, is_active=True).order_by("name")
-    # Inactive services should not be bookable or selectable on the public page.
-    service = Service.objects.filter(slug=service_slug, organization=org, is_active=True).first()
-    if not service:
-        return redirect(reverse('bookings:public_org_page', args=[org.slug]))
-
-    show_with_line = (get_plan_slug(org) == TEAM_SLUG)
-
-    if request.method == "POST":
-        client_name = request.POST.get("client_name")
-        client_email = request.POST.get("client_email")
-        start_str = request.POST.get("start")
-        end_str = request.POST.get("end")
-        # Allow selecting a different service from the modal
-        posted_service_slug = request.POST.get("service_slug")
-        if posted_service_slug and posted_service_slug != service_slug:
-            service = Service.objects.filter(slug=posted_service_slug, organization=org, is_active=True).first()
-            if not service:
-                return HttpResponseBadRequest("Service is not available")
-
-        if not all([client_name, client_email, start_str, end_str]):
-            return HttpResponseBadRequest("Missing required fields")
-
-        start = parse_datetime(start_str)
-        end = parse_datetime(end_str)
-        # Interpret naive datetimes in the organization's timezone
-        try:
-            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
-        except Exception:
-            org_tz = timezone.get_current_timezone()
-        if timezone.is_naive(start):
-            start = make_aware(start, org_tz)
-        else:
-            start = start.astimezone(org_tz)
-        if timezone.is_naive(end):
-            end = make_aware(end, org_tz)
-        else:
-            end = end.astimezone(org_tz)
-
-        # Double-check there's still no conflict (exclude per-date overrides)
-        conflict = Booking.objects.filter(
-            organization=org,
-            start__lt=end,
-            end__gt=start,
-            service__isnull=False  # only check real service bookings
-        ).exists()
-        if conflict:
-            return render(request, "public/public_service_page.html", {
-                "org": org,
-                "services": services,
-                "service": service,
-                "show_with_line": show_with_line,
-                "error": "Sorry, that time was just booked. Please choose another slot.",
-            })
-
-        # Determine if this POST is part of a reschedule flow by validating
-        # the provided `reschedule_source`/`reschedule_token` before creating
-        # the new booking so we can mark the booking to suppress the normal
-        # confirmation email when appropriate.
-        reschedule_old_id = None
-        res_src = request.POST.get('reschedule_source') or request.POST.get('source')
-        res_token = request.POST.get('reschedule_token') or request.POST.get('token')
-        try:
-            if res_src and res_token:
-                signer = TimestampSigner()
-                try:
-                    unsigned = signer.unsign(res_token, max_age=60*60*24*30)
-                    if str(unsigned) == str(res_src):
-                        try:
-                            reschedule_old_id = int(res_src)
-                        except Exception:
-                            reschedule_old_id = None
-                except Exception:
-                    reschedule_old_id = None
-        except Exception:
-            reschedule_old_id = None
-
-        booking = Booking.objects.create(
-            organization=org,
-            service=service,
-            title=getattr(service, "name", "Booking"),
-            client_name=client_name,
-            client_email=client_email,
-            start=start,
-            end=end,
-            is_blocking=False,
-        )
-
-        # Mark booking to suppress confirmation email when this create
-        # is part of a validated reschedule flow. The confirmation sender
-        # wrapper below will check this flag before sending.
-        try:
-            setattr(booking, '_suppress_confirmation', bool(reschedule_old_id))
-        except Exception:
-            pass
-
-        # Email notifications: send a single HTML confirmation to client
-        # Determine if this POST is part of a reschedule flow by validating
-        # the provided `reschedule_source`/`reschedule_token` once and storing
-        # the validated old booking id in `reschedule_old_id`.
-        reschedule_old_id = None
-        res_src = request.POST.get('reschedule_source') or request.POST.get('source')
-        res_token = request.POST.get('reschedule_token') or request.POST.get('token')
-        try:
-            if res_src and res_token:
-                signer = TimestampSigner()
-                try:
-                    unsigned = signer.unsign(res_token, max_age=60*60*24*30)
-                    if str(unsigned) == str(res_src):
-                        try:
-                            reschedule_old_id = int(res_src)
-                        except Exception:
-                            reschedule_old_id = None
-                except Exception:
-                    reschedule_old_id = None
-        except Exception:
-            reschedule_old_id = None
-
-        # Email notifications: owner notification only here. Client notification
-        # for reschedules or normal confirmations will be handled after reschedule
-        # reconciliation below to avoid sending the wrong email when rescheduling.
-        try:
-            from django.db import transaction
-            from .emails import send_owner_booking_notification
-            if getattr(org, "owner", None) and org.owner.email:
-                try:
-                    transaction.on_commit(lambda: send_owner_booking_notification(booking))
-                except Exception:
-                    try:
-                        send_owner_booking_notification(booking)
-                    except Exception:
-                        pass
-        except Exception:
-            # Avoid breaking booking flow if email subsystem fails
-            pass
-
-        # (previous reschedule cleanup removed - consolidated below)
-
-        # If this booking was created as part of a reschedule flow, and we
-        # validated an old booking id earlier, attempt to delete/update the
-        # original booking/audit and notify the client via the rescheduled email.
-        try:
-            if reschedule_old_id:
-                try:
-                    old = Booking.objects.filter(id=reschedule_old_id, organization=org).first()
-                    if old:
-                        old.delete()
-                    else:
-                        from .models import AuditBooking
-                        ab = AuditBooking.objects.filter(booking_id=reschedule_old_id, organization=org, event_type=AuditBooking.EVENT_CANCELLED).order_by('-created_at').first()
-                        if ab:
-                            ab.event_type = AuditBooking.EVENT_DELETED
-                            try:
-                                ab.save()
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-                # Send a rescheduled notification to the client (best-effort)
-                try:
-                    from django.db import transaction
-                    from .emails import send_booking_rescheduled
-                    try:
-                        transaction.on_commit(lambda: send_booking_rescheduled(booking, old_booking_id=reschedule_old_id))
-                    except Exception:
-                        try:
-                            send_booking_rescheduled(booking, old_booking_id=reschedule_old_id)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # After reschedule reconciliation: ensure client receives the correct
-        # email. If this was a reschedule, `send_booking_rescheduled` was already
-        # attempted above; if not, send a normal confirmation now.
-        try:
-            from django.db import transaction
-            from .emails import send_booking_confirmation, send_booking_rescheduled
-            # Only send a normal confirmation when this was NOT a reschedule
-            if not reschedule_old_id:
-                try:
-                    def _maybe_send():
-                        try:
-                            if not getattr(booking, '_suppress_confirmation', False):
-                                send_booking_confirmation(booking)
-                        except Exception:
-                            pass
-                    transaction.on_commit(_maybe_send)
-                except Exception:
-                    try:
-                        if not getattr(booking, '_suppress_confirmation', False):
-                            send_booking_confirmation(booking)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
-        # Notify owner if this booking would violate service buffers (squished)
-        try:
-            if getattr(service, 'allow_squished_bookings', False):
-                if _has_overlap(org, start, end, service=service):
-                    owner = getattr(org, 'owner', None)
-                    if owner and owner.email:
-                        send_mail(
-                            subject=f"Public booking violates buffers for {service.name}",
-                            message=f"A public booking was made for {service.name} at {start.isoformat()} which violates buffer settings.",
-                            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
-                            recipient_list=[owner.email],
-                            fail_silently=True,
-                        )
-        except Exception:
-            pass
+def _build_public_service_page_context(
+    request,
+    *,
+    org: Organization,
+    services,
+    service: Service,
+    show_with_line: bool,
+    offline_methods_allowed: bool,
+    offline_methods: list,
+    offline_instructions: str,
+):
+    """Build template context for the public service booking page."""
 
     # GET - add trial context for banner
     subscription = get_subscription(org)
@@ -1602,7 +1392,7 @@ def public_service_page(request, org_slug, service_slug):
         if subscription.trial_end > now:
             trialing_active = True
             trial_end_date = subscription.trial_end
-    
+
     # Attach assigned member display names to services for client UI (Team plan only)
     if show_with_line:
         try:
@@ -1636,10 +1426,6 @@ def public_service_page(request, org_slug, service_slug):
         service.assigned_names = ''
 
     # Provide per-service EFFECTIVE weekly availability (UI index 0=Sun..6=Sat) as JSON.
-    # If a service is explicitly scoped (has any active service-weekly rows OR is an
-    # unassigned/shared/partitioned service that must have its own schedule), it is
-    # restricted to ONLY those days/times (days without service rows should be empty,
-    # not org fallback). Otherwise fall back to org weekly windows -> legacy full-day.
     any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
     service_weekly_map = {}
     for s in services:
@@ -1681,30 +1467,606 @@ def public_service_page(request, org_slug, service_slug):
                         per_day.append(['00:00-23:59'])
         service_weekly_map[s.slug] = per_day
 
-    return render(request, "public/public_service_page.html", {
+    return {
         "org": org,
         "services": services,
         "service": service,
         "trialing_active": trialing_active,
         "trial_end_date": trial_end_date,
         "show_with_line": show_with_line,
+        "offline_methods_allowed": offline_methods_allowed,
+        "offline_methods": offline_methods,
+        "offline_instructions": offline_instructions,
         "service_weekly_map_json": json.dumps(service_weekly_map),
         # Support reschedule GET params to prefill client info and attach reschedule metadata
         'reschedule_source': request.GET.get('reschedule_source') or request.GET.get('source'),
         'reschedule_token': request.GET.get('reschedule_token') or request.GET.get('token'),
         'prefill_client_name': request.GET.get('client_name') or '',
         'prefill_client_email': request.GET.get('client_email') or '',
-    })
+    }
+
+
+
+
+
+@require_http_methods(['GET', 'POST'])
+def public_service_page(request, org_slug, service_slug):
+    """
+    Public booking page for a single service.
+    GET  -> show calendar + booking modal
+    POST -> create a Booking for the selected time
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    services = Service.objects.filter(organization=org, is_active=True).order_by("name")
+    # Inactive services should not be bookable or selectable on the public page.
+    service = Service.objects.filter(slug=service_slug, organization=org, is_active=True).first()
+    if not service:
+        return redirect(reverse('bookings:public_org_page', args=[org.slug]))
+
+    show_with_line = (get_plan_slug(org) == TEAM_SLUG)
+
+    offline_methods_allowed = can_use_offline_payment_methods(org)
+    try:
+        org_settings = getattr(org, 'settings', None)
+    except Exception:
+        org_settings = None
+    offline_methods = []
+    offline_instructions = ''
+    try:
+        if org_settings:
+            offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
+            offline_instructions = (getattr(org_settings, 'offline_payment_instructions', '') or '').strip()
+    except Exception:
+        offline_methods = []
+        offline_instructions = ''
+
+    if request.method == "POST":
+        client_name = request.POST.get("client_name")
+        client_email = request.POST.get("client_email")
+        start_str = request.POST.get("start")
+        end_str = request.POST.get("end")
+        # Allow selecting a different service from the modal
+        posted_service_slug = request.POST.get("service_slug")
+        if posted_service_slug and posted_service_slug != service_slug:
+            service = Service.objects.filter(slug=posted_service_slug, organization=org, is_active=True).first()
+            if not service:
+                return HttpResponseBadRequest("Service is not available")
+
+        if not all([client_name, client_email, start_str, end_str]):
+            return HttpResponseBadRequest("Missing required fields")
+
+        start = parse_datetime(start_str)
+        end = parse_datetime(end_str)
+        # Interpret naive datetimes in the organization's timezone
+        try:
+            org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        except Exception:
+            org_tz = timezone.get_current_timezone()
+        if timezone.is_naive(start):
+            start = make_aware(start, org_tz)
+        else:
+            start = start.astimezone(org_tz)
+        if timezone.is_naive(end):
+            end = make_aware(end, org_tz)
+        else:
+            end = end.astimezone(org_tz)
+
+        # Double-check there's still no conflict (exclude per-date overrides)
+        conflict = Booking.objects.filter(
+            organization=org,
+            start__lt=end,
+            end__gt=start,
+            service__isnull=False  # only check real service bookings
+        ).exists()
+        if conflict:
+            ctx = _build_public_service_page_context(
+                request,
+                org=org,
+                services=services,
+                service=service,
+                show_with_line=show_with_line,
+                offline_methods_allowed=offline_methods_allowed,
+                offline_methods=offline_methods,
+                offline_instructions=offline_instructions,
+            )
+            ctx["error"] = "Sorry, that time was just booked. Please choose another slot."
+            return render(request, "public/public_service_page.html", ctx)
+
+        # Determine if this POST is part of a reschedule flow by validating
+        # the provided `reschedule_source`/`reschedule_token` before creating
+        # the new booking so we can mark the booking to suppress the normal
+        # confirmation email when appropriate.
+        reschedule_old_id = None
+        res_src = request.POST.get('reschedule_source') or request.POST.get('source')
+        res_token = request.POST.get('reschedule_token') or request.POST.get('token')
+        try:
+            if res_src and res_token:
+                signer = TimestampSigner()
+                try:
+                    unsigned = signer.unsign(res_token, max_age=60*60*24*30)
+                    if str(unsigned) == str(res_src):
+                        try:
+                            reschedule_old_id = int(res_src)
+                        except Exception:
+                            reschedule_old_id = None
+                except Exception:
+                    reschedule_old_id = None
+        except Exception:
+            reschedule_old_id = None
+
+        # Payment selection
+        payment_method = (request.POST.get('payment_method') or '').strip().lower()
+        # Free services bypass payments regardless of selection
+        try:
+            service_price = float(getattr(service, 'price', 0) or 0)
+        except Exception:
+            service_price = 0
+        is_paid_service = service_price > 0
+
+        if not is_paid_service:
+            payment_method = 'none'
+        else:
+            if payment_method not in {'stripe', 'offline'}:
+                payment_method = 'stripe'
+            if payment_method == 'offline' and (not offline_methods_allowed):
+                return HttpResponseBadRequest('Offline payment methods require a Pro or Team subscription.')
+
+        # Stripe payments must NOT create a Booking until Stripe confirms payment.
+        if payment_method == 'stripe':
+            try:
+                import stripe
+                stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
+                if not stripe.api_key:
+                    return HttpResponseBadRequest('Stripe is not configured.')
+
+                publishable_key = getattr(settings, 'STRIPE_PUBLISHABLE_KEY', None)
+                if not publishable_key:
+                    return HttpResponseBadRequest('Stripe publishable key is not configured.')
+
+                # Create an intent first; we'll create the real Booking on Stripe return.
+                intent = PublicBookingIntent.objects.create(
+                    organization=org,
+                    service=service,
+                    client_name=client_name,
+                    client_email=client_email,
+                    start=start,
+                    end=end,
+                    payment_method='stripe',
+                    payment_status='pending',
+                    rescheduled_from_booking_id=reschedule_old_id,
+                )
+
+                unit_amount = int(round(service_price * 100))
+                return_path = reverse('bookings:public_stripe_return', args=[org.slug, service.slug, intent.id])
+                site_url = (getattr(settings, 'SITE_URL', None) or '').strip()
+                if site_url:
+                    return_url = site_url.rstrip('/') + return_path + '?session_id={CHECKOUT_SESSION_ID}'
+                else:
+                    return_url = request.build_absolute_uri(return_path) + '?session_id={CHECKOUT_SESSION_ID}'
+
+                session = stripe.checkout.Session.create(
+                    ui_mode='embedded',
+                    mode='payment',
+                    customer_email=client_email,
+                    line_items=[{
+                        'price_data': {
+                            'currency': 'usd',
+                            'product_data': {
+                                'name': f"{org.name} — {service.name}",
+                            },
+                            'unit_amount': unit_amount,
+                        },
+                        'quantity': 1,
+                    }],
+                    metadata={
+                        'public_booking_intent_id': str(intent.id),
+                        'org_slug': str(org.slug),
+                        'service_slug': str(service.slug),
+                    },
+                    return_url=return_url,
+                )
+
+                intent.stripe_checkout_session_id = session.id or ''
+                try:
+                    intent.save(update_fields=['stripe_checkout_session_id'])
+                except Exception:
+                    pass
+
+                # Render the same public booking page but mount Embedded Checkout in the modal.
+                ctx = _build_public_service_page_context(
+                    request,
+                    org=org,
+                    services=services,
+                    service=service,
+                    show_with_line=show_with_line,
+                    offline_methods_allowed=offline_methods_allowed,
+                    offline_methods=offline_methods,
+                    offline_instructions=offline_instructions,
+                )
+                ctx.update({
+                    'stripe_publishable_key': publishable_key,
+                    'stripe_client_secret': getattr(session, 'client_secret', None),
+                    'open_checkout': True,
+                })
+                return render(request, "public/public_service_page.html", ctx)
+            except Exception:
+                return HttpResponseBadRequest('Unable to start Stripe checkout. Please try again.')
+
+        # Offline/free: create a booking immediately.
+        booking = Booking.objects.create(
+            organization=org,
+            service=service,
+            title=getattr(service, "name", "Booking"),
+            client_name=client_name,
+            client_email=client_email,
+            start=start,
+            end=end,
+            is_blocking=False,
+            payment_method=payment_method,
+            payment_status=('not_required' if payment_method == 'none' else 'offline_due'),
+            rescheduled_from_booking_id=reschedule_old_id,
+        )
+
+        try:
+            setattr(booking, '_suppress_confirmation', bool(reschedule_old_id))
+        except Exception:
+            pass
+
+        # Owner notification for offline/free is immediate.
+        try:
+            from django.db import transaction
+            from .emails import send_owner_booking_notification
+            if getattr(org, "owner", None) and org.owner.email:
+                try:
+                    transaction.on_commit(lambda: send_owner_booking_notification(booking))
+                except Exception:
+                    try:
+                        send_owner_booking_notification(booking)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Offline/free: do reschedule reconciliation and send the appropriate emails now.
+        try:
+            if reschedule_old_id:
+                try:
+                    old = Booking.objects.filter(id=reschedule_old_id, organization=org).first()
+                    if old:
+                        old.delete()
+                    else:
+                        from .models import AuditBooking
+                        ab = AuditBooking.objects.filter(booking_id=reschedule_old_id, organization=org, event_type=AuditBooking.EVENT_CANCELLED).order_by('-created_at').first()
+                        if ab:
+                            ab.event_type = AuditBooking.EVENT_DELETED
+                            try:
+                                ab.save()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                try:
+                    from django.db import transaction
+                    from .emails import send_booking_rescheduled
+                    try:
+                        transaction.on_commit(lambda: send_booking_rescheduled(booking, old_booking_id=reschedule_old_id))
+                    except Exception:
+                        try:
+                            send_booking_rescheduled(booking, old_booking_id=reschedule_old_id)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            from django.db import transaction
+            from .emails import send_booking_confirmation
+            if not reschedule_old_id:
+                try:
+                    def _maybe_send():
+                        try:
+                            if not getattr(booking, '_suppress_confirmation', False):
+                                send_booking_confirmation(booking)
+                        except Exception:
+                            pass
+                    transaction.on_commit(_maybe_send)
+                except Exception:
+                    try:
+                        if not getattr(booking, '_suppress_confirmation', False):
+                            send_booking_confirmation(booking)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
+        # Notify owner if this booking would violate service buffers (squished)
+        try:
+            if getattr(service, 'allow_squished_bookings', False):
+                if _has_overlap(org, start, end, service=service):
+                    owner = getattr(org, 'owner', None)
+                    if owner and owner.email:
+                        send_mail(
+                            subject=f"Public booking violates buffers for {service.name}",
+                            message=f"A public booking was made for {service.name} at {start.isoformat()} which violates buffer settings.",
+                            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+                            recipient_list=[owner.email],
+                            fail_silently=True,
+                        )
+        except Exception:
+            pass
+
+    ctx = _build_public_service_page_context(
+        request,
+        org=org,
+        services=services,
+        service=service,
+        show_with_line=show_with_line,
+        offline_methods_allowed=offline_methods_allowed,
+        offline_methods=offline_methods,
+        offline_instructions=offline_instructions,
+    )
+    return render(request, "public/public_service_page.html", ctx)
 
 def booking_success(request, org_slug, service_slug, booking_id):
     org = get_object_or_404(Organization, slug=org_slug)
     service = get_object_or_404(Service, slug=service_slug, organization=org)
     booking = get_object_or_404(Booking, id=booking_id, organization=org, service=service)
+
+    # Stripe return: verify payment and perform any deferred side effects.
+    session_id = (request.GET.get('session_id') or '').strip()
+    paid_now = False
+    if getattr(booking, 'payment_method', '') == 'stripe' and getattr(booking, 'payment_status', '') != 'paid':
+        if session_id and session_id == getattr(booking, 'stripe_checkout_session_id', ''):
+            try:
+                import stripe
+                stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
+                if stripe.api_key:
+                    sess = stripe.checkout.Session.retrieve(session_id)
+                    if sess and getattr(sess, 'payment_status', None) == 'paid':
+                        booking.payment_status = 'paid'
+                        try:
+                            booking.save(update_fields=['payment_status'])
+                        except Exception:
+                            pass
+                        paid_now = True
+            except Exception:
+                paid_now = False
+
+    # If payment was confirmed on this request, run deferred reschedule cleanup and send emails.
+    if paid_now:
+        old_id = getattr(booking, 'rescheduled_from_booking_id', None)
+        try:
+            if old_id:
+                try:
+                    old = Booking.objects.filter(id=old_id, organization=org).first()
+                    if old:
+                        old.delete()
+                    else:
+                        from .models import AuditBooking
+                        ab = AuditBooking.objects.filter(booking_id=old_id, organization=org, event_type=AuditBooking.EVENT_CANCELLED).order_by('-created_at').first()
+                        if ab:
+                            ab.event_type = AuditBooking.EVENT_DELETED
+                            try:
+                                ab.save()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                try:
+                    from django.db import transaction
+                    from .emails import send_booking_rescheduled
+                    try:
+                        transaction.on_commit(lambda: send_booking_rescheduled(booking, old_booking_id=old_id))
+                    except Exception:
+                        try:
+                            send_booking_rescheduled(booking, old_booking_id=old_id)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            if not old_id:
+                from django.db import transaction
+                from .emails import send_booking_confirmation
+                try:
+                    transaction.on_commit(lambda: send_booking_confirmation(booking))
+                except Exception:
+                    try:
+                        send_booking_confirmation(booking)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            from django.db import transaction
+            from .emails import send_owner_booking_notification
+            if getattr(org, "owner", None) and org.owner.email:
+                try:
+                    transaction.on_commit(lambda: send_owner_booking_notification(booking))
+                except Exception:
+                    try:
+                        send_owner_booking_notification(booking)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    offline_instructions = ''
+    try:
+        org_settings = getattr(org, 'settings', None)
+        offline_instructions = (getattr(org_settings, 'offline_payment_instructions', '') or '').strip() if org_settings else ''
+    except Exception:
+        offline_instructions = ''
+
     return render(request, "public/booking_success.html", {
         "org": org,
         "service": service,
         "booking": booking,
+        "offline_instructions": offline_instructions,
     })
+
+
+@require_http_methods(["GET"])
+def public_stripe_return(request, org_slug, service_slug, intent_id: int):
+    """Finalize a Stripe-paid public booking.
+
+    This endpoint is used as the Stripe Embedded Checkout `return_url`.
+    It verifies the Checkout Session, then creates the real Booking.
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    service = get_object_or_404(Service, slug=service_slug, organization=org)
+    intent = get_object_or_404(PublicBookingIntent, id=intent_id, organization=org, service=service)
+
+    session_id = (request.GET.get('session_id') or '').strip()
+    if not session_id or session_id != (getattr(intent, 'stripe_checkout_session_id', '') or ''):
+        return HttpResponseBadRequest('Invalid Stripe session.')
+
+    paid = False
+    try:
+        import stripe
+        stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
+        if stripe.api_key:
+            sess = stripe.checkout.Session.retrieve(session_id)
+            if sess and getattr(sess, 'payment_status', None) == 'paid':
+                paid = True
+    except Exception:
+        paid = False
+
+    if not paid:
+        # Payment not complete => no booking.
+        ctx = _build_public_service_page_context(
+            request,
+            org=org,
+            services=Service.objects.filter(organization=org, is_active=True).order_by('name'),
+            service=service,
+            show_with_line=(get_plan_slug(org) == TEAM_SLUG),
+            offline_methods_allowed=can_use_offline_payment_methods(org),
+            offline_methods=list(getattr(getattr(org, 'settings', None), 'offline_payment_methods', []) or []),
+            offline_instructions=(getattr(getattr(org, 'settings', None), 'offline_payment_instructions', '') or '').strip(),
+        )
+        ctx['error'] = 'Payment was not completed. No booking was created.'
+        return render(request, 'public/public_service_page.html', ctx)
+
+    # Re-check conflicts at finalize time.
+    conflict = Booking.objects.filter(
+        organization=org,
+        start__lt=intent.end,
+        end__gt=intent.start,
+        service__isnull=False,
+    ).exists()
+    if conflict:
+        ctx = _build_public_service_page_context(
+            request,
+            org=org,
+            services=Service.objects.filter(organization=org, is_active=True).order_by('name'),
+            service=service,
+            show_with_line=(get_plan_slug(org) == TEAM_SLUG),
+            offline_methods_allowed=can_use_offline_payment_methods(org),
+            offline_methods=list(getattr(getattr(org, 'settings', None), 'offline_payment_methods', []) or []),
+            offline_instructions=(getattr(getattr(org, 'settings', None), 'offline_payment_instructions', '') or '').strip(),
+        )
+        ctx['error'] = 'Sorry, that time was just booked. Please contact the business.'
+        return render(request, 'public/public_service_page.html', ctx)
+
+    booking = Booking.objects.create(
+        organization=org,
+        service=service,
+        title=getattr(service, 'name', 'Booking'),
+        client_name=getattr(intent, 'client_name', '') or '',
+        client_email=getattr(intent, 'client_email', '') or '',
+        start=intent.start,
+        end=intent.end,
+        is_blocking=False,
+        payment_method='stripe',
+        payment_status='paid',
+        stripe_checkout_session_id=session_id,
+        rescheduled_from_booking_id=getattr(intent, 'rescheduled_from_booking_id', None),
+    )
+
+    try:
+        intent.delete()
+    except Exception:
+        pass
+
+    # Owner notification
+    try:
+        from django.db import transaction
+        from .emails import send_owner_booking_notification
+        if getattr(org, 'owner', None) and org.owner.email:
+            try:
+                transaction.on_commit(lambda: send_owner_booking_notification(booking))
+            except Exception:
+                try:
+                    send_owner_booking_notification(booking)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    old_id = getattr(booking, 'rescheduled_from_booking_id', None)
+    try:
+        if old_id:
+            try:
+                old = Booking.objects.filter(id=old_id, organization=org).first()
+                if old:
+                    old.delete()
+                else:
+                    from .models import AuditBooking
+                    ab = AuditBooking.objects.filter(booking_id=old_id, organization=org, event_type=AuditBooking.EVENT_CANCELLED).order_by('-created_at').first()
+                    if ab:
+                        ab.event_type = AuditBooking.EVENT_DELETED
+                        try:
+                            ab.save()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            try:
+                from django.db import transaction
+                from .emails import send_booking_rescheduled
+                try:
+                    transaction.on_commit(lambda: send_booking_rescheduled(booking, old_booking_id=old_id))
+                except Exception:
+                    try:
+                        send_booking_rescheduled(booking, old_booking_id=old_id)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        else:
+            try:
+                from django.db import transaction
+                from .emails import send_booking_confirmation
+
+                def _maybe_send():
+                    try:
+                        send_booking_confirmation(booking)
+                    except Exception:
+                        pass
+
+                try:
+                    transaction.on_commit(_maybe_send)
+                except Exception:
+                    try:
+                        send_booking_confirmation(booking)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return redirect(reverse('bookings:booking_success', args=[org.slug, service.slug, booking.id]))
 
 @require_http_methods(["GET"])
 def reschedule_booking(request, booking_id):

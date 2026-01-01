@@ -17,6 +17,28 @@
       <div><strong>Time:</strong> {{ booking.start|time:"g:i A" }} – {{ booking.end|time:"g:i A" }}</div>
     {% endtimezone %}
     <div><strong>Email:</strong> {{ booking.client_email }}</div>
+
+    {% if booking.payment_method and booking.payment_method != 'none' %}
+      <div>
+        <strong>Payment method:</strong>
+        {% if booking.payment_method == 'stripe' %}
+          Card (Stripe)
+        {% elif booking.payment_method == 'offline' %}
+          Offline
+        {% else %}
+          {{ booking.payment_method }}
+        {% endif %}
+      </div>
+      {% if booking.payment_method == 'stripe' %}
+        <div><strong>Payment status:</strong> {{ booking.payment_status|default:"pending" }}</div>
+      {% endif %}
+      {% if booking.payment_method == 'offline' and offline_instructions %}
+        <div class="text-sm text-gray-700 mt-2">
+          <strong>Payment instructions:</strong>
+          <div class="mt-1 whitespace-pre-line">{{ offline_instructions }}</div>
+        </div>
+      {% endif %}
+    {% endif %}
   </div>
 
   <div class="mt-6 flex gap-3">

@@ -22,6 +22,7 @@ urlpatterns = [
     # Backward-compatible alias used by existing templates
     path("bus/<slug:org_slug>/service/<slug:service_slug>/", views.public_service_page, name="services_page"),
     path("bus/<slug:org_slug>/service/<slug:service_slug>/booking_success/<int:booking_id>/", views.booking_success, name="booking_success"),
+    path("bus/<slug:org_slug>/service/<slug:service_slug>/stripe_return/<int:intent_id>/", views.public_stripe_return, name="public_stripe_return"),
     path("api/<slug:org_slug>/<slug:service_slug>/book/", views.create_booking, name="create_service"),
 
     path("bus/<slug:org_slug>/", views.public_org_page, name="public_org_page"),

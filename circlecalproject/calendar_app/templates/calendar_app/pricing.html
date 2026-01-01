@@ -37,23 +37,26 @@
             <div class="bg-blue-500 text-white text-xs font-bold uppercase px-3 py-1 rounded-full inline-block mb-4">Most Popular</div>
             {% endif %}
             
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Client payments: Stripe only</li>
             <h2 class="text-2xl font-semibold mb-2">{{ plan.name }}</h2>
             <p class="text-5xl font-bold mb-2">${{ plan.price|floatformat:2 }}</p>
             <p class="text-gray-500 text-sm mb-6">per month</p>
             <p class="text-gray-600 mb-6 h-12">{{ plan.description }}</p>
 
             <ul class="text-left space-y-3 mb-8">
-                {% if plan.slug == 'basic' %}
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Client payments: Stripe + offline options</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> 1 active service</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Up to 100 bookings/month</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Basic calendar</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Email support</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Client payments: Stripe + offline options</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Client payments via Stripe</li>
                 {% elif plan.slug == 'pro' %}
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Unlimited services</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Unlimited bookings</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Custom weekly availability</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Custom branding</li>
-                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Payment processing</li>
+                <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Client payments via Stripe + offline options (cash/Venmo/Zelle)</li>
                 {% elif plan.slug == 'team' %}
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Everything in Pro</li>
                 <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Multiple staff accounts</li>
