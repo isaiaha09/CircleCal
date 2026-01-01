@@ -2,33 +2,1007 @@
 {% load static %}
 
 {% block content %}
-<h1 style="text-align:center;">CircleCal Demo Calendar</h1>
-<p style="text-align:center; color:#666;">Try selecting days, setting availability, and interacting with the calendar.</p>
+<div class="cc-page" style="max-width: 1180px; margin: 0 auto; padding: 24px 16px;">
+    <div style="display:flex; justify-content:center; align-items:center; margin-bottom:12px; flex-direction:column;">
+        <div style="text-align:center;">
+            <h1 class="calendar-title" style="font-size:32px; font-weight:800; margin:0 0 8px 0; letter-spacing:-0.5px;">CircleCal Demo Calendar</h1>
+            <p style="color:var(--gray-600); font-size:15px; margin:0;">This demo only demonstrates creating a consistent weekly schedule. It does not include entirely accurate visuals or features to the real CircleCal calendar.
+                Authentic visuals and features are available when you <a href="{% url 'calendar_app:signup' %}" style="color:var(--primary-600); font-weight:600; text-decoration:underline;">create a free account</a>.
+            </p>
+        </div>
+    </div>
 
-<div id="calendar"></div>
+    <div style="display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; justify-content:center;">
+        <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 520px; min-width:520px; margin-bottom:0; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 10px 0;">
+                    <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
+                </div>
+                <div style="margin:0 0 14px 0; font-size:13px; color:var(--gray-600); line-height:1.4;">
+                    Demo: adjust your weekly availability below. The calendar day circles will update automatically.
+                </div>
+                <table style="width:100%; border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:2px solid var(--gray-200); background:var(--gray-50);">
+                            <th style="padding:12px; text-align:left; font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--gray-900); width:20%;">Day</th>
+                            <th style="padding:12px; text-align:center; font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--gray-900); width:55%;" colspan="2">Time Ranges</th>
+                            <th style="padding:12px; text-align:center; font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--gray-900); width:25%;">Unavailable</th>
+                        </tr>
+                    </thead>
+                    <tbody id="defaultAvailabilityTable"></tbody>
+                </table>
+                <button id="saveDefaultAvailabilityBtn"
+                        type="button"
+                        style="margin-top:20px; padding:12px 24px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                    Save Defaults
+                </button>
+        </div>
 
+        <div style="flex: 1 1 560px; min-width: 560px;">
+            <div id="calendarWrapper" style="position:relative;">
+                <div id="calendar"></div>
+                <div id="calendarLoading" aria-live="polite" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; border-radius:16px; background:rgba(255,255,255,0.85); z-index:200;">
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:10px; padding:18px 16px;">
+                        <div class="cc-spinner" aria-hidden="true"></div>
+                        <div style="font-weight:700; color:var(--gray-700); font-size:14px;">Loading calendar…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="ccToast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 hidden">
+    <div id="ccToastInner" class="px-4 py-3 rounded-lg shadow-lg border bg-white text-sm"></div>
+</div>
+
+<!-- TIME CIRCLES (Demo) -->
+<div id="timeCirclesModal" style="display:none; flex-direction:column; padding:10px; position:fixed; inset:0; 
+         background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10000; animation:fadeIn 0.2s ease-out;">
+    <div style="background:white; padding:40px; border-radius:20px; width:640px; max-width:92vw; max-height:85vh; overflow-y:auto; position:relative; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); animation:modalSlideUp 0.3s ease-out;">
+        <div style="margin-bottom: 18px; padding:20px; border-radius:12px; background:var(--gray-50);">
+            <h3 style="margin:0 0 12px 0; font-size:16px; font-weight:800; color:var(--gray-900);">Time circles (demo)</h3>
+            <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                <div>
+                    <label style="font-size:12px; color:var(--gray-600);">Hour Block</label><br>
+                    <select id="hourBlockSelect">
+                        <option value="1" selected>1 Hour</option>
+                        <option value="2">2 Hours</option>
+                        <option value="3">3 Hours</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; color:var(--gray-600);">Increment</label><br>
+                    <select id="incrementSelect">
+                        <option value="15">15 min</option>
+                        <option value="30" selected>30 min</option>
+                        <option value="45">45 min</option>
+                        <option value="60">60 min</option>
+                    </select>
+                </div>
+            </div>
+            <div style="margin-top:10px; font-size:13px; color:var(--gray-600); font-style:italic;">Green = available, Grey = unavailable, Red = booked (demo).</div>
+        </div>
+
+        <div id="circleModalTitle" style="font-weight:800; font-size:16px; color:var(--gray-900);"></div>
+        <div id="timeCirclesContainer" style="display:flex; flex-direction:column; gap:40px;"></div>
+
+        <button id="closeCirclesBtn" type="button" style="position:absolute; top:10px; right:10px; background:none; border:none; font-size:20px; cursor:pointer;">✖</button>
+    </div>
+</div>
+
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/main.min.css" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 
+<style>
+/* Mirror calendar.html styling (trimmed to demo needs) */
+:root {
+    --primary-500: #3b82f6;
+    --primary-600: #2563eb;
+    --primary-700: #1d4ed8;
+    --success-500: #10b981;
+    --danger-500: #ef4444;
+    --gray-50: #f9fafb;
+    --gray-200: #e5e7eb;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-900: #111827;
+    --cc-wave-duration: 14s;
+}
+
+#calendar {
+    width: 100%;
+    margin: auto;
+    height: auto;
+    border: none !important;
+    background-color: white;
+    padding: 24px;
+    border-radius: 16px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.fc-scrollgrid,
+.fc-scrollgrid td,
+.fc-scrollgrid th,
+.fc .fc-daygrid-day,
+.fc .fc-daygrid-body,
+.fc .fc-scrollgrid,
+.fc .fc-col-header-cell,
+.fc .fc-daygrid-day-frame { border: none !important; }
+.fc-day-other { background: transparent !important; }
+.fc-day-other .fc-daygrid-day-number {
+    opacity: 0;
+    pointer-events: none;
+}
+.fc .fc-daygrid-body,
+.fc .fc-scrollgrid-section-body,
+.fc .fc-scrollgrid { background: transparent !important; }
+.fc .fc-view-harness { margin-top: 100px; }
+
+@keyframes cc-wave {
+    0% { background-position: 0% 50%; }
+    25% { background-position: 50% 50%; }
+    50% { background-position: 100% 50%; }
+    75% { background-position: 50% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+#defaultAvailabilityContainer,
+#calendar,
+#timeCirclesModal {
+    position: relative;
+    overflow: hidden;
+}
+
+#defaultAvailabilityContainer::before,
+#calendar::before,
+#timeCirclesModal::before {
+    content: '';
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 6px;
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+    background: linear-gradient(to right, var(--primary-500), var(--success-500), var(--danger-500));
+    background-size: 400% 100%;
+    animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
+    animation-delay: var(--cc-wave-offset, 0s);
+    z-index: 50;
+    pointer-events: none;
+}
+
+/* Default Weekly Availability UI (match calendar.html look/feel) */
+#defaultAvailabilityContainer table { table-layout: fixed; width: 100%; }
+#defaultAvailabilityContainer th, #defaultAvailabilityContainer td { white-space: nowrap; overflow: visible; }
+#defaultAvailabilityContainer tbody td:first-child { white-space: nowrap; }
+#defaultAvailabilityContainer tbody td:not(:first-child) { white-space: normal; }
+#defaultAvailabilityContainer tbody tr { border-bottom: 1px solid var(--gray-200); }
+#defaultAvailabilityContainer tbody tr:last-child { border-bottom: none; }
+#defaultAvailabilityContainer tbody td { padding-top: 16px; padding-bottom: 16px; }
+
+/* Modern select and input styling */
+select, input[type="time"], input[type="number"] {
+    padding: 6px 10px;
+    border: 2px solid var(--gray-200);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--gray-900);
+    background: white;
+    transition: all 0.2s ease;
+    outline: none;
+}
+select:focus, input[type="time"]:focus, input[type="number"]:focus {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.range-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    justify-content: center;
+}
+.range-start, .range-end {
+    text-align: center;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--gray-200);
+    background: white;
+    font-weight: 600;
+}
+.remove-range-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border: none;
+    background: var(--danger-500);
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+}
+.remove-range-btn .remove-text { display: none; }
+.add-range-btn {
+    padding: 6px 10px !important;
+    background: var(--primary-500) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    font-weight: 600;
+    font-size: 13px;
+}
+.unavailable-checkbox {
+    width: 18px;
+    height: 18px;
+}
+
+/* Day number circles */
+.fc-daygrid-day-frame {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.fc-daygrid-day-number {
+    position: absolute;
+    margin-top: 100%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 50px;
+    height: 50px;
+    font-size: 1.5rem;
+    border-radius: 50% !important;
+    font-weight: 600;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.fc-day-available .fc-daygrid-day-number { cursor:pointer !important; }
+.fc-day-unavailable .fc-daygrid-day-number { cursor:pointer !important; }
+
+.fc-day-available .fc-daygrid-day-number {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(37, 99, 235, 0.15));
+    border: 2px solid var(--primary-500);
+    color: var(--primary-600);
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.1);
+}
+.fc-day-available .fc-daygrid-day-number:hover {
+    transform: translate(-50%, -50%) scale(1.15);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(37, 99, 235, 0.25));
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+.fc-day-unavailable .fc-daygrid-day-number {
+    background: linear-gradient(135deg, rgba(45, 45, 45, 0.06), rgba(26, 26, 26, 0.10));
+    border: 2px solid var(--gray-200);
+    color: var(--gray-700);
+}
+.fc-daygrid-day-number.selected {
+    background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+    color: white;
+    transform: translate(-50%, -50%) scale(1.25);
+    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+    border-color: var(--primary-700);
+}
+
+/* Temporary highlight during drag (matches calendar.html feel) */
+.fc-day-available .fc-daygrid-day-number.temp-highlight {
+    background-color: rgba(0, 123, 255, 0.5);
+    color: white;
+    transform: translate(-50%, -50%) scale(1.3);
+}
+.fc-day-unavailable .fc-daygrid-day-number.temp-highlight {
+    background-color: rgba(45, 45, 45, 0.5);
+    color: white;
+    transform: translate(-50%, -50%) scale(1.3);
+}
+
+/* Past day + unavailable day styling (parity with calendar.html) */
+.fc-daygrid-day-number.selected.past-day {
+    background-color: #ccc !important;
+    color: #fff !important;
+    border: 2px solid #999 !important;
+}
+.fc-daygrid-day-number.past-day {
+    background-color: #7d7d7d28 !important;
+    color: #4f4b4bff !important;
+    font-weight: 600;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    line-height: 46px;
+    text-align: center;
+    border: 2px solid var(--gray-200);
+}
+.fc-daygrid-day-number.unavailable-number {
+    background-color: #69696990 !important;
+    color: #393535ff !important;
+    font-weight: 600;
+    border: 2px solid #454545ff;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    line-height: 46px;
+    text-align: center;
+}
+.fc-day-unavailable .fc-daygrid-day-number.selected,
+.fc-daygrid-day-number.unavailable-number.selected {
+    background: linear-gradient(135deg, #2d2d2d, #1a1a1a) !important;
+    color: white !important;
+    transform: translate(-50%, -50%) scale(1.25) !important;
+    border: 2px solid #000000 !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Time circles */
+.time-circle {
+    width: 80px; height: 80px; border-radius: 50% !important;
+    display:flex; justify-content:center; align-items:center;
+    cursor:pointer; font-size: 13px; color:white; transition: transform 0.1s ease;
+    user-select:none;
+}
+.time-circle.open { background: var(--success-500); }
+.time-circle.booked { background: var(--danger-500); }
+.time-circle.blocked { background: var(--gray-700); }
+.time-circle:hover { transform: scale(1.06); }
+
+/* Loading overlay */
+.cc-spinner {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 3px solid rgba(17, 24, 39, 0.15);
+    border-top-color: var(--primary-500);
+    animation: cc-spin 0.9s linear infinite;
+}
+@keyframes cc-spin { to { transform: rotate(360deg); } }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalSlideUp { from { transform: translateY(12px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+
+@media (max-width: 768px) {
+    #calendar { padding: 12px; }
+    .fc .fc-view-harness { margin-top: 80px; }
+    .fc-daygrid-day-number { width: 40px; height: 40px; font-size: 1.1rem; }
+    .time-circle { width: 56px !important; height: 56px !important; font-size: 12px !important; }
+    #defaultAvailabilityContainer { min-width: unset !important; }
+}
+</style>
+
 <script>
-document.addEventListener("DOMContentLoaded", function() {
+(function(){
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function toYMD(date) {
+        const d = new Date(date);
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
 
-    const calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
-        initialView: 'dayGridMonth',
-        selectable: true,
-        editable: false,
+    // Parse a YYYY-MM-DD string into a local Date at midnight (avoids Date("YYYY-MM-DD") UTC parsing)
+    function parseYMD(dateStr) {
+        const parts = String(dateStr).split('-');
+        if (parts.length !== 3) return new Date(dateStr);
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        return new Date(y, m, d);
+    }
+    function addDays(date, days) {
+        const d = new Date(date);
+        d.setDate(d.getDate() + days);
+        return d;
+    }
+    function formatRange(start, end) {
+        const s = new Date(start);
+        const e = new Date(end);
+        return s.toLocaleString() + ' → ' + e.toLocaleString();
+    }
 
-        // DEMO MOCKED EVENTS — does not save
-        events: [
-            { title: "Booked", start: "2025-02-12T09:00", end: "2025-02-12T10:00", color:"#ff9999" },
-            { title: "Blocked", start: "2025-02-15", display:"background", color:"#eee" },
-        ],
+    function showToast(kind, message) {
+        const root = document.getElementById('ccToast');
+        const inner = document.getElementById('ccToastInner');
+        if (!root || !inner) return;
+        root.classList.remove('hidden');
+        inner.textContent = message;
+        inner.className = 'px-4 py-3 rounded-lg shadow-lg border bg-white text-sm';
+        if (kind === 'error') inner.classList.add('border-red-200');
+        if (kind === 'success') inner.classList.add('border-green-200');
+        if (kind === 'info') inner.classList.add('border-blue-200');
+        window.clearTimeout(showToast._t);
+        showToast._t = window.setTimeout(() => root.classList.add('hidden'), 2600);
+    }
 
-        dateClick(info) {
-            showToast('info', "This is a demo. Selecting: " + info.dateStr);
+    // Default weekly availability (demo-only, in-memory)
+    // Shape: { [dow]: { unavailable: boolean, ranges: [{ start:'HH:MM', end:'HH:MM' }] } }
+    const defaultAvailability = {
+        0: { unavailable: true, ranges: [] },
+        1: { unavailable: false, ranges: [{ start: '09:00', end: '17:00' }] },
+        2: { unavailable: false, ranges: [{ start: '09:00', end: '17:00' }] },
+        3: { unavailable: false, ranges: [{ start: '09:00', end: '17:00' }] },
+        4: { unavailable: false, ranges: [{ start: '09:00', end: '17:00' }] },
+        5: { unavailable: false, ranges: [{ start: '09:00', end: '17:00' }] },
+        6: { unavailable: true, ranges: [] }
+    };
+    const selectedDates = new Set();
+    let isDragging = false;
+    let dragStartDate = null;
+    let dragMode = null; // 'select' | 'deselect'
+    let dragStartIsUnavailable = false;
+
+    const DAY_LABEL = {0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
+
+    function timeToMinutes(t) {
+        const parts = String(t || '').split(':');
+        const h = parseInt(parts[0] || '0', 10);
+        const m = parseInt(parts[1] || '0', 10);
+        if (Number.isNaN(h) || Number.isNaN(m)) return null;
+        return h * 60 + m;
+    }
+
+    function addDefaultRangeRow(rangesWrap, startVal, endVal) {
+        const row = document.createElement('div');
+        row.className = 'range-row';
+
+        const start = document.createElement('input');
+        start.type = 'time';
+        start.value = startVal || '09:00';
+        start.className = 'range-start';
+
+        const end = document.createElement('input');
+        end.type = 'time';
+        end.value = endVal || '17:00';
+        end.className = 'range-end';
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'remove-range-btn';
+        remove.innerHTML = '<span class="remove-icon">✖</span><span class="remove-text">Remove</span>';
+        remove.addEventListener('click', () => row.remove());
+
+        row.appendChild(start);
+        row.appendChild(end);
+        row.appendChild(remove);
+
+        const addBtn = rangesWrap.querySelector('.add-range-btn');
+        if (addBtn) rangesWrap.insertBefore(row, addBtn);
+        else rangesWrap.appendChild(row);
+    }
+
+    function renderDefaultAvailabilityTable() {
+        const tbody = document.getElementById('defaultAvailabilityTable');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        for (let dow = 0; dow <= 6; dow++) {
+            const info = defaultAvailability[dow] || { unavailable: true, ranges: [] };
+            const tr = document.createElement('tr');
+
+            const tdDay = document.createElement('td');
+            tdDay.style.padding = '12px';
+            tdDay.style.fontWeight = '700';
+            tdDay.style.color = 'var(--gray-900)';
+            tdDay.textContent = DAY_LABEL[dow];
+
+            const tdRanges = document.createElement('td');
+            tdRanges.colSpan = 2;
+            tdRanges.style.padding = '12px';
+            tdRanges.style.textAlign = 'center';
+
+            const rangesWrap = document.createElement('div');
+            rangesWrap.style.display = 'flex';
+            rangesWrap.style.flexDirection = 'column';
+            rangesWrap.style.gap = '8px';
+            rangesWrap.style.alignItems = 'center';
+
+            const ranges = Array.isArray(info.ranges) ? info.ranges : [];
+            // If the day is unavailable, show no ranges (matches the requested behavior).
+            if (!info.unavailable) {
+                if (ranges.length === 0) addDefaultRangeRow(rangesWrap, '09:00', '17:00');
+                else ranges.forEach(r => addDefaultRangeRow(rangesWrap, r.start, r.end));
+            }
+
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'add-range-btn';
+            addBtn.textContent = 'Add Range';
+            addBtn.addEventListener('click', () => addDefaultRangeRow(rangesWrap, '09:00', '17:00'));
+            rangesWrap.appendChild(addBtn);
+
+            tdRanges.appendChild(rangesWrap);
+
+            const tdUnavailable = document.createElement('td');
+            tdUnavailable.style.padding = '12px';
+            tdUnavailable.style.textAlign = 'center';
+
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'unavailable-checkbox';
+            cb.checked = !!info.unavailable;
+            cb.addEventListener('change', () => {
+                const disabled = cb.checked;
+                const add = rangesWrap.querySelector('button.add-range-btn');
+                if (disabled) {
+                    // Clear ranges immediately so the row visually matches "Unavailable".
+                    rangesWrap.querySelectorAll('.range-row').forEach(r => r.remove());
+                    if (add) add.style.display = 'none';
+                } else {
+                    if (add) add.style.display = 'inline-flex';
+                    // Ensure at least one row exists when becoming available.
+                    if (!rangesWrap.querySelector('.range-row')) {
+                        addDefaultRangeRow(rangesWrap, '09:00', '17:00');
+                    }
+                    rangesWrap.querySelectorAll('input[type="time"]').forEach(i => { i.disabled = false; });
+                    rangesWrap.querySelectorAll('button.remove-range-btn').forEach(b => { b.disabled = false; });
+                }
+            });
+            tdUnavailable.appendChild(cb);
+
+            tr.appendChild(tdDay);
+            tr.appendChild(tdRanges);
+            tr.appendChild(tdUnavailable);
+            tbody.appendChild(tr);
+
+            cb.dispatchEvent(new Event('change'));
         }
-    });
+    }
 
-    calendar.render();
-});
+    function readDefaultAvailabilityFromTable() {
+        const tbody = document.getElementById('defaultAvailabilityTable');
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.forEach((tr, idx) => {
+            const dow = idx;
+            const cb = tr.querySelector('input.unavailable-checkbox');
+            const unavailable = !!(cb && cb.checked);
+            const ranges = [];
+            if (!unavailable) {
+                const rangeRows = Array.from(tr.querySelectorAll('.range-row'));
+                rangeRows.forEach(rr => {
+                    const s = rr.querySelector('input.range-start')?.value;
+                    const e = rr.querySelector('input.range-end')?.value;
+                    if (!s || !e) return;
+                    if (s >= e) return;
+                    ranges.push({ start: s, end: e });
+                });
+            }
+            defaultAvailability[dow] = { unavailable, ranges };
+        });
+    }
+
+    function isPastDate(dateStr) {
+        const d = new Date(dateStr + 'T00:00:00');
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        return d < today;
+    }
+
+    function isWithinWeeklyAvailability(dateStr, slotStart, slotEnd) {
+        const d = new Date(dateStr + 'T00:00:00');
+        const dow = d.getDay();
+        const info = defaultAvailability[dow] || { unavailable: true, ranges: [] };
+        if (info.unavailable) return false;
+
+        const startMinutes = slotStart.getHours() * 60 + slotStart.getMinutes();
+        const endMinutes = slotEnd.getHours() * 60 + slotEnd.getMinutes();
+        const ranges = Array.isArray(info.ranges) ? info.ranges : [];
+
+        for (const r of ranges) {
+            const rs = timeToMinutes(r.start);
+            const re = timeToMinutes(r.end);
+            if (rs == null || re == null) continue;
+            if (startMinutes >= rs && endMinutes <= re) return true;
+        }
+        return false;
+    }
+
+    function updateSelectButtonText() {
+        const btn = document.getElementById('ccSelectDayBtn');
+        if (!btn) return;
+        const count = selectedDates.size;
+        if (count <= 1) btn.textContent = 'Select Day';
+        else btn.textContent = `Select ${count} Days`;
+
+        const clearBtn = document.getElementById('ccClearSelectionBtn');
+        if (clearBtn) clearBtn.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+
+    function clearSelectedDates() {
+        selectedDates.clear();
+        document.querySelectorAll('.fc-daygrid-day-number.selected').forEach(el => el.classList.remove('selected'));
+        updateSelectButtonText();
+    }
+
+    function toggleDateSelection(dateStr, forceSelect) {
+        const numberEl = document.querySelector(`.fc-daygrid-day[data-date="${dateStr}"] .fc-daygrid-day-number`);
+        if (!numberEl) return;
+        if (isPastDate(dateStr)) {
+            // Match calendar.html: past dates open schedule read-only
+            openTimeCirclesModal(dateStr, { readOnly: true });
+            return;
+        }
+
+        const willSelect = (typeof forceSelect === 'boolean') ? forceSelect : !selectedDates.has(dateStr);
+        if (willSelect) {
+            selectedDates.add(dateStr);
+            numberEl.classList.add('selected');
+        } else {
+            selectedDates.delete(dateStr);
+            numberEl.classList.remove('selected');
+        }
+        updateSelectButtonText();
+    }
+
+    let calendar;
+    function refreshCalendar() {
+        if (!calendar) return;
+        try { applyDayCircleClasses(); } catch(e) {}
+    }
+
+    function computeDayAvailability(dateStr) {
+        const d = new Date(dateStr + 'T00:00:00');
+        const dow = d.getDay();
+        const info = defaultAvailability[dow] || { unavailable: true, ranges: [] };
+        if (info.unavailable) return false;
+        return Array.isArray(info.ranges) && info.ranges.length > 0;
+    }
+
+    function applyDayCircleClasses() {
+        document.querySelectorAll('.fc-daygrid-day').forEach(cell => {
+            const dateStr = cell.getAttribute('data-date');
+            if (!dateStr) return;
+            cell.classList.remove('fc-day-available', 'fc-day-unavailable');
+            cell.classList.add(computeDayAvailability(dateStr) ? 'fc-day-available' : 'fc-day-unavailable');
+
+            // preserve selection highlight
+            const num = cell.querySelector('.fc-daygrid-day-number');
+            if (num) {
+                // past day style
+                num.classList.remove('past-day');
+                if (isPastDate(dateStr)) num.classList.add('past-day');
+
+                // unavailable-number style for future unavailable days
+                num.classList.remove('unavailable-number');
+                if (!isPastDate(dateStr) && !computeDayAvailability(dateStr)) num.classList.add('unavailable-number');
+
+                if (selectedDates.has(dateStr)) num.classList.add('selected');
+                else num.classList.remove('selected');
+            }
+        });
+    }
+
+    function ensureDemoToolbarInjected() {
+        const calRoot = document.getElementById('calendar');
+        if (!calRoot) return;
+        if (document.getElementById('ccDemoToolbar')) return;
+
+        const toolbar = document.createElement('div');
+        toolbar.id = 'ccDemoToolbar';
+        toolbar.style.display = 'flex';
+        toolbar.style.justifyContent = 'center';
+        toolbar.style.gap = '10px';
+        toolbar.style.flexWrap = 'wrap';
+        toolbar.style.margin = '8px 0 16px 0';
+
+        const selectBtn = document.createElement('button');
+        selectBtn.id = 'ccSelectDayBtn';
+        selectBtn.type = 'button';
+        selectBtn.textContent = 'Select Day';
+        selectBtn.style.background = 'var(--primary-500)';
+        selectBtn.style.color = 'white';
+        selectBtn.style.border = 'none';
+        selectBtn.style.padding = '10px 16px';
+        selectBtn.style.borderRadius = '10px';
+        selectBtn.style.cursor = 'pointer';
+        selectBtn.style.fontWeight = '700';
+        selectBtn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+
+        const clearBtn = document.createElement('button');
+        clearBtn.id = 'ccClearSelectionBtn';
+        clearBtn.type = 'button';
+        clearBtn.textContent = 'Clear Selection';
+        clearBtn.style.background = 'var(--gray-200)';
+        clearBtn.style.color = 'var(--gray-700)';
+        clearBtn.style.border = 'none';
+        clearBtn.style.padding = '10px 16px';
+        clearBtn.style.borderRadius = '10px';
+        clearBtn.style.cursor = 'pointer';
+        clearBtn.style.fontWeight = '700';
+
+        toolbar.appendChild(selectBtn);
+        toolbar.appendChild(clearBtn);
+
+        const fcHeader = calRoot.querySelector('.fc-header-toolbar');
+        if (fcHeader && fcHeader.parentNode) fcHeader.parentNode.insertBefore(toolbar, fcHeader.nextSibling);
+        else calRoot.insertBefore(toolbar, calRoot.firstChild);
+
+        clearBtn.addEventListener('click', () => {
+            clearSelectedDates();
+            showToast('info', 'Selection cleared.');
+        });
+
+        selectBtn.addEventListener('click', () => {
+            const dates = Array.from(selectedDates).sort();
+            if (dates.length === 0) {
+                alert('Select a day to view the schedule.');
+                return;
+            }
+            if (dates.length !== 1) {
+                alert('Select only one day to view the schedule.');
+                return;
+            }
+            openTimeCirclesModal(dates[0], { readOnly: true });
+        });
+    }
+
+    function getFakeBookingsForDate(dateStr) {
+        // Map date -> array of booking ranges in minutes-from-midnight
+        const today = toYMD(new Date());
+        const tomorrow = toYMD(addDays(new Date(), 1));
+        const map = new Map();
+        map.set(today, [
+            { start: 10 * 60, end: 10 * 60 + 45 },
+            { start: 14 * 60, end: 15 * 60 }
+        ]);
+        map.set(tomorrow, [
+            { start: 9 * 60 + 30, end: 10 * 60 + 30 },
+            { start: 15 * 60, end: 15 * 60 + 30 }
+        ]);
+        return map.get(dateStr) || [];
+    }
+
+    function openTimeCirclesModal(dateStr, opts) {
+        const modal = document.getElementById('timeCirclesModal');
+        const container = document.getElementById('timeCirclesContainer');
+        const title = document.getElementById('circleModalTitle');
+        const hourBlockSelect = document.getElementById('hourBlockSelect');
+        const incrementSelect = document.getElementById('incrementSelect');
+        const closeBtn = document.getElementById('closeCirclesBtn');
+
+        const readOnly = true;
+
+        if (!modal || !container || !title || !hourBlockSelect || !incrementSelect || !closeBtn) return;
+        modal.style.display = 'flex';
+        title.textContent = 'Schedule for ' + dateStr;
+        container.innerHTML = '';
+
+        let currentBlockSize = parseInt(hourBlockSelect.value, 10);
+        let currentIncrement = parseInt(incrementSelect.value, 10);
+
+        function renderGrid() {
+            container.innerHTML = '';
+            const startHour = 6;
+            const endHour = 22;
+            const blockMinutes = currentBlockSize * 60;
+
+            for (let blockStartHour = startHour; blockStartHour < endHour; blockStartHour += currentBlockSize) {
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.justifyContent = 'space-between';
+                row.style.gap = '8px';
+
+                const blockLabel = document.createElement('div');
+                const labelDate = new Date(dateStr + 'T00:00:00');
+                labelDate.setHours(blockStartHour, 0, 0, 0);
+                blockLabel.textContent = labelDate.toLocaleString(undefined, { hour: 'numeric', hour12: true });
+                blockLabel.style.width = '70px';
+                blockLabel.style.fontWeight = 'bold';
+                row.appendChild(blockLabel);
+
+                const circlesContainer = document.createElement('div');
+                circlesContainer.style.display = 'flex';
+                circlesContainer.style.flexWrap = 'wrap';
+                circlesContainer.style.gap = '8px';
+                circlesContainer.style.marginLeft = 'auto';
+
+                for (let minutes = 0; minutes < blockMinutes; minutes += currentIncrement) {
+                    const totalMinutes = blockStartHour * 60 + minutes;
+                    const hour = Math.floor(totalMinutes / 60);
+                    const min = totalMinutes % 60;
+
+                    const slotStart = new Date(dateStr + 'T00:00:00');
+                    slotStart.setHours(hour, min, 0, 0);
+                    const slotEnd = new Date(slotStart);
+                    slotEnd.setMinutes(slotEnd.getMinutes() + currentIncrement);
+
+                    const baselineAvailable = isWithinWeeklyAvailability(dateStr, slotStart, slotEnd);
+                    let state = baselineAvailable ? 'open' : 'blocked';
+
+                    const bookings = getFakeBookingsForDate(dateStr);
+                    const isBooked = bookings.some(b => totalMinutes >= b.start && (totalMinutes + currentIncrement) <= b.end);
+                    if (isBooked) state = 'booked';
+
+                    const circle = document.createElement('div');
+                    circle.className = 'time-circle ' + (state === 'booked' ? 'booked' : (state === 'open' ? 'open' : 'blocked'));
+
+                    // Format label like calendar.html
+                    const ampm = hour >= 12 ? 'PM' : 'AM';
+                    const hour12 = ((hour % 12) || 12);
+                    const timeLabel = hour12 + ':' + String(min).padStart(2, '0') + ' ' + ampm;
+                    circle.textContent = timeLabel;
+
+                    circle.addEventListener('click', () => {
+                        if (state === 'booked') {
+                            showToast('info', `Booked: ${timeLabel} (demo)`);
+                            return;
+                        }
+                        if (readOnly || isPastDate(dateStr)) {
+                            showToast('info', `Schedule view only (demo): ${timeLabel}`);
+                            return;
+                        }
+                        showToast('info', `Schedule view only (demo): ${timeLabel}`);
+                    });
+
+                    circlesContainer.appendChild(circle);
+                }
+
+                row.appendChild(circlesContainer);
+                container.appendChild(row);
+            }
+        }
+
+        hourBlockSelect.onchange = () => {
+            currentBlockSize = parseInt(hourBlockSelect.value, 10);
+            renderGrid();
+        };
+        incrementSelect.onchange = () => {
+            currentIncrement = parseInt(incrementSelect.value, 10);
+            renderGrid();
+        };
+
+        closeBtn.onclick = () => { modal.style.display = 'none'; };
+        modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+        renderGrid();
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const calendarLoadingEl = document.getElementById('calendarLoading');
+        function hideCalendarLoading() {
+            if (!calendarLoadingEl) return;
+            calendarLoadingEl.style.display = 'none';
+        }
+
+        renderDefaultAvailabilityTable();
+
+        const calEl = document.getElementById('calendar');
+        calendar = new FullCalendar.Calendar(calEl, {
+            initialView: 'dayGridMonth',
+            selectable: false,
+            editable: false,
+            nowIndicator: true,
+            height: 'auto',
+            showNonCurrentDates: false,
+            headerToolbar: {
+                left: 'prev,next',
+                center: 'title',
+                right: ''
+            },
+            datesSet: function() {
+                applyDayCircleClasses();
+                ensureDemoToolbarInjected();
+            }
+        });
+
+        calendar.render();
+        applyDayCircleClasses();
+        ensureDemoToolbarInjected();
+        updateSelectButtonText();
+        // Ensure overlay hides after initial render.
+        requestAnimationFrame(hideCalendarLoading);
+
+        const saveDefaultsBtn = document.getElementById('saveDefaultAvailabilityBtn');
+        if (saveDefaultsBtn) saveDefaultsBtn.addEventListener('click', function() {
+            readDefaultAvailabilityFromTable();
+            renderDefaultAvailabilityTable();
+            refreshCalendar();
+            showToast('success', 'Saved default weekly availability (demo).');
+        });
+
+        // Mirror calendar.html interaction model:
+        // - click day number toggles selection (past day opens read-only schedule)
+        // - click+drag selects/deselects a range across same availability type
+        calEl.addEventListener('pointerup', function(ev) {
+            try {
+                if (isDragging) return;
+                const num = ev.target.closest('.fc-daygrid-day-number');
+                if (!num) return;
+                const dayCell = num.closest('.fc-daygrid-day');
+                if (!dayCell) return;
+                if (dayCell.classList.contains('fc-day-other')) return;
+                const dateStr = dayCell.dataset.date;
+                if (!dateStr) return;
+                toggleDateSelection(dateStr);
+            } catch (err) { console.error('demo delegated pointerup failed', err); }
+        });
+
+        calEl.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            const cell = e.target.closest('.fc-daygrid-day');
+            if (!cell) return;
+            if (cell.classList.contains('fc-day-other')) return;
+            const date = cell.dataset.date;
+            if (!date) return;
+
+            // Past day: open read-only schedule
+            if (isPastDate(date)) {
+                openTimeCirclesModal(date, { readOnly: true });
+                return;
+            }
+
+            isDragging = true;
+            dragStartDate = date;
+            dragMode = selectedDates.has(date) ? 'deselect' : 'select';
+            try {
+                const numEl = cell.querySelector('.fc-daygrid-day-number');
+                dragStartIsUnavailable = cell.classList.contains('fc-day-unavailable') || (numEl && numEl.classList.contains('unavailable-number'));
+            } catch (e2) { dragStartIsUnavailable = false; }
+
+            toggleDateSelection(date, dragMode === 'select');
+        });
+
+        calEl.addEventListener('mousemove', e => {
+            if (!isDragging || !dragStartDate) return;
+            const cell = e.target.closest('.fc-daygrid-day');
+            if (!cell) return;
+            if (cell.classList.contains('fc-day-other')) return;
+            const currentDate = cell.dataset.date;
+            if (!currentDate) return;
+            if (isPastDate(currentDate)) return;
+
+            const start = parseYMD(dragStartDate);
+            const end = parseYMD(currentDate);
+            const minDate = start < end ? start : end;
+            const maxDate = start > end ? start : end;
+
+            const selector = dragStartIsUnavailable ? '.fc-daygrid-day.fc-day-unavailable' : '.fc-daygrid-day.fc-day-available';
+            document.querySelectorAll(selector).forEach(c => {
+                const dateStr = c.dataset.date;
+                const numberEl = c.querySelector('.fc-daygrid-day-number');
+                if (!numberEl || !dateStr) return;
+                if (isPastDate(dateStr)) return;
+
+                const d = parseYMD(dateStr);
+                if (d >= minDate && d <= maxDate) {
+                    numberEl.classList.add('temp-highlight');
+                    if (dragMode === 'select') numberEl.classList.add('selected');
+                    else numberEl.classList.remove('selected');
+                } else {
+                    numberEl.classList.remove('temp-highlight');
+                    if (dragMode === 'select' && !selectedDates.has(dateStr)) numberEl.classList.remove('selected');
+                    if (dragMode === 'deselect' && selectedDates.has(dateStr)) numberEl.classList.add('selected');
+                }
+            });
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            document.querySelectorAll('.fc-daygrid-day-number.temp-highlight').forEach(el => {
+                el.classList.remove('temp-highlight');
+                const dayCell = el.closest('.fc-daygrid-day');
+                const date = dayCell ? dayCell.dataset.date : null;
+                if (!date) return;
+                if (dragMode === 'select') selectedDates.add(date);
+                else if (dragMode === 'deselect') selectedDates.delete(date);
+            });
+            isDragging = false;
+            dragStartDate = null;
+            dragMode = null;
+            dragStartIsUnavailable = false;
+            updateSelectButtonText();
+        });
+
+        // No weekly rules or per-day overrides in the demo (by request)
+    });
+})();
 </script>
 {% endblock %}

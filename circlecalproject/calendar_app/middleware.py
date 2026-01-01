@@ -65,7 +65,7 @@ class OrganizationMiddleware:
             # Auto-provision trial subscription if missing
             if not sub:
                 basic_plan = Plan.objects.filter(slug="basic").first()
-                trial_days = 14
+                trial_days = 31
                 trial_end = timezone.now() + timezone.timedelta(days=trial_days)
                 sub = Subscription.objects.create(
                     organization=org,

@@ -907,6 +907,7 @@ def manage_billing(request, org_slug):
     upcoming_invoice = None
     trial_remaining_seconds = None
     trial_remaining_days = None
+    trial_total_days = None
     trial_end_iso = None
     next_billing_iso = None
     show_invoices = True
@@ -922,6 +923,11 @@ def manage_billing(request, org_slug):
         trial_remaining_seconds = int(delta.total_seconds())
         trial_remaining_days = delta.days
         trial_end_iso = subscription.trial_end.isoformat()
+        try:
+            if subscription.start_date:
+                trial_total_days = max(1, (subscription.trial_end - subscription.start_date).days)
+        except Exception:
+            trial_total_days = None
         show_invoices = False
         show_upcoming_invoice = False
 
@@ -1519,6 +1525,7 @@ def manage_billing(request, org_slug):
         "upcoming_invoice": upcoming_invoice,
         "trial_remaining_seconds": trial_remaining_seconds,
         "trial_remaining_days": trial_remaining_days,
+        "trial_total_days": trial_total_days,
         "trial_end_iso": trial_end_iso,
         "next_billing_iso": next_billing_iso,
         "checkout_status": request.GET.get('checkout', ''),

@@ -64,7 +64,7 @@
       </div>
       {% if trial_remaining_seconds %}
         <div class="mt-3 p-3 rounded border-l-4 border-yellow-300 bg-yellow-50 text-sm text-yellow-800">
-          You are currently on a free trial — <strong id="trialSummary">{{ trial_remaining_days }} day(s) left</strong>. You can add a card below and convert to a paid plan at any time.
+          You are currently on a free{% if trial_total_days %} {{ trial_total_days }}-day{% endif %} trial — <strong id="trialSummary">{{ trial_remaining_days }} day(s) left</strong>. You can add a card below and convert to a paid plan at any time.
         </div>
       {% endif %}
     {% endif %}
