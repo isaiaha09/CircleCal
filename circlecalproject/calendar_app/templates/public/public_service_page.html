@@ -5,7 +5,19 @@
 
 {% block content %}
 <style>
-  .calendar-container { position: relative; max-width: 900px; margin: 20px auto; background: #fafafa; border-radius: 12px; padding: 8px; }
+  .calendar-container {
+    position: relative;
+    max-width: 900px;
+    margin: 20px auto;
+    background: #fafafa;
+    border-radius: 18px;
+    padding: 8px;
+    box-shadow:
+      0 14px 34px rgba(17, 24, 39, 0.10),
+      0 2px 10px rgba(17, 24, 39, 0.06);
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    transform: translateZ(0);
+  }
   @media (min-width: 768px) {
     .calendar-container { margin: 40px auto; padding: 12px; }
   }
@@ -30,11 +42,38 @@
     opacity: 0;
     pointer-events: none;
   }
-  .day-circle { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; background: #1f1f29; color: white; cursor: pointer; transition: transform .15s ease, background .15s ease; border: 1px solid rgba(255,255,255,0.15); margin: 0 auto; font-size: 0.9rem; z-index: 1; position: relative; }
+  .day-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #1f1f29;
+    color: white;
+    cursor: pointer;
+    transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
+    border: 1px solid rgba(255,255,255,0.15);
+    margin: 0 auto;
+    font-size: 0.9rem;
+    z-index: 1;
+    position: relative;
+    box-shadow:
+      0 10px 18px rgba(17, 24, 39, 0.14),
+      inset 0 1px 0 rgba(255,255,255,0.08);
+    transform: translateZ(0);
+    will-change: transform;
+  }
   @media (min-width: 768px) {
     .day-circle { width: 52px; height: 52px; font-size: 1rem; }
   }
-  .day-circle:hover { transform: scale(1.07); background: #4b59f0; }
+  .day-circle:hover {
+    transform: translateY(-2px) scale(1.07);
+    background: #4b59f0;
+    box-shadow:
+      0 16px 26px rgba(17, 24, 39, 0.18),
+      inset 0 1px 0 rgba(255,255,255,0.10);
+  }
   /* Disabled days: greyed out like past-day or unavailable, not clickable */
   .day-circle.disabled {
     opacity: 0.65;
@@ -481,12 +520,23 @@
               <span class="text-sm text-gray-800">Cash</span>
             </label>
           </div>
-          <div id="offlineInstructions" class="text-xs text-gray-600 ml-6" style="display:none;">
+          <div id="offlineInstructions" class="text-xs text-gray-600 ml-6" style="display:none; white-space: pre-line;">
             {% if offline_instructions %}
               {{ offline_instructions }}
             {% else %}
               Offline payment instructions will be shown after booking.
             {% endif %}
+          </div>
+
+          <div id="offlineQrWrap" class="ml-6 mt-3" style="display:none;">
+            <div class="text-xs text-gray-700" style="font-weight:600;">Scan to pay now</div>
+            <div class="mt-2 flex items-start gap-3">
+              <img id="offlineQrImg" src="" alt="Payment QR code" style="display:none; width:160px; height:160px; border:1px solid #e5e7eb; border-radius:8px; background:#fff;" />
+              <div class="text-xs text-gray-600" style="line-height:1.35;">
+                If you prefer paying later prior to the appointment or in-person on the day of, this QR code is also included in your confirmation email.
+              </div>
+            </div>
+            <div id="offlineQrFallback" class="text-xs text-gray-600 mt-2" style="display:none;">QR code unavailable — the business owner will provide payment details.</div>
           </div>
         </div>
 
@@ -550,6 +600,109 @@ document.addEventListener("DOMContentLoaded", async function () {
   const paymentUnavailableNote = document.getElementById('paymentUnavailableNote');
   const paymentMethodChoices = document.getElementById('paymentMethodChoices');
   const offlineInstructions = document.getElementById('offlineInstructions');
+  const offlineQrWrap = document.getElementById('offlineQrWrap');
+  const offlineQrImg = document.getElementById('offlineQrImg');
+  const offlineQrFallback = document.getElementById('offlineQrFallback');
+
+  const OFFLINE_INSTRUCTIONS_RAW = "{{ offline_instructions|default:''|escapejs }}";
+
+  function _isMethodLine(line){
+    try{
+      return /^\s*(venmo|zelle|cash)\s*[:\-]/i.test(String(line || ''));
+    }catch(e){ return false; }
+  }
+
+  function _filterOfflineInstructionsTextFor(method){
+    try{
+      const m = String(method || '').toLowerCase();
+      const full = String(OFFLINE_INSTRUCTIONS_RAW || '').trim();
+      if (!full) return '';
+      const lines = full.split(/\r?\n/);
+      const out = [];
+      for (const rawLine of lines){
+        const line = String(rawLine || '');
+        if (_isMethodLine(line)){
+          if (m === 'venmo' && /^\s*venmo\s*[:\-]/i.test(line)) out.push(line);
+          else if (m === 'zelle' && /^\s*zelle\s*[:\-]/i.test(line)) out.push(line);
+          else if (m === 'cash' && /^\s*cash\s*[:\-]/i.test(line)) out.push(line);
+          continue;
+        }
+        if (line.trim() !== '') out.push(line);
+      }
+      return out.join('\n').trim();
+    }catch(e){ return ''; }
+  }
+
+  function _extractOfflineLineFor(method){
+    try{
+      const m = String(method || '').toLowerCase();
+      const full = String(OFFLINE_INSTRUCTIONS_RAW || '').trim();
+      if (!full) return '';
+      const lines = full.split(/\r?\n/);
+      const re = new RegExp('^\\s*' + m + '\\s*[:\\-]\\s*(.+)$', 'i');
+      for (const line of lines){
+        const match = String(line || '').match(re);
+        if (match && match[1]) return String(match[1]).trim();
+      }
+      return '';
+    }catch(e){ return ''; }
+  }
+
+  function _isOfflineChoice(v){
+    v = String(v || '').toLowerCase();
+    return v === 'venmo' || v === 'zelle' || v === 'cash';
+  }
+
+  function _refreshOfflineInstructionsDisplay(){
+    try{
+      if (!offlineInstructions) return;
+      const selected = paymentSection ? paymentSection.querySelector('input[name="payment_method"]:checked') : null;
+      const v = selected ? String(selected.value || '').toLowerCase() : '';
+      if (!_isOfflineChoice(v)) return;
+
+      // Cash is always an in-person flow; never show Venmo/Zelle details.
+      if (v === 'cash') {
+        offlineInstructions.textContent = 'Pay in-person. If unable to make appointment, please try to cancel prior to the time established in the Refund Policy';
+        return;
+      }
+
+      const filtered = _filterOfflineInstructionsTextFor(v);
+      // Never fall back to server-rendered instructions here (it may contain the other method).
+      offlineInstructions.textContent = filtered || 'Offline payment instructions will be shown after booking.';
+    }catch(e){ /* ignore */ }
+  }
+
+  function _refreshOfflineQrDisplay(){
+    try{
+      if (!offlineQrWrap) return;
+      if (offlineQrImg) offlineQrImg.style.display = 'none';
+      if (offlineQrFallback) offlineQrFallback.style.display = 'none';
+
+      const selected = paymentSection ? paymentSection.querySelector('input[name="payment_method"]:checked') : null;
+      const v = selected ? String(selected.value || '').toLowerCase() : '';
+      // Only show QR for Venmo/Zelle (cash has no reliable QR flow).
+      if (v !== 'venmo' && v !== 'zelle') { offlineQrWrap.style.display = 'none'; return; }
+
+      // Derive QR payload from offline instructions. Prefer a method-specific line (e.g. "Venmo: @handle").
+      const methodLine = _extractOfflineLineFor(v);
+      // If the method-specific line is missing, don't fall back to full instructions
+      // (it may contain the other method's details).
+      if (!methodLine){
+        offlineQrWrap.style.display = '';
+        if (offlineQrFallback) offlineQrFallback.style.display = '';
+        return;
+      }
+
+      const qrText = (v.toUpperCase() + ': ' + methodLine);
+
+      const url = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(qrText);
+      if (offlineQrImg){
+        offlineQrImg.src = url;
+        offlineQrImg.style.display = '';
+      }
+      offlineQrWrap.style.display = '';
+    }catch(e){ try{ if (offlineQrWrap) offlineQrWrap.style.display = 'none'; }catch(_){ } }
+  }
 
   const SERVICE_PAYMENT = JSON.parse(
     (document.getElementById('service-payment-controls') || {}).textContent || '{}'
@@ -584,6 +737,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     // Default behavior: hide offline instructions until selected
     if (offlineInstructions) offlineInstructions.style.display = 'none';
+    if (offlineQrWrap) offlineQrWrap.style.display = 'none';
 
     if (!isPaid) return;
 
@@ -659,6 +813,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (offlineInstructions) {
       offlineInstructions.style.display = (offlineAllowed && selected2 && isOfflineValue(selected2.value) && allowedOfflineValues.has(String(selected2.value).toLowerCase())) ? '' : 'none';
     }
+    try{ _refreshOfflineInstructionsDisplay(); }catch(e){}
+    try{ _refreshOfflineQrDisplay(); }catch(e){}
   }
 
   if (paymentSection) {
@@ -666,6 +822,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       try {
         const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '{{ service.slug }}');
         updatePaymentSectionForServiceSlug(slug);
+        _refreshOfflineQrDisplay();
       } catch (err) {}
     });
   }
@@ -1364,6 +1521,17 @@ document.addEventListener("DOMContentLoaded", async function () {
   const bookingForm = document.querySelector('#timeModalViewDetails form');
   if (bookingForm) {
     bookingForm.addEventListener('submit', (e) => {
+      try{
+        const selected = bookingForm.querySelector('input[name="payment_method"]:checked');
+        const v = selected ? String(selected.value || '').toLowerCase() : '';
+        if (_isOfflineChoice(v)){
+          if (v === 'venmo' || v === 'zelle'){
+            alert('This payment method must be paid prior to your appointment.\n\nPlease scan the QR code to pay now. If you prefer paying later, the QR code is included in your confirmation email.');
+          } else if (v === 'cash'){
+            alert('Cash payments are handled directly with the business. Please bring cash to your appointment as required by the business owner.');
+          }
+        }
+      }catch(err){}
       // Get the slot key from the start input
       const startVal = startInput.value;
       const endVal = endInput.value;

@@ -23,6 +23,30 @@ def profile_view(request):
 	user = request.user
 	from .models import Profile
 	profile, _ = Profile.objects.get_or_create(user=user)
+
+	# Business-level offline payment info (owner-only)
+	org = getattr(request, 'organization', None)
+	is_owner_for_org = False
+	try:
+		if org is not None:
+			is_owner_for_org = bool(
+				(getattr(org, 'owner_id', None) == getattr(user, 'id', None))
+				or Membership.objects.filter(user=user, organization=org, is_active=True, role='owner').exists()
+			)
+	except Exception:
+		is_owner_for_org = False
+	org_offline_venmo = ''
+	org_offline_zelle = ''
+	try:
+		if org is not None:
+			from bookings.models import OrgSettings
+			settings_obj, _ = OrgSettings.objects.get_or_create(organization=org)
+			org_offline_venmo = (getattr(settings_obj, 'offline_venmo', '') or '').strip()
+			org_offline_zelle = (getattr(settings_obj, 'offline_zelle', '') or '').strip()
+	except Exception:
+		org_offline_venmo = ''
+		org_offline_zelle = ''
+
 	if request.method == "POST":
 		# Update user core fields if provided
 		username = request.POST.get("username")
@@ -38,6 +62,20 @@ def profile_view(request):
 		if last_name is not None:
 			user.last_name = last_name
 		user.save()
+
+		# Save org-level offline payment info (owner-only)
+		try:
+			if org is not None and is_owner_for_org:
+				from bookings.models import OrgSettings
+				settings_obj, _ = OrgSettings.objects.get_or_create(organization=org)
+				settings_obj.offline_venmo = (request.POST.get('offline_venmo') or '').strip()
+				settings_obj.offline_zelle = (request.POST.get('offline_zelle') or '').strip()
+				settings_obj.save(update_fields=['offline_venmo', 'offline_zelle'])
+				org_offline_venmo = (getattr(settings_obj, 'offline_venmo', '') or '').strip()
+				org_offline_zelle = (getattr(settings_obj, 'offline_zelle', '') or '').strip()
+		except Exception:
+			# Fail open: do not block profile saving
+			pass
 
 		form = ProfileForm(request.POST, request.FILES, instance=profile)
 		if form.is_valid():
@@ -88,6 +126,9 @@ def profile_view(request):
 		"organization": org,
 		"memberships": memberships,
 		"pending_invites": pending_invites,
+		"is_owner_for_org": is_owner_for_org,
+		"org_offline_venmo": org_offline_venmo,
+		"org_offline_zelle": org_offline_zelle,
 	})
 
 	if incomplete:

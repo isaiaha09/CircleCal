@@ -238,6 +238,9 @@
                        class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked>
                 <span class="ml-2 text-sm text-gray-700">Accept card payments (Stripe)</span>
               </label>
+              {% if can_use_pro_team %}
+                <div class="ml-6 text-xs text-gray-500">Recommended: Stripe enables automatic payment confirmation and refunds.</div>
+              {% endif %}
 
               <div class="ml-6">
                 <div class="text-sm font-medium text-gray-700">Different form of payment</div>
@@ -255,7 +258,7 @@
                     <span class="ml-2">Zelle</span>
                   </label>
 
-                  <div class="text-sm text-gray-500">Any other payment methods go here</div>
+        
 
                   <label class="flex items-center text-sm text-gray-700">
                     <input type="checkbox" name="offline_methods" value="cash"
@@ -584,9 +587,11 @@
           <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Limit advance window to manage demand.</li>
         </ul>
       </div>
+      {% if not can_use_pro_team %}
       <div class="bg-blue-50 border border-blue-200 rounded-xl p-6 text-sm text-blue-700">
         Upgrade to Pro or higher for advanced booking logic.
       </div>
+      {% endif %}
     </div>
   </div>
 
@@ -597,6 +602,29 @@
 {% endblock %}
 
 {% block extra_scripts %}
+
+<div id="ccOfflinePaymentWarningModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10060;">
+  <div style="background:#fff; border-radius:12px; width:min(620px, 92vw); padding:18px 18px 16px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.25);">
+    <div style="font-weight:800; font-size:1.05rem; margin-bottom:8px; color:#111827;">Offline payment warning</div>
+    <div style="color:#374151; font-size:0.95rem; line-height:1.4; margin-bottom:14px;">
+      You enabled a payment method that is processed outside CircleCal (Venmo/Zelle/Cash). These methods cannot enforce automatic refunds by cutoff and clients can potentially not pay.
+      <div style="margin-top:10px;">
+        As the controller of your service, you have the right to refuse or provide service to anyone that fails to follow fair and established rules.
+      </div>
+      <div style="margin-top:10px;">
+        It is much easier with only Stripe implemented, but that reduces flexibility for clients who want to pay another way besides card.
+      </div>
+      <div style="margin-top:10px; color:#6b7280;">
+        You can change the form of payment for this service at any time.
+      </div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:10px;">
+      <button id="ccOfflinePaymentWarningCancelBtn" type="button" style="background:#e5e7eb; color:#111827; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">Cancel</button>
+      <button id="ccOfflinePaymentWarningConfirmBtn" type="button" style="background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:800;">I understand, create service</button>
+    </div>
+  </div>
+</div>
+
 <div id="ccAdvancedUpgradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10050;">
   <div style="background:#fff; border-radius:12px; width:min(520px, 92vw); padding:18px 18px 16px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.25);">
     <div style="font-weight:800; font-size:1.05rem; margin-bottom:8px; color:#111827;">Upgrade required</div>
@@ -670,6 +698,90 @@
             }
           }catch(err){}
         });
+      });
+    }catch(e){ /* ignore */ }
+  })();
+</script>
+
+<script>
+  (function(){
+    try{
+      const form = document.querySelector('form.cc-form');
+      if (!form) return;
+
+      const ORG_HAS_VENMO = {{ org_has_venmo|yesno:'true,false' }};
+      const ORG_HAS_ZELLE = {{ org_has_zelle|yesno:'true,false' }};
+      const PROFILE_URL = "{% url 'accounts:profile' %}";
+
+      const modal = document.getElementById('ccOfflinePaymentWarningModal');
+      const cancelBtn = document.getElementById('ccOfflinePaymentWarningCancelBtn');
+      const confirmBtn = document.getElementById('ccOfflinePaymentWarningConfirmBtn');
+
+      let bypassOnce = false;
+      function shouldWarn(){
+        try{
+          const priceEl = form.querySelector('input[name="price"]');
+          const price = priceEl ? Number(priceEl.value || 0) : 0;
+          const isPaid = (Number.isFinite(price) && price > 0);
+          if (!isPaid) return false;
+          const offlineChecked = Array.from(form.querySelectorAll('input[name="offline_methods"]:checked')).length > 0;
+          return !!offlineChecked;
+        }catch(e){ return false; }
+      }
+
+      function missingRequiredOfflineInfo(){
+        try{
+          const priceEl = form.querySelector('input[name="price"]');
+          const price = priceEl ? Number(priceEl.value || 0) : 0;
+          const isPaid = (Number.isFinite(price) && price > 0);
+          if (!isPaid) return null;
+
+          const selected = Array.from(form.querySelectorAll('input[name="offline_methods"]:checked'))
+            .map(el => String(el.value || ''));
+
+          if (selected.includes('venmo') && !ORG_HAS_VENMO) return 'venmo';
+          if (selected.includes('zelle') && !ORG_HAS_ZELLE) return 'zelle';
+          return null;
+        }catch(e){ return null; }
+      }
+
+      function openModal(){
+        if (!modal || !cancelBtn || !confirmBtn){
+          const ok = confirm('You enabled a payment method processed outside CircleCal (Venmo/Zelle/Cash). These methods cannot enforce automatic refunds by cutoff and clients can potentially not pay.\n\nIt is easier with only Stripe, but less flexible.\n\nYou can change the form of payment for this service at any time.\n\nPress OK to continue, or Cancel to go back.');
+          if (ok){ bypassOnce = true; try{ form.submit(); }catch(e){} }
+          return;
+        }
+        modal.style.display = 'flex';
+      }
+      function closeModal(){ try{ if (modal) modal.style.display = 'none'; }catch(e){} }
+
+      if (cancelBtn) cancelBtn.addEventListener('click', function(ev){ try{ ev.preventDefault(); }catch(e){} closeModal(); });
+      if (confirmBtn) confirmBtn.addEventListener('click', function(ev){
+        try{ ev.preventDefault(); }catch(e){}
+        bypassOnce = true;
+        closeModal();
+        try{ form.submit(); }catch(e){}
+      });
+      if (modal){
+        modal.addEventListener('click', function(e){ try{ if (e && e.target === modal) closeModal(); }catch(err){} });
+      }
+
+      form.addEventListener('submit', function(e){
+        try{
+          if (bypassOnce){ bypassOnce = false; return; }
+
+          const missing = missingRequiredOfflineInfo();
+          if (missing){
+            e.preventDefault();
+            const label = (missing === 'venmo') ? 'Venmo' : 'Zelle';
+            alert(`To enable ${label} for a paid service, add your ${label} info on your Profile page first.\n\nGo to: ${PROFILE_URL}`);
+            return;
+          }
+
+          if (!shouldWarn()) return;
+          e.preventDefault();
+          openModal();
+        }catch(err){ /* fall through */ }
       });
     }catch(e){ /* ignore */ }
   })();

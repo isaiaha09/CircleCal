@@ -275,12 +275,55 @@ class OrgSettings(models.Model):
     offline_payment_methods = models.JSONField(default=list, blank=True)
     offline_payment_instructions = models.TextField(blank=True, default='')
 
+    # Optional: method-specific payment info used to generate QR codes and
+    # provide clearer client-facing instructions.
+    offline_venmo = models.TextField(blank=True, default='')
+    offline_zelle = models.TextField(blank=True, default='')
+
     def __str__(self):
         try:
             org_name = self.organization.name
         except Exception:
             org_name = f"org_id={self.organization_id}"
         return f"Settings for {org_name}"
+
+
+def build_offline_payment_instructions(org_settings: 'OrgSettings') -> str:
+    """Build the effective offline payment instructions shown to clients.
+
+    Priority:
+    - Use explicit Venmo/Zelle values when present (to support QR generation)
+    - Append any free-form `offline_payment_instructions`
+
+    This keeps backwards-compatibility with existing deployments that only
+    used `offline_payment_instructions`.
+    """
+    try:
+        if not org_settings:
+            return ''
+
+        venmo = (getattr(org_settings, 'offline_venmo', '') or '').strip()
+        zelle = (getattr(org_settings, 'offline_zelle', '') or '').strip()
+        extra = (getattr(org_settings, 'offline_payment_instructions', '') or '').strip()
+
+        lines = []
+        if venmo:
+            lines.append(f"Venmo: {venmo}")
+        if zelle:
+            lines.append(f"Zelle: {zelle}")
+
+        if extra:
+            extra_lines = [ln.strip() for ln in extra.splitlines() if (ln or '').strip()]
+            # Avoid duplicating method lines when explicit fields exist.
+            if venmo:
+                extra_lines = [ln for ln in extra_lines if not ln.lower().startswith('venmo')]
+            if zelle:
+                extra_lines = [ln for ln in extra_lines if not ln.lower().startswith('zelle')]
+            lines.extend(extra_lines)
+
+        return "\n".join([ln for ln in lines if (ln or '').strip()]).strip()
+    except Exception:
+        return ''
 
 
 class WeeklyAvailability(models.Model):

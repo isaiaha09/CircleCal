@@ -622,9 +622,84 @@ def apply_service_update(request, org_slug, service_id):
         org_settings = getattr(org, 'settings', None)
         org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
     except Exception:
+        org_settings = None
         org_offline_methods = []
     if offline_methods_allowed and (not org_offline_methods):
         org_offline_methods = ['cash', 'venmo', 'zelle']
+
+    # Owner-configured offline method details (used for Venmo/Zelle QR/instructions).
+    try:
+        org_has_venmo = bool((getattr(org_settings, 'offline_venmo', '') or '').strip())
+    except Exception:
+        org_has_venmo = False
+    try:
+        org_has_zelle = bool((getattr(org_settings, 'offline_zelle', '') or '').strip())
+    except Exception:
+        org_has_zelle = False
+
+    # Owner-configured offline method details (used for Venmo/Zelle QR/instructions).
+    try:
+        org_has_venmo = bool((getattr(org_settings, 'offline_venmo', '') or '').strip())
+    except Exception:
+        org_has_venmo = False
+    try:
+        org_has_zelle = bool((getattr(org_settings, 'offline_zelle', '') or '').strip())
+    except Exception:
+        org_has_zelle = False
+
+    # Validate payment method requirements for paid services.
+    try:
+        proposed_price = payload.get('price', getattr(svc, 'price', 0) or 0)
+        is_paid_service = float(proposed_price) > 0
+    except Exception:
+        is_paid_service = False
+    if is_paid_service:
+        try:
+            allow_stripe = bool(_coerce_bool(payload.get('allow_stripe_payments'))) if ('allow_stripe_payments' in payload) else bool(getattr(svc, 'allow_stripe_payments', True))
+        except Exception:
+            allow_stripe = bool(getattr(svc, 'allow_stripe_payments', True))
+
+        try:
+            if not offline_methods_allowed:
+                effective_offline = []
+            else:
+                selected = payload.get('offline_methods', None)
+                if selected is None:
+                    # No update provided; use existing.
+                    existing = getattr(svc, 'allowed_offline_payment_methods', None)
+                    effective_offline = list(existing or []) if (existing is not None) else []
+                else:
+                    if not isinstance(selected, list):
+                        selected = [selected]
+                    effective_offline = [str(m) for m in selected if str(m) in org_offline_methods]
+        except Exception:
+            effective_offline = []
+
+        if (not allow_stripe) and (not effective_offline):
+            return JsonResponse(
+                {'status': 'error', 'error': 'Paid services must allow Stripe payments and/or at least one offline payment method.'},
+                status=400,
+            )
+        if ('venmo' in effective_offline) and (not org_has_venmo):
+            return JsonResponse(
+                {'status': 'error', 'error': 'To enable Venmo for a paid service, add your Venmo info on your Profile page first.'},
+                status=400,
+            )
+        if ('zelle' in effective_offline) and (not org_has_zelle):
+            return JsonResponse(
+                {'status': 'error', 'error': 'To enable Zelle for a paid service, add your Zelle info on your Profile page first.'},
+                status=400,
+            )
+
+    # Owner-configured offline method details (used for Venmo/Zelle QR/instructions).
+    try:
+        org_has_venmo = bool((getattr(org_settings, 'offline_venmo', '') or '').strip())
+    except Exception:
+        org_has_venmo = False
+    try:
+        org_has_zelle = bool((getattr(org_settings, 'offline_zelle', '') or '').strip())
+    except Exception:
+        org_has_zelle = False
 
     # Validate facility resource selection (Team plan + owner only) before doing
     # any side effects (like freeze creation) or persisting service changes.
@@ -928,6 +1003,18 @@ def apply_service_update(request, org_slug, service_id):
             if (not bool(effective_allow_stripe)) and (not effective_offline):
                 return JsonResponse(
                     {'status': 'error', 'error': 'Paid services must allow Stripe payments and/or at least one offline payment method.'},
+                    status=400,
+                )
+
+            # If Venmo/Zelle are enabled, require corresponding org-level info.
+            if ('venmo' in effective_offline) and (not org_has_venmo):
+                return JsonResponse(
+                    {'status': 'error', 'error': 'To enable Venmo for a paid service, add your Venmo info on your Profile page first.'},
+                    status=400,
+                )
+            if ('zelle' in effective_offline) and (not org_has_zelle):
+                return JsonResponse(
+                    {'status': 'error', 'error': 'To enable Zelle for a paid service, add your Zelle info on your Profile page first.'},
                     status=400,
                 )
         except Exception:
@@ -3450,6 +3537,16 @@ def edit_service(request, org_slug, service_id):
         org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
     except Exception:
         org_offline_methods = []
+
+    # Owner-configured offline method details (used for Venmo/Zelle QR/instructions).
+    try:
+        org_has_venmo = bool((getattr(org_settings, 'offline_venmo', '') or '').strip())
+    except Exception:
+        org_has_venmo = False
+    try:
+        org_has_zelle = bool((getattr(org_settings, 'offline_zelle', '') or '').strip())
+    except Exception:
+        org_has_zelle = False
     # In this deployment, business users don't manage offline methods in Billing.
     # If Pro/Team offline methods are enabled but the org-level list is empty,
     # fall back to a standard set so owners can choose per service.
@@ -3909,13 +4006,25 @@ def create_service(request, org_slug):
         offline_methods_allowed = bool(can_use_offline_payment_methods(org))
     except Exception:
         offline_methods_allowed = False
+    org_settings = None
     try:
         org_settings = getattr(org, 'settings', None)
         org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
     except Exception:
+        org_settings = None
         org_offline_methods = []
     if offline_methods_allowed and (not org_offline_methods):
         org_offline_methods = ['cash', 'venmo', 'zelle']
+
+    # Owner-configured offline method details (used for Venmo/Zelle QR/instructions).
+    try:
+        org_has_venmo = bool((getattr(org_settings, 'offline_venmo', '') or '').strip())
+    except Exception:
+        org_has_venmo = False
+    try:
+        org_has_zelle = bool((getattr(org_settings, 'offline_zelle', '') or '').strip())
+    except Exception:
+        org_has_zelle = False
 
     if request.method == "POST":
         # Plan enforcement: Basic only allows 1 active service
@@ -4023,6 +4132,14 @@ def create_service(request, org_slug):
                     effective_offline = list(allowed_offline_payment_methods or []) if offline_methods_allowed else []
                     if (not allow_stripe_payments) and (not effective_offline):
                         messages.error(request, "Paid services must allow Stripe payments and/or at least one offline payment method.")
+                        return redirect('calendar_app:create_service', org_slug=org.slug)
+
+                    # If Venmo/Zelle are enabled, require corresponding org-level info.
+                    if ('venmo' in effective_offline) and (not org_has_venmo):
+                        messages.error(request, "To enable Venmo for a paid service, add your Venmo info on your Profile page first.")
+                        return redirect('calendar_app:create_service', org_slug=org.slug)
+                    if ('zelle' in effective_offline) and (not org_has_zelle):
+                        messages.error(request, "To enable Zelle for a paid service, add your Zelle info on your Profile page first.")
                         return redirect('calendar_app:create_service', org_slug=org.slug)
 
                 svc = Service.objects.create(
@@ -4133,6 +4250,8 @@ def create_service(request, org_slug):
         "trial_end": trial_end,
         "offline_methods_allowed": offline_methods_allowed,
         "org_offline_methods": org_offline_methods,
+        "org_has_venmo": org_has_venmo,
+        "org_has_zelle": org_has_zelle,
     })
 
 
@@ -4176,6 +4295,16 @@ def edit_service(request, org_slug, service_id):
         org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
     except Exception:
         org_offline_methods = []
+
+    # Owner-configured offline method details (used for Venmo/Zelle QR/instructions).
+    try:
+        org_has_venmo = bool((getattr(org_settings, 'offline_venmo', '') or '').strip())
+    except Exception:
+        org_has_venmo = False
+    try:
+        org_has_zelle = bool((getattr(org_settings, 'offline_zelle', '') or '').strip())
+    except Exception:
+        org_has_zelle = False
     if offline_methods_allowed and (not org_offline_methods):
         org_offline_methods = ['cash', 'venmo', 'zelle']
 
@@ -4561,6 +4690,14 @@ def edit_service(request, org_slug, service_id):
                         messages.error(request, "Paid services must allow Stripe payments and/or at least one offline payment method.")
                         return redirect('calendar_app:edit_service', org_slug=org.slug, service_id=service.id)
 
+                    # If Venmo/Zelle are enabled, require corresponding org-level info.
+                    if ('venmo' in effective_offline) and (not org_has_venmo):
+                        messages.error(request, "To enable Venmo for a paid service, add your Venmo info on your Profile page first.")
+                        return redirect('calendar_app:edit_service', org_slug=org.slug, service_id=service.id)
+                    if ('zelle' in effective_offline) and (not org_has_zelle):
+                        messages.error(request, "To enable Zelle for a paid service, add your Zelle info on your Profile page first.")
+                        return redirect('calendar_app:edit_service', org_slug=org.slug, service_id=service.id)
+
                 try:
                     service.allow_stripe_payments = bool(allow_stripe)
                     service.allowed_offline_payment_methods = offline_value
@@ -4732,6 +4869,8 @@ def edit_service(request, org_slug, service_id):
                         'svc_allow_stripe': pm_allow_stripe,
                         'svc_offline_inherit': pm_offline_inherit,
                         'svc_offline_methods': pm_offline_methods,
+                        'org_has_venmo': org_has_venmo,
+                        'org_has_zelle': org_has_zelle,
                     })
 
                 # Persist changes (and optionally apply to conflicts)
@@ -5151,6 +5290,8 @@ def edit_service(request, org_slug, service_id):
         'svc_allow_stripe': svc_allow_stripe,
         'svc_offline_inherit': svc_offline_inherit,
         'svc_offline_methods': svc_offline_methods,
+        'org_has_venmo': org_has_venmo,
+        'org_has_zelle': org_has_zelle,
     })
 
 

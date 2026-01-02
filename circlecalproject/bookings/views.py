@@ -29,6 +29,7 @@ from calendar_app.permissions import require_roles
 from billing.utils import get_subscription
 from billing.utils import get_plan_slug, TEAM_SLUG, PRO_SLUG
 from billing.utils import can_use_offline_payment_methods
+from bookings.models import build_offline_payment_instructions
 from billing.utils import can_use_offline_payment_methods
 
 
@@ -1515,7 +1516,7 @@ def public_service_page(request, org_slug, service_slug):
     try:
         if org_settings:
             offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
-            offline_instructions = (getattr(org_settings, 'offline_payment_instructions', '') or '').strip()
+            offline_instructions = build_offline_payment_instructions(org_settings)
     except Exception:
         offline_methods = []
         offline_instructions = ''
@@ -2009,7 +2010,7 @@ def booking_success(request, org_slug, service_slug, booking_id):
     offline_instructions = ''
     try:
         org_settings = getattr(org, 'settings', None)
-        offline_instructions = (getattr(org_settings, 'offline_payment_instructions', '') or '').strip() if org_settings else ''
+        offline_instructions = build_offline_payment_instructions(org_settings) if org_settings else ''
     except Exception:
         offline_instructions = ''
 
@@ -2057,7 +2058,7 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
             show_with_line=(get_plan_slug(org) == TEAM_SLUG),
             offline_methods_allowed=can_use_offline_payment_methods(org),
             offline_methods=list(getattr(getattr(org, 'settings', None), 'offline_payment_methods', []) or []),
-            offline_instructions=(getattr(getattr(org, 'settings', None), 'offline_payment_instructions', '') or '').strip(),
+            offline_instructions=build_offline_payment_instructions(getattr(org, 'settings', None)),
         )
         ctx['error'] = 'Payment was not completed. No booking was created.'
         return render(request, 'public/public_service_page.html', ctx)
@@ -2078,7 +2079,7 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
             show_with_line=(get_plan_slug(org) == TEAM_SLUG),
             offline_methods_allowed=can_use_offline_payment_methods(org),
             offline_methods=list(getattr(getattr(org, 'settings', None), 'offline_payment_methods', []) or []),
-            offline_instructions=(getattr(getattr(org, 'settings', None), 'offline_payment_instructions', '') or '').strip(),
+            offline_instructions=build_offline_payment_instructions(getattr(org, 'settings', None)),
         )
         ctx['error'] = 'Sorry, that time was just booked. Please contact the business.'
         return render(request, 'public/public_service_page.html', ctx)

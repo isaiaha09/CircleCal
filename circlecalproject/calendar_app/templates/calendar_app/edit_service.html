@@ -945,6 +945,9 @@
                    >
             <span class="ml-2 text-sm text-gray-700">Accept card payments (Stripe)</span>
           </label>
+          {% if can_use_pro_team %}
+            <div class="ml-6 text-xs text-gray-500">Recommended: Stripe enables automatic payment confirmation and refunds.</div>
+          {% endif %}
 
           <div class="ml-6">
             <div class="text-sm font-medium text-gray-700">Different form of payment</div>
@@ -1842,11 +1845,59 @@
       const clone = tpl.content.cloneNode(true);
       const backdrop = clone.querySelector('.cc-modal-backdrop');
       const list = clone.querySelector('#svc-conflict-list');
+      const titleEl = clone.querySelector('h3');
+      const descEl = clone.querySelector('p');
+      const confirmBtn = clone.querySelector('#svc-conflict-confirm');
       // store small context so buildConflictNodes can show applied/will apply labels
       try{ window.__conflict_ctx = { proposedUseFixed: !!(proposedPayload && proposedPayload.use_fixed_increment), currentUseFixed: !!currentUseFixed, proposedPayload: proposedPayload || {} }; }catch(e){}
+
+      function shouldShowOfflinePaymentWarning(pl){
+        try{
+          if (!pl) return false;
+          const price = Number(pl.price || 0);
+          const isPaid = Number.isFinite(price) && price > 0;
+          if (!isPaid) return false;
+          const offs = Array.isArray(pl.offline_methods) ? pl.offline_methods : [];
+          return offs.length > 0;
+        }catch(e){ return false; }
+      }
+
+      function buildOfflinePaymentWarningNode(){
+        try{
+          if (!shouldShowOfflinePaymentWarning(proposedPayload)) return null;
+          const wrap = document.createElement('div');
+          wrap.style.margin = '6px';
+          wrap.style.padding = '12px';
+          wrap.style.border = '1px solid #fde68a';
+          wrap.style.background = '#fffbeb';
+          wrap.style.borderRadius = '10px';
+          wrap.innerHTML = `
+            <div style="font-weight:800; color:#92400e; margin-bottom:6px;">Offline payment warning</div>
+            <div style="color:#78350f; font-size:0.95rem; line-height:1.4;">
+              You enabled a payment method that is processed outside CircleCal (Venmo/Zelle/Cash). These methods cannot enforce automatic refunds by cutoff and clients can potentially not pay.
+              <div style="margin-top:8px;">As the controller of your service, you have the right to refuse or provide service to anyone that fails to follow fair and established rules.</div>
+              <div style="margin-top:8px;">It is much easier with only Stripe implemented, but that reduces flexibility for clients who want to pay another way besides card.</div>
+            </div>
+          `;
+          return wrap;
+        }catch(e){ return null; }
+      }
+
+      const hasConflicts = !!(conflicts && Object.keys(conflicts || {}).length);
+      const warnNode = buildOfflinePaymentWarningNode();
+      if (!hasConflicts && warnNode){
+        try{ if (titleEl) titleEl.textContent = 'Payment method warning'; }catch(e){}
+        try{ if (descEl) descEl.textContent = 'Review this note before saving changes.'; }catch(e){}
+        try{ if (confirmBtn) confirmBtn.textContent = 'I understand, save changes'; }catch(e){}
+      } else {
+        // Reset button text in case the template is reused
+        try{ if (confirmBtn) confirmBtn.textContent = 'Confirm and apply changes'; }catch(e){}
+      }
       // clear and populate with structured rows (one booking per stacked row)
       list.textContent = '';
       const nodes = buildConflictNodes(conflicts || {});
+      // Payment warning node should appear at the top when applicable.
+      try{ if (warnNode) nodes.unshift(warnNode); }catch(e){}
       // Render a settings diff node (only when there are changes)
       try{
         const changesNode = buildChangesNode(window.__conflict_ctx.proposedPayload, window.__svc_current || {});
@@ -1917,6 +1968,24 @@
         hideSavedBanner();
 
         const payload = serializeFormToPayload();
+
+        // Enforce: paid services can't enable Venmo/Zelle unless the org has configured them.
+        try{
+          const ORG_HAS_VENMO = {{ org_has_venmo|yesno:"true,false" }};
+          const ORG_HAS_ZELLE = {{ org_has_zelle|yesno:"true,false" }};
+          const price = Number(payload.price || 0);
+          const isPaid = Number.isFinite(price) && price > 0;
+          const offs = Array.isArray(payload.offline_methods) ? payload.offline_methods : [];
+          if (isPaid && offs.includes('venmo') && !ORG_HAS_VENMO){
+            showErrorBanner('To enable Venmo for a paid service, add your Venmo info on your Profile page first.');
+            return;
+          }
+          if (isPaid && offs.includes('zelle') && !ORG_HAS_ZELLE){
+            showErrorBanner('To enable Zelle for a paid service, add your Zelle info on your Profile page first.');
+            return;
+          }
+        }catch(e){ /* ignore client-side validation errors */ }
+
         const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
         const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
 
@@ -1952,8 +2021,30 @@
         }
 
         const conflicts = preview.conflicts || {};
+        function needsOfflinePaymentWarning(pl){
+          try{
+            if (!pl) return false;
+            const price = Number(pl.price || 0);
+            const isPaid = Number.isFinite(price) && price > 0;
+            if (!isPaid) return false;
+            const offs = Array.isArray(pl.offline_methods) ? pl.offline_methods : [];
+            return offs.length > 0;
+          }catch(e){ return false; }
+        }
+
         if (Object.keys(conflicts).length === 0){
-          // No conflicts → apply immediately (show saving overlay now).
+          // No conflicts → apply immediately unless we need to warn about offline payments.
+          if (needsOfflinePaymentWarning(payload)){
+            showModal({}, payload, window.__svc_current && !!window.__svc_current.use_fixed_increment, async function(){
+              try{ setSaving(true); }catch(e){}
+              const ok = await applyAndRedirect(payload);
+              if (!ok) {
+                try{ setSaving(false); }catch(e){}
+                form.submit();
+              }
+            });
+            return;
+          }
           try{ setSaving(true); }catch(e){}
           const ok = await applyAndRedirect(payload);
           if (!ok) {

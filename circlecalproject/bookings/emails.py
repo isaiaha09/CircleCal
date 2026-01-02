@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import quote
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -6,6 +7,53 @@ from django.utils import timezone
 from zoneinfo import ZoneInfo
 from django.core.signing import TimestampSigner
 from django.urls import reverse
+from bookings.models import build_offline_payment_instructions
+
+
+def _extract_offline_line_for_method(instructions: str, method: str) -> str:
+    """Extract a method-specific line from org offline instructions.
+
+    Looks for lines like:
+      "Venmo: @myhandle" or "Zelle - myemail@example.com"
+    """
+    try:
+        full = (instructions or '').strip()
+        m = (method or '').strip().lower()
+        if not full or not m:
+            return ''
+        for raw in full.splitlines():
+            line = (raw or '').strip()
+            if not line:
+                continue
+            low = line.lower()
+            if not low.startswith(m):
+                continue
+            rest = line[len(m):].lstrip()
+            if rest.startswith(':') or rest.startswith('-'):
+                rest = rest[1:].lstrip()
+            return rest.strip()
+    except Exception:
+        return ''
+    return ''
+
+
+def _build_offline_qr_url(instructions: str, method: str) -> str:
+    """Build a QR image URL for Venmo/Zelle based on instructions text."""
+    try:
+        m = (method or '').strip().lower()
+        if m not in {'venmo', 'zelle'}:
+            return ''
+        method_line = _extract_offline_line_for_method(instructions, m)
+        payload = ''
+        if method_line:
+            payload = f"{m.upper()}: {method_line}"
+        else:
+            payload = (instructions or '').strip()
+        if not payload:
+            return ''
+        return 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + quote(payload)
+    except Exception:
+        return ''
 
 
 def send_booking_confirmation(booking):
@@ -38,6 +86,21 @@ def send_booking_confirmation(booking):
         'cancel_url': cancel_url,
         'reschedule_url': reschedule_url,
     }
+
+    # Offline payment details (manual payments outside CircleCal)
+    try:
+        if getattr(booking, 'payment_method', '') == 'offline':
+            org = getattr(booking, 'organization', None)
+            org_settings = getattr(org, 'settings', None) if org else None
+            offline_instructions = build_offline_payment_instructions(org_settings) if org_settings else ''
+            offline_method = (getattr(booking, 'offline_payment_method', '') or '').strip().lower()
+            context.update({
+                'offline_instructions': offline_instructions,
+                'offline_method': offline_method,
+                'offline_qr_url': _build_offline_qr_url(offline_instructions, offline_method),
+            })
+    except Exception:
+        pass
     
     logger = logging.getLogger(__name__)
     subject = f"Booking Confirmed - {booking.organization.name}"
