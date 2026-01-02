@@ -1520,6 +1520,51 @@ def public_service_page(request, org_slug, service_slug):
         offline_methods = []
         offline_instructions = ''
 
+    # In this deployment, business users manage offline method acceptance per service.
+    # If offline methods are plan-enabled but org-level settings are empty, fall back
+    # to a standard set so the UI/validation behaves predictably.
+    if offline_methods_allowed and (not offline_methods):
+        offline_methods = ['cash', 'venmo', 'zelle']
+
+    def _effective_offline_methods_for_service(svc):
+        """Return the effective list of offline methods allowed for a specific service.
+
+        In this deployment, offline method acceptance is configured per-service.
+
+        - If svc.allowed_offline_payment_methods is None: treat as none (no inheritance)
+        - If []: none
+        - Else: subset of org settings (for safety)
+        """
+        try:
+            svc_methods = getattr(svc, 'allowed_offline_payment_methods', None)
+        except Exception:
+            svc_methods = None
+
+        try:
+            desired = list(svc_methods or [])
+        except Exception:
+            desired = []
+
+        # Safety: never allow a method that's not enabled at the org level.
+        org_set = set([str(x).strip().lower() for x in (offline_methods or []) if str(x).strip()])
+        cleaned = []
+        for x in desired:
+            v = str(x).strip().lower()
+            if v and v in org_set:
+                cleaned.append(v)
+        return cleaned
+
+    def _offline_methods_label(methods):
+        pretty = {
+            'cash': 'cash',
+            'venmo': 'Venmo',
+            'zelle': 'Zelle',
+        }
+        parts = [pretty.get(m, m) for m in (methods or [])]
+        if not parts:
+            return ''
+        return '/'.join(parts)
+
     if request.method == "POST":
         client_name = request.POST.get("client_name")
         client_email = request.POST.get("client_email")
@@ -1595,7 +1640,8 @@ def public_service_page(request, org_slug, service_slug):
             reschedule_old_id = None
 
         # Payment selection
-        payment_method = (request.POST.get('payment_method') or '').strip().lower()
+        payment_selection = (request.POST.get('payment_method') or '').strip().lower()
+        chosen_offline_method = ''
         # Free services bypass payments regardless of selection
         try:
             service_price = float(getattr(service, 'price', 0) or 0)
@@ -1603,13 +1649,52 @@ def public_service_page(request, org_slug, service_slug):
             service_price = 0
         is_paid_service = service_price > 0
 
+        # Enforce per-service allowed methods
+        try:
+            stripe_allowed_for_service = bool(getattr(service, 'allow_stripe_payments', True))
+        except Exception:
+            stripe_allowed_for_service = True
+        effective_offline_methods = _effective_offline_methods_for_service(service)
+        offline_allowed_for_service = bool(offline_methods_allowed and effective_offline_methods)
+
         if not is_paid_service:
             payment_method = 'none'
         else:
-            if payment_method not in {'stripe', 'offline'}:
-                payment_method = 'stripe'
-            if payment_method == 'offline' and (not offline_methods_allowed):
-                return HttpResponseBadRequest('Offline payment methods require a Pro or Team subscription.')
+            if not stripe_allowed_for_service and not offline_allowed_for_service:
+                return HttpResponseBadRequest('No payment methods are enabled for this service.')
+
+            allowed_offline_set = set([str(x).strip().lower() for x in (effective_offline_methods or []) if str(x).strip()])
+
+            if payment_selection == 'stripe':
+                if stripe_allowed_for_service:
+                    payment_method = 'stripe'
+                elif offline_allowed_for_service:
+                    # Fallback to first allowed offline method
+                    chosen_offline_method = next(iter(allowed_offline_set), '')
+                    if not chosen_offline_method:
+                        return HttpResponseBadRequest('Offline payment is not enabled for this service.')
+                    payment_method = 'offline'
+                else:
+                    payment_method = 'none'
+            elif payment_selection in allowed_offline_set:
+                # Client chose a specific offline method (venmo/zelle/cash)
+                if not offline_allowed_for_service:
+                    if not offline_methods_allowed:
+                        return HttpResponseBadRequest('Offline payment methods require a Pro or Team subscription.')
+                    return HttpResponseBadRequest('Offline payment is not enabled for this service.')
+                chosen_offline_method = payment_selection
+                payment_method = 'offline'
+            else:
+                # Invalid/blank selection: pick a valid default
+                if stripe_allowed_for_service:
+                    payment_method = 'stripe'
+                elif offline_allowed_for_service:
+                    chosen_offline_method = next(iter(allowed_offline_set), '')
+                    if not chosen_offline_method:
+                        return HttpResponseBadRequest('Offline payment is not enabled for this service.')
+                    payment_method = 'offline'
+                else:
+                    payment_method = 'none'
 
         # Stripe payments must NOT create a Booking until Stripe confirms payment.
         if payment_method == 'stripe':
@@ -1703,6 +1788,7 @@ def public_service_page(request, org_slug, service_slug):
             end=end,
             is_blocking=False,
             payment_method=payment_method,
+            offline_payment_method=(chosen_offline_method if payment_method == 'offline' else ''),
             payment_status=('not_required' if payment_method == 'none' else 'offline_due'),
             rescheduled_from_booking_id=reschedule_old_id,
         )
@@ -1809,6 +1895,26 @@ def public_service_page(request, org_slug, service_slug):
         offline_methods=offline_methods,
         offline_instructions=offline_instructions,
     )
+
+    # Per-service payment method controls (for client-side toggling when the service dropdown changes)
+    try:
+        svc_payment = {}
+        for s in services:
+            try:
+                allow_stripe = bool(getattr(s, 'allow_stripe_payments', True))
+            except Exception:
+                allow_stripe = True
+            eff_off = _effective_offline_methods_for_service(s)
+            svc_payment[str(getattr(s, 'slug', ''))] = {
+                'allow_stripe': bool(allow_stripe),
+                'offline_methods': eff_off,
+                'offline_label': _offline_methods_label(eff_off),
+                'offline_allowed': bool(offline_methods_allowed and eff_off),
+            }
+        ctx['service_payment_controls'] = svc_payment
+    except Exception:
+        ctx['service_payment_controls'] = {}
+
     return render(request, "public/public_service_page.html", ctx)
 
 def booking_success(request, org_slug, service_slug, booking_id):

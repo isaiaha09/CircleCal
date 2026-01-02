@@ -354,6 +354,23 @@ def preview_service_update(request, org_slug, service_id):
     except Exception:
         payload = {}
 
+    def _coerce_bool(v):
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            try:
+                return float(v) != 0
+            except Exception:
+                return bool(v)
+        s = str(v).strip().lower()
+        if s in {'1', 'true', 't', 'yes', 'y', 'on'}:
+            return True
+        if s in {'0', 'false', 'f', 'no', 'n', 'off', ''}:
+            return False
+        return bool(s)
+
     # Determine scanning window: from today (org tz) to a reasonable horizon
     try:
         org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
@@ -390,9 +407,9 @@ def preview_service_update(request, org_slug, service_id):
         'duration': _get_proposed('duration', lambda v: int(v) if v is not None else None),
         'buffer_after': _get_proposed('buffer_after', lambda v: int(v) if v is not None else 0),
         'time_increment_minutes': _get_proposed('time_increment_minutes', lambda v: int(v) if v is not None else 30),
-        'use_fixed_increment': bool(_get_proposed('use_fixed_increment', lambda v: bool(v))),
-        'allow_ends_after_availability': bool(_get_proposed('allow_ends_after_availability', lambda v: bool(v))),
-        'allow_squished_bookings': bool(_get_proposed('allow_squished_bookings', lambda v: bool(v))),
+        'use_fixed_increment': bool(_get_proposed('use_fixed_increment', _coerce_bool)),
+        'allow_ends_after_availability': bool(_get_proposed('allow_ends_after_availability', _coerce_bool)),
+        'allow_squished_bookings': bool(_get_proposed('allow_squished_bookings', _coerce_bool)),
     }
 
     # Keys that define a freeze's relevant fingerprint
@@ -506,7 +523,7 @@ def preview_service_update(request, org_slug, service_id):
     try:
         toggled_use_fixed = None
         if 'use_fixed_increment' in payload:
-            toggled_use_fixed = bool(payload.get('use_fixed_increment'))
+            toggled_use_fixed = bool(_coerce_bool(payload.get('use_fixed_increment')))
     except Exception:
         toggled_use_fixed = None
 
@@ -577,6 +594,37 @@ def apply_service_update(request, org_slug, service_id):
 
     if not payload.get('confirm'):
         return HttpResponseBadRequest('Must include confirm=true to apply changes')
+
+    def _coerce_bool(v):
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            try:
+                return float(v) != 0
+            except Exception:
+                return bool(v)
+        s = str(v).strip().lower()
+        if s in {'1', 'true', 't', 'yes', 'y', 'on'}:
+            return True
+        if s in {'0', 'false', 'f', 'no', 'n', 'off', ''}:
+            return False
+        return bool(s)
+
+    # Payment method controls: org-level offline settings + plan gate.
+    try:
+        from billing.utils import can_use_offline_payment_methods
+        offline_methods_allowed = bool(can_use_offline_payment_methods(org))
+    except Exception:
+        offline_methods_allowed = False
+    try:
+        org_settings = getattr(org, 'settings', None)
+        org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
+    except Exception:
+        org_offline_methods = []
+    if offline_methods_allowed and (not org_offline_methods):
+        org_offline_methods = ['cash', 'venmo', 'zelle']
 
     # Validate facility resource selection (Team plan + owner only) before doing
     # any side effects (like freeze creation) or persisting service changes.
@@ -797,27 +845,27 @@ def apply_service_update(request, org_slug, service_id):
     # Boolean fields
     if 'use_fixed_increment' in payload:
         try:
-            fields['use_fixed_increment'] = bool(payload.get('use_fixed_increment'))
+            fields['use_fixed_increment'] = bool(_coerce_bool(payload.get('use_fixed_increment')))
         except Exception:
             pass
     if 'allow_squished_bookings' in payload:
         try:
-            fields['allow_squished_bookings'] = bool(payload.get('allow_squished_bookings'))
+            fields['allow_squished_bookings'] = bool(_coerce_bool(payload.get('allow_squished_bookings')))
         except Exception:
             pass
     if 'allow_ends_after_availability' in payload:
         try:
-            fields['allow_ends_after_availability'] = bool(payload.get('allow_ends_after_availability'))
+            fields['allow_ends_after_availability'] = bool(_coerce_bool(payload.get('allow_ends_after_availability')))
         except Exception:
             pass
     if 'is_active' in payload:
         try:
-            fields['is_active'] = bool(payload.get('is_active'))
+            fields['is_active'] = bool(_coerce_bool(payload.get('is_active')))
         except Exception:
             pass
     if 'refunds_allowed' in payload:
         try:
-            fields['refunds_allowed'] = bool(payload.get('refunds_allowed'))
+            fields['refunds_allowed'] = bool(_coerce_bool(payload.get('refunds_allowed')))
         except Exception:
             pass
 
@@ -826,6 +874,64 @@ def apply_service_update(request, org_slug, service_id):
         try:
             fields['refund_policy_text'] = (payload.get('refund_policy_text') or '').strip()
         except Exception:
+            pass
+
+    # Per-service payment method controls.
+    # The edit page saves via this JSON endpoint, so we must persist these too.
+    allow_stripe_payments = None
+    if 'allow_stripe_payments' in payload:
+        try:
+            allow_stripe_payments = bool(_coerce_bool(payload.get('allow_stripe_payments')))
+            fields['allow_stripe_payments'] = allow_stripe_payments
+        except Exception:
+            allow_stripe_payments = None
+
+    allowed_offline_payment_methods = None
+    if 'offline_methods' in payload:
+        try:
+            if not offline_methods_allowed:
+                allowed_offline_payment_methods = None
+            else:
+                selected = payload.get('offline_methods')
+                if selected is None:
+                    selected = []
+                if not isinstance(selected, list):
+                    selected = [selected]
+                cleaned = [str(m) for m in selected if str(m) in org_offline_methods]
+                allowed_offline_payment_methods = cleaned
+            fields['allowed_offline_payment_methods'] = allowed_offline_payment_methods
+        except Exception:
+            allowed_offline_payment_methods = None
+
+    # For paid services, require at least one enabled payment option.
+    try:
+        proposed_price = fields.get('price', getattr(svc, 'price', 0) or 0)
+        is_paid_service = float(proposed_price) > 0
+    except Exception:
+        is_paid_service = False
+    if is_paid_service:
+        try:
+            effective_allow_stripe = allow_stripe_payments
+            if effective_allow_stripe is None:
+                effective_allow_stripe = bool(getattr(svc, 'allow_stripe_payments', True))
+
+            if not offline_methods_allowed:
+                effective_offline = []
+            else:
+                if allowed_offline_payment_methods is None and ('offline_methods' not in payload):
+                    # No update provided; use existing value.
+                    existing = getattr(svc, 'allowed_offline_payment_methods', None)
+                    effective_offline = list(existing or []) if (existing is not None) else []
+                else:
+                    effective_offline = list(allowed_offline_payment_methods or [])
+
+            if (not bool(effective_allow_stripe)) and (not effective_offline):
+                return JsonResponse(
+                    {'status': 'error', 'error': 'Paid services must allow Stripe payments and/or at least one offline payment method.'},
+                    status=400,
+                )
+        except Exception:
+            # If validation cannot be evaluated, fail open.
             pass
 
     # Enforce refund cutoff behavior similar to the form POST.
@@ -1022,6 +1128,54 @@ def _build_org_weekly_map(org):
         ui_idx = (row.weekday + 1) % 7
         availability_map[ui_idx].append(f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}")
     return availability_map
+
+
+def _seed_service_weekly_from_org_defaults(org, service):
+    """Ensure a service has explicit weekly windows by copying org defaults.
+
+    This is primarily to support Trial/Basic -> Pro upgrades: Trial/Basic often
+    runs in "single-service mode" where availability follows org WeeklyAvailability
+    without creating ServiceWeeklyAvailability rows. After upgrading, the service
+    availability editor expects explicit service weekly windows.
+
+    Returns True if rows were created.
+    """
+    if not org or not service:
+        return False
+
+    try:
+        if service.weekly_availability.filter(is_active=True).exists():
+            return False
+    except Exception:
+        # If we can't check, fail closed and avoid creating duplicates.
+        return False
+
+    try:
+        org_rows = list(
+            WeeklyAvailability.objects.filter(organization=org, is_active=True)
+            .order_by('weekday', 'start_time')
+        )
+    except Exception:
+        org_rows = []
+
+    if not org_rows:
+        return False
+
+    try:
+        from bookings.models import ServiceWeeklyAvailability
+        ServiceWeeklyAvailability.objects.bulk_create([
+            ServiceWeeklyAvailability(
+                service=service,
+                weekday=r.weekday,
+                start_time=r.start_time,
+                end_time=r.end_time,
+                is_active=True,
+            )
+            for r in org_rows
+        ])
+        return True
+    except Exception:
+        return False
 
 
 def _service_schedule_signature(service):
@@ -3276,6 +3430,36 @@ def edit_service(request, org_slug, service_id):
         except Exception:
             assigned_member_ids = []
 
+    # Payment method controls context (safe defaults if billing is unavailable).
+    is_trialing = False
+    trial_end = None
+    can_use_pro_team = False
+    offline_methods_allowed = False
+    try:
+        from billing.utils import get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription, can_use_offline_payment_methods
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        trial_end = getattr(sub, 'trial_end', None) if sub else None
+        plan_slug = get_plan_slug(org)
+        can_use_pro_team = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
+        offline_methods_allowed = bool(can_use_offline_payment_methods(org))
+    except Exception:
+        pass
+    try:
+        org_settings = getattr(org, 'settings', None)
+        org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
+    except Exception:
+        org_offline_methods = []
+    # In this deployment, business users don't manage offline methods in Billing.
+    # If Pro/Team offline methods are enabled but the org-level list is empty,
+    # fall back to a standard set so owners can choose per service.
+    if offline_methods_allowed and (not org_offline_methods):
+        org_offline_methods = ['cash', 'venmo', 'zelle']
+    svc_allow_stripe = bool(getattr(service, 'allow_stripe_payments', True))
+    svc_offline_override = getattr(service, 'allowed_offline_payment_methods', None)
+    svc_offline_inherit = (svc_offline_override is None)
+    svc_offline_methods = list(svc_offline_override or []) if (svc_offline_override is not None) else []
+
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
@@ -3283,6 +3467,14 @@ def edit_service(request, org_slug, service_id):
         'can_edit_slug': can_edit_slug,
         'assigned_member_ids': assigned_member_ids,
         'is_team_plan': is_team_plan,
+        'can_use_pro_team': can_use_pro_team,
+        'is_trialing': is_trialing,
+        'trial_end': trial_end,
+        'offline_methods_allowed': offline_methods_allowed,
+        'org_offline_methods': org_offline_methods,
+        'svc_allow_stripe': svc_allow_stripe,
+        'svc_offline_inherit': svc_offline_inherit,
+        'svc_offline_methods': svc_offline_methods,
     })
 
 
@@ -3694,16 +3886,36 @@ def create_service(request, org_slug):
     # Pro/Team feature gate: advanced service settings + editable refund policy fields.
     is_team_plan = False
     can_use_pro_team = False
+    is_trialing = False
+    trial_end = None
     try:
         from billing.utils import can_add_staff, get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
         is_team_plan = bool(can_add_staff(org))
         sub = get_subscription(org)
         is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        trial_end = getattr(sub, 'trial_end', None) if sub else None
         plan_slug = get_plan_slug(org)
         can_use_pro_team = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
     except Exception:
         is_team_plan = False
         can_use_pro_team = False
+        is_trialing = False
+        trial_end = None
+
+    # Payment settings are feature-gated (Pro/Team, non-trial) and also constrained
+    # by the org-level offline payment settings.
+    try:
+        from billing.utils import can_use_offline_payment_methods
+        offline_methods_allowed = bool(can_use_offline_payment_methods(org))
+    except Exception:
+        offline_methods_allowed = False
+    try:
+        org_settings = getattr(org, 'settings', None)
+        org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
+    except Exception:
+        org_offline_methods = []
+    if offline_methods_allowed and (not org_offline_methods):
+        org_offline_methods = ['cash', 'venmo', 'zelle']
 
     if request.method == "POST":
         # Plan enforcement: Basic only allows 1 active service
@@ -3723,16 +3935,32 @@ def create_service(request, org_slug):
         slug_input = (request.POST.get("slug") or "").strip()
         description = (request.POST.get("description") or "").strip()
 
-        duration_raw = request.POST.get("duration") or "60"
-        price_raw = request.POST.get("price") or "0"
+        duration_raw = request.POST.get("duration")
+        price_raw = request.POST.get("price")
         buffer_before_raw = request.POST.get("buffer_before") or "0"
         buffer_after_raw = request.POST.get("buffer_after") or "0"
-        min_notice_hours_raw = request.POST.get("min_notice_hours") or "24"
-        max_booking_days_raw = request.POST.get("max_booking_days") or "30"
+        min_notice_hours_raw = request.POST.get("min_notice_hours")
+        max_booking_days_raw = request.POST.get("max_booking_days")
 
+        has_errors = False
         if not name:
+            has_errors = True
             messages.error(request, "Name is required.")
-        else:
+        if duration_raw is None or str(duration_raw).strip() == "":
+            has_errors = True
+            messages.error(request, "Duration is required.")
+        if price_raw is None or str(price_raw).strip() == "":
+            has_errors = True
+            messages.error(request, "Price is required (use 0 for free).")
+        if can_use_pro_team:
+            if min_notice_hours_raw is None or str(min_notice_hours_raw).strip() == "":
+                has_errors = True
+                messages.error(request, "Min notice is required.")
+            if max_booking_days_raw is None or str(max_booking_days_raw).strip() == "":
+                has_errors = True
+                messages.error(request, "Max advance is required.")
+
+        if not has_errors:
             # Require at-least-one assigned member for every service
             try:
                 from accounts.models import Membership
@@ -3764,8 +3992,8 @@ def create_service(request, org_slug):
                 duration = int(duration_raw)
                 buffer_before = int(buffer_before_raw)
                 buffer_after = int(buffer_after_raw)
-                min_notice_hours = int(min_notice_hours_raw)
-                max_booking_days = int(max_booking_days_raw)
+                min_notice_hours = int(min_notice_hours_raw) if (min_notice_hours_raw is not None and str(min_notice_hours_raw).strip() != "") else 24
+                max_booking_days = int(max_booking_days_raw) if (max_booking_days_raw is not None and str(max_booking_days_raw).strip() != "") else (31 if is_trialing else 30)
                 price = float(price_raw)
             except ValueError:
                 messages.error(request, "Numeric fields must be valid numbers.")
@@ -3773,7 +4001,30 @@ def create_service(request, org_slug):
                 # Trial/Basic: lock min notice + max advance.
                 if not can_use_pro_team:
                     min_notice_hours = 24
-                    max_booking_days = 30
+                    max_booking_days = 31 if is_trialing else 30
+
+                # Per-service payment method controls.
+                # Note: Templates no longer expose an "inherit" toggle. Treat an empty selection
+                # as explicitly disabling offline methods for this service.
+                allow_stripe_payments = (request.POST.get('allow_stripe_payments') is not None)
+                if not offline_methods_allowed:
+                    # Plan-gated: Stripe only.
+                    allowed_offline_payment_methods = None
+                else:
+                    selected = request.POST.getlist('offline_methods') or []
+                    allowed_offline_payment_methods = [m for m in selected if m in org_offline_methods]
+
+                # For paid services, require at least one enabled payment option.
+                try:
+                    is_paid_service = float(price) > 0
+                except Exception:
+                    is_paid_service = False
+                if is_paid_service:
+                    effective_offline = list(allowed_offline_payment_methods or []) if offline_methods_allowed else []
+                    if (not allow_stripe_payments) and (not effective_offline):
+                        messages.error(request, "Paid services must allow Stripe payments and/or at least one offline payment method.")
+                        return redirect('calendar_app:create_service', org_slug=org.slug)
+
                 svc = Service.objects.create(
                     organization=org,
                     name=name,
@@ -3786,6 +4037,8 @@ def create_service(request, org_slug):
                     min_notice_hours=min_notice_hours,
                     max_booking_days=max_booking_days,
                     is_active=True,
+                    allow_stripe_payments=allow_stripe_payments,
+                    allowed_offline_payment_methods=allowed_offline_payment_methods,
                 )
                 # Per-service client slot settings
                 try:
@@ -3876,6 +4129,10 @@ def create_service(request, org_slug):
         "org": org,
         "is_team_plan": is_team_plan,
         "can_use_pro_team": can_use_pro_team,
+        "is_trialing": is_trialing,
+        "trial_end": trial_end,
+        "offline_methods_allowed": offline_methods_allowed,
+        "org_offline_methods": org_offline_methods,
     })
 
 
@@ -3892,16 +4149,48 @@ def edit_service(request, org_slug, service_id):
     # Pro/Team feature gate: advanced service settings + editable refund policy fields.
     is_team_plan = False
     can_use_pro_team = False
+    is_trialing = False
+    trial_end = None
     try:
         from billing.utils import can_add_staff, get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
         is_team_plan = bool(can_add_staff(org))
         sub = get_subscription(org)
         is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        trial_end = getattr(sub, 'trial_end', None) if sub else None
         plan_slug = get_plan_slug(org)
         can_use_pro_team = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
     except Exception:
         is_team_plan = False
         can_use_pro_team = False
+        is_trialing = False
+        trial_end = None
+
+    # Payment method controls: org-level offline settings + plan gate.
+    try:
+        from billing.utils import can_use_offline_payment_methods
+        offline_methods_allowed = bool(can_use_offline_payment_methods(org))
+    except Exception:
+        offline_methods_allowed = False
+    try:
+        org_settings = getattr(org, 'settings', None)
+        org_offline_methods = list(getattr(org_settings, 'offline_payment_methods', []) or [])
+    except Exception:
+        org_offline_methods = []
+    if offline_methods_allowed and (not org_offline_methods):
+        org_offline_methods = ['cash', 'venmo', 'zelle']
+
+    svc_allow_stripe = bool(getattr(service, 'allow_stripe_payments', True))
+    svc_offline_override = getattr(service, 'allowed_offline_payment_methods', None)
+    svc_offline_inherit = (svc_offline_override is None)
+    svc_offline_methods = list(svc_offline_override or []) if (svc_offline_override is not None) else []
+
+    # Trial/Basic often runs in "single-service mode" where a service effectively inherits
+    # org default WeeklyAvailability without persisting explicit ServiceWeeklyAvailability rows.
+    # After upgrading to Pro/Team, the service editor and activation checks expect explicit
+    # per-service weekly windows. Seed them from org defaults (idempotent) so the Edit Service
+    # page matches the Calendar defaults and doesn't incorrectly force the service inactive.
+    if can_use_pro_team:
+        _seed_service_weekly_from_org_defaults(org, service)
 
     # Keep Basic/Trial behavior consistent with UI: refunds always on (locked).
     if not can_use_pro_team:
@@ -3953,8 +4242,9 @@ def edit_service(request, org_slug, service_id):
         except Exception:
             pass
         try:
-            if hasattr(service, 'max_booking_days') and int(getattr(service, 'max_booking_days', 0) or 0) != 30:
-                service.max_booking_days = 30
+            locked_max = 31 if is_trialing else 30
+            if hasattr(service, 'max_booking_days') and int(getattr(service, 'max_booking_days', 0) or 0) != locked_max:
+                service.max_booking_days = locked_max
                 update_fields.append('max_booking_days')
         except Exception:
             pass
@@ -3982,23 +4272,17 @@ def edit_service(request, org_slug, service_id):
             except Exception:
                 pass
 
-    # Trial/Basic guardrail: these orgs effectively operate in a single-service mode.
-    # Ensure the org cannot end up with zero active services (which breaks the public page).
-    # If this service is currently inactive and there are no other active services, force it active.
+    # Guardrail (all plans): the org cannot end up with zero active services
+    # (which breaks the public booking page).
     try:
-        from billing.utils import get_plan_slug, BASIC_SLUG, get_subscription
-        plan_slug = get_plan_slug(org)
-        sub = get_subscription(org)
-        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
-        if plan_slug == BASIC_SLUG or is_trialing:
-            active_ct = Service.objects.filter(organization=org, is_active=True).count()
-            if active_ct == 0 and not bool(getattr(service, 'is_active', False)):
-                service.is_active = True
-                service.save(update_fields=['is_active'])
-                try:
-                    messages.info(request, 'Your service was set active to keep your public booking page available.')
-                except Exception:
-                    pass
+        active_ct = Service.objects.filter(organization=org, is_active=True).count()
+        if active_ct == 0 and not bool(getattr(service, 'is_active', False)):
+            service.is_active = True
+            service.save(update_fields=['is_active'])
+            try:
+                messages.info(request, 'Your service was set active to keep your public booking page available.')
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -4012,21 +4296,37 @@ def edit_service(request, org_slug, service_id):
     # Keep UI truthful: if a service has no weekly availability (overrides don't count), it cannot remain active.
     try:
         if getattr(service, 'is_active', False) and (not _service_has_effective_weekly_availability_for_activation(org, service)):
-            service.is_active = False
-            service.save(update_fields=['is_active'])
-            # Ensure the in-memory object reflects the saved value
             try:
-                service.refresh_from_db(fields=['is_active'])
+                other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
             except Exception:
-                pass
-            try:
-                messages.error(
-                    request,
-                    "This service was set to inactive because it has no weekly availability. "
-                    "Add weekly availability (overrides don’t count) to activate it."
-                )
-            except Exception:
-                pass
+                other_active = 0
+
+            if other_active == 0:
+                # Last active service must remain active to keep the booking page reachable.
+                try:
+                    messages.error(
+                        request,
+                        "This service has no weekly availability (overrides don’t count). "
+                        "Add weekly availability so clients can book times."
+                    )
+                except Exception:
+                    pass
+            else:
+                service.is_active = False
+                service.save(update_fields=['is_active'])
+                # Ensure the in-memory object reflects the saved value
+                try:
+                    service.refresh_from_db(fields=['is_active'])
+                except Exception:
+                    pass
+                try:
+                    messages.error(
+                        request,
+                        "This service was set to inactive because it has no weekly availability. "
+                        "Add weekly availability (overrides don’t count) to activate it."
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -4034,13 +4334,31 @@ def edit_service(request, org_slug, service_id):
         name = (request.POST.get("name") or "").strip()
         description = (request.POST.get("description") or "").strip()
 
-        duration_raw = request.POST.get("duration") or "60"
-        price_raw = request.POST.get("price") or "0"
+        duration_raw = request.POST.get("duration")
+        price_raw = request.POST.get("price")
         buffer_before_raw = request.POST.get("buffer_before") or "0"
         buffer_after_raw = request.POST.get("buffer_after") or "0"
-        min_notice_hours_raw = request.POST.get("min_notice_hours") or "1"
-        max_booking_days_raw = request.POST.get("max_booking_days") or "30"
+        min_notice_hours_raw = request.POST.get("min_notice_hours")
+        max_booking_days_raw = request.POST.get("max_booking_days")
         requested_active = request.POST.get("is_active") == "on"
+
+        # Rule: the org must always have at least one active service.
+        # If this would deactivate the last active service, force it back on.
+        if not requested_active:
+            try:
+                other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
+            except Exception:
+                other_active = 0
+            if other_active == 0:
+                requested_active = True
+                try:
+                    messages.error(
+                        request,
+                        "You can’t deactivate your only active service. "
+                        "Create or activate another service first."
+                    )
+                except Exception:
+                    pass
 
         # Snapshot current service settings so we can freeze them for booked dates
         try:
@@ -4048,15 +4366,34 @@ def edit_service(request, org_slug, service_id):
         except Exception:
             current_settings_snapshot = None
 
+        has_errors = False
         if not name:
+            has_errors = True
             messages.error(request, "Name is required.")
+        if duration_raw is None or str(duration_raw).strip() == "":
+            has_errors = True
+            messages.error(request, "Duration is required.")
+        if price_raw is None or str(price_raw).strip() == "":
+            has_errors = True
+            messages.error(request, "Price is required (use 0 for free).")
+        if can_use_pro_team:
+            if min_notice_hours_raw is None or str(min_notice_hours_raw).strip() == "":
+                has_errors = True
+                messages.error(request, "Min notice is required.")
+            if max_booking_days_raw is None or str(max_booking_days_raw).strip() == "":
+                has_errors = True
+                messages.error(request, "Max advance is required.")
+
+        if has_errors:
+            return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
+
         else:
             try:
                 duration = int(duration_raw)
                 buffer_before = int(buffer_before_raw)
                 buffer_after = int(buffer_after_raw)
-                min_notice_hours = int(min_notice_hours_raw)
-                max_booking_days = int(max_booking_days_raw)
+                min_notice_hours = int(min_notice_hours_raw) if (min_notice_hours_raw is not None and str(min_notice_hours_raw).strip() != "") else 24
+                max_booking_days = int(max_booking_days_raw) if (max_booking_days_raw is not None and str(max_booking_days_raw).strip() != "") else (31 if is_trialing else 30)
                 price = float(price_raw)
             except ValueError:
                 messages.error(request, "Numeric fields must be valid numbers.")
@@ -4069,7 +4406,7 @@ def edit_service(request, org_slug, service_id):
                 service.buffer_after = buffer_after if can_use_pro_team else 0
                 # Trial/Basic: lock min notice + max advance.
                 service.min_notice_hours = min_notice_hours if can_use_pro_team else 24
-                service.max_booking_days = max_booking_days if can_use_pro_team else 30
+                service.max_booking_days = max_booking_days if can_use_pro_team else (31 if is_trialing else 30)
                 service.is_active = requested_active
 
                 # Per-service slot settings
@@ -4132,20 +4469,35 @@ def edit_service(request, org_slug, service_id):
                     except Exception:
                         pass
 
-                # New rule: block activating a service unless it has weekly availability.
-                # Per-date overrides do not count.
+                # Rule: generally, a service shouldn't be activated unless it has weekly availability
+                # (per-date overrides do not count). Exception: the last active service must remain
+                # active to keep the booking page reachable.
                 if requested_active:
                     try:
-                        if not _service_has_effective_weekly_availability_for_activation(org, service):
-                            service.is_active = False
+                        other_active = Service.objects.filter(organization=org, is_active=True).exclude(id=service.id).count()
+                    except Exception:
+                        other_active = 0
+                    try:
+                        has_effective = _service_has_effective_weekly_availability_for_activation(org, service)
+                    except Exception:
+                        has_effective = True
+
+                    if (not has_effective) and other_active == 0:
+                        try:
                             messages.error(
                                 request,
-                                "This service can’t be activated because it has no weekly availability. "
-                                "Add weekly availability in the Service availability section or via the calendar first."
+                                "This service has no weekly availability (overrides don’t count). "
+                                "Add weekly availability so clients can book times."
                             )
-                    except Exception:
-                        # If checks fail, fail open to avoid locking out editing.
-                        pass
+                        except Exception:
+                            pass
+                    elif not has_effective:
+                        service.is_active = False
+                        messages.error(
+                            request,
+                            "This service can’t be activated because it has no weekly availability. "
+                            "Add weekly availability in the Service availability section or via the calendar first."
+                        )
 
                 # Allow slug update only when there are no bookings for this service.
                 try:
@@ -4188,6 +4540,33 @@ def edit_service(request, org_slug, service_id):
                                 break
 
                 apply_to_conflicts = request.POST.get('apply_to_conflicts') is not None
+
+                # Per-service payment method controls. These are applied to the edited service only
+                # (not to conflict services).
+                allow_stripe = (request.POST.get('allow_stripe_payments') is not None)
+                if not offline_methods_allowed:
+                    offline_value = None
+                else:
+                    selected = request.POST.getlist('offline_methods') or []
+                    offline_value = [m for m in selected if m in org_offline_methods]
+
+                # For paid services, require at least one enabled payment option.
+                try:
+                    is_paid_service = float(price) > 0
+                except Exception:
+                    is_paid_service = False
+                if is_paid_service:
+                    effective_offline = list(offline_value or []) if offline_methods_allowed else []
+                    if (not allow_stripe) and (not effective_offline):
+                        messages.error(request, "Paid services must allow Stripe payments and/or at least one offline payment method.")
+                        return redirect('calendar_app:edit_service', org_slug=org.slug, service_id=service.id)
+
+                try:
+                    service.allow_stripe_payments = bool(allow_stripe)
+                    service.allowed_offline_payment_methods = offline_value
+                except Exception:
+                    # If the migration isn't applied yet, don't block editing.
+                    pass
                 # If conflicts exist and user didn't confirm applying, re-render with warning
                 if conflict_services and not apply_to_conflicts:
                     # Do not persist changes yet; show prompt to user
@@ -4320,6 +4699,15 @@ def edit_service(request, org_slug, service_id):
                         facility_resources = []
                         selected_resource_ids = []
 
+                    # Payment method controls: reflect posted values on re-render.
+                    pm_allow_stripe = (request.POST.get('allow_stripe_payments') is not None)
+                    pm_offline_inherit = False
+                    if offline_methods_allowed:
+                        selected = request.POST.getlist('offline_methods') or []
+                        pm_offline_methods = [m for m in selected if m in org_offline_methods]
+                    else:
+                        pm_offline_methods = []
+
                     return render(request, "calendar_app/edit_service.html", {
                         "org": org,
                         "service": service,
@@ -4339,6 +4727,11 @@ def edit_service(request, org_slug, service_id):
                         "activation_requires_service_weekly": activation_requires_service_weekly,
                         'is_team_plan': is_team_plan,
                         'can_use_pro_team': can_use_pro_team,
+                        'offline_methods_allowed': offline_methods_allowed,
+                        'org_offline_methods': org_offline_methods,
+                        'svc_allow_stripe': pm_allow_stripe,
+                        'svc_offline_inherit': pm_offline_inherit,
+                        'svc_offline_methods': pm_offline_methods,
                     })
 
                 # Persist changes (and optionally apply to conflicts)
@@ -4751,6 +5144,13 @@ def edit_service(request, org_slug, service_id):
         'can_use_facility_resources': can_use_facility_resources,
         'is_team_plan': is_team_plan,
         'can_use_pro_team': can_use_pro_team,
+        'is_trialing': is_trialing,
+        'trial_end': trial_end,
+        'offline_methods_allowed': offline_methods_allowed,
+        'org_offline_methods': org_offline_methods,
+        'svc_allow_stripe': svc_allow_stripe,
+        'svc_offline_inherit': svc_offline_inherit,
+        'svc_offline_methods': svc_offline_methods,
     })
 
 
@@ -4950,6 +5350,7 @@ def bookings_audit_list(request, org_slug):
     org = request.organization
     page = int(request.GET.get('page', 1))
     per_page = int(request.GET.get('per_page', 25))
+    qs = AuditBooking.objects.filter(organization=org).order_by('-created_at')
     # support incremental polling: ?since=ISO8601
     since_raw = request.GET.get('since')
     if since_raw:
@@ -4959,11 +5360,16 @@ def bookings_audit_list(request, org_slug):
                 s = s[:-1] + '+00:00'
             from datetime import datetime
             since_dt = datetime.fromisoformat(s)
+            try:
+                # Make naive datetimes UTC so comparisons are valid.
+                if since_dt.tzinfo is None:
+                    since_dt = timezone.make_aware(since_dt, timezone.utc)
+            except Exception:
+                pass
             qs = qs.filter(created_at__gt=since_dt)
         except Exception:
             # ignore parsing errors and return full page
             pass
-    qs = AuditBooking.objects.filter(organization=org).order_by('-created_at')
     total = qs.count()
     start = (page - 1) * per_page
     end = start + per_page

@@ -229,6 +229,47 @@
           </div>
         </div>
 
+        <div class="section-card">
+          <div class="section-title">Payment Methods</div>
+          <div>
+            <div class="space-y-3">
+              <label class="inline-flex items-start">
+                <input type="checkbox" name="allow_stripe_payments" id="allow_stripe_payments" value="1"
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked>
+                <span class="ml-2 text-sm text-gray-700">Accept card payments (Stripe)</span>
+              </label>
+
+              <div class="ml-6">
+                <div class="text-sm font-medium text-gray-700">Different form of payment</div>
+                <div class="mt-2 space-y-2">
+                  <label class="flex items-center text-sm text-gray-700">
+                    <input type="checkbox" name="offline_methods" value="venmo"
+                           class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                           {% if not offline_methods_allowed %}disabled{% endif %}>
+                    <span class="ml-2">Venmo</span>
+                  </label>
+                  <label class="flex items-center text-sm text-gray-700">
+                    <input type="checkbox" name="offline_methods" value="zelle"
+                           class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                           {% if not offline_methods_allowed %}disabled{% endif %}>
+                    <span class="ml-2">Zelle</span>
+                  </label>
+
+                  <div class="text-sm text-gray-500">Any other payment methods go here</div>
+
+                  <label class="flex items-center text-sm text-gray-700">
+                    <input type="checkbox" name="offline_methods" value="cash"
+                           class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                           {% if not offline_methods_allowed %}disabled{% endif %}>
+                    <span class="ml-2">Offline (Cash)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-gray-500">For paid services, you must enable at least one payment method.</p>
+        </div>
+
         <div class="grid sm:grid-cols-2 gap-6">
           <div>
             <!-- Prep buffer removed: buffer_before is deprecated and not used by availability/overlap logic -->
@@ -306,11 +347,17 @@
           <div>
             <label class="block text-sm font-medium text-gray-700">Max Advance (days)</label>
             <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
-              <input name="max_booking_days" type="number" value="30" min="1"
+              <input name="max_booking_days" type="number" value="{% if can_use_pro_team %}30{% elif is_trialing %}31{% else %}30{% endif %}" min="1"
                 class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
               {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
             </div>
             <p class="mt-2 text-xs text-gray-500">Limit how far out clients can book.</p>
+            {% if is_trialing %}
+              <p class="mt-2 text-xs text-gray-500">
+                During your trial, clients can book through the end of your trial{% if trial_end %} ({{ trial_end|date:"M j, Y" }}){% endif %}.
+                This setting takes effect after you purchase a subscription.
+              </p>
+            {% endif %}
           </div>
         </div>
 

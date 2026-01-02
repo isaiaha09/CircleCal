@@ -934,6 +934,53 @@
       </div>
     </div>
 
+    <div class="section-card">
+      <h2 class="text-base font-semibold">Payment Methods</h2>
+      <div class="mt-3">
+        <div class="space-y-3">
+          <label class="inline-flex items-start">
+            <input type="checkbox" name="allow_stripe_payments" id="allow_stripe_payments" value="1"
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                   {% if svc_allow_stripe %}checked{% endif %}
+                   >
+            <span class="ml-2 text-sm text-gray-700">Accept card payments (Stripe)</span>
+          </label>
+
+          <div class="ml-6">
+            <div class="text-sm font-medium text-gray-700">Different form of payment</div>
+            <div class="mt-2 space-y-2">
+              <label class="flex items-center text-sm text-gray-700">
+                <input type="checkbox" name="offline_methods" value="venmo"
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       {% if 'venmo' in svc_offline_methods %}checked{% endif %}
+                       {% if not offline_methods_allowed %}disabled{% endif %}>
+                <span class="ml-2">Venmo</span>
+              </label>
+              <label class="flex items-center text-sm text-gray-700">
+                <input type="checkbox" name="offline_methods" value="zelle"
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       {% if 'zelle' in svc_offline_methods %}checked{% endif %}
+                       {% if not offline_methods_allowed %}disabled{% endif %}>
+                <span class="ml-2">Zelle</span>
+              </label>
+
+              <div class="text-sm text-gray-500">Any other payment methods go here</div>
+
+              <label class="flex items-center text-sm text-gray-700">
+                <input type="checkbox" name="offline_methods" value="cash"
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       {% if 'cash' in svc_offline_methods %}checked{% endif %}
+                       {% if not offline_methods_allowed %}disabled{% endif %}>
+                <span class="ml-2">Offline (Cash)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="mt-2 text-xs text-gray-500">For paid services, you must enable at least one payment method.</p>
+    </div>
+
     <div class="grid grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium text-gray-700">How soon can clients book before the appointment? (In Hours)</label>
@@ -947,11 +994,17 @@
       <div>
         <label class="block text-sm font-medium text-gray-700">How far ahead can clients book? (In Days)</label>
       <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
-         <input name="max_booking_days" type="number" value="{% if can_use_pro_team %}{{ service.max_booking_days }}{% else %}30{% endif %}" min="1"
+         <input name="max_booking_days" type="number" value="{% if can_use_pro_team %}{{ service.max_booking_days }}{% elif is_trialing %}31{% else %}30{% endif %}" min="1"
            class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
          {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
        </div>
        <p class="mt-2 text-xs text-gray-500">Limit how far out clients can book.</p>
+       {% if is_trialing %}
+         <p class="mt-2 text-xs text-gray-500">
+           During your trial, clients can book through the end of your trial{% if trial_end %} ({{ trial_end|date:"M j, Y" }}){% endif %}.
+           This setting takes effect after you purchase a subscription.
+         </p>
+       {% endif %}
       </div>
     </div>
 
@@ -1476,7 +1529,7 @@
         name: "{{ service.name|escapejs }}",
         description: "{{ service.description|escapejs }}",
         min_notice_hours: {{ service.min_notice_hours|default:1 }},
-        max_booking_days: {{ service.max_booking_days|default:30 }},
+        max_booking_days: {% if can_use_pro_team %}{{ service.max_booking_days|default:30 }}{% elif is_trialing %}31{% else %}30{% endif %},
         is_active: {{ service.is_active|yesno:"true,false" }}
       }; }catch(e){}
     const form = document.querySelector('form.cc-form');
@@ -1559,6 +1612,21 @@
           out[name] = false;
         }
       }
+
+      // Payment methods: always include explicit values so the JSON save endpoint
+      // can persist unchecked/cleared states.
+      try{
+        const stripeEl = form.querySelector('#allow_stripe_payments');
+        out.allow_stripe_payments = !!(stripeEl && stripeEl.checked);
+      }catch(e){ out.allow_stripe_payments = false; }
+
+      try{
+        const selected = Array.from(form.querySelectorAll('input[name="offline_methods"]:checked'))
+          .map(el => String(el.value || ''))
+          .filter(v => !!v)
+          .sort();
+        out.offline_methods = selected;
+      }catch(e){ out.offline_methods = []; }
 
       return out;
     }
@@ -1848,9 +1916,6 @@
         try{ const prior = document.getElementById('svc-error-banner'); if (prior) prior.style.display = 'none'; }catch(e){}
         hideSavedBanner();
 
-        // Show loading overlay during preview/apply.
-        try{ setSaving(true); }catch(e){}
-
         const payload = serializeFormToPayload();
         const previewUrl = window.location.pathname.replace('/edit/', '/preview_update/');
         const applyUrl = window.location.pathname.replace('/edit/', '/apply_update/');
@@ -1888,6 +1953,8 @@
 
         const conflicts = preview.conflicts || {};
         if (Object.keys(conflicts).length === 0){
+          // No conflicts → apply immediately (show saving overlay now).
+          try{ setSaving(true); }catch(e){}
           const ok = await applyAndRedirect(payload);
           if (!ok) {
             try{ setSaving(false); }catch(e){}
@@ -1897,6 +1964,8 @@
         }
 
         showModal(conflicts, payload, window.__svc_current && !!window.__svc_current.use_fixed_increment, async function(){
+          // User confirmed in modal → start saving animation now.
+          try{ setSaving(true); }catch(e){}
           const ok = await applyAndRedirect(payload);
           if (!ok) {
             try{ setSaving(false); }catch(e){}

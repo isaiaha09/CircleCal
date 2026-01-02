@@ -451,34 +451,46 @@
       <input type="email" name="client_email" required value="{{ prefill_client_email|default:'' }}" class="w-full mb-4 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="john@example.com">
 
       <div id="paymentSection" class="mb-4" style="display:none;">
-        <label class="block text-sm text-gray-700 mb-2">Payment method</label>
+        <label class="block text-sm text-gray-700 mb-2">Different payment methods:</label>
 
-        <div class="space-y-2">
-          <label class="flex items-start gap-2">
-            <input type="radio" name="payment_method" value="stripe" checked>
-            <span class="text-sm text-gray-800">
-              Pay with card (Stripe)
-            </span>
-          </label>
-
-          {% if offline_methods_allowed %}
-            <label class="flex items-start gap-2">
-              <input type="radio" name="payment_method" value="offline">
-              <span class="text-sm text-gray-800">
-                Pay offline (cash/Venmo/Zelle)
-              </span>
-            </label>
-            <div id="offlineInstructions" class="text-xs text-gray-600 ml-6" style="display:none;">
-              {% if offline_instructions %}
-                {{ offline_instructions }}
-              {% else %}
-                Offline payment instructions will be shown after booking.
-              {% endif %}
-            </div>
-          {% endif %}
+        <div id="paymentFreeNote" class="text-sm text-gray-700" style="display:none;">
+          No payment is required for this service.
         </div>
 
-        <p class="text-xs text-gray-500 mt-2">Payment is only required for paid services.</p>
+        <div id="paymentUnavailableNote" class="text-sm text-gray-700" style="display:none;">
+          This service can’t be booked online right now.
+        </div>
+
+        <div id="paymentMethodChoices" class="space-y-2" style="display:none;">
+          <label class="flex items-start gap-2" id="pmStripeWrap">
+            <input type="radio" name="payment_method" value="stripe" checked>
+            <span class="text-sm text-gray-800">Pay with card (Stripe)</span>
+          </label>
+
+          <div id="pmOfflineMethodsWrap" class="space-y-2" style="display:none;">
+            <label class="flex items-start gap-2" id="pmOfflineVenmoWrap" style="display:none;">
+              <input type="radio" name="payment_method" value="venmo">
+              <span class="text-sm text-gray-800">Venmo</span>
+            </label>
+            <label class="flex items-start gap-2" id="pmOfflineZelleWrap" style="display:none;">
+              <input type="radio" name="payment_method" value="zelle">
+              <span class="text-sm text-gray-800">Zelle</span>
+            </label>
+            <label class="flex items-start gap-2" id="pmOfflineCashWrap" style="display:none;">
+              <input type="radio" name="payment_method" value="cash">
+              <span class="text-sm text-gray-800">Cash</span>
+            </label>
+          </div>
+          <div id="offlineInstructions" class="text-xs text-gray-600 ml-6" style="display:none;">
+            {% if offline_instructions %}
+              {{ offline_instructions }}
+            {% else %}
+              Offline payment instructions will be shown after booking.
+            {% endif %}
+          </div>
+        </div>
+
+        <p class="text-xs text-gray-500 mt-2">Payment options appear for paid services.</p>
       </div>
 
       <div class="modal-actions">
@@ -500,6 +512,8 @@
 {% if open_checkout %}
 <script src="https://js.stripe.com/v3/"></script>
 {% endif %}
+
+{{ service_payment_controls|json_script:"service-payment-controls" }}
 
 <script>
 // Global variable to track booked slots during this session
@@ -532,9 +546,14 @@ document.addEventListener("DOMContentLoaded", async function () {
   const svcRefundLine = document.getElementById("svcRefundLine");
   const svcRefundText = document.getElementById("svcRefundText");
   const paymentSection = document.getElementById('paymentSection');
+  const paymentFreeNote = document.getElementById('paymentFreeNote');
+  const paymentUnavailableNote = document.getElementById('paymentUnavailableNote');
+  const paymentMethodChoices = document.getElementById('paymentMethodChoices');
   const offlineInstructions = document.getElementById('offlineInstructions');
 
-  const offlineAllowed = {{ offline_methods_allowed|yesno:"true,false" }};
+  const SERVICE_PAYMENT = JSON.parse(
+    (document.getElementById('service-payment-controls') || {}).textContent || '{}'
+  );
 
   const now = new Date();
   let currentMonth = now.getMonth();
@@ -545,6 +564,9 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function updatePaymentSectionForServiceSlug(slug) {
     if (!paymentSection) return;
+    const bookNowBtn = document.getElementById('bookNowBtn');
+    if (paymentUnavailableNote) paymentUnavailableNote.style.display = 'none';
+    if (bookNowBtn) bookNowBtn.disabled = false;
     let price = 0;
     try {
       const d = SERVICE_MAP[slug];
@@ -553,35 +575,97 @@ document.addEventListener("DOMContentLoaded", async function () {
       price = 0;
     }
 
-    if (price > 0) {
-      paymentSection.style.display = '';
-    } else {
-      paymentSection.style.display = 'none';
-    }
+    // Always show the section so clients understand whether payment is required.
+    paymentSection.style.display = '';
+
+    const isPaid = price > 0;
+    if (paymentFreeNote) paymentFreeNote.style.display = isPaid ? 'none' : '';
+    if (paymentMethodChoices) paymentMethodChoices.style.display = isPaid ? '' : 'none';
 
     // Default behavior: hide offline instructions until selected
     if (offlineInstructions) offlineInstructions.style.display = 'none';
 
-    // If offline isn't allowed, ensure Stripe is selected
-    if (!offlineAllowed) {
-      const stripeRadio = paymentSection.querySelector('input[name="payment_method"][value="stripe"]');
-      if (stripeRadio) stripeRadio.checked = true;
+    if (!isPaid) return;
+
+    // Per-service allowed payment methods
+    const pm = (SERVICE_PAYMENT && SERVICE_PAYMENT[slug]) ? SERVICE_PAYMENT[slug] : null;
+    const stripeAllowed = pm ? !!pm.allow_stripe : true;
+    const offlineMethods = (pm && Array.isArray(pm.offline_methods)) ? pm.offline_methods.map(x => String(x || '').toLowerCase()).filter(Boolean) : [];
+    const offlineAllowed = offlineMethods.length > 0;
+
+    const stripeWrap = document.getElementById('pmStripeWrap');
+    const offlineMethodsWrap = document.getElementById('pmOfflineMethodsWrap');
+    const venmoWrap = document.getElementById('pmOfflineVenmoWrap');
+    const zelleWrap = document.getElementById('pmOfflineZelleWrap');
+    const cashWrap = document.getElementById('pmOfflineCashWrap');
+
+    if (stripeWrap) stripeWrap.style.display = stripeAllowed ? '' : 'none';
+    if (offlineMethodsWrap) offlineMethodsWrap.style.display = offlineAllowed ? '' : 'none';
+    if (venmoWrap) venmoWrap.style.display = (offlineAllowed && offlineMethods.includes('venmo')) ? '' : 'none';
+    if (zelleWrap) zelleWrap.style.display = (offlineAllowed && offlineMethods.includes('zelle')) ? '' : 'none';
+    if (cashWrap) cashWrap.style.display = (offlineAllowed && offlineMethods.includes('cash')) ? '' : 'none';
+
+    // Choose a valid default selection
+    const stripeRadio = paymentSection.querySelector('input[name="payment_method"][value="stripe"]');
+    const venmoRadio = paymentSection.querySelector('input[name="payment_method"][value="venmo"]');
+    const zelleRadio = paymentSection.querySelector('input[name="payment_method"][value="zelle"]');
+    const cashRadio = paymentSection.querySelector('input[name="payment_method"][value="cash"]');
+    const selected = paymentSection.querySelector('input[name="payment_method"]:checked');
+
+    const offlineRadios = [venmoRadio, zelleRadio, cashRadio].filter(Boolean);
+    const allowedOfflineValues = new Set(offlineMethods);
+    const firstAllowedOfflineRadio = offlineRadios.find(r => allowedOfflineValues.has(String(r.value).toLowerCase())) || null;
+
+    function isOfflineValue(v){
+      v = String(v || '').toLowerCase();
+      return v === 'venmo' || v === 'zelle' || v === 'cash';
+    }
+
+    // Enforce availability at the input level too (prevents submitting a hidden/invalid option).
+    if (stripeRadio) {
+      stripeRadio.disabled = !stripeAllowed;
+      if (!stripeAllowed) stripeRadio.checked = false;
+    }
+    for (const r of offlineRadios){
+      const v = String(r.value || '').toLowerCase();
+      const enabled = offlineAllowed && allowedOfflineValues.has(v);
+      r.disabled = !enabled;
+      if (!enabled) r.checked = false;
+    }
+
+    // If neither payment method is allowed for a paid service, block booking.
+    if (!stripeAllowed && !offlineAllowed) {
+      if (paymentMethodChoices) paymentMethodChoices.style.display = 'none';
+      if (offlineInstructions) offlineInstructions.style.display = 'none';
+      if (paymentUnavailableNote) paymentUnavailableNote.style.display = '';
+      if (bookNowBtn) bookNowBtn.disabled = true;
       return;
     }
 
-    // Wire up toggling instructions
-    const selected = paymentSection.querySelector('input[name="payment_method"]:checked');
+    if (selected && selected.value === 'stripe' && !stripeAllowed && offlineAllowed) {
+      if (firstAllowedOfflineRadio) firstAllowedOfflineRadio.checked = true;
+    } else if (selected && isOfflineValue(selected.value) && (!offlineAllowed || !allowedOfflineValues.has(String(selected.value).toLowerCase())) && stripeAllowed) {
+      if (stripeRadio) stripeRadio.checked = true;
+    } else {
+      const selectedNow = paymentSection.querySelector('input[name="payment_method"]:checked');
+      if (!selectedNow) {
+        if (stripeAllowed && stripeRadio) stripeRadio.checked = true;
+        else if (offlineAllowed && firstAllowedOfflineRadio) firstAllowedOfflineRadio.checked = true;
+      }
+    }
+
+    // Show instructions only when an offline method is selected AND offline is available
+    const selected2 = paymentSection.querySelector('input[name="payment_method"]:checked');
     if (offlineInstructions) {
-      offlineInstructions.style.display = (selected && selected.value === 'offline') ? '' : 'none';
+      offlineInstructions.style.display = (offlineAllowed && selected2 && isOfflineValue(selected2.value) && allowedOfflineValues.has(String(selected2.value).toLowerCase())) ? '' : 'none';
     }
   }
 
   if (paymentSection) {
     paymentSection.addEventListener('change', function (e) {
       try {
-        if (!offlineInstructions) return;
-        const selected = paymentSection.querySelector('input[name="payment_method"]:checked');
-        offlineInstructions.style.display = (selected && selected.value === 'offline') ? '' : 'none';
+        const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '{{ service.slug }}');
+        updatePaymentSectionForServiceSlug(slug);
       } catch (err) {}
     });
   }
@@ -852,6 +936,14 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   // Fetch availability from server and show time circles for selected day
   async function openTimeModal(year, month, day, dateKey) {
+    // Default the booking modal to the service currently selected on the calendar.
+    try {
+      const selectedSlug = window.selectedServiceSlug || '{{ service.slug }}';
+      if (serviceSelect && selectedSlug && serviceSelect.value !== selectedSlug) {
+        serviceSelect.value = selectedSlug;
+      }
+    } catch (e) {}
+
     const date = new Date(year, month, day);
     selectedDateLabel.innerText = date.toDateString();
     timeSlots.innerHTML = "";

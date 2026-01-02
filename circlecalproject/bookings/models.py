@@ -59,6 +59,15 @@ class Service(models.Model):
     refund_cutoff_hours = models.PositiveIntegerField(default=24, help_text="Hours before start time within which refunds are NOT permitted.")
     refund_policy_text = models.TextField(blank=True, help_text="Optional custom refund policy text shown to clients.")
 
+    # Payment method controls (per service)
+    # - allow_stripe_payments controls whether clients can pay by card via Stripe for this service
+    # - allowed_offline_payment_methods controls which offline methods are accepted for this service
+    #   * None => inherit organization settings (default, preserves legacy behavior)
+    #   * []   => offline payments disabled for this service
+    #   * [..] => explicit allowed subset (e.g. ["cash","venmo"])
+    allow_stripe_payments = models.BooleanField(default=True)
+    allowed_offline_payment_methods = models.JSONField(null=True, blank=True, default=None)
+
     def __str__(self):
         try:
             org_name = self.organization.name
@@ -177,6 +186,9 @@ class Booking(models.Model):
     # - 'offline' for instructions-based methods (cash/Venmo/Zelle)
     # - 'stripe' when Stripe Checkout is used
     payment_method = models.CharField(max_length=20, blank=True, default='none', db_index=True)
+    # For offline payments only, the specific method the client selected:
+    # 'cash' | 'venmo' | 'zelle' | ''
+    offline_payment_method = models.CharField(max_length=20, blank=True, default='', db_index=True)
     # 'not_required' | 'offline_due' | 'pending' | 'paid'
     payment_status = models.CharField(max_length=20, blank=True, default='not_required', db_index=True)
     stripe_checkout_session_id = models.CharField(max_length=255, blank=True, default='', db_index=True)

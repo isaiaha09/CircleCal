@@ -1167,7 +1167,8 @@ if (exportAuditBtn) {
             const ts = Date.now();
             // record timestamps for suppression decisions
             if (aId) {
-              try{ _seenAuditIds.delete(String(aId)); }catch(e){}
+              // Keep deleted audit ids in the seen set so polling cannot re-add them.
+              try{ _seenAuditIds.add(String(aId)); }catch(e){}
               try{ _recentlyDeletedAuditTimestamps[aId] = ts; }catch(e){}
               setTimeout(() => { try{ delete _recentlyDeletedAuditTimestamps[aId]; }catch(e){} }, 30000);
             }
@@ -1190,24 +1191,38 @@ if (exportAuditBtn) {
       // Build numeric ids to send to server. Prefer the checkbox value when
       // it's numeric (covers server-rendered rows), otherwise fall back to
       // dataset.auditId (covers some cases where value may be 'tmp-...').
-      let ids = removed.map(r => {
-        const fromCheckbox = Number(r.val);
-        if (Number.isFinite(fromCheckbox)) return fromCheckbox;
-        const fromDataset = (r.auditId !== null && r.auditId !== undefined) ? Number(r.auditId) : null;
-        return Number.isFinite(fromDataset) ? fromDataset : null;
-      }).filter(n => n !== null);
+      function _toIntId(maybe){
+        try{
+          const s = String(maybe == null ? '' : maybe).trim();
+          if (!s) return null;
+          if (!/^\d+$/.test(s)) return null;
+          const n = Number(s);
+          return Number.isFinite(n) ? n : null;
+        }catch(e){ return null; }
+      }
 
-      // If we couldn't derive any numeric ids locally (e.g. optimistic rows
-      // used tmp-* values), query the server audit list and map rows by
-      // booking id or public_ref to find canonical audit ids to delete.
-      if (!ids || ids.length === 0) {
+      let ids = [];
+      const needsMapping = [];
+      for (const r of removed){
+        const fromCheckbox = _toIntId(r.val);
+        const fromDataset = _toIntId(r.auditId);
+        const resolved = (fromCheckbox != null) ? fromCheckbox : fromDataset;
+        if (resolved != null) ids.push(resolved);
+        else needsMapping.push(r);
+      }
+      ids = Array.from(new Set(ids));
+
+      // If we couldn't derive numeric ids for all selected rows locally
+      // (e.g. optimistic rows used tmp-* values), query the server audit list
+      // and map rows by booking id or public_ref to find canonical ids.
+      if (needsMapping.length > 0 || !ids || ids.length === 0) {
         try{
           const listResp = await fetch(`/bus/${orgSlug}/bookings/audit/?since=${encodeURIComponent('1970-01-01T00:00:00Z')}`);
           if (listResp && listResp.ok){
             const j = await listResp.json();
             const serverItems = Array.isArray(j.items) ? j.items : (j && j.items) || [];
             const mapped = [];
-            for (const r of removed){
+            for (const r of (needsMapping.length ? needsMapping : removed)){
               try{
                 const tr = r.tr;
                 if (!tr) continue;
@@ -1225,7 +1240,7 @@ if (exportAuditBtn) {
               }catch(e){}
             }
             if (mapped.length) {
-              ids = Array.from(new Set(mapped));
+              ids = Array.from(new Set([...(ids || []), ...mapped]));
             }
           }
         }catch(e){ console.error('Error mapping audit ids from server list', e); }
