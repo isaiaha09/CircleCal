@@ -3891,6 +3891,14 @@ def signup(request):
                 # As a last resort, try to login without specifying backend
                 # (this will raise the same ValueError if Django requires it).
                 login(request, user)
+
+            # One-time onboarding nudge: when the user reaches the profile page
+            # after signup, warn them that they'll be directed to Stripe Connect
+            # before continuing business setup.
+            try:
+                request.session['cc_show_stripe_connect_modal'] = True
+            except Exception:
+                pass
             return redirect("calendar_app:choose_business")
     else:
         form = SignupForm()

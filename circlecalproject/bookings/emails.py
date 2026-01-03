@@ -1,5 +1,6 @@
 import logging
 from urllib.parse import quote
+import re
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
 from django.conf import settings
@@ -7,7 +8,7 @@ from django.utils import timezone
 from zoneinfo import ZoneInfo
 from django.core.signing import TimestampSigner
 from django.urls import reverse
-from bookings.models import build_offline_payment_instructions
+from bookings.models import build_offline_payment_instructions, filter_offline_payment_instructions_for_method
 
 
 def _extract_offline_line_for_method(instructions: str, method: str) -> str:
@@ -44,11 +45,30 @@ def _build_offline_qr_url(instructions: str, method: str) -> str:
         if m not in {'venmo', 'zelle'}:
             return ''
         method_line = _extract_offline_line_for_method(instructions, m)
-        payload = ''
-        if method_line:
-            payload = f"{m.upper()}: {method_line}"
-        else:
-            payload = (instructions or '').strip()
+        # Never fall back to full instructions for QR; it may include other methods.
+        if not method_line:
+            return ''
+
+        def _zelle_payload(value: str) -> str:
+            raw = (value or '').strip()
+            if not raw:
+                return ''
+            # Prefer email -> opens mail client reliably.
+            m_email = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", raw, re.I)
+            if m_email:
+                return f"mailto:{m_email.group(0)}"
+
+            # Otherwise treat as phone -> opens dialer.
+            digits = re.sub(r"\D", "", raw)
+            if not digits:
+                return raw
+            if len(digits) == 10:
+                digits = "1" + digits
+            if len(digits) == 11 and digits.startswith("1"):
+                return f"tel:+{digits}"
+            return f"tel:+{digits}"
+
+        payload = _zelle_payload(method_line) if m == 'zelle' else f"{m.upper()}: {method_line}"
         if not payload:
             return ''
         return 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + quote(payload)
@@ -92,8 +112,9 @@ def send_booking_confirmation(booking):
         if getattr(booking, 'payment_method', '') == 'offline':
             org = getattr(booking, 'organization', None)
             org_settings = getattr(org, 'settings', None) if org else None
-            offline_instructions = build_offline_payment_instructions(org_settings) if org_settings else ''
             offline_method = (getattr(booking, 'offline_payment_method', '') or '').strip().lower()
+            full = build_offline_payment_instructions(org_settings) if org_settings else ''
+            offline_instructions = filter_offline_payment_instructions_for_method(full, offline_method) if offline_method else full
             context.update({
                 'offline_instructions': offline_instructions,
                 'offline_method': offline_method,

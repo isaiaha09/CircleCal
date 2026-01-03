@@ -5,7 +5,19 @@
 {% block title %}Booking Confirmed – {{ org.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-xl mx-auto bg-white rounded-lg shadow p-6 mt-8">
+<style>
+  .booking-success-card {
+    background: #ffffff;
+    border-radius: 18px;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    box-shadow:
+      0 14px 34px rgba(17, 24, 39, 0.10),
+      0 2px 10px rgba(17, 24, 39, 0.06);
+    transform: translateZ(0);
+  }
+</style>
+
+<div class="booking-success-card max-w-xl mx-auto p-6 mt-8">
   <h1 class="text-2xl font-semibold text-green-700 mb-2">Booking Confirmed</h1>
   <p class="text-gray-700 mb-4">Thank you, {{ booking.client_name }}. Your booking has been confirmed.</p>
 
@@ -22,9 +34,15 @@
       <div>
         <strong>Payment method:</strong>
         {% if booking.payment_method == 'stripe' %}
-          Card (Stripe)
+          Card
         {% elif booking.payment_method == 'offline' %}
-          Offline
+          {% if booking.offline_payment_method %}
+            {% with m=booking.offline_payment_method|lower %}
+              {% if m == 'venmo' %}Venmo{% elif m == 'zelle' %}Zelle{% elif m == 'cash' %}Cash{% else %}Offline{% endif %}
+            {% endwith %}
+          {% else %}
+            Offline
+          {% endif %}
         {% else %}
           {{ booking.payment_method }}
         {% endif %}

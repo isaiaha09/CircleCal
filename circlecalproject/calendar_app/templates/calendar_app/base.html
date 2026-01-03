@@ -136,6 +136,7 @@
 
 <body class="bg-blue-50  text-gray-900">
 
+    {% if request.GET.embed != '1' %}
     <header class="bg-white border-b shadow-sm">
         <div class="max-w-7xl mx-auto px-4 py-4">
             <div class="flex items-center justify-between">
@@ -227,6 +228,7 @@
             </div>
         </div>
     </header>
+    {% endif %}
 
     <!-- Content -->
     <main class="{% block main_class %}max-w-6xl mx-auto px-4 py-6 md:p-6{% endblock %}">

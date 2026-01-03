@@ -1569,6 +1569,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   const openCheckout = {{ open_checkout|default:False|yesno:"true,false" }};
   const stripePublishableKey = "{{ stripe_publishable_key|default:''|escapejs }}";
   const stripeClientSecret = "{{ stripe_client_secret|default:''|escapejs }}";
+  const stripeConnectedAccountId = "{{ stripe_connected_account_id|default:''|escapejs }}";
   if (openCheckout && stripePublishableKey && stripeClientSecret && timeModal && timeModalViewCheckout) {
     try {
       timeModalViewSlots.style.display = 'none';
@@ -1580,7 +1581,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     (async function () {
       try {
         if (typeof Stripe !== 'function') throw new Error('Stripe.js not loaded');
-        const stripe = Stripe(stripePublishableKey);
+        const stripe = stripeConnectedAccountId ? Stripe(stripePublishableKey, { stripeAccount: stripeConnectedAccountId }) : Stripe(stripePublishableKey);
         const checkout = await stripe.initEmbeddedCheckout({ clientSecret: stripeClientSecret });
         checkout.mount('#embedded-checkout');
       } catch (err) {

@@ -326,6 +326,67 @@ def build_offline_payment_instructions(org_settings: 'OrgSettings') -> str:
         return ''
 
 
+def filter_offline_payment_instructions_for_method(instructions: str, method: str) -> str:
+    """Filter offline instructions to show only the selected method.
+
+    - Keeps non-method (general) lines
+    - Keeps only the selected method line among Venmo/Zelle/Cash
+    - For cash, shows an in-person payment note and removes other method lines
+    """
+    try:
+        m = (method or '').strip().lower()
+        full = (instructions or '').strip()
+        if not m:
+            return ''
+
+        cash_note = (
+            'Pay in-person. If unable to make appointment, please try to cancel '
+            'prior to the time established in the Refund Policy'
+        )
+
+        def _is_method_line(line: str) -> bool:
+            low = (line or '').strip().lower()
+            return (
+                low.startswith('venmo:') or low.startswith('venmo-') or
+                low.startswith('zelle:') or low.startswith('zelle-') or
+                low.startswith('cash:') or low.startswith('cash-')
+            )
+
+        out: list[str] = []
+
+        # Cash is always in-person; never include Venmo/Zelle details.
+        if m == 'cash':
+            out.append(cash_note)
+            if full:
+                for raw in full.splitlines():
+                    ln = (raw or '').strip()
+                    if not ln:
+                        continue
+                    if _is_method_line(ln):
+                        continue
+                    out.append(ln)
+            return "\n".join(out).strip()
+
+        # Venmo/Zelle: keep matching method line; drop other method lines.
+        if full:
+            for raw in full.splitlines():
+                ln = (raw or '').strip()
+                if not ln:
+                    continue
+                if _is_method_line(ln):
+                    low = ln.lower()
+                    if m == 'venmo' and (low.startswith('venmo:') or low.startswith('venmo-')):
+                        out.append(ln)
+                    elif m == 'zelle' and (low.startswith('zelle:') or low.startswith('zelle-')):
+                        out.append(ln)
+                    continue
+                out.append(ln)
+
+        return "\n".join(out).strip()
+    except Exception:
+        return ''
+
+
 class WeeklyAvailability(models.Model):
     """Defines one available time window for an organization on a given weekday.
 

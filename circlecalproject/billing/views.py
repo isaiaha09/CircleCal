@@ -7,6 +7,7 @@ from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbid
 from django.shortcuts import redirect, get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.urls import reverse
 
 from accounts.models import Business as Organization
 from billing.models import Plan, Subscription, PaymentMethod
@@ -18,8 +19,115 @@ from django.utils import timezone as dj_timezone
 from django.db.models import Q
 import logging
 import traceback
+from django.contrib import messages
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def _sync_connect_status(org):
+    """Fetch Stripe connect account flags and persist them locally."""
+    try:
+        acct_id = getattr(org, 'stripe_connect_account_id', None)
+        if not acct_id:
+            return False
+        acct = stripe.Account.retrieve(acct_id)
+        org.stripe_connect_details_submitted = bool(acct.get('details_submitted'))
+        org.stripe_connect_charges_enabled = bool(acct.get('charges_enabled'))
+        org.stripe_connect_payouts_enabled = bool(acct.get('payouts_enabled'))
+        org.save(update_fields=[
+            'stripe_connect_details_submitted',
+            'stripe_connect_charges_enabled',
+            'stripe_connect_payouts_enabled',
+        ])
+        return True
+    except Exception:
+        return False
+
+
+@login_required
+@require_http_methods(["GET"])
+def stripe_connect_start(request, org_slug):
+    """Start/continue Stripe Connect Express onboarding for this business."""
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    if not getattr(settings, 'STRIPE_SECRET_KEY', None):
+        return render(request, 'billing/stripe_connect.html', {
+            'org': org,
+            'connect_error': 'Stripe is not configured on this server. Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY.',
+        }, status=200)
+
+    # If already connected, send them back.
+    if getattr(org, 'stripe_connect_account_id', None) and getattr(org, 'stripe_connect_charges_enabled', False):
+        messages.success(request, 'Stripe is already connected.')
+        return redirect('calendar_app:dashboard', org_slug=org.slug)
+
+    try:
+        acct_id = getattr(org, 'stripe_connect_account_id', None)
+        if not acct_id:
+            acct = stripe.Account.create(
+                type='express',
+                email=request.user.email,
+                metadata={'organization_id': str(org.id), 'org_slug': str(org.slug)},
+                capabilities={
+                    'card_payments': {'requested': True},
+                    'transfers': {'requested': True},
+                },
+            )
+            org.stripe_connect_account_id = acct.id
+            try:
+                org.save(update_fields=['stripe_connect_account_id'])
+            except Exception:
+                org.save()
+            acct_id = acct.id
+
+        refresh_url = request.build_absolute_uri(
+            reverse('billing:stripe_connect_refresh', kwargs={'org_slug': org.slug})
+        )
+        return_url = request.build_absolute_uri(
+            reverse('billing:stripe_connect_return', kwargs={'org_slug': org.slug})
+        )
+
+        link = stripe.AccountLink.create(
+            account=acct_id,
+            refresh_url=refresh_url,
+            return_url=return_url,
+            type='account_onboarding',
+        )
+        return redirect(link.url)
+    except Exception as e:
+        # Render a friendly page with next steps instead of a raw 400.
+        return render(request, 'billing/stripe_connect.html', {
+            'org': org,
+            'connect_error': str(e),
+        }, status=200)
+
+
+@login_required
+@require_http_methods(["GET"])
+def stripe_connect_refresh(request, org_slug):
+    """Stripe sends users here if they need to re-start onboarding."""
+    return redirect('billing:stripe_connect_start', org_slug=org_slug)
+
+
+@login_required
+@require_http_methods(["GET"])
+def stripe_connect_return(request, org_slug):
+    """Stripe returns here after onboarding; refresh status and send user back."""
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    ok = _sync_connect_status(org)
+    if ok and getattr(org, 'stripe_connect_charges_enabled', False):
+        messages.success(request, 'Stripe is connected and ready for payments.')
+        return redirect('calendar_app:dashboard', org_slug=org.slug)
+
+    messages.warning(request, 'Stripe connection started, but is not fully enabled yet. Please finish onboarding in Stripe.')
+    return redirect('billing:stripe_connect_start', org_slug=org.slug)
 
 
 def stripe_invoice_upcoming(**kwargs):

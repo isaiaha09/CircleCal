@@ -7,6 +7,91 @@
     <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm">Save Changes</button>
   </div>
 
+  {% if stripe_connect_modal_enabled and stripe_connect_start_url %}
+  <div id="stripe-connect-leave-modal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/50"></div>
+    <div class="relative min-h-full flex items-center justify-center p-4">
+      <div class="w-full max-w-lg bg-white rounded-xl shadow-lg border border-blue-100">
+        <div class="px-6 py-5 border-b border-blue-50">
+          <h2 class="text-lg font-bold text-blue-800">Connect Stripe to accept card payments</h2>
+        </div>
+        <div class="px-6 py-5 text-sm text-gray-700 space-y-3">
+          <p>
+            Before you set up the rest of your business in CircleCal, you’ll be directed to Stripe to
+            enter your business info so you can accept card payments.
+          </p>
+          <p class="text-xs text-gray-500">
+            You can come back to CircleCal after completing Stripe’s setup.
+          </p>
+        </div>
+        <div class="px-6 py-4 border-t border-blue-50 flex items-center justify-end gap-3">
+          <button type="button" id="stripe-connect-stay" class="btn-ghost px-4 py-2">Stay on Profile</button>
+          <button type="button" id="stripe-connect-go" class="btn-primary px-4 py-2">Continue to Stripe</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var modal = document.getElementById('stripe-connect-leave-modal');
+      var stayBtn = document.getElementById('stripe-connect-stay');
+      var goBtn = document.getElementById('stripe-connect-go');
+      if (!modal || !stayBtn || !goBtn) return;
+
+      function openModal() {
+        modal.classList.remove('hidden');
+      }
+      function closeModal() {
+        modal.classList.add('hidden');
+      }
+
+      // Intercept navigation away from this page (links). Form submissions (Save) are unaffected.
+      document.addEventListener('click', function (e) {
+        var target = e.target;
+        if (!target) return;
+        var a = target.closest ? target.closest('a') : null;
+        if (!a) return;
+        if (a.closest && a.closest('#stripe-connect-leave-modal')) return;
+        var href = a.getAttribute('href') || '';
+        if (!href) return;
+        if (href.charAt(0) === '#') return;
+        if (href.toLowerCase().indexOf('javascript:') === 0) return;
+
+        // Allow logout without interception.
+        if (href.indexOf('/accounts/logout') === 0 || href.indexOf('{% url "accounts:logout" %}') === 0) return;
+
+        // Block leaving and show modal.
+        e.preventDefault();
+        openModal();
+      }, true);
+
+      stayBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        closeModal();
+      });
+
+      goBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        window.location.href = "{{ stripe_connect_start_url }}";
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          closeModal();
+        }
+      });
+
+      {% if stripe_connect_modal_auto_open %}
+      // Auto-open after login when user isn't connected yet.
+      setTimeout(function () {
+        openModal();
+      }, 0);
+      {% endif %}
+    })();
+  </script>
+  {% endif %}
+
   {# Remove local messages block to avoid duplicates; base.html already renders messages #}
 
   <form id="profile-form" method="post" enctype="multipart/form-data" class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg">

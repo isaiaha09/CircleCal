@@ -1,0 +1,51 @@
+{% extends "calendar_app/base.html" %}
+
+{% block title %}Connect Stripe – {{ org.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white rounded-lg shadow p-6 mt-8">
+  <h1 class="text-2xl font-semibold text-gray-900">Connect Stripe</h1>
+  <p class="text-gray-700 mt-2">
+    To accept card payments from clients, {{ org.name }} needs a connected Stripe account.
+  </p>
+
+  {% if connect_error %}
+    <div class="mt-4 px-4 py-3 rounded bg-red-50 text-red-800 border border-red-100">
+      <div class="font-semibold">We couldn’t start Stripe onboarding.</div>
+      <div class="mt-1 text-sm" style="white-space:pre-line;">{{ connect_error }}</div>
+    </div>
+
+    <div class="mt-5 text-sm text-gray-700 space-y-2">
+      <div class="font-semibold text-gray-900">Most common fix</div>
+      <div>
+        In your Stripe Dashboard, enable <strong>Connect</strong> for your platform account.
+        Stripe requires this before you can create connected accounts.
+      </div>
+      <div class="mt-3">
+        <div class="font-semibold text-gray-900">Open Stripe Connect</div>
+        <div class="mt-1">
+          <a class="text-blue-600 hover:text-blue-700 underline" href="https://dashboard.stripe.com/test/connect/overview" target="_blank" rel="noopener noreferrer">Open Stripe Connect (Test mode)</a>
+        </div>
+        <div class="mt-1">
+          <a class="text-blue-600 hover:text-blue-700 underline" href="https://dashboard.stripe.com/connect/overview" target="_blank" rel="noopener noreferrer">Open Stripe Connect (Live mode)</a>
+        </div>
+        <div class="mt-2">
+          <a class="text-blue-600 hover:text-blue-700 underline" href="https://stripe.com/docs/connect" target="_blank" rel="noopener noreferrer">Stripe Connect documentation</a>
+        </div>
+      </div>
+      <div>
+        After enabling Connect, come back here and reload this page.
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="mt-6 flex gap-3">
+    <a href="{% url 'billing:stripe_connect_start' org.slug %}" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">
+      Try again
+    </a>
+    <a href="{% url 'billing:manage_billing' org.slug %}" class="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">
+      Billing
+    </a>
+  </div>
+</div>
+{% endblock %}

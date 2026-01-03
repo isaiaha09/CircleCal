@@ -83,12 +83,61 @@ class OrganizationMiddleware:
                     f"/billing/org/{org.slug}/embedded/",
                     f"/billing/api/bus/{org.slug}/embedded/",
                     "/accounts/login/",
+                    "/accounts/login",
                     "/accounts/signup/",
+                    "/accounts/signup",
                 ]
                 path = request.path
                 if not any(path.startswith(ap) for ap in allow_paths):
                     from django.urls import reverse
                     return redirect(reverse("calendar_app:pricing_page", kwargs={"org_slug": org.slug}))
+
+            # 7. Stripe Connect enforcement (for client card payments): owners/admins must connect.
+            try:
+                # Only enforce for privileged roles.
+                needs_connect = user_has_role(request.user, org, ["owner", "admin"])
+            except Exception:
+                needs_connect = False
+
+            if needs_connect:
+                if not getattr(settings, 'STRIPE_SECRET_KEY', None):
+                    return response
+                connected = bool(getattr(org, 'stripe_connect_charges_enabled', False)) and bool(getattr(org, 'stripe_connect_account_id', None))
+                if not connected:
+                    path = request.path or ''
+                    # Normalize trailing slash so /accounts/profile and /accounts/profile/ behave the same.
+                    path_norm = path if path.endswith('/') else (path + '/')
+                    allow_paths = [
+                        f"/billing/bus/{org.slug}/stripe/connect/",
+                        "/billing/",  # allow billing routes needed for onboarding
+                        "/accounts/login/",
+                        "/accounts/login",
+                        "/accounts/logout/",
+                        "/accounts/logout",
+                        "/accounts/signup/",
+                        "/accounts/signup",
+                        "/accounts/profile/",
+                        "/accounts/profile",
+                        "/static/",
+                        settings.MEDIA_URL,
+                    ]
+
+                    # Allow public /bus/<slug>/... routes only for GET requests; still enforce on internal POSTs.
+                    is_public_bus_root = (path == f"/bus/{org.slug}/")
+                    is_public_bus_service = path.startswith(f"/bus/{org.slug}/service/")
+                    if (is_public_bus_root or is_public_bus_service) and request.method == 'GET':
+                        pass
+                    elif any(path.startswith(ap) for ap in allow_paths) or any(path_norm.startswith(ap) for ap in allow_paths):
+                        pass
+                    else:
+                        # Instead of sending users straight to Stripe (server-side redirect),
+                        # route them to Profile and auto-open a modal explaining why.
+                        try:
+                            request.session['cc_auto_open_stripe_connect_modal'] = True
+                        except Exception:
+                            pass
+                        from django.urls import reverse
+                        return redirect(reverse('accounts:profile'))
 
         return response
 

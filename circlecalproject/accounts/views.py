@@ -106,6 +106,24 @@ def profile_view(request):
 		except Subscription.DoesNotExist:
 			sub = None
 
+	stripe_connect_start_url = None
+	stripe_connect_modal_enabled = False
+	stripe_connect_modal_auto_open = False
+	try:
+		try:
+			stripe_connect_modal_auto_open = bool(request.session.pop('cc_auto_open_stripe_connect_modal', False))
+		except Exception:
+			stripe_connect_modal_auto_open = False
+
+		stripe_configured = bool(getattr(settings, 'STRIPE_SECRET_KEY', None))
+		needs_connect = bool(org is not None) and bool(is_owner_for_org) and stripe_configured and not bool(getattr(org, 'stripe_connect_charges_enabled', False))
+		if needs_connect:
+			stripe_connect_modal_enabled = True
+			stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org.slug})
+	except Exception:
+		stripe_connect_modal_enabled = False
+		stripe_connect_start_url = None
+
 	# Team/org info
 	memberships = Membership.objects.filter(user=user).select_related('organization')
 	pending_invites = Invite.objects.filter(email=user.email, accepted=False).select_related('organization') if user.email else []
@@ -129,6 +147,9 @@ def profile_view(request):
 		"is_owner_for_org": is_owner_for_org,
 		"org_offline_venmo": org_offline_venmo,
 		"org_offline_zelle": org_offline_zelle,
+		"stripe_connect_modal_enabled": stripe_connect_modal_enabled,
+		"stripe_connect_start_url": stripe_connect_start_url,
+		"stripe_connect_modal_auto_open": stripe_connect_modal_auto_open,
 	})
 
 	if incomplete:
@@ -153,6 +174,27 @@ class CustomLoginView(TwoFactorLoginView):
 	def form_valid(self, form):
 		# Default response from TwoFactorLoginView
 		response = super().form_valid(form)
+
+		# If an owner/admin logs in but Stripe Connect isn't completed yet for their
+		# current org, route them to Profile and auto-open the Stripe modal. This
+		# ensures they see the message before being sent to Stripe.
+		try:
+			user = getattr(self.request, 'user', None)
+			if user and user.is_authenticated and getattr(settings, 'STRIPE_SECRET_KEY', None):
+				mem = Membership.objects.filter(user=user, is_active=True).select_related('organization').first()
+				org = getattr(mem, 'organization', None) if mem else None
+				if org is not None:
+					is_owner_admin = bool(getattr(org, 'owner_id', None) == getattr(user, 'id', None)) or bool(getattr(mem, 'role', None) in ['owner', 'admin'])
+					connected = bool(getattr(org, 'stripe_connect_charges_enabled', False)) and bool(getattr(org, 'stripe_connect_account_id', None))
+					if is_owner_admin and not connected:
+						try:
+							self.request.session['cc_auto_open_stripe_connect_modal'] = True
+						except Exception:
+							pass
+						return redirect('accounts:profile')
+		except Exception:
+			pass
+
 		# If the session contains a pending invite token, attach the user to
 		# the invited organization after successful authentication.
 		try:
@@ -293,11 +335,35 @@ def delete_account_view(request):
 		messages.error(request, "Password incorrect. Account not deleted.")
 		return redirect('accounts:profile')
 
-	# Log the user out first to drop session
-	# Delete businesses owned by the user (cascades to related bookings, billing, invites, etc.)
+	# Disconnect Stripe + delete businesses owned by the user (cascades to related bookings, billing, invites, etc.)
 	try:
 		from .models import Business
-		owned = Business.objects.filter(owner=u)
+		from .emails import send_account_deleted_email
+		owned = list(Business.objects.filter(owner=u))
+		business_names = [getattr(b, 'name', '') for b in owned if getattr(b, 'name', '')]
+		# Disconnect Stripe in CircleCal (does not delete Stripe account)
+		for b in owned:
+			try:
+				if getattr(b, 'stripe_connect_account_id', None):
+					b.stripe_connect_account_id = None
+					b.stripe_connect_details_submitted = False
+					b.stripe_connect_charges_enabled = False
+					b.stripe_connect_payouts_enabled = False
+					b.save(update_fields=[
+						'stripe_connect_account_id',
+						'stripe_connect_details_submitted',
+						'stripe_connect_charges_enabled',
+						'stripe_connect_payouts_enabled',
+					])
+			except Exception:
+				pass
+
+		# Send email confirmation before deleting user
+		try:
+			send_account_deleted_email(u, business_names=business_names)
+		except Exception:
+			pass
+
 		for b in owned:
 			try:
 				b.delete()
@@ -331,10 +397,40 @@ def deactivate_account_view(request):
 
 	# Soft-deactivate: set is_active to False and logout
 	try:
+		# Disconnect Stripe in CircleCal for businesses owned by this user
+		try:
+			from .models import Business
+			from .emails import send_account_deactivated_email
+			owned = list(Business.objects.filter(owner=u))
+			business_names = [getattr(b, 'name', '') for b in owned if getattr(b, 'name', '')]
+			for b in owned:
+				try:
+					if getattr(b, 'stripe_connect_account_id', None):
+						b.stripe_connect_account_id = None
+						b.stripe_connect_details_submitted = False
+						b.stripe_connect_charges_enabled = False
+						b.stripe_connect_payouts_enabled = False
+						b.save(update_fields=[
+							'stripe_connect_account_id',
+							'stripe_connect_details_submitted',
+							'stripe_connect_charges_enabled',
+							'stripe_connect_payouts_enabled',
+						])
+				except Exception:
+					pass
+
+			# Send email confirmation
+			try:
+				send_account_deactivated_email(u, business_names=business_names)
+			except Exception:
+				pass
+		except Exception:
+			pass
+
 		u.is_active = False
 		u.save()
 		logout(request)
-		messages.success(request, "Your account has been deactivated. To reactivate it, go to the reactivate page to reactivate your account.")
+		messages.success(request, "Your account has been deactivated. If you had connected Stripe in CircleCal, it has been disconnected here (your Stripe account itself is not deleted). To permanently delete your Stripe account, do that directly in Stripe.")
 	except Exception:
 		messages.error(request, "We couldn't deactivate your account right now. Please try again.")
 	return redirect('calendar_app:home')

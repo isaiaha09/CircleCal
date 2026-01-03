@@ -1384,6 +1384,9 @@ def _build_public_service_page_context(
 ):
     """Build template context for the public service booking page."""
 
+    is_embed = (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+    org_stripe_connected = bool(getattr(org, 'stripe_connect_account_id', None)) and bool(getattr(org, 'stripe_connect_charges_enabled', False))
+
     # GET - add trial context for banner
     subscription = get_subscription(org)
     trialing_active = False
@@ -1472,6 +1475,8 @@ def _build_public_service_page_context(
         "org": org,
         "services": services,
         "service": service,
+        "is_embed": is_embed,
+        "org_stripe_connected": org_stripe_connected,
         "trialing_active": trialing_active,
         "trial_end_date": trial_end_date,
         "show_with_line": show_with_line,
@@ -1498,6 +1503,8 @@ def public_service_page(request, org_slug, service_slug):
     POST -> create a Booking for the selected time
     """
     org = get_object_or_404(Organization, slug=org_slug)
+    is_embed = (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+    org_stripe_connected = bool(getattr(org, 'stripe_connect_account_id', None)) and bool(getattr(org, 'stripe_connect_charges_enabled', False))
     services = Service.objects.filter(organization=org, is_active=True).order_by("name")
     # Inactive services should not be bookable or selectable on the public page.
     service = Service.objects.filter(slug=service_slug, organization=org, is_active=True).first()
@@ -1616,7 +1623,13 @@ def public_service_page(request, org_slug, service_slug):
                 offline_instructions=offline_instructions,
             )
             ctx["error"] = "Sorry, that time was just booked. Please choose another slot."
-            return render(request, "public/public_service_page.html", ctx)
+            resp = render(request, "public/public_service_page.html", ctx)
+            if is_embed:
+                try:
+                    resp.xframe_options_exempt = True
+                except Exception:
+                    pass
+            return resp
 
         # Determine if this POST is part of a reschedule flow by validating
         # the provided `reschedule_source`/`reschedule_token` before creating
@@ -1655,6 +1668,8 @@ def public_service_page(request, org_slug, service_slug):
             stripe_allowed_for_service = bool(getattr(service, 'allow_stripe_payments', True))
         except Exception:
             stripe_allowed_for_service = True
+        # Stripe card payments require a connected Stripe account for this business.
+        stripe_allowed_for_service = bool(stripe_allowed_for_service and org_stripe_connected)
         effective_offline_methods = _effective_offline_methods_for_service(service)
         offline_allowed_for_service = bool(offline_methods_allowed and effective_offline_methods)
 
@@ -1705,6 +1720,13 @@ def public_service_page(request, org_slug, service_slug):
                 if not stripe.api_key:
                     return HttpResponseBadRequest('Stripe is not configured.')
 
+                if not org_stripe_connected:
+                    return HttpResponseBadRequest('This business is not yet set up to accept card payments.')
+
+                connected_account_id = getattr(org, 'stripe_connect_account_id', None)
+                if not connected_account_id:
+                    return HttpResponseBadRequest('This business is not yet set up to accept card payments.')
+
                 publishable_key = getattr(settings, 'STRIPE_PUBLISHABLE_KEY', None)
                 if not publishable_key:
                     return HttpResponseBadRequest('Stripe publishable key is not configured.')
@@ -1726,10 +1748,12 @@ def public_service_page(request, org_slug, service_slug):
                 return_path = reverse('bookings:public_stripe_return', args=[org.slug, service.slug, intent.id])
                 site_url = (getattr(settings, 'SITE_URL', None) or '').strip()
                 if site_url:
-                    return_url = site_url.rstrip('/') + return_path + '?session_id={CHECKOUT_SESSION_ID}'
+                    return_url = site_url.rstrip('/') + return_path + '?session_id={CHECKOUT_SESSION_ID}' + ('&embed=1' if is_embed else '')
                 else:
-                    return_url = request.build_absolute_uri(return_path) + '?session_id={CHECKOUT_SESSION_ID}'
+                    return_url = request.build_absolute_uri(return_path) + '?session_id={CHECKOUT_SESSION_ID}' + ('&embed=1' if is_embed else '')
 
+                # Create the Checkout Session ON the connected account (direct charge).
+                # This ensures Stripe processing fees are charged to the business, not the platform.
                 session = stripe.checkout.Session.create(
                     ui_mode='embedded',
                     mode='payment',
@@ -1750,6 +1774,7 @@ def public_service_page(request, org_slug, service_slug):
                         'service_slug': str(service.slug),
                     },
                     return_url=return_url,
+                    stripe_account=connected_account_id,
                 )
 
                 intent.stripe_checkout_session_id = session.id or ''
@@ -1772,9 +1797,16 @@ def public_service_page(request, org_slug, service_slug):
                 ctx.update({
                     'stripe_publishable_key': publishable_key,
                     'stripe_client_secret': getattr(session, 'client_secret', None),
+                    'stripe_connected_account_id': connected_account_id,
                     'open_checkout': True,
                 })
-                return render(request, "public/public_service_page.html", ctx)
+                resp = render(request, "public/public_service_page.html", ctx)
+                if is_embed:
+                    try:
+                        resp.xframe_options_exempt = True
+                    except Exception:
+                        pass
+                return resp
             except Exception:
                 return HttpResponseBadRequest('Unable to start Stripe checkout. Please try again.')
 
@@ -1869,7 +1901,10 @@ def public_service_page(request, org_slug, service_slug):
         except Exception:
             pass
 
-        return redirect(reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]))
+        success_url = reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id])
+        if is_embed:
+            success_url += '?embed=1'
+        return redirect(success_url)
         # Notify owner if this booking would violate service buffers (squished)
         try:
             if getattr(service, 'allow_squished_bookings', False):
@@ -1905,6 +1940,7 @@ def public_service_page(request, org_slug, service_slug):
                 allow_stripe = bool(getattr(s, 'allow_stripe_payments', True))
             except Exception:
                 allow_stripe = True
+            allow_stripe = bool(allow_stripe and org_stripe_connected)
             eff_off = _effective_offline_methods_for_service(s)
             svc_payment[str(getattr(s, 'slug', ''))] = {
                 'allow_stripe': bool(allow_stripe),
@@ -1916,7 +1952,13 @@ def public_service_page(request, org_slug, service_slug):
     except Exception:
         ctx['service_payment_controls'] = {}
 
-    return render(request, "public/public_service_page.html", ctx)
+    resp = render(request, "public/public_service_page.html", ctx)
+    if is_embed:
+        try:
+            resp.xframe_options_exempt = True
+        except Exception:
+            pass
+    return resp
 
 def booking_success(request, org_slug, service_slug, booking_id):
     org = get_object_or_404(Organization, slug=org_slug)
@@ -1932,7 +1974,12 @@ def booking_success(request, org_slug, service_slug, booking_id):
                 import stripe
                 stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
                 if stripe.api_key:
-                    sess = stripe.checkout.Session.retrieve(session_id)
+                    # If the Checkout Session was created on a connected account, retrieve with that context.
+                    acct = getattr(org, 'stripe_connect_account_id', None)
+                    if acct:
+                        sess = stripe.checkout.Session.retrieve(session_id, stripe_account=acct)
+                    else:
+                        sess = stripe.checkout.Session.retrieve(session_id)
                     if sess and getattr(sess, 'payment_status', None) == 'paid':
                         booking.payment_status = 'paid'
                         try:
@@ -2010,16 +2057,29 @@ def booking_success(request, org_slug, service_slug, booking_id):
     offline_instructions = ''
     try:
         org_settings = getattr(org, 'settings', None)
-        offline_instructions = build_offline_payment_instructions(org_settings) if org_settings else ''
+        full = build_offline_payment_instructions(org_settings) if org_settings else ''
+        if getattr(booking, 'payment_method', '') == 'offline':
+            from bookings.models import filter_offline_payment_instructions_for_method
+            offline_method = (getattr(booking, 'offline_payment_method', '') or '').strip().lower()
+            offline_instructions = filter_offline_payment_instructions_for_method(full, offline_method) or ''
+        else:
+            offline_instructions = full
     except Exception:
         offline_instructions = ''
 
-    return render(request, "public/booking_success.html", {
+    is_embed = (request.GET.get('embed') == '1')
+    resp = render(request, "public/booking_success.html", {
         "org": org,
         "service": service,
         "booking": booking,
         "offline_instructions": offline_instructions,
     })
+    if is_embed:
+        try:
+            resp.xframe_options_exempt = True
+        except Exception:
+            pass
+    return resp
 
 
 @require_http_methods(["GET"])
@@ -2042,7 +2102,11 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         import stripe
         stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
         if stripe.api_key:
-            sess = stripe.checkout.Session.retrieve(session_id)
+            acct = getattr(org, 'stripe_connect_account_id', None)
+            if acct:
+                sess = stripe.checkout.Session.retrieve(session_id, stripe_account=acct)
+            else:
+                sess = stripe.checkout.Session.retrieve(session_id)
             if sess and getattr(sess, 'payment_status', None) == 'paid':
                 paid = True
     except Exception:
@@ -2061,7 +2125,13 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
             offline_instructions=build_offline_payment_instructions(getattr(org, 'settings', None)),
         )
         ctx['error'] = 'Payment was not completed. No booking was created.'
-        return render(request, 'public/public_service_page.html', ctx)
+        resp = render(request, 'public/public_service_page.html', ctx)
+        if request.GET.get('embed') == '1':
+            try:
+                resp.xframe_options_exempt = True
+            except Exception:
+                pass
+        return resp
 
     # Re-check conflicts at finalize time.
     conflict = Booking.objects.filter(
@@ -2082,7 +2152,13 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
             offline_instructions=build_offline_payment_instructions(getattr(org, 'settings', None)),
         )
         ctx['error'] = 'Sorry, that time was just booked. Please contact the business.'
-        return render(request, 'public/public_service_page.html', ctx)
+        resp = render(request, 'public/public_service_page.html', ctx)
+        if request.GET.get('embed') == '1':
+            try:
+                resp.xframe_options_exempt = True
+            except Exception:
+                pass
+        return resp
 
     booking = Booking.objects.create(
         organization=org,
@@ -2173,7 +2249,10 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
     except Exception:
         pass
 
-    return redirect(reverse('bookings:booking_success', args=[org.slug, service.slug, booking.id]))
+    success_url = reverse('bookings:booking_success', args=[org.slug, service.slug, booking.id])
+    if request.GET.get('embed') == '1':
+        success_url += '?embed=1'
+    return redirect(success_url)
 
 @require_http_methods(["GET"])
 def reschedule_booking(request, booking_id):

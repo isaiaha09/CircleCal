@@ -1,6 +1,7 @@
 from .settings import *
 
 import os
+import sys
 from urllib.parse import urlparse, parse_qs
 
 # Production-like defaults (safe for local testing)
@@ -30,6 +31,10 @@ ALLOWED_HOSTS = _env_csv(
     [
         "www.circlecal.app",
         "circlecal.app",
+        # Local dev conveniences when running with production settings
+        "127.0.0.1",
+        "localhost",
+        "[::1]",
     ],
 )
 CSRF_TRUSTED_ORIGINS = _env_csv(
@@ -86,15 +91,19 @@ if _env_bool("USE_X_FORWARDED_PROTO", True):
     USE_X_FORWARDED_HOST = True
 
 # Redirect HTTP to HTTPS.
-# Set SECURE_SSL_REDIRECT=0 only if your reverse proxy/load balancer handles redirects.
-SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
+# In real production, keep this enabled.
+# When running the Django dev server (`manage.py runserver`) locally, default it
+# to off so you don't get redirected to HTTPS (runserver does not serve HTTPS).
+_is_runserver = any(arg == 'runserver' or arg.endswith('runserver') for arg in sys.argv)
+SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", False if _is_runserver else True)
 
 # HSTS (only enable if your entire site is served over HTTPS).
-# Defaults are "real prod" safe; override via env vars if needed.
+# Defaults are "real prod" safe; for local runserver default to 0.
 try:
-    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
+    _hsts_default = "0" if _is_runserver else "31536000"
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", _hsts_default))
 except Exception:
-    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_SECONDS = 0 if _is_runserver else 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
 SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", False)
 
@@ -109,16 +118,26 @@ if _enable_whitenoise:
         import whitenoise  # noqa: F401
 
         # Use WhiteNoise's hashed+compressed static file storage in production.
-        # This gives long-term caching and will fail loudly if a referenced
-        # static asset is missing during `collectstatic`.
-        STORAGES = {
-            "default": {
-                "BACKEND": "django.core.files.storage.FileSystemStorage",
-            },
-            "staticfiles": {
-                "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-            },
-        }
+        # For local runserver with settings_prod, avoid manifest storage because
+        # it requires `collectstatic` and a manifest to exist.
+        if _is_runserver:
+            STORAGES = {
+                "default": {
+                    "BACKEND": "django.core.files.storage.FileSystemStorage",
+                },
+                "staticfiles": {
+                    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+                },
+            }
+        else:
+            STORAGES = {
+                "default": {
+                    "BACKEND": "django.core.files.storage.FileSystemStorage",
+                },
+                "staticfiles": {
+                    "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+                },
+            }
 
         if isinstance(MIDDLEWARE, (list, tuple)):
             _mw = list(MIDDLEWARE)

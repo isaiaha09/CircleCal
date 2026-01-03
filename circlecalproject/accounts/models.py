@@ -33,6 +33,12 @@ class Business(models.Model):
     owner = models.ForeignKey(User, related_name="owned_businesses", on_delete=models.SET_NULL, null=True)
     # Add billing fields if needed (stripe_customer_id etc.)
     stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
+
+    # Stripe Connect (for taking card payments from clients into the business's Stripe account)
+    stripe_connect_account_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    stripe_connect_details_submitted = models.BooleanField(default=False)
+    stripe_connect_charges_enabled = models.BooleanField(default=False)
+    stripe_connect_payouts_enabled = models.BooleanField(default=False)
     # Timezone for the organization (e.g., 'America/Los_Angeles', 'America/New_York')
     # Defaults to 'UTC' if not set - organizations should update this to their local timezone
     timezone = models.CharField(max_length=63, default='UTC', help_text="Business's timezone (e.g., America/Los_Angeles)")

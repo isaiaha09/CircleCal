@@ -28,4 +28,9 @@ urlpatterns = [
     path("api/bus/<slug:org_slug>/invoice/<str:invoice_id>/hide/", views.invoice_hide, name="invoice_hide"),
     path("api/bus/<slug:org_slug>/invoice/<str:invoice_id>/void/", views.invoice_void, name="invoice_void"),
     path("api/bus/<slug:org_slug>/invoice/<str:invoice_id>/unhide/", views.invoice_unhide, name="invoice_unhide"),
+
+    # Stripe Connect onboarding (for client payments)
+    path("bus/<slug:org_slug>/stripe/connect/start/", views.stripe_connect_start, name="stripe_connect_start"),
+    path("bus/<slug:org_slug>/stripe/connect/return/", views.stripe_connect_return, name="stripe_connect_return"),
+    path("bus/<slug:org_slug>/stripe/connect/refresh/", views.stripe_connect_refresh, name="stripe_connect_refresh"),
 ]
