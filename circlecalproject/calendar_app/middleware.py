@@ -1,5 +1,6 @@
 # calendar_app/middleware.py
 import os
+import sys
 from django.shortcuts import redirect
 from django.utils import timezone
 from zoneinfo import ZoneInfo
@@ -8,6 +9,7 @@ from .utils import user_has_role
 from billing.models import Subscription, Plan
 from django.conf import settings
 from django.contrib import messages
+from django.core.cache import cache
 class OrganizationMiddleware:
     """
     Resolve the organization for the current request.
@@ -57,12 +59,12 @@ class OrganizationMiddleware:
         # During pytest runs we skip UX-gating redirects (Stripe connect / profile completion)
         # so integration tests can validate endpoint behavior (200/400/etc) without being
         # converted into 302 redirects.
-        is_pytest = bool(os.environ.get('PYTEST_CURRENT_TEST'))
+        is_test_run = bool(os.environ.get('PYTEST_CURRENT_TEST')) or ('test' in sys.argv)
 
         # 5a. Enforce profile completion (First/Last) before allowing navigation away
         # from Profile. Client-side JS should block clicks, but this makes it non-bypassable.
         try:
-            if (not is_pytest) and request.user.is_authenticated:
+            if (not is_test_run) and request.user.is_authenticated:
                 path = request.path or ''
                 is_admin_path = path.startswith('/admin')
                 is_admin_user = bool(getattr(request.user, 'is_staff', False)) or bool(getattr(request.user, 'is_superuser', False))
@@ -171,8 +173,21 @@ class OrganizationMiddleware:
             except Exception:
                 needs_connect = False
 
-            if (not is_pytest) and needs_connect:
+            if (not is_test_run) and needs_connect:
                 if not getattr(settings, 'STRIPE_SECRET_KEY', None):
+                    # Opportunistic background cleanup: delete trial accounts whose scheduled
+                    # deletion time has passed. This avoids relying on manual CLI commands.
+                    # Skipped during tests.
+                    try:
+                        if not is_test_run:
+                            lock_key = 'cc_due_trial_deletion_check_lock'
+                            if not cache.get(lock_key):
+                                cache.set(lock_key, True, timeout=300)  # run at most every 5 min per process
+                                from accounts.deletion import delete_due_trial_accounts
+                                delete_due_trial_accounts(limit=20, dry_run=False)
+                    except Exception:
+                        pass
+
                     return response
                 connected = bool(getattr(org, 'stripe_connect_charges_enabled', False)) and bool(getattr(org, 'stripe_connect_account_id', None))
                 if not connected:

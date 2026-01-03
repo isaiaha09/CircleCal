@@ -4,7 +4,7 @@
 {% block title %}Manage Billing – {{ org.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto mt-6 md:mt-10 bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-sm p-4 md:p-6">
+<div class="max-w-4xl mx-auto mt-6 md:mt-10 bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 p-4 md:p-6">
   <h1 class="text-xl md:text-2xl font-semibold mb-3 md:mb-4">Billing Management</h1>
   <p class="text-xs md:text-sm text-gray-600 mb-4 md:mb-6">Manage subscription, payment methods, and invoices for <strong>{{ org.name }}</strong>.</p>
 
@@ -120,7 +120,7 @@
               <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
             {% endif %}
 
-            {% if not trial_remaining_seconds and next_billing_iso %}
+            {% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %}
               <div class="text-sm mt-2"><strong>Next charge in:</strong> <span id="nextChargeCountdown">—</span></div>
             {% endif %}
           </div>
@@ -128,7 +128,7 @@
             {% if subscription.cancel_at_period_end %}
               <button id="reactivateBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-green-600 text-white hover:bg-green-700">Reactivate</button>
             {% else %}
-              <button id="cancelBtn" class="px-3 py-1 text-xs rounded bg-yellow-500 text-white hover:bg-yellow-600 md:px-4 md:py-2 md:text-sm">Cancel at Period End</button>
+              <button id="cancelBtn" data-is-trial="{% if trial_remaining_seconds or subscription.status|lower == 'trialing' %}true{% else %}false{% endif %}" class="px-3 py-1 text-xs rounded bg-yellow-500 text-white hover:bg-yellow-600 md:px-4 md:py-2 md:text-sm">Cancel at Period End</button>
             {% endif %}
             {% if trial_remaining_seconds %}
               <button id="immediateCancelBtn" class="px-3 py-1 text-xs rounded bg-red-700 text-white hover:bg-red-800 md:px-4 md:py-2 md:text-sm" data-is-trial="true">Immediate Cancel</button>
@@ -1444,9 +1444,105 @@
   // Cancel/reactivate subscription
   const cancelBtn = document.getElementById('cancelBtn');
   if (cancelBtn) cancelBtn.addEventListener('click', () => {
-    showLoading();
-    fetch(`/billing/api/bus/${orgSlug}/subscription/cancel/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken }})
-      .then(() => { hideLoading(); window.location.reload(); }).catch(()=> { hideLoading(); window.location.reload(); });
+    const isTrial = cancelBtn.getAttribute('data-is-trial') === 'true';
+
+    // Confirm modal (prevents accidental cancel-at-period-end)
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+
+    const box = document.createElement('div');
+    box.className = 'bg-white rounded-lg shadow-lg p-6 max-w-lg w-full mx-4';
+
+    const title = document.createElement('div');
+    title.className = 'text-lg font-semibold mb-2';
+    title.textContent = 'Cancel at period end?';
+    box.appendChild(title);
+
+    const msg = document.createElement('div');
+    msg.className = 'text-sm text-gray-800';
+    if (isTrial) {
+      msg.textContent = 'This will schedule cancellation for the end of your trial. Your account will be automatically deleted when the trial ends unless you subscribe before then. We will send you an email confirming the scheduled deletion.';
+    } else {
+      msg.textContent = 'This will schedule cancellation for the end of your current billing period. You will keep access until then.';
+    }
+    box.appendChild(msg);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex justify-end gap-2 mt-5';
+
+    const keepBtn = document.createElement('button');
+    keepBtn.className = 'px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 text-sm';
+    keepBtn.textContent = 'Keep subscription';
+    keepBtn.onclick = () => document.body.removeChild(overlay);
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'px-3 py-2 rounded bg-yellow-600 text-white hover:bg-yellow-700 text-sm';
+    confirmBtn.textContent = 'Confirm cancel';
+    confirmBtn.onclick = async () => {
+      document.body.removeChild(overlay);
+      showLoading();
+      try {
+        const resp = await fetch(`/billing/api/bus/${orgSlug}/subscription/cancel/`, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': csrftoken,
+            'Content-Type': 'application/json'
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            immediate: false,
+            schedule_delete_at_trial_end: isTrial
+          })
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text().catch(()=>null);
+          throw new Error(txt || 'Failed to cancel');
+        }
+        const data = await resp.json().catch(()=>({}));
+        try { console.log('cancel_subscription response', data); } catch (e) {}
+
+        const msgText = (data && data.message) ? data.message : (isTrial
+          ? 'Cancellation scheduled. Account will be deleted at trial end unless you subscribe.'
+          : 'Cancellation scheduled for period end.'
+        );
+
+        const emailTo = (data && data.email_to) ? String(data.email_to) : '';
+        const emailSuffix = emailTo ? ` (to: ${emailTo})` : '';
+
+        // Surface whether the server thinks the email sent.
+        let emailFlag = null;
+        if (isTrial && data && typeof data.trial_deletion_email_sent !== 'undefined') {
+          emailFlag = data.trial_deletion_email_sent;
+        }
+        if (!isTrial && data && typeof data.email_sent !== 'undefined') {
+          emailFlag = data.email_sent;
+        }
+
+        if (emailFlag === false) {
+          showToast('error', msgText + emailSuffix + ' (Email failed to send — check logs/SMTP sender verification)', 7000);
+        } else if (emailFlag === true) {
+          showToast('success', msgText + emailSuffix + ' (Email sent)', 6000);
+        } else {
+          showToast('success', msgText + emailSuffix, 6000);
+        }
+      } catch (e) {
+        showToast('error', 'Failed to schedule cancellation: ' + (e && e.message ? e.message : String(e)));
+      } finally {
+        hideLoading();
+        // Give time to read toast / inspect Network.
+        setTimeout(() => window.location.reload(), 3000);
+      }
+    };
+
+    btnRow.appendChild(keepBtn);
+    btnRow.appendChild(confirmBtn);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) document.body.removeChild(overlay);
+    });
+    document.body.appendChild(overlay);
   });
   const reactivateBtn = document.getElementById('reactivateBtn');
   if (reactivateBtn) reactivateBtn.addEventListener('click', () => {

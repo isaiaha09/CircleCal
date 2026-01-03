@@ -21,6 +21,10 @@ class Profile(models.Model):
     display_name = models.CharField(max_length=255, blank=True, null=True, help_text='Optional display name used for client-facing messages')
     email_alerts = models.BooleanField(default=True)
     booking_reminders = models.BooleanField(default=True)
+    # If a user cancels at the end of their free trial, we can schedule their
+    # account for automatic deletion when the trial ends (unless they subscribe).
+    scheduled_account_deletion_at = models.DateTimeField(null=True, blank=True)
+    scheduled_account_deletion_reason = models.CharField(max_length=64, blank=True, null=True)
     # Add more fields as needed
 
     def __str__(self):

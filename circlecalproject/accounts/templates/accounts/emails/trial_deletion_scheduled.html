@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); color: white; padding: 30px 20px; text-align: center; }
+        .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+        .content { padding: 30px 20px; }
+        .info { background-color: #fff7ed; border-left: 4px solid #f59e0b; padding: 18px; margin: 20px 0; border-radius: 4px; }
+        .info h2 { margin-top: 0; color: #b45309; font-size: 16px; }
+        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 14px; color: #666; }
+        .footer a { color: #667eea; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Account deletion scheduled</h1>
+        </div>
+        <div class="content">
+            <p>Hi {{ user.first_name|default:user.username|default:"there" }},</p>
+            <p>You scheduled your subscription to cancel at the end of your trial. Your CircleCal account is now scheduled to be automatically deleted when your trial ends, unless you subscribe before then.</p>
+
+            <div class="info">
+                <h2>Scheduled deletion</h2>
+                <p style="margin: 0;">Scheduled for: <strong>{{ scheduled_for }}</strong></p>
+                {% if business_names %}
+                    <p style="margin: 10px 0 0 0;"><strong>Businesses affected:</strong> {{ business_names|join:", " }}</p>
+                {% endif %}
+            </div>
+
+            <p>If you change your mind, you can reactivate your subscription from the Billing page before the trial ends.</p>
+
+            <p style="margin-top: 30px;">Thanks,<br>
+            <strong>CircleCal Team</strong></p>
+        </div>
+        <div class="footer">
+            <p>This is an automated email from CircleCal.</p>
+            <p><a href="{{ site_url }}">Visit CircleCal</a></p>
+        </div>
+    </div>
+</body>
+</html>
