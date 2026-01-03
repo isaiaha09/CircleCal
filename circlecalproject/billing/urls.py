@@ -33,4 +33,7 @@ urlpatterns = [
     path("bus/<slug:org_slug>/stripe/connect/start/", views.stripe_connect_start, name="stripe_connect_start"),
     path("bus/<slug:org_slug>/stripe/connect/return/", views.stripe_connect_return, name="stripe_connect_return"),
     path("bus/<slug:org_slug>/stripe/connect/refresh/", views.stripe_connect_refresh, name="stripe_connect_refresh"),
+
+    # Stripe Express Dashboard (single-use login link)
+    path("bus/<slug:org_slug>/stripe/connect/express-dashboard/", views.stripe_express_dashboard, name="stripe_express_dashboard"),
 ]

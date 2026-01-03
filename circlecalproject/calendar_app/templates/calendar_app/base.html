@@ -179,7 +179,7 @@
                         {% endif %}
                     {% else %}
                         <nav class="hidden md:flex items-center space-x-4">
-                            <a href="{% url 'calendar_app:choose_business' %}" class="text-blue-600 font-medium">Choose Business</a>
+                            <a href="{% url 'calendar_app:choose_business' %}" class="text-blue-600 font-medium">Create Business</a>
                             <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                 {% csrf_token %}
                                 <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
@@ -218,7 +218,7 @@
                     {% endif %}
                 {% else %}
                     <a href="{% url 'calendar_app:choose_business' %}"
-                        class="block text-blue-600 font-medium py-2">Choose Business</a>
+                        class="block text-blue-600 font-medium py-2">Create Business</a>
                 {% endif %}
                 {% else %}
                     <a href="{% url 'accounts:login' %}" class="block text-gray-700 hover:text-blue-600 py-2">Login</a>

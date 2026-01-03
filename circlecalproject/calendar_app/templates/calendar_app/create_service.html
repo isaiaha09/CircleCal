@@ -229,13 +229,18 @@
           </div>
         </div>
 
-        <div class="section-card">
+        <div class="section-card cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
           <div class="section-title">Payment Methods</div>
           <div>
             <div class="space-y-3">
               <label class="inline-flex items-start">
+                {% if not can_use_pro_team %}
+                  <input type="hidden" name="allow_stripe_payments" value="1">
+                {% endif %}
                 <input type="checkbox" name="allow_stripe_payments" id="allow_stripe_payments" value="1"
-                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked>
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       checked
+                       {% if not can_use_pro_team %}disabled{% endif %}>
                 <span class="ml-2 text-sm text-gray-700">Accept card payments (Stripe)</span>
               </label>
               {% if can_use_pro_team %}
@@ -248,13 +253,13 @@
                   <label class="flex items-center text-sm text-gray-700">
                     <input type="checkbox" name="offline_methods" value="venmo"
                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                           {% if not offline_methods_allowed %}disabled{% endif %}>
+                           {% if not offline_methods_allowed or not can_use_pro_team %}disabled{% endif %}>
                     <span class="ml-2">Venmo</span>
                   </label>
                   <label class="flex items-center text-sm text-gray-700">
                     <input type="checkbox" name="offline_methods" value="zelle"
                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                           {% if not offline_methods_allowed %}disabled{% endif %}>
+                           {% if not offline_methods_allowed or not can_use_pro_team %}disabled{% endif %}>
                     <span class="ml-2">Zelle</span>
                   </label>
 
@@ -263,13 +268,14 @@
                   <label class="flex items-center text-sm text-gray-700">
                     <input type="checkbox" name="offline_methods" value="cash"
                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                           {% if not offline_methods_allowed %}disabled{% endif %}>
+                           {% if not offline_methods_allowed or not can_use_pro_team %}disabled{% endif %}>
                     <span class="ml-2">Offline (Cash)</span>
                   </label>
                 </div>
               </div>
             </div>
           </div>
+          {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required" style="border-radius:0.75rem;"></div>{% endif %}
           <p class="mt-2 text-xs text-gray-500">For paid services, you must enable at least one payment method.</p>
         </div>
 

@@ -3260,6 +3260,12 @@ def dashboard(request, org_slug):
     except Exception:
         has_availability = True
 
+    stripe_connected_dashboard_modal_auto_open = False
+    try:
+        stripe_connected_dashboard_modal_auto_open = bool(request.session.pop('cc_stripe_connected_dashboard_modal', False))
+    except Exception:
+        stripe_connected_dashboard_modal_auto_open = False
+
     return render(request, "calendar_app/dashboard.html", {
         "memberships": memberships,
         "org": org,
@@ -3267,6 +3273,7 @@ def dashboard(request, org_slug):
         "plan_slug": plan_slug,
         "trialing_active": trialing_active,
         "has_availability": has_availability,
+        "stripe_connected_dashboard_modal_auto_open": stripe_connected_dashboard_modal_auto_open,
     })
 
 

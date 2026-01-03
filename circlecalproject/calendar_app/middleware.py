@@ -6,6 +6,7 @@ from accounts.models import Business as Organization, Membership
 from .utils import user_has_role
 from billing.models import Subscription, Plan
 from django.conf import settings
+from django.contrib import messages
 class OrganizationMiddleware:
     """
     Resolve the organization for the current request.
@@ -52,6 +53,51 @@ class OrganizationMiddleware:
         )
 
         # 5. Continue processing
+        # 5. Enforce profile completion (First/Last) before allowing navigation away
+        # from Profile. Client-side JS should block clicks, but this makes it non-bypassable.
+        try:
+            if request.user.is_authenticated:
+                path = request.path or ''
+                is_admin_path = path.startswith('/admin')
+                is_admin_user = bool(getattr(request.user, 'is_staff', False)) or bool(getattr(request.user, 'is_superuser', False))
+
+                # Do not block Django admin users/pages.
+                if not (is_admin_path or is_admin_user):
+                    first = (getattr(request.user, 'first_name', '') or '').strip()
+                    last = (getattr(request.user, 'last_name', '') or '').strip()
+                    if not (first and last):
+                        allow_paths = [
+                            '/accounts/profile/',
+                            '/accounts/profile',
+                            '/accounts/two_factor/',
+                            '/accounts/two_factor',
+                            '/accounts/password/change/',
+                            '/accounts/password/change',
+                            '/accounts/deactivate/',
+                            '/accounts/deactivate',
+                            '/accounts/delete/',
+                            '/accounts/delete',
+                            '/accounts/logout/',
+                            '/accounts/logout',
+                            '/choose-business/',
+                            '/choose-business',
+                            '/create-business/',
+                            '/create-business',
+                            '/static/',
+                            settings.MEDIA_URL,
+                        ]
+                        if not any(path.startswith(ap) for ap in allow_paths):
+                            try:
+                                if not request.session.get('cc_name_required_notice_shown'):
+                                    messages.warning(request, 'Please complete your First and Last Name before leaving your Profile.')
+                                    request.session['cc_name_required_notice_shown'] = True
+                            except Exception:
+                                pass
+                            from django.urls import reverse
+                            return redirect(reverse('accounts:profile'))
+        except Exception:
+            pass
+
         response = self.get_response(request)
 
         # 6. Trial/Subscription enforcement: allow trial without card, require payment after trial
@@ -76,6 +122,22 @@ class OrganizationMiddleware:
                 )
 
             # If trial expired and not active, redirect to pricing unless already there
+            # Also show a one-time post-login message when applicable.
+            try:
+                post_login_check = bool(request.session.pop('cc_post_login_check_trial', False))
+            except Exception:
+                post_login_check = False
+            if post_login_check and sub and sub.status == 'trialing' and sub.trial_end:
+                try:
+                    remaining = sub.trial_end - timezone.now()
+                    remaining_days = int(remaining.total_seconds() // 86400)
+                    if remaining.total_seconds() <= 0:
+                        messages.error(request, 'Your trial has ended. Please choose a plan to continue using CircleCal.')
+                    elif remaining_days <= 3:
+                        messages.warning(request, f'Your trial ends soon ({max(remaining_days, 0)} day(s) remaining). Choose a plan to keep your business active.')
+                except Exception:
+                    pass
+
             if sub.status == "trialing" and sub.trial_end and timezone.now() >= sub.trial_end:
                 # Allow pricing, embedded checkout, and auth pages
                 allow_paths = [
@@ -86,6 +148,10 @@ class OrganizationMiddleware:
                     "/accounts/login",
                     "/accounts/signup/",
                     "/accounts/signup",
+                    "/accounts/profile/",
+                    "/accounts/profile",
+                    "/accounts/logout/",
+                    "/accounts/logout",
                 ]
                 path = request.path
                 if not any(path.startswith(ap) for ap in allow_paths):
@@ -110,6 +176,7 @@ class OrganizationMiddleware:
                     allow_paths = [
                         f"/billing/bus/{org.slug}/stripe/connect/",
                         "/billing/",  # allow billing routes needed for onboarding
+                        f"/bus/{org.slug}/pricing/",
                         "/accounts/login/",
                         "/accounts/login",
                         "/accounts/logout/",
@@ -118,6 +185,14 @@ class OrganizationMiddleware:
                         "/accounts/signup",
                         "/accounts/profile/",
                         "/accounts/profile",
+                        "/accounts/two_factor/",
+                        "/accounts/two_factor",
+                        "/accounts/password/change/",
+                        "/accounts/password/change",
+                        "/accounts/deactivate/",
+                        "/accounts/deactivate",
+                        "/accounts/delete/",
+                        "/accounts/delete",
                         "/static/",
                         settings.MEDIA_URL,
                     ]

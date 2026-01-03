@@ -37,17 +37,103 @@ def profile_view(request):
 		is_owner_for_org = False
 	org_offline_venmo = ''
 	org_offline_zelle = ''
+	can_use_offline_payment_methods = False
+	stripe_connected_account_url = None
+	stripe_express_dashboard_url = None
 	try:
 		if org is not None:
 			from bookings.models import OrgSettings
 			settings_obj, _ = OrgSettings.objects.get_or_create(organization=org)
 			org_offline_venmo = (getattr(settings_obj, 'offline_venmo', '') or '').strip()
 			org_offline_zelle = (getattr(settings_obj, 'offline_zelle', '') or '').strip()
+
+			# Pro/Team gating for offline payment methods (trial/basic blocked)
+			try:
+				from billing.utils import can_use_offline_payment_methods as _can_use_offline
+				can_use_offline_payment_methods = bool(_can_use_offline(org))
+			except Exception:
+				can_use_offline_payment_methods = False
+
+			# Stripe connected account link (test vs live)
+			try:
+				acct_id = getattr(org, 'stripe_connect_account_id', None)
+				if acct_id:
+					secret = str(getattr(settings, 'STRIPE_SECRET_KEY', '') or '')
+					is_test = secret.startswith('sk_test')
+					base = 'https://dashboard.stripe.com/test/connect/accounts/' if is_test else 'https://dashboard.stripe.com/connect/accounts/'
+					stripe_connected_account_url = base + str(acct_id)
+					try:
+						stripe_express_dashboard_url = reverse('billing:stripe_express_dashboard', kwargs={'org_slug': org.slug})
+					except Exception:
+						stripe_express_dashboard_url = None
+			except Exception:
+				stripe_connected_account_url = None
+				stripe_express_dashboard_url = None
 	except Exception:
 		org_offline_venmo = ''
 		org_offline_zelle = ''
+		can_use_offline_payment_methods = False
+		stripe_connected_account_url = None
+		stripe_express_dashboard_url = None
 
 	if request.method == "POST":
+		# Enforce First/Last Name requirement.
+		first_name_required = (request.POST.get("first_name") or "").strip()
+		last_name_required = (request.POST.get("last_name") or "").strip()
+		if not first_name_required or not last_name_required:
+			# Keep typed values in-memory for re-render.
+			try:
+				user.first_name = first_name_required
+				user.last_name = last_name_required
+			except Exception:
+				pass
+			messages.error(request, "Please enter your First Name and Last Name, then click Save Changes.")
+			form = ProfileForm(request.POST, request.FILES, instance=profile)
+			# Don't save anything yet.
+			activities = LoginActivity.objects.filter(user=user).only('timestamp','ip_address','user_agent')[:5]
+			# Billing summary based on current org in request (if any)
+			sub = None
+			org2 = getattr(request, 'organization', None)
+			if org2 is not None:
+				try:
+					sub = Subscription.objects.select_related('plan').get(organization=org2)
+				except Subscription.DoesNotExist:
+					sub = None
+
+			# Stripe connect modal context (avoid NameError; do not auto-open here)
+			stripe_connect_start_url = None
+			stripe_connect_modal_enabled = False
+			stripe_connect_modal_auto_open = False
+			try:
+				stripe_configured = bool(getattr(settings, 'STRIPE_SECRET_KEY', None))
+				needs_connect = bool(org2 is not None) and bool(is_owner_for_org) and stripe_configured and not bool(getattr(org2, 'stripe_connect_charges_enabled', False))
+				if needs_connect:
+					stripe_connect_modal_enabled = True
+					stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org2.slug})
+			except Exception:
+				stripe_connect_modal_enabled = False
+				stripe_connect_start_url = None
+				stripe_connect_modal_auto_open = False
+
+			return render(request, "accounts/profile.html", {
+				"form": form,
+				"user": user,
+				"activities": activities,
+				"subscription": sub,
+				"organization": org2,
+				"memberships": Membership.objects.filter(user=user).select_related('organization'),
+				"pending_invites": Invite.objects.filter(email=user.email, accepted=False).select_related('organization') if user.email else [],
+				"is_owner_for_org": is_owner_for_org,
+				"org_offline_venmo": org_offline_venmo,
+				"org_offline_zelle": org_offline_zelle,
+				"can_use_offline_payment_methods": can_use_offline_payment_methods,
+				"stripe_connected_account_url": stripe_connected_account_url,
+				"stripe_express_dashboard_url": stripe_express_dashboard_url,
+				"stripe_connect_modal_enabled": stripe_connect_modal_enabled,
+				"stripe_connect_start_url": stripe_connect_start_url,
+				"stripe_connect_modal_auto_open": stripe_connect_modal_auto_open,
+			})
+
 		# Update user core fields if provided
 		username = request.POST.get("username")
 		email = request.POST.get("email")
@@ -65,7 +151,7 @@ def profile_view(request):
 
 		# Save org-level offline payment info (owner-only)
 		try:
-			if org is not None and is_owner_for_org:
+			if org is not None and is_owner_for_org and can_use_offline_payment_methods:
 				from bookings.models import OrgSettings
 				settings_obj, _ = OrgSettings.objects.get_or_create(organization=org)
 				settings_obj.offline_venmo = (request.POST.get('offline_venmo') or '').strip()
@@ -147,6 +233,9 @@ def profile_view(request):
 		"is_owner_for_org": is_owner_for_org,
 		"org_offline_venmo": org_offline_venmo,
 		"org_offline_zelle": org_offline_zelle,
+		"can_use_offline_payment_methods": can_use_offline_payment_methods,
+		"stripe_connected_account_url": stripe_connected_account_url,
+		"stripe_express_dashboard_url": stripe_express_dashboard_url,
 		"stripe_connect_modal_enabled": stripe_connect_modal_enabled,
 		"stripe_connect_start_url": stripe_connect_start_url,
 		"stripe_connect_modal_auto_open": stripe_connect_modal_auto_open,
@@ -174,6 +263,13 @@ class CustomLoginView(TwoFactorLoginView):
 	def form_valid(self, form):
 		# Default response from TwoFactorLoginView
 		response = super().form_valid(form)
+
+		# Allow middleware to show a one-time trial warning/expired message right
+		# after login when it has org/subscription context.
+		try:
+			self.request.session['cc_post_login_check_trial'] = True
+		except Exception:
+			pass
 
 		# If an owner/admin logs in but Stripe Connect isn't completed yet for their
 		# current org, route them to Profile and auto-open the Stripe modal. This

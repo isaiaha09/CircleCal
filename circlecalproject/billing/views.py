@@ -124,10 +124,47 @@ def stripe_connect_return(request, org_slug):
     ok = _sync_connect_status(org)
     if ok and getattr(org, 'stripe_connect_charges_enabled', False):
         messages.success(request, 'Stripe is connected and ready for payments.')
+        # Show a one-time informational modal on the dashboard after Connect completes.
+        try:
+            request.session['cc_stripe_connected_dashboard_modal'] = True
+        except Exception:
+            pass
         return redirect('calendar_app:dashboard', org_slug=org.slug)
 
     messages.warning(request, 'Stripe connection started, but is not fully enabled yet. Please finish onboarding in Stripe.')
     return redirect('billing:stripe_connect_start', org_slug=org.slug)
+
+
+@login_required
+@require_http_methods(["GET"])
+def stripe_express_dashboard(request, org_slug):
+    """Redirect owner/admin into Stripe's Express Dashboard for this connected account.
+
+    Uses Stripe's login link API so the user doesn't need to already be logged into Stripe.
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    acct_id = getattr(org, 'stripe_connect_account_id', None)
+    if not acct_id:
+        messages.warning(request, 'No Stripe connected account found for this business. Please connect Stripe first.')
+        return redirect('accounts:profile')
+
+    if not getattr(settings, 'STRIPE_SECRET_KEY', None):
+        messages.error(request, 'Stripe is not configured on this server.')
+        return redirect('accounts:profile')
+
+    try:
+        link = stripe.Account.create_login_link(acct_id)
+        url = getattr(link, 'url', None) or link.get('url')
+        if not url:
+            raise ValueError('Stripe did not return a login link URL.')
+        return redirect(url)
+    except Exception:
+        messages.error(request, 'Could not open Stripe Express Dashboard. Please try again.')
+        return redirect('accounts:profile')
 
 
 def stripe_invoice_upcoming(**kwargs):
