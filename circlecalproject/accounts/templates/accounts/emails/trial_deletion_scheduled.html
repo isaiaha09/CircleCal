@@ -18,21 +18,21 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Account deletion scheduled</h1>
+            <h1>Account deactivation scheduled</h1>
         </div>
         <div class="content">
             <p>Hi {{ user.first_name|default:user.username|default:"there" }},</p>
-            <p>You scheduled your subscription to cancel at the end of your trial. Your CircleCal account is now scheduled to be automatically deleted when your trial ends, unless you subscribe before then.</p>
+            <p>You scheduled your subscription to cancel at the end of your trial. Your CircleCal account is now scheduled to be automatically deactivated when your trial ends, unless you subscribe before then.</p>
 
             <div class="info">
-                <h2>Scheduled deletion</h2>
+                <h2>Scheduled deactivation</h2>
                 <p style="margin: 0;">Scheduled for: <strong>{{ scheduled_for }}</strong></p>
                 {% if business_names %}
                     <p style="margin: 10px 0 0 0;"><strong>Businesses affected:</strong> {{ business_names|join:", " }}</p>
                 {% endif %}
             </div>
 
-            <p>If you change your mind, you can reactivate your subscription from the Billing page before the trial ends.</p>
+            <p>If you change your mind, you can subscribe from the Billing page before the trial ends to keep your account active.</p>
 
             <p style="margin-top: 30px;">Thanks,<br>
             <strong>CircleCal Team</strong></p>

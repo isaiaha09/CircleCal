@@ -62,7 +62,7 @@ def send_trial_deletion_scheduled_email(user, *, scheduled_for, business_names=N
         'scheduled_for': scheduled_for,
     }
     return _send_account_email(
-        subject='CircleCal account deletion scheduled',
+        subject='CircleCal account deactivation scheduled',
         template_name='accounts/emails/trial_deletion_scheduled.html',
         to_email=getattr(user, 'email', ''),
         context=context,

@@ -2,7 +2,7 @@ from django.utils import timezone
 
 
 def delete_due_trial_accounts(*, limit: int = 200, dry_run: bool = False):
-    """Delete accounts scheduled for deletion at/after trial end.
+    """Deactivate accounts scheduled for deactivation at/after trial end.
 
     This is the shared implementation used by both the management command and
     the opportunistic middleware runner.
@@ -10,7 +10,7 @@ def delete_due_trial_accounts(*, limit: int = 200, dry_run: bool = False):
     Returns: dict with counts.
     """
     from accounts.models import Profile, Business
-    from accounts.emails import send_account_deleted_email
+    from accounts.emails import send_account_deactivated_email
 
     now = timezone.now()
 
@@ -23,7 +23,7 @@ def delete_due_trial_accounts(*, limit: int = 200, dry_run: bool = False):
     if limit:
         qs = qs[: int(limit)]
 
-    deleted_count = 0
+    deactivated_count = 0
     skipped_count = 0
 
     for profile in qs:
@@ -54,7 +54,7 @@ def delete_due_trial_accounts(*, limit: int = 200, dry_run: bool = False):
         business_names = [getattr(b, 'name', '') for b in owned_orgs if getattr(b, 'name', '')]
 
         if dry_run:
-            deleted_count += 1
+            deactivated_count += 1
             continue
 
         # Disconnect Stripe in CircleCal for owned orgs
@@ -74,26 +74,38 @@ def delete_due_trial_accounts(*, limit: int = 200, dry_run: bool = False):
             except Exception:
                 pass
 
-        # Email confirmation before deleting
+        # Email confirmation before deactivating
         try:
-            send_account_deleted_email(user, business_names=business_names)
+            send_account_deactivated_email(user, business_names=business_names)
         except Exception:
             pass
 
-        # Delete orgs, then user
+        # Deactivate user and archive owned orgs (soft-disable access) instead of deleting.
+        try:
+            user.is_active = False
+            user.save(update_fields=['is_active'])
+        except Exception:
+            pass
+
         for b in owned_orgs:
             try:
-                b.delete()
+                if hasattr(b, 'is_archived'):
+                    b.is_archived = True
+                    b.save(update_fields=['is_archived'])
             except Exception:
                 pass
 
+        # Clear schedule so we don't repeatedly process the same profile.
         try:
-            user.delete()
-            deleted_count += 1
+            profile.scheduled_account_deletion_at = None
+            profile.scheduled_account_deletion_reason = None
+            profile.save(update_fields=['scheduled_account_deletion_at', 'scheduled_account_deletion_reason'])
         except Exception:
             pass
 
+        deactivated_count += 1
+
     return {
-        'deleted': deleted_count,
+        'deactivated': deactivated_count,
         'skipped': skipped_count,
     }

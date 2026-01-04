@@ -4,7 +4,7 @@ from accounts.deletion import delete_due_trial_accounts
 
 class Command(BaseCommand):
     help = (
-        "Deletes user accounts that were scheduled for deletion at trial end "
+        "Deactivates user accounts that were scheduled for deactivation at trial end "
         "(typically after cancel-at-period-end during trial)."
     )
 
@@ -26,5 +26,5 @@ class Command(BaseCommand):
         limit = int(options.get('limit') or 200)
         result = delete_due_trial_accounts(limit=limit, dry_run=dry_run)
         self.stdout.write(self.style.SUCCESS(
-            f"Deleted={result.get('deleted', 0)}, skipped={result.get('skipped', 0)}."
+            f"Deactivated={result.get('deactivated', 0)}, skipped={result.get('skipped', 0)}."
         ))

@@ -935,6 +935,20 @@ def sync_subscription_from_stripe(request, org_slug, subscription_id):
 
     Subscription.objects.update_or_create(organization=org, defaults=defaults)
 
+    # If the org owner previously scheduled account deletion due to trial cancel-at-period-end,
+    # clear that schedule once we have an active subscription that is not canceling.
+    try:
+        if (status in ("active", "trialing")) and (not cancel_at_period_end):
+            from accounts.models import Profile
+            owner = getattr(org, 'owner', None)
+            if owner:
+                Profile.objects.filter(user=owner, scheduled_account_deletion_reason='trial_cancel_at_period_end').update(
+                    scheduled_account_deletion_at=None,
+                    scheduled_account_deletion_reason=None,
+                )
+    except Exception:
+        pass
+
     # Best-effort: sync payment methods and default card into our local cache so
     # manage.html reflects the card used in embedded checkout even when webhooks
     # are not running (common in local dev).
@@ -1075,6 +1089,56 @@ def manage_billing(request, org_slug):
     use_ajax_filters = True
 
     now = timezone.now()
+
+    # Best-effort: reconcile local subscription state from Stripe.
+    # This prevents stale UI (e.g., still showing "cancels at period end") after
+    # a user resumes billing/changes plan and a webhook or client-side sync was missed.
+    if subscription and getattr(subscription, 'stripe_subscription_id', None) and org.stripe_customer_id:
+        try:
+            stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+            stripe_status = stripe_sub.get('status') or getattr(subscription, 'status', 'active')
+            stripe_cancel = bool(stripe_sub.get('cancel_at_period_end', False))
+
+            update_fields = []
+            if getattr(subscription, 'status', None) != stripe_status:
+                subscription.status = stripe_status
+                update_fields.append('status')
+
+            stripe_active = (stripe_status in ('active', 'trialing'))
+            if getattr(subscription, 'active', None) != stripe_active:
+                subscription.active = stripe_active
+                update_fields.append('active')
+
+            if getattr(subscription, 'cancel_at_period_end', None) != stripe_cancel:
+                subscription.cancel_at_period_end = stripe_cancel
+                update_fields.append('cancel_at_period_end')
+
+            # Keep key timestamps in sync for display.
+            try:
+                from datetime import datetime
+                from django.utils import timezone as django_tz
+                cpe = stripe_sub.get('current_period_end')
+                if cpe:
+                    cpe_dt = django_tz.make_aware(datetime.fromtimestamp(int(cpe)))
+                    if getattr(subscription, 'current_period_end', None) != cpe_dt:
+                        subscription.current_period_end = cpe_dt
+                        update_fields.append('current_period_end')
+                te = stripe_sub.get('trial_end')
+                if te:
+                    te_dt = django_tz.make_aware(datetime.fromtimestamp(int(te)))
+                    if getattr(subscription, 'trial_end', None) != te_dt:
+                        subscription.trial_end = te_dt
+                        update_fields.append('trial_end')
+            except Exception:
+                pass
+
+            if update_fields:
+                try:
+                    subscription.save(update_fields=list(dict.fromkeys(update_fields)))
+                except Exception:
+                    subscription.save()
+        except Exception:
+            pass
 
     # Determine trial countdown regardless of Stripe subscription presence
     if subscription and subscription.status == "trialing" and subscription.trial_end and subscription.trial_end > now:
@@ -2016,7 +2080,7 @@ def cancel_subscription(request, org_slug):
             resp["message"] = "Cancellation scheduled for period end."
             return JsonResponse(resp)
 
-        # Trial: always schedule deletion + send scheduled-deletion email immediately.
+        # Trial: always schedule deactivation + send scheduled-deactivation email immediately.
         try:
             from accounts.models import Profile
             from accounts.emails import send_trial_deletion_scheduled_email
@@ -2038,7 +2102,7 @@ def cancel_subscription(request, org_slug):
         except Exception:
             resp["trial_deletion_email_sent"] = False
 
-        resp["message"] = "Cancellation scheduled for trial end. Your account will be deleted at trial end unless you subscribe before then."
+        resp["message"] = "Cancellation scheduled for trial end. Your account will be deactivated at trial end unless you subscribe before then."
         return JsonResponse(resp)
 
     try:
@@ -2119,7 +2183,7 @@ def cancel_subscription(request, org_slug):
                 email_sent = False
             message = "Cancellation scheduled for period end."
 
-        # Trial: schedule deletion + send scheduled-deletion email immediately.
+        # Trial: schedule deactivation + send scheduled-deactivation email immediately.
         # Do this whenever a trial is set to cancel-at-period-end (no reliance on client flags).
         if is_trial:
             delete_at = getattr(sub, 'trial_end', None) or getattr(sub, 'current_period_end', None)
@@ -2142,7 +2206,7 @@ def cancel_subscription(request, org_slug):
                     business_names=business_names,
                 ))
 
-                message = "Cancellation scheduled for trial end. Your account will be deleted at trial end unless you subscribe before then."
+                message = "Cancellation scheduled for trial end. Your account will be deactivated at trial end unless you subscribe before then."
             except Exception:
                 logger.exception('Failed to schedule account deletion at trial end')
                 deletion_email_sent = False
@@ -2169,27 +2233,46 @@ def reactivate_subscription(request, org_slug):
     if err:
         return err
     sub = getattr(org, "subscription", None)
-    if not sub or not sub.stripe_subscription_id:
+    if not sub:
         return HttpResponseBadRequest("No subscription.")
+
+    # If there is a Stripe subscription, clear cancel_at_period_end in Stripe.
+    if getattr(sub, 'stripe_subscription_id', None):
+        try:
+            stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=False)
+        except Exception as e:
+            return HttpResponseBadRequest(str(e))
+
+    # Local state: always clear cancel_at_period_end.
+    sub.cancel_at_period_end = False
+
+    # If local status got marked as canceled for UI purposes, restore it.
+    now = timezone.now()
+    if getattr(sub, 'trial_end', None) and now < sub.trial_end:
+        sub.status = 'trialing'
+    else:
+        sub.status = 'active'
+    sub.active = True
+
     try:
-        stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=False)
-        sub.cancel_at_period_end = False
+        sub.save(update_fields=['cancel_at_period_end', 'status', 'active'])
+    except Exception:
         sub.save()
 
-        # If this org was on a trial-cancel path, clear any scheduled account deletion.
-        try:
-            from accounts.models import Profile
-            owner = getattr(org, 'owner', None)
-            if owner:
-                Profile.objects.filter(user=owner, scheduled_account_deletion_reason='trial_cancel_at_period_end').update(
-                    scheduled_account_deletion_at=None,
-                    scheduled_account_deletion_reason=None,
-                )
-        except Exception:
-            pass
-    except Exception as e:
-        return HttpResponseBadRequest(str(e))
-    return JsonResponse({"status": "ok"})
+    # If this org was on a trial-cancel path, clear any scheduled account deletion.
+    try:
+        from accounts.models import Profile
+        owner = getattr(org, 'owner', None)
+        if owner:
+            Profile.objects.filter(user=owner, scheduled_account_deletion_reason='trial_cancel_at_period_end').update(
+                scheduled_account_deletion_at=None,
+                scheduled_account_deletion_reason=None,
+            )
+    except Exception:
+        pass
+
+    is_trial = bool(getattr(sub, 'trial_end', None) and now < sub.trial_end)
+    return JsonResponse({"status": "ok", "message": "Subscription reactivated.", "is_trial": is_trial})
 
 
 @require_http_methods(["POST"])
@@ -2469,6 +2552,26 @@ def change_subscription_plan(request, org_slug, plan_id):
     # Case 1: Trial without Stripe subscription - either schedule plan change
     # to take effect after trial, or create a Stripe subscription immediately.
     if sub and not sub.stripe_subscription_id:
+        # User is choosing a plan (scheduled or immediate). This implies they no longer
+        # want to cancel at trial/period end.
+        try:
+            if getattr(sub, 'cancel_at_period_end', False):
+                sub.cancel_at_period_end = False
+        except Exception:
+            pass
+
+        # Clear any scheduled trial-end account deletion when user picks a plan.
+        try:
+            from accounts.models import Profile
+            owner = getattr(org, 'owner', None)
+            if owner:
+                Profile.objects.filter(user=owner, scheduled_account_deletion_reason='trial_cancel_at_period_end').update(
+                    scheduled_account_deletion_at=None,
+                    scheduled_account_deletion_reason=None,
+                )
+        except Exception:
+            pass
+
         if not org.stripe_customer_id:
             return HttpResponseBadRequest("No Stripe customer. Add payment method first.")
 
@@ -2476,7 +2579,10 @@ def change_subscription_plan(request, org_slug, plan_id):
         # pointer and don't create a Stripe subscription yet.
         if not start_immediately:
             sub.plan = new_plan
-            sub.save()
+            try:
+                sub.save(update_fields=['plan', 'cancel_at_period_end'])
+            except Exception:
+                sub.save()
             return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
 
         try:
@@ -2506,6 +2612,7 @@ def change_subscription_plan(request, org_slug, plan_id):
             sub.plan = new_plan
             sub.status = stripe_sub.status
             sub.active = (stripe_sub.status == "active")
+            sub.cancel_at_period_end = False
             if stripe_sub.get("current_period_end"):
                 from datetime import datetime
                 sub.current_period_end = timezone.make_aware(datetime.fromtimestamp(stripe_sub["current_period_end"]))
@@ -2521,6 +2628,37 @@ def change_subscription_plan(request, org_slug, plan_id):
     # Case 2: Existing Stripe subscription - modify it
     if not sub or not sub.stripe_subscription_id:
         return HttpResponseBadRequest("No subscription.")
+
+    # User is changing plans; ensure the subscription is not set to cancel-at-period-end.
+    # Important: don't trust local state here. If Stripe still has cancel_at_period_end=true
+    # (e.g., local DB missed a webhook update), subsequent Stripe webhooks can reapply the
+    # canceling flag after the plan change, causing the UI to stay in "reactivate" mode.
+    try:
+        try:
+            stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=False)
+        except Exception:
+            # Best-effort; still clear locally so UI reflects intent.
+            pass
+        if getattr(sub, 'cancel_at_period_end', False):
+            sub.cancel_at_period_end = False
+            try:
+                sub.save(update_fields=['cancel_at_period_end'])
+            except Exception:
+                sub.save()
+    except Exception:
+        pass
+
+    # Clear any scheduled trial-end account deletion when user resumes billing.
+    try:
+        from accounts.models import Profile
+        owner = getattr(org, 'owner', None)
+        if owner:
+            Profile.objects.filter(user=owner, scheduled_account_deletion_reason='trial_cancel_at_period_end').update(
+                scheduled_account_deletion_at=None,
+                scheduled_account_deletion_reason=None,
+            )
+    except Exception:
+        pass
     # Prefer using Stripe's live subscription price to determine upgrade vs downgrade
     current_price = None
     stripe_sub_obj = None
@@ -2544,7 +2682,10 @@ def change_subscription_plan(request, org_slug, plan_id):
     # record the desired plan locally to take effect after trial ends.
     if not start_immediately and getattr(sub, 'status', '') == 'trialing':
         sub.plan = new_plan
-        sub.save()
+        try:
+            sub.save(update_fields=['plan', 'cancel_at_period_end'])
+        except Exception:
+            sub.save()
         return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
 
     # Decide upgrade vs downgrade based on Stripe price (preferred) or local DB price
@@ -2614,6 +2755,7 @@ def change_subscription_plan(request, org_slug, plan_id):
             sub.plan = new_plan
             sub.status = new_sub.get('status')
             sub.active = (sub.status == 'active' or sub.status == 'trialing')
+            sub.cancel_at_period_end = False
             if new_sub.get('current_period_end'):
                 from datetime import datetime
                 sub.current_period_end = timezone.make_aware(datetime.fromtimestamp(new_sub['current_period_end']))

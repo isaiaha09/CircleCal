@@ -114,14 +114,10 @@
             {% endif %}
             {# Show next charge amount/date in the subscription details when available #}
             {% if upcoming_invoice_adjusted %}
-              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
+              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}{% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %} <span class="ml-2 text-gray-600" id="nextChargeCountdown">—</span>{% endif %}</div>
               <div class="text-sm text-green-700 mt-1">Discount: -${{ upcoming_invoice_adjusted.discount_amount|floatformat:2 }} — Original: <s>${{ upcoming_invoice_adjusted.original|floatformat:2 }}</s></div>
             {% elif upcoming_invoice %}
-              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
-            {% endif %}
-
-            {% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %}
-              <div class="text-sm mt-2"><strong>Next charge in:</strong> <span id="nextChargeCountdown">—</span></div>
+              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}{% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %} <span class="ml-2 text-gray-600" id="nextChargeCountdown">—</span>{% endif %}</div>
             {% endif %}
           </div>
           <div class="flex items-center gap-2">
@@ -1461,7 +1457,7 @@
     const msg = document.createElement('div');
     msg.className = 'text-sm text-gray-800';
     if (isTrial) {
-      msg.textContent = 'This will schedule cancellation for the end of your trial. Your account will be automatically deleted when the trial ends unless you subscribe before then. We will send you an email confirming the scheduled deletion.';
+      msg.textContent = 'This will schedule cancellation for the end of your trial. Your CircleCal account will be automatically deactivated when the trial ends unless you subscribe before then. We will send you an email confirming the scheduled deactivation.';
     } else {
       msg.textContent = 'This will schedule cancellation for the end of your current billing period. You will keep access until then.';
     }
@@ -1503,7 +1499,7 @@
         try { console.log('cancel_subscription response', data); } catch (e) {}
 
         const msgText = (data && data.message) ? data.message : (isTrial
-          ? 'Cancellation scheduled. Account will be deleted at trial end unless you subscribe.'
+          ? 'Cancellation scheduled. Account will be deactivated at trial end unless you subscribe.'
           : 'Cancellation scheduled for period end.'
         );
 
@@ -1545,10 +1541,33 @@
     document.body.appendChild(overlay);
   });
   const reactivateBtn = document.getElementById('reactivateBtn');
-  if (reactivateBtn) reactivateBtn.addEventListener('click', () => {
+  if (reactivateBtn) reactivateBtn.addEventListener('click', async () => {
     showLoading();
-    fetch(`/billing/api/bus/${orgSlug}/subscription/reactivate/`, { method: 'POST', headers: { 'X-CSRFToken': csrftoken }})
-      .then(() => { hideLoading(); window.location.reload(); }).catch(()=> { hideLoading(); window.location.reload(); });
+    try {
+      const resp = await fetch(`/billing/api/bus/${orgSlug}/subscription/reactivate/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({}),
+      });
+
+      let data = null;
+      try { data = await resp.json(); } catch (e) { data = null; }
+
+      if (!resp.ok) {
+        const msg = (data && (data.error || data.message)) ? String(data.error || data.message) : 'Failed to reactivate.';
+        showToast('error', msg, 6500);
+        return;
+      }
+
+      const msg = (data && data.message) ? String(data.message) : 'Subscription reactivated.';
+      showToast('success', msg, 4500);
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      showToast('error', 'Failed to reactivate: ' + (e && e.message ? e.message : String(e)), 6500);
+    } finally {
+      hideLoading();
+    }
   });
   const immediateCancelBtn = document.getElementById('immediateCancelBtn');
   if (immediateCancelBtn) immediateCancelBtn.addEventListener('click', () => {

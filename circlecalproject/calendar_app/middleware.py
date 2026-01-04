@@ -175,8 +175,8 @@ class OrganizationMiddleware:
 
             if (not is_test_run) and needs_connect:
                 if not getattr(settings, 'STRIPE_SECRET_KEY', None):
-                    # Opportunistic background cleanup: delete trial accounts whose scheduled
-                    # deletion time has passed. This avoids relying on manual CLI commands.
+                    # Opportunistic background cleanup: deactivate trial accounts whose scheduled
+                    # deactivation time has passed. This avoids relying on manual CLI commands.
                     # Skipped during tests.
                     try:
                         if not is_test_run:
