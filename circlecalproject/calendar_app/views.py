@@ -3175,6 +3175,30 @@ def edit_business(request, org_slug):
     Edit business details - only owners can edit.
     """
     org = get_object_or_404(Organization, slug=org_slug)
+
+    # Plan gate: business identity (name + public slug) requires Pro/Team (not trial).
+    can_change_identity = False
+    try:
+        from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
+        sub = get_subscription(org)
+        status = (getattr(sub, 'status', '') or '').lower() if sub else ''
+        plan_slug = (get_plan_slug(org) or '').lower()
+        can_change_identity = (
+            status == 'active'
+            and plan_slug in {PRO_SLUG, TEAM_SLUG}
+        )
+    except Exception:
+        # Fail closed if billing is unavailable.
+        can_change_identity = False
+
+    # Slug can only be changed before any bookings exist.
+    has_any_bookings = False
+    try:
+        from bookings.models import Booking
+        has_any_bookings = Booking.objects.filter(organization=org).only('id').exists()
+    except Exception:
+        has_any_bookings = False
+    can_change_slug = can_change_identity and (not has_any_bookings)
     
     # Check if user is effectively owner (by field or role)
     membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
@@ -3185,10 +3209,118 @@ def edit_business(request, org_slug):
         return redirect('calendar_app:choose_business')
     
     if request.method == "POST":
-        org.name = request.POST.get('name', org.name).strip()
+        identity_change_attempted = False
+        slug_changed = False
+
+        # Optional: change public URL slug (only if there are no bookings).
+        try:
+            requested_slug_raw = (request.POST.get('public_slug') or '').strip()
+        except Exception:
+            requested_slug_raw = ''
+
+        if requested_slug_raw and requested_slug_raw != org.slug:
+            identity_change_attempted = True
+            if not can_change_identity:
+                # Ignore slug edits when not eligible; timezone can still be saved.
+                pass
+            elif not can_change_slug:
+                messages.error(request, "You can only change your public URL before any appointments have been booked.")
+                return redirect('calendar_app:edit_business', org_slug=org.slug)
+            else:
+                old_slug_for_stripe = org.slug
+                try:
+                    from django.utils.text import slugify
+                    requested_slug = slugify(requested_slug_raw)
+                except Exception:
+                    requested_slug = (requested_slug_raw or '').strip().lower().replace(' ', '-')
+
+                if not requested_slug:
+                    messages.error(request, "Please enter a valid public URL slug.")
+                    return redirect('calendar_app:edit_business', org_slug=org.slug)
+
+                if Organization.objects.filter(slug=requested_slug).exclude(id=org.id).exists():
+                    messages.error(request, "That public URL is already taken. Please choose another.")
+                    return redirect('calendar_app:edit_business', org_slug=org.slug)
+
+                # Store old slug so old links can permanently redirect.
+                try:
+                    from accounts.models import BusinessSlugRedirect
+                    BusinessSlugRedirect.objects.get_or_create(old_slug=org.slug, defaults={'business': org})
+                except Exception:
+                    # Best-effort; do not block rename if redirect row can't be written.
+                    pass
+
+                org.slug = requested_slug
+                slug_changed = True
+
+        requested_name = (request.POST.get('name', org.name) or '').strip()
+        if requested_name != org.name:
+            identity_change_attempted = True
+            if can_change_identity:
+                org.name = requested_name
+
         org.timezone = request.POST.get('timezone', org.timezone)
         org.save()
-        messages.success(request, f"Business '{org.name}' updated successfully.")
+
+        # Best-effort: keep Stripe dashboard metadata in sync with latest slug.
+        if slug_changed and getattr(org, 'stripe_customer_id', None):
+            try:
+                import logging
+                logger = logging.getLogger(__name__)
+                from django.conf import settings
+                if getattr(settings, 'STRIPE_SECRET_KEY', None):
+                    import stripe
+                    stripe.api_key = settings.STRIPE_SECRET_KEY
+                    stripe.Customer.modify(
+                        org.stripe_customer_id,
+                        metadata={
+                            'organization_id': str(org.id),
+                            'org_slug': str(org.slug),
+                        },
+                    )
+                    try:
+                        from billing.models import Subscription
+                        sub = Subscription.objects.filter(organization=org).first()
+                        sub_id = getattr(sub, 'stripe_subscription_id', None) if sub else None
+                        if sub_id:
+                            stripe.Subscription.modify(
+                                sub_id,
+                                metadata={
+                                    'organization_id': str(org.id),
+                                    'org_slug': str(org.slug),
+                                },
+                            )
+                    except Exception:
+                        logger.exception(
+                            'Stripe metadata sync: failed to update subscription metadata',
+                            extra={
+                                'organization_id': str(org.id),
+                                'org_slug': str(org.slug),
+                            },
+                        )
+                else:
+                    logger.warning(
+                        'Stripe metadata sync skipped: STRIPE_SECRET_KEY not configured',
+                        extra={
+                            'organization_id': str(org.id),
+                            'org_slug': str(org.slug),
+                        },
+                    )
+            except Exception:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception(
+                    'Stripe metadata sync failed (customer update)',
+                    extra={
+                        'organization_id': str(org.id),
+                        'org_slug': str(org.slug),
+                    },
+                )
+
+        if identity_change_attempted and (not can_change_identity):
+            messages.error(request, "Changing business name or public URL requires an active Pro/Team plan (not trial).")
+        else:
+            messages.success(request, f"Business '{org.name}' updated successfully.")
         return redirect('calendar_app:choose_business')
     
     # Get list of common timezones
@@ -3204,6 +3336,9 @@ def edit_business(request, org_slug):
     return render(request, "calendar_app/edit_business.html", {
         "org": org,
         "timezones": common_timezones,
+        "has_any_bookings": has_any_bookings,
+        "can_change_slug": can_change_slug,
+        "can_change_identity": can_change_identity,
     })
 
 
@@ -3298,6 +3433,214 @@ def org_refund_settings(request, org_slug):
     return render(request, "calendar_app/org_refund_settings.html", {
         "org": org,
         "settings": settings_obj,
+    })
+
+
+@require_http_methods(["GET", "POST"])
+@require_roles(["owner", "admin"])
+def org_custom_domain_settings(request, org_slug):
+    """Allow Pro/Team orgs to verify and use a custom booking domain."""
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
+    is_owner = bool((org.owner_id == request.user.id) or (membership and membership.role == 'owner'))
+
+    can_use = False
+    is_trialing = False
+    try:
+        from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        plan_slug = get_plan_slug(org)
+        can_use = bool((plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing) and (sub is not None))
+    except Exception:
+        can_use = False
+
+    import secrets
+    from django.utils import timezone
+
+    from calendar_app.render_api import (
+        RenderApiError,
+        ensure_custom_domain_attached,
+        get_render_config,
+        delete_custom_domain,
+        list_custom_domains,
+        retrieve_service,
+    )
+
+    def _normalize_domain(raw: str) -> str:
+        d = (raw or '').strip()
+        d = d.replace('https://', '').replace('http://', '').strip()
+        d = d.split('/', 1)[0].strip()
+        d = d.split(':', 1)[0].strip()
+        return d.lower()
+
+    def _check_txt(domain: str, token: str) -> bool:
+        try:
+            import dns.resolver
+
+            qname = f"_circlecal-verify.{domain}."
+            answers = dns.resolver.resolve(qname, 'TXT')
+            for rdata in answers:
+                try:
+                    # dnspython may expose bytes in rdata.strings
+                    parts = getattr(rdata, 'strings', None)
+                    if parts:
+                        value = b''.join(parts).decode('utf-8', errors='ignore')
+                    else:
+                        value = str(rdata).strip('"')
+                    if token and token in value:
+                        return True
+                except Exception:
+                    continue
+            return False
+        except Exception:
+            return False
+
+    if request.method == "POST":
+        action = (request.POST.get('action') or '').strip()
+
+        if not can_use:
+            messages.error(request, 'Custom domains require an active Pro or Team plan (not trial).')
+            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+        if action == 'set_domain':
+            new_domain = _normalize_domain(request.POST.get('custom_domain'))
+            if not new_domain:
+                messages.error(request, 'Enter a domain like booking.yoursite.com')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+            org.custom_domain = new_domain
+            org.custom_domain_verified = False
+            org.custom_domain_verified_at = None
+            if not org.custom_domain_verification_token:
+                org.custom_domain_verification_token = secrets.token_urlsafe(16)
+            try:
+                org.save(update_fields=[
+                    'custom_domain',
+                    'custom_domain_verified',
+                    'custom_domain_verified_at',
+                    'custom_domain_verification_token',
+                ])
+                messages.success(request, 'Domain saved. Add the TXT record and click Verify.')
+            except Exception:
+                messages.error(request, 'Could not save domain. It may already be in use.')
+            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+        if action == 'verify_domain':
+            domain = (org.custom_domain or '').strip().lower()
+            token = (org.custom_domain_verification_token or '').strip()
+            if not domain or not token:
+                messages.error(request, 'Set a domain first.')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+            ok = _check_txt(domain, token)
+            if ok:
+                org.custom_domain_verified = True
+                org.custom_domain_verified_at = timezone.now()
+                org.save(update_fields=['custom_domain_verified', 'custom_domain_verified_at'])
+                cfg = get_render_config()
+                if cfg:
+                    try:
+                        ensure_custom_domain_attached(cfg, domain)
+                        messages.success(request, 'Domain verified! Render is now provisioning HTTPS for this domain.')
+                    except RenderApiError as exc:
+                        # Keep CircleCal verification successful even if Render API fails.
+                        messages.success(request, 'Domain verified!')
+                        messages.warning(request, f'Render domain auto-attach failed: {exc}')
+                    except Exception:
+                        messages.success(request, 'Domain verified!')
+                        messages.warning(request, 'Render domain auto-attach failed due to an unexpected error.')
+                else:
+                    messages.success(request, 'Domain verified!')
+            else:
+                messages.error(request, 'TXT record not found yet. DNS can take a few minutes to propagate.')
+            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+        if action == 'remove_domain':
+            prev_domain = (org.custom_domain or '').strip().lower()
+            cfg = get_render_config()
+            if cfg and prev_domain:
+                try:
+                    delete_custom_domain(cfg, prev_domain)
+                except Exception:
+                    # Don't block removal if Render cleanup fails.
+                    pass
+
+            org.custom_domain = None
+            org.custom_domain_verified = False
+            org.custom_domain_verified_at = None
+            org.custom_domain_verification_token = None
+            org.save(update_fields=[
+                'custom_domain',
+                'custom_domain_verified',
+                'custom_domain_verified_at',
+                'custom_domain_verification_token',
+            ])
+            messages.success(request, 'Custom domain removed.')
+            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+        if action == 'test_render_api':
+            if not is_owner:
+                messages.error(request, 'Only the business owner can test the Render API connection.')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+            cfg = get_render_config()
+            if not cfg:
+                messages.error(request, 'Render auto-attach is not configured. Set RENDER_API_KEY and RENDER_SERVICE_ID in your environment.')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+            try:
+                service = retrieve_service(cfg)
+                service_name = (service.get('name') or '').strip() if isinstance(service, dict) else ''
+                if service_name:
+                    messages.success(request, f'Render API connection OK. Service: {service_name}')
+                else:
+                    messages.success(request, 'Render API connection OK.')
+            except RenderApiError as exc:
+                if exc.status_code in (401, 403):
+                    messages.error(request, 'Render API connection failed: invalid API key or insufficient permissions.')
+                elif exc.status_code == 404:
+                    messages.error(request, 'Render API connection failed: service not found (check RENDER_SERVICE_ID).')
+                else:
+                    messages.error(request, f'Render API connection failed: {exc}')
+            except Exception:
+                messages.error(request, 'Render API connection failed due to an unexpected error.')
+
+            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+    txt_name = None
+    txt_value = None
+    if getattr(org, 'custom_domain', None) and getattr(org, 'custom_domain_verification_token', None):
+        txt_name = f"_circlecal-verify.{org.custom_domain}"
+        txt_value = org.custom_domain_verification_token
+
+    render_enabled = False
+    render_verification_status = None
+    try:
+        cfg = get_render_config()
+        render_enabled = bool(cfg)
+        if cfg and getattr(org, 'custom_domain', None):
+            target = (org.custom_domain or '').strip().lower()
+            for row in list_custom_domains(cfg):
+                cd = (row or {}).get('customDomain') if isinstance(row, dict) else None
+                if not isinstance(cd, dict):
+                    continue
+                if (cd.get('name') or '').strip().lower() == target:
+                    render_verification_status = cd.get('verificationStatus')
+                    break
+    except Exception:
+        # Render API is optional; keep the page working even if it errors.
+        render_enabled = bool(get_render_config())
+
+    return render(request, 'calendar_app/org_custom_domain_settings.html', {
+        'org': org,
+        'can_use_custom_domain': can_use,
+        'is_trialing': is_trialing,
+        'txt_name': txt_name,
+        'txt_value': txt_value,
+        'render_enabled': render_enabled,
+        'render_verification_status': render_verification_status,
+        'is_owner': is_owner,
     })
 
 
@@ -3924,7 +4267,7 @@ def logout(request):
 
 
 @login_required
-@require_roles(['owner', 'admin', 'manager', 'staff'])
+@require_roles(['owner', 'admin'])
 def services_page(request, org_slug):
     """
     List all services for this organization (internal management page).
@@ -3977,12 +4320,61 @@ def services_page(request, org_slug):
         for s in services:
             s.assigned_names = []
 
+    # Pro/Team-only: public embed widget (iframe) using a revocable per-business key.
+    embed_widget_available = False
+    embed_services_embed_src = None
+    try:
+        from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
+        sub = get_subscription(org)
+        plan_slug = get_plan_slug(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        is_active = True
+        try:
+            is_active = bool(sub and callable(getattr(sub, 'is_active', None)) and sub.is_active())
+        except Exception:
+            is_active = True
+
+        embed_widget_available = bool((plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing) and (sub is not None) and is_active)
+    except Exception:
+        embed_widget_available = False
+
+    if embed_widget_available:
+        try:
+            import secrets
+            if not getattr(org, 'embed_key', None):
+                org.embed_key = secrets.token_urlsafe(24)
+            if not getattr(org, 'embed_enabled', False):
+                org.embed_enabled = True
+            org.save(update_fields=['embed_key', 'embed_enabled'])
+        except Exception:
+            pass
+
+        try:
+            from django.urls import reverse
+            base = request.build_absolute_uri(reverse('bookings:public_org_page', args=[org.slug]))
+            embed_services_embed_src = f"{base}?embed=1&key={getattr(org, 'embed_key', '')}"
+
+            # Attach per-service embed src for template convenience.
+            for service in services:
+                try:
+                    service_base = request.build_absolute_uri(
+                        reverse('bookings:public_service_page', args=[org.slug, service.slug])
+                    )
+                    service.embed_src = f"{service_base}?embed=1&key={getattr(org, 'embed_key', '')}"
+                except Exception:
+                    service.embed_src = None
+        except Exception:
+            embed_services_embed_src = None
+
     return render(request, "calendar_app/services.html", {
         "org": org,
         "services": services,
         "can_add_more_services": can_add_more_services,
         "show_upgrade_modal": bool(upgrade_prompt == 'service_limit'),
         "upgrade_prompt_reason": upgrade_prompt,
+        "embed_widget_available": embed_widget_available,
+        "embed_services_embed_src": embed_services_embed_src,
+        "embed_key": getattr(org, 'embed_key', None),
     })
 
 

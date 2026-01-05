@@ -33,6 +33,83 @@ from bookings.models import build_offline_payment_instructions
 from billing.utils import can_use_offline_payment_methods
 
 
+def _is_embed_request(request) -> bool:
+    try:
+        return (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+    except Exception:
+        return False
+
+
+def _request_host_no_port(request) -> str:
+    try:
+        host = (request.get_host() or '').strip()
+    except Exception:
+        host = ''
+    if not host:
+        return ''
+    return host.split(':', 1)[0].lower()
+
+
+def _embed_breakout_required(request, org: Organization) -> bool:
+    """Return True when the embed should break out to a top-level page.
+
+    CircleCal-hosted embeds (third-party to the customer's site) are brittle due
+    to modern third-party cookie restrictions. If the booking page is served
+    from a verified custom domain (booking.customer.com), keep the full flow
+    inside the iframe.
+    """
+    host = _request_host_no_port(request)
+    try:
+        custom = (getattr(org, 'custom_domain', None) or '').strip().lower()
+        verified = bool(getattr(org, 'custom_domain_verified', False))
+        if verified and custom and host and host == custom:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
+    """Validate iframe embed access.
+
+    Embed is a Pro/Team feature and requires a matching per-business embed key.
+    """
+    key = None
+    try:
+        key = (request.GET.get('key') or request.POST.get('key') or '').strip()
+    except Exception:
+        key = ''
+
+    if not key:
+        return False, 'missing_key'
+
+    if not bool(getattr(org, 'embed_enabled', False)):
+        return False, 'embed_disabled'
+
+    if (getattr(org, 'embed_key', None) or '') != key:
+        return False, 'invalid_key'
+
+    try:
+        plan_slug = get_plan_slug(org)
+        if plan_slug not in {PRO_SLUG, TEAM_SLUG}:
+            return False, 'plan_required'
+        sub = get_subscription(org)
+        if not sub:
+            return False, 'no_subscription'
+        if getattr(sub, 'status', '') == 'trialing':
+            return False, 'trial_not_eligible'
+        # Ensure billing is active (best-effort)
+        try:
+            if callable(getattr(sub, 'is_active', None)) and (not sub.is_active()):
+                return False, 'subscription_inactive'
+        except Exception:
+            pass
+    except Exception:
+        return False, 'unknown'
+
+    return True, 'ok'
+
+
 def _can_use_per_date_overrides(org: Organization) -> bool:
     """Per-date overrides are available on Pro/Team only (not Trial/Basic)."""
     try:
@@ -1367,8 +1444,26 @@ def batch_delete(request, org_slug):
 
 def public_org_page(request, org_slug):
     org = get_object_or_404(Organization, slug=org_slug)
+    is_embed = _is_embed_request(request)
+    embed_breakout = _embed_breakout_required(request, org) if is_embed else False
+    if is_embed:
+        ok, _reason = _validate_embed_access(request, org)
+        if not ok:
+            resp = render(request, 'public/embed_unavailable.html', {"org": org, "is_embed": True, "embed_breakout": True})
+            try:
+                resp.xframe_options_exempt = True
+            except Exception:
+                pass
+            return resp
+
     services = org.services.filter(is_active=True)
-    return render(request, "public/public_org_page.html", {"org": org, "services": services})
+    resp = render(request, "public/public_org_page.html", {"org": org, "services": services, "is_embed": is_embed, "embed_breakout": embed_breakout})
+    if is_embed:
+        try:
+            resp.xframe_options_exempt = True
+        except Exception:
+            pass
+    return resp
 
 
 def _build_public_service_page_context(
@@ -1385,6 +1480,7 @@ def _build_public_service_page_context(
     """Build template context for the public service booking page."""
 
     is_embed = (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+    embed_breakout = _embed_breakout_required(request, org) if is_embed else False
     org_stripe_connected = bool(getattr(org, 'stripe_connect_account_id', None)) and bool(getattr(org, 'stripe_connect_charges_enabled', False))
 
     # GET - add trial context for banner
@@ -1476,6 +1572,7 @@ def _build_public_service_page_context(
         "services": services,
         "service": service,
         "is_embed": is_embed,
+        "embed_breakout": embed_breakout,
         "org_stripe_connected": org_stripe_connected,
         "trialing_active": trialing_active,
         "trial_end_date": trial_end_date,
@@ -1504,6 +1601,17 @@ def public_service_page(request, org_slug, service_slug):
     """
     org = get_object_or_404(Organization, slug=org_slug)
     is_embed = (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+
+    if is_embed:
+        ok, _reason = _validate_embed_access(request, org)
+        if not ok:
+            resp = render(request, 'public/embed_unavailable.html', {"org": org, "is_embed": True})
+            try:
+                resp.xframe_options_exempt = True
+            except Exception:
+                pass
+            return resp
+
     org_stripe_connected = bool(getattr(org, 'stripe_connect_account_id', None)) and bool(getattr(org, 'stripe_connect_charges_enabled', False))
     services = Service.objects.filter(organization=org, is_active=True).order_by("name")
     # Inactive services should not be bookable or selectable on the public page.
@@ -1573,7 +1681,14 @@ def public_service_page(request, org_slug, service_slug):
             return ''
         return '/'.join(parts)
 
+    embed_breakout = _embed_breakout_required(request, org) if is_embed else False
+
     if request.method == "POST":
+        # Embedded widgets should not attempt same-origin CSRF-protected POSTs
+        # inside third-party iframes; redirect the user to the full booking page.
+        if is_embed and embed_breakout:
+            return redirect(reverse('bookings:public_service_page', args=[org.slug, service.slug]))
+
         client_name = request.POST.get("client_name")
         client_email = request.POST.get("client_email")
         start_str = request.POST.get("start")

@@ -24,6 +24,41 @@ def profile_view(request):
 	from .models import Profile
 	profile, _ = Profile.objects.get_or_create(user=user)
 
+	def _annotate_membership_plan_features(membership_qs):
+		"""Attach per-org feature flags used by the Profile UI.
+
+		We intentionally compute this per membership (org), since users can belong
+		to multiple businesses with different plans.
+		"""
+		items = list(membership_qs)
+		for m in items:
+			org_obj = getattr(m, 'organization', None)
+			eligible = False
+			try:
+				from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
+				sub = get_subscription(org_obj)
+				plan_slug = get_plan_slug(org_obj)
+				is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+				is_active = True
+				try:
+					is_active = bool(sub and callable(getattr(sub, 'is_active', None)) and sub.is_active())
+				except Exception:
+					is_active = True
+				eligible = bool((plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing) and (sub is not None) and is_active)
+			except Exception:
+				eligible = False
+
+			# Used by profile.html to enable/disable buttons.
+			try:
+				m.can_use_embed_widget = eligible
+			except Exception:
+				pass
+			try:
+				m.can_use_custom_domain = eligible
+			except Exception:
+				pass
+		return items
+
 	# Business-level offline payment info (owner-only)
 	org = getattr(request, 'organization', None)
 	is_owner_for_org = False
@@ -121,7 +156,7 @@ def profile_view(request):
 				"activities": activities,
 				"subscription": sub,
 				"organization": org2,
-				"memberships": Membership.objects.filter(user=user).select_related('organization'),
+				"memberships": _annotate_membership_plan_features(Membership.objects.filter(user=user).select_related('organization')),
 				"pending_invites": Invite.objects.filter(email=user.email, accepted=False).select_related('organization') if user.email else [],
 				"is_owner_for_org": is_owner_for_org,
 				"org_offline_venmo": org_offline_venmo,
@@ -211,7 +246,7 @@ def profile_view(request):
 		stripe_connect_start_url = None
 
 	# Team/org info
-	memberships = Membership.objects.filter(user=user).select_related('organization')
+	memberships = _annotate_membership_plan_features(Membership.objects.filter(user=user).select_related('organization'))
 	pending_invites = Invite.objects.filter(email=user.email, accepted=False).select_related('organization') if user.email else []
 
 

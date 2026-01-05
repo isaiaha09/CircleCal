@@ -71,6 +71,7 @@ urlpatterns = [
 
     # Org refund settings
     path('bus/<slug:org_slug>/settings/refunds/', views.org_refund_settings, name="org_refund_settings"),
+    path('bus/<slug:org_slug>/settings/domain/', views.org_custom_domain_settings, name="org_custom_domain_settings"),
 
 
 ]

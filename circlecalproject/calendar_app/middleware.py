@@ -2,6 +2,7 @@
 import os
 import sys
 from django.shortcuts import redirect
+from django.http import HttpResponseBadRequest, HttpResponsePermanentRedirect
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from accounts.models import Business as Organization, Membership
@@ -10,6 +11,88 @@ from billing.models import Subscription, Plan
 from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
+
+
+class CustomDomainMiddleware:
+    """Support verified per-business custom domains (e.g. booking.example.com).
+
+    This middleware:
+    - Detects whether the request host matches a verified Business.custom_domain
+    - Redirects '/' on that host to the org's public booking page
+    - Optionally validates hosts when ALLOWED_HOSTS is permissive (production)
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @staticmethod
+    def _raw_host_without_port(request):
+        """Return the HTTP host without consulting Django's ALLOWED_HOSTS.
+
+        We intentionally avoid request.get_host() here because it raises
+        DisallowedHost before we can auto-allow verified custom domains.
+        """
+        try:
+            raw = (request.META.get('HTTP_HOST') or request.META.get('SERVER_NAME') or '').strip()
+        except Exception:
+            raw = ''
+        if not raw:
+            return ''
+        return raw.split(':', 1)[0].lower()
+
+    @staticmethod
+    def _ensure_allowed_host(host: str):
+        """Best-effort: add host to settings.ALLOWED_HOSTS if needed."""
+        if not host:
+            return
+        try:
+            allowed = getattr(settings, 'ALLOWED_HOSTS', [])
+            if '*' in (allowed or []):
+                return
+            # Normalize to a mutable list
+            if isinstance(allowed, tuple):
+                allowed = list(allowed)
+            if not isinstance(allowed, list):
+                return
+            if host not in [h.lower() for h in allowed]:
+                allowed.append(host)
+                settings.ALLOWED_HOSTS = allowed
+        except Exception:
+            return
+
+    def __call__(self, request):
+        request.custom_domain_organization = None
+
+        host = self._raw_host_without_port(request)
+        if not host:
+            return self.get_response(request)
+
+        # Django test client uses 'testserver'
+        if host in {'testserver'}:
+            return self.get_response(request)
+
+        org = None
+        try:
+            org = Organization.objects.filter(custom_domain__iexact=host, custom_domain_verified=True).first()
+        except Exception:
+            org = None
+
+        if org:
+            request.custom_domain_organization = org
+
+            # Auto-allow this verified host so downstream middleware that calls
+            # request.get_host() doesn't raise DisallowedHost.
+            self._ensure_allowed_host(host)
+
+            # Branded root: https://booking.example.com/ => /bus/<slug>/
+            try:
+                if (request.path or '/') == '/':
+                    from django.urls import reverse
+                    return redirect(reverse('bookings:public_org_page', args=[org.slug]))
+            except Exception:
+                pass
+
+        return self.get_response(request)
 class OrganizationMiddleware:
     """
     Resolve the organization for the current request.
@@ -317,3 +400,50 @@ class AdminPinMiddleware:
             return redirect(f'/admin/pin/?{qs}')
 
         return self.get_response(request)
+
+
+class BusinessSlugRedirectMiddleware:
+    """Redirect old /bus/<slug>/ links after a business changes its public slug."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path or ''
+        if not path.startswith('/bus/'):
+            return self.get_response(request)
+
+        parts = path.strip('/').split('/')
+        if len(parts) < 2:
+            return self.get_response(request)
+
+        slug = (parts[1] or '').strip()
+        if not slug:
+            return self.get_response(request)
+
+        # Fast path: slug exists
+        try:
+            if Organization.objects.filter(slug=slug).only('id').exists():
+                return self.get_response(request)
+        except Exception:
+            return self.get_response(request)
+
+        # Redirect path: slug used to exist
+        try:
+            from accounts.models import BusinessSlugRedirect
+            row = BusinessSlugRedirect.objects.select_related('business').filter(old_slug=slug).first()
+            if not row or not getattr(row, 'business', None):
+                return self.get_response(request)
+            new_slug = getattr(row.business, 'slug', None)
+            if not new_slug or new_slug == slug:
+                return self.get_response(request)
+
+            parts[1] = new_slug
+            trailing = '/' if path.endswith('/') else ''
+            new_path = '/' + '/'.join(parts) + trailing
+            qs = request.META.get('QUERY_STRING') or ''
+            if qs:
+                new_path = new_path + '?' + qs
+            return HttpResponsePermanentRedirect(new_path)
+        except Exception:
+            return self.get_response(request)

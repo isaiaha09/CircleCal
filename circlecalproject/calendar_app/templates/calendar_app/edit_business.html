@@ -18,10 +18,57 @@
                 name="name" 
                 value="{{ org.name }}"
                 required
-                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;"
+                {% if not can_change_identity %}disabled{% endif %}
+                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;{% if not can_change_identity %} background: #f1f5f9; color: #64748b; cursor: not-allowed;{% endif %}"
                 onfocus="this.style.borderColor='#007bff'"
                 onblur="this.style.borderColor='#e0e0e0'"
             >
+            {% if not can_change_identity %}
+                <div style="margin-top:10px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">
+                    <strong>Plan required:</strong> Changing your business name or public URL requires an active <strong>Pro/Team</strong> plan (not trial). <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
+                </div>
+            {% endif %}
+        </div>
+
+        <div>
+            <label for="public_slug" style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Public Business URL (slug)</label>
+            <input
+                type="text"
+                id="public_slug"
+                name="public_slug"
+                value="{{ org.slug }}"
+                {% if not can_change_slug %}disabled{% endif %}
+                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;{% if not can_change_slug %} background: #f1f5f9; color: #64748b; cursor: not-allowed;{% endif %}"
+                onfocus="this.style.borderColor='#007bff'"
+                onblur="this.style.borderColor='#e0e0e0'"
+            >
+            <p style="margin-top:8px;color:#475569;font-size:0.95rem;">
+                This controls your public booking business URL: <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">/bus/{{ org.slug }}/</span>
+            </p>
+            <div style="margin-top:10px; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; color: #1e3a8a;">
+                <strong>FYI:</strong> Changing your business name or slug does <strong>not</strong> require redoing your <strong>Custom Domain</strong> setup.
+                Custom domain DNS only needs updates if you change the actual subdomain (example: <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">booking.yoursite.com</span> → <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">schedule.yoursite.com</span>).
+                {% if can_change_slug %}
+                    <div style="margin-top:8px; color:#334155;">
+                        If you have an embed on your website, it’s a good idea to re-copy the embed code from your Services page after changing the slug.
+                    </div>
+                {% endif %}
+            </div>
+            {% if can_change_slug %}
+                <p style="margin-top:6px;color:#475569;font-size:0.95rem;">
+                    You can change this only <strong>before any appointments have been booked</strong>. After your first booking, it becomes locked to avoid breaking links.
+                </p>
+            {% else %}
+                {% if not can_change_identity %}
+                    <div style="margin-top:10px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">
+                        <strong>Plan required:</strong> Upgrade to <strong>Pro/Team</strong> to change your public URL. <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
+                    </div>
+                {% else %}
+                    <div style="margin-top:10px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">
+                        <strong>Locked:</strong> You can’t change your public URL because this business already has booked appointments.
+                    </div>
+                {% endif %}
+            {% endif %}
         </div>
         
         <div>

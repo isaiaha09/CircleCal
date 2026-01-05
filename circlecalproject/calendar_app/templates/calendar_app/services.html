@@ -2,78 +2,153 @@
 {% block title %}Services – {{ org.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto py-8 px-4">
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-3xl font-bold text-gray-900">Services</h1>
-        <a href="{% url 'calendar_app:create_service' org.slug %}" 
+<div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <h1 class="text-2xl font-bold text-blue-700">Services</h1>
+            <p class="text-sm text-gray-600">Create and manage your bookable services.</p>
+        </div>
+        <a href="{% url 'calendar_app:create_service' org.slug %}"
            {% if not can_add_more_services %}data-cc-service-limit="1"{% endif %}
-           class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+           class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">
             + Create Service
         </a>
     </div>
 
+    {% if embed_widget_available and embed_services_embed_src %}
+        <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mb-6">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-bold text-blue-700">Embed widget</h2>
+                    <p class="text-sm text-gray-600 mt-1">Copy and paste this into your website to show your services and availability.</p>
+
+                    <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-white border border-blue-100 rounded-xl p-4">
+                                <div class="text-sm font-bold text-blue-800">Embed</div>
+                                <div class="text-sm text-gray-700 mt-1">Paste the iframe code into your website.</div>
+                            </div>
+                            <div class="bg-white border border-blue-100 rounded-xl p-4">
+                                <div class="text-sm font-bold text-blue-800">Custom domain (recommended)</div>
+                                <div class="text-sm text-gray-700 mt-1">Use a booking subdomain like <span class="font-mono">booking.yoursite.com</span> so the booking flow can reliably stay inside the iframe.</div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div class="text-sm text-gray-700">
+                                Set up your booking subdomain in Custom Domain settings.
+                            </div>
+                            <a href="{% url 'calendar_app:org_custom_domain_settings' org.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">Custom domain settings →</a>
+                        </div>
+
+                        {% if org.custom_domain and org.custom_domain_verified %}
+                            <div class="mt-3 pt-3 border-t border-blue-100 text-sm text-gray-700">
+                                <span class="font-semibold text-blue-800">Tip:</span>
+                                Once verified, use this as your iframe <span class="font-mono">src</span> (so the booking flow stays reliably embedded):
+                                <div class="mt-2">
+                                    <span class="font-mono">https://{{ org.custom_domain }}{% url 'bookings:public_org_page' org.slug %}?embed=1&key={{ embed_key|default:'' }}</span>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-blue-100">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="text-sm font-semibold text-blue-800">Embed code</div>
+                    <button type="button" class="btn-primary py-2 px-3 text-sm" onclick="window.ccCopyText('cc-embed-services-iframe', 'Embed code copied to clipboard.')">Copy code</button>
+                </div>
+                <textarea id="cc-embed-services-iframe" readonly rows="3" class="w-full mt-3 text-xs bg-gray-50 text-gray-800 border border-blue-100 rounded-xl p-3 font-mono">&lt;iframe src=&quot;{{ embed_services_embed_src }}&quot; style=&quot;width:100%;height:900px;border:0;&quot; loading=&quot;lazy&quot;&gt;&lt;/iframe&gt;</textarea>
+                <p class="text-xs text-gray-500 mt-2">Tip: adjust <span class="font-mono">height</span> as needed for your page layout.</p>
+            </div>
+        </div>
+    {% endif %}
+
     {% if services %}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             {% for service in services %}
-                <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg">
                     <div class="flex justify-between items-start mb-2">
-                        <h2 class="text-xl font-semibold text-white">
+                        <h2 class="text-xl font-bold text-gray-900">
                             {{ service.name }}
                             {% if service.assigned_names %}
-                                <span class="text-sm font-normal text-gray-400">&mdash; with {{ service.assigned_names|join:", " }}</span>
+                                <span class="text-sm font-normal text-gray-500">&mdash; with {{ service.assigned_names|join:", " }}</span>
                             {% endif %}
                         </h2>
                         {% if not service.is_active %}
-                            <span class="text-xs bg-gray-600 text-gray-300 px-2 py-1 rounded">Inactive</span>
+                            <span class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">Inactive</span>
                         {% endif %}
                     </div>
                     
-                    <p class="text-gray-400 text-sm mb-3">{{ service.description|default:"No description" }}</p>
+                    <p class="text-gray-600 text-sm">{{ service.description|default:"No description" }}</p>
                     
-                    <div class="grid grid-cols-2 gap-2 text-sm text-gray-300">
-                        <div>
-                            <span class="text-gray-500">Duration:</span> {{ service.duration }} min
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Price:</span> ${{ service.price }}
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Min Notice:</span> {{ service.min_notice_hours }}h
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Max Days:</span> {{ service.max_booking_days }}
+                    <div class="mt-4 bg-gray-50 border border-gray-100 rounded-xl p-4">
+                        <div class="grid grid-cols-2 gap-3 text-sm text-gray-700">
+                            <div>
+                                <div class="text-xs text-gray-500">Duration</div>
+                                <div class="font-semibold text-gray-900">{{ service.duration }} min</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500">Price</div>
+                                <div class="font-semibold text-gray-900">${{ service.price }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500">Min Notice</div>
+                                <div class="font-semibold text-gray-900">{{ service.min_notice_hours }}h</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500">Max Days</div>
+                                <div class="font-semibold text-gray-900">{{ service.max_booking_days }}</div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="mt-4 pt-4 border-t border-gray-700 flex items-center justify-between gap-2">
-                        <a href="{% url 'bookings:services_page' org.slug service.slug %}" 
+                    <div class="mt-4 pt-4 border-t border-blue-100 flex items-center justify-between gap-2">
+                        <a href="{% url 'bookings:services_page' org.slug service.slug %}"
                            target="_blank"
-                           class="text-blue-400 hover:text-blue-300 text-sm">
-                            View Public Page →
+                           class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">
+                            View public page →
                         </a>
                         <div class="flex items-center gap-3">
                             <a href="{% url 'calendar_app:edit_service' org.slug service.id %}" 
-                               class="inline-flex items-center text-yellow-400 hover:text-yellow-300 text-sm">
+                               class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">
                                 Edit
                             </a>
                             <form method="post" action="{% url 'calendar_app:delete_service' org.slug service.id %}" 
                                   onsubmit="return confirm('Delete {{ service.name }}? This cannot be undone.');"
                                   class="m-0 inline-flex items-center">
                                 {% csrf_token %}
-                                <button type="submit" class="inline-flex items-center text-red-400 hover:text-red-300 text-sm">
+                                <button type="submit" class="btn-danger inline-flex items-center justify-center px-4 py-2 text-sm">
                                     Delete
                                 </button>
                             </form>
                         </div>
                     </div>
+
+                    {% if embed_widget_available and service.embed_src %}
+                        <div class="mt-3">
+                            <details class="text-sm">
+                                <summary class="cursor-pointer text-blue-700 font-semibold underline">Embed this service</summary>
+                                <div class="mt-2">
+                                    <div class="mt-3 pt-3 border-t border-blue-100">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <div class="text-xs font-semibold text-blue-800">Embed code</div>
+                                            <button type="button" class="btn-primary py-2 px-3 text-xs" onclick="window.ccCopyText('cc-embed-service-{{ service.id }}', 'Service embed code copied to clipboard.')">Copy code</button>
+                                        </div>
+                                        <textarea id="cc-embed-service-{{ service.id }}" readonly rows="3" class="w-full mt-2 text-xs bg-gray-50 text-gray-800 border border-blue-100 rounded-xl p-3 font-mono">&lt;iframe src=&quot;{{ service.embed_src }}&quot; style=&quot;width:100%;height:900px;border:0;&quot; loading=&quot;lazy&quot;&gt;&lt;/iframe&gt;</textarea>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+                    {% endif %}
                 </div>
             {% endfor %}
         </div>
     {% else %}
-        <div class="bg-gray-800 border border-gray-700 rounded-lg p-8 text-center">
-            <p class="text-gray-400 mb-4">No services created yet.</p>
+        <div class="bg-white border border-blue-100 rounded-xl p-8 text-center shadow-lg">
+            <p class="text-gray-600 mb-4">No services created yet.</p>
             <a href="{% url 'calendar_app:create_service' org.slug %}" 
-               class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 inline-block">
+               class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">
                 Create Your First Service
             </a>
         </div>
@@ -81,9 +156,15 @@
 
     <div class="mt-6">
         <a href="{% url 'calendar_app:dashboard' org.slug %}" 
-           class="text-gray-400 hover:text-gray-300 text-sm">
+           class="text-blue-700 hover:underline text-sm font-semibold">
             ← Back to Dashboard
         </a>
+    </div>
+
+    <div id="ccCopyToast" class="fixed bottom-6 right-6 z-50 hidden" aria-live="polite" aria-atomic="true">
+        <div class="bg-white border border-blue-100 rounded-xl shadow-lg px-4 py-3">
+            <div id="ccCopyToastText" class="text-sm font-semibold text-gray-900">Copied to clipboard.</div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -103,6 +184,51 @@
 </div>
 
 <script>
+    window.ccCopyText = function(textareaId, message){
+        function showToast(msg){
+            try{
+                const toast = document.getElementById('ccCopyToast');
+                const text = document.getElementById('ccCopyToastText');
+                if (!toast || !text) return;
+                text.textContent = msg || 'Copied to clipboard.';
+                toast.classList.remove('hidden');
+                window.clearTimeout(window.__ccCopyToastTimer);
+                window.__ccCopyToastTimer = window.setTimeout(function(){
+                    try{ toast.classList.add('hidden'); }catch(e){}
+                }, 2200);
+            }catch(e){}
+        }
+
+        try{
+            const el = document.getElementById(textareaId);
+            if (!el) return;
+            const value = el.value || el.textContent || '';
+
+            // Prefer Clipboard API when available.
+            if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(value).then(function(){
+                    showToast(message || 'Copied to clipboard.');
+                }).catch(function(){
+                    try{
+                        el.focus();
+                        el.select();
+                        try{ document.execCommand('copy'); }catch(e){}
+                    }catch(e){}
+                    showToast(message || 'Copied to clipboard.');
+                });
+                return;
+            }
+
+            // Fallback for older browsers.
+            try{
+                el.focus();
+                el.select();
+                try{ document.execCommand('copy'); }catch(e){}
+            }catch(e){}
+            showToast(message || 'Copied to clipboard.');
+        }catch(e){}
+    };
+
     (function(){
         try{
             const PRICING_URL = "{% url 'calendar_app:pricing_page' org.slug %}";

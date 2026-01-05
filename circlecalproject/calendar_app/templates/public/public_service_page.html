@@ -252,6 +252,14 @@
   }
 </style>
 
+<script>
+  // In third-party iframes, cookies/CSRF often break (Safari/Chrome). For embed
+  // widgets we browse availability here, but complete booking on the full page.
+  window.CC_IS_EMBED = {{ is_embed|yesno:"true,false" }};
+  window.CC_EMBED_BREAKOUT = {{ embed_breakout|yesno:"true,false" }};
+  window.CC_TOP_BOOK_URL = "{% url 'bookings:public_service_page' org.slug service.slug %}";
+</script>
+
 <div class="calendar-container" style="position:relative;">
   
   {% if trialing_active %}
@@ -1098,6 +1106,22 @@ document.addEventListener("DOMContentLoaded", async function () {
       const selectedSlug = window.selectedServiceSlug || '{{ service.slug }}';
       if (serviceSelect && selectedSlug && serviceSelect.value !== selectedSlug) {
         serviceSelect.value = selectedSlug;
+      }
+    } catch (e) {}
+
+    // Embedded widget: break out of iframe for actual booking (only when needed).
+    try {
+      if (window.CC_IS_EMBED && window.CC_EMBED_BREAKOUT) {
+        try {
+          if (window.top) {
+            window.top.location.href = window.CC_TOP_BOOK_URL;
+          } else {
+            window.location.href = window.CC_TOP_BOOK_URL;
+          }
+        } catch (e) {
+          window.location.href = window.CC_TOP_BOOK_URL;
+        }
+        return;
       }
     } catch (e) {}
 

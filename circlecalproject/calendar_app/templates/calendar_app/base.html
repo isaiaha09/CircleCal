@@ -129,6 +129,41 @@
             .twofactor-page label[for*="token"], .twofactor-page .token-label {
                 display:block; font-weight:600; margin-bottom:6px; color:#0f172a;
             }
+
+            /* Shared button styles used across templates */
+            .btn-primary {
+                background: linear-gradient(90deg,#2563eb,#4f46e5);
+                color: white;
+                padding: .45rem .9rem;
+                border-radius: .5rem;
+                display: inline-block;
+                min-width: 10rem;
+                text-align: center;
+                transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+                text-decoration: none;
+            }
+            .btn-ghost {
+                background: transparent;
+                border: 1px solid #e5e7eb;
+                padding: .4rem .6rem;
+                border-radius: .5rem;
+                transition: background 120ms ease, border-color 120ms ease;
+                text-decoration: none;
+                color: inherit;
+            }
+            .btn-danger {
+                background: white;
+                border: 1px solid #f87171;
+                color: #b91c1c;
+                padding: .4rem .6rem;
+                border-radius: .5rem;
+                transition: transform 120ms ease, box-shadow 120ms ease;
+                text-decoration: none;
+            }
+            .btn-primary, .btn-ghost, .btn-danger { cursor: pointer; }
+            .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 10px 25px rgba(37,99,235,0.12); filter: brightness(1.03); }
+            .btn-ghost:hover { background: #f8fafc; border-color: #dbeafe; }
+            .btn-danger:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(248,113,113,0.08); }
         </style>
 
     {% block extra_head %}{% endblock %}

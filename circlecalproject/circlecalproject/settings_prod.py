@@ -26,8 +26,13 @@ def _env_csv(name: str, default_list: list[str]) -> list[str]:
 # You can override via env vars:
 #   ALLOWED_HOSTS=www.circlecal.app,circlecal.app
 #   CSRF_TRUSTED_ORIGINS=https://circlecal.app,https://www.circlecal.app
-ALLOWED_HOSTS = _env_csv(
-    "ALLOWED_HOSTS",
+_allow_custom_domains = _env_bool("ALLOW_CUSTOM_DOMAINS", False)
+
+# Canonical hosts are the hostnames you control directly.
+# When ALLOW_CUSTOM_DOMAINS=1, we accept any Host at the Django layer and
+# validate it in CustomDomainMiddleware against this list + verified custom domains.
+CANONICAL_HOSTS = _env_csv(
+    "CANONICAL_HOSTS",
     [
         "www.circlecal.app",
         "circlecal.app",
@@ -37,6 +42,13 @@ ALLOWED_HOSTS = _env_csv(
         "[::1]",
     ],
 )
+
+if _allow_custom_domains:
+    # Keep Django's host protection enabled; verified custom domains are
+    # auto-allowed at runtime by CustomDomainMiddleware.
+    ALLOWED_HOSTS = CANONICAL_HOSTS
+else:
+    ALLOWED_HOSTS = _env_csv("ALLOWED_HOSTS", CANONICAL_HOSTS)
 CSRF_TRUSTED_ORIGINS = _env_csv(
     "CSRF_TRUSTED_ORIGINS",
     [
@@ -148,6 +160,14 @@ if _enable_whitenoise:
             elif "whitenoise.middleware.WhiteNoiseMiddleware" not in _mw:
                 _mw.insert(0, "whitenoise.middleware.WhiteNoiseMiddleware")
             MIDDLEWARE = _mw
+
+        # When running the dev server with production settings, static files
+        # won't be served by Django because DEBUG=False. Tell WhiteNoise to use
+        # Django's staticfiles finders so assets resolve without requiring an
+        # explicit `collectstatic`.
+        if _is_runserver:
+            WHITENOISE_USE_FINDERS = True
+            WHITENOISE_AUTOREFRESH = True
     except Exception:
         pass
 

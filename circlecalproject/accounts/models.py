@@ -43,6 +43,18 @@ class Business(models.Model):
     stripe_connect_details_submitted = models.BooleanField(default=False)
     stripe_connect_charges_enabled = models.BooleanField(default=False)
     stripe_connect_payouts_enabled = models.BooleanField(default=False)
+
+    # Public embed widget (Pro/Team only). Use a revocable key so businesses can
+    # embed CircleCal pages on their own websites without exposing admin access.
+    embed_enabled = models.BooleanField(default=False)
+    embed_key = models.CharField(max_length=64, blank=True, null=True, db_index=True)
+
+    # Custom domain support (Pro/Team add-on / Team feature).
+    # Example: booking.example.com
+    custom_domain = models.CharField(max_length=255, blank=True, null=True, unique=True, db_index=True)
+    custom_domain_verification_token = models.CharField(max_length=64, blank=True, null=True)
+    custom_domain_verified = models.BooleanField(default=False)
+    custom_domain_verified_at = models.DateTimeField(null=True, blank=True)
     # Timezone for the organization (e.g., 'America/Los_Angeles', 'America/New_York')
     # Defaults to 'UTC' if not set - organizations should update this to their local timezone
     timezone = models.CharField(max_length=63, default='UTC', help_text="Business's timezone (e.g., America/Los_Angeles)")
@@ -75,6 +87,21 @@ class Membership(models.Model):
 
     def __str__(self):
         return f"{self.user} @ {self.organization} ({self.role})"
+
+
+class BusinessSlugRedirect(models.Model):
+    """Stores previous slugs for a Business so old links can redirect.
+
+    This enables a safe, explicit "Change public URL" action without breaking
+    old bookmarks, embeds, or shared links.
+    """
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='slug_redirects')
+    old_slug = models.SlugField(max_length=255, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.old_slug} -> {self.business.slug}"
     
 
 class Invite(models.Model):

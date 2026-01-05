@@ -31,6 +31,7 @@
             {% endif %}
           </div>
           <a href="{% url 'bookings:public_service_page' org.slug service.slug %}"
+             {% if is_embed and embed_breakout %}target="_top"{% endif %}
              class="inline-block w-full text-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
             View availability
           </a>
