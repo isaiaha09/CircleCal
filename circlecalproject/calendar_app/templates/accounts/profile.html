@@ -536,9 +536,7 @@
       <div>
         <div class="flex items-center justify-between mb-2">
           <label class="block text-sm font-semibold text-blue-800">Zelle</label>
-          {% if stripe_express_dashboard_url %}
-            <a href="{{ stripe_express_dashboard_url }}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-700 font-semibold hover:underline">Stripe</a>
-          {% endif %}
+          
         </div>
         <input type="text" name="offline_zelle" value="{{ org_offline_zelle|default:'' }}" placeholder="e.g. your-email@example.com or +1 (555) 555-5555"
                {% if not can_use_offline_payment_methods %}disabled{% endif %}
@@ -581,6 +579,56 @@
                 </div>
               </div>
 
+              <div class="mt-3 rounded-lg border border-blue-100 bg-white p-3">
+                <div class="text-xs font-semibold text-blue-800">Public booking link (share this)</div>
+                {% url 'bookings:public_org_page' m.organization.slug as cc_public_booking_path %}
+                {% with cc_public_booking_base=request.scheme|add:"://"|add:request.get_host %}
+                <div class="mt-2 flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                  <div class="w-full sm:flex-1 space-y-2">
+                    <div>
+                      <div class="text-xs text-gray-500 mb-1">Link text (what people see)</div>
+                      <div class="flex items-center gap-2">
+                        <input
+                          id="ccPublicLabel-{{ m.organization.id }}"
+                          type="text"
+                          value="Book Me Here"
+                          class="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white text-gray-700"
+                        />
+                        <button
+                          type="button"
+                          class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-32 shrink-0"
+                          onclick="window.ccCopyBookingLinkHtml && window.ccCopyBookingLinkHtml('{{ m.organization.id }}', 'ccPublicLinkMsgLink-{{ m.organization.id }}')"
+                        >Copy link</button>
+                        <span id="ccPublicLinkMsgLink-{{ m.organization.id }}" class="hidden text-xs text-emerald-700 font-semibold">Copied</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-gray-500 mb-1">URL (the destination)</div>
+                      <div class="flex items-center gap-2">
+                        <input
+                          id="ccPublicUrl-{{ m.organization.id }}"
+                          type="text"
+                          readonly
+                          value="{{ cc_public_booking_base }}{{ cc_public_booking_path }}"
+                          class="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700"
+                        />
+                        <button
+                          type="button"
+                          class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-32 shrink-0"
+                          onclick="window.ccCopyInputValue && window.ccCopyInputValue('ccPublicUrl-{{ m.organization.id }}', 'ccPublicLinkMsgUrl-{{ m.organization.id }}')"
+                        >Copy URL</button>
+                        <span id="ccPublicLinkMsgUrl-{{ m.organization.id }}" class="hidden text-xs text-emerald-700 font-semibold">Copied</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-2 text-xs text-gray-500">
+                  “Copy link” copies a Markdown link (works in many apps that support formatted links). For places that require a raw URL (like many social bios), use “Copy URL”.
+                  <a class="text-blue-700 font-semibold hover:underline" href="{{ cc_public_booking_path }}" target="_blank" rel="noopener noreferrer">Open booking page</a>
+                </div>
+                {% endwith %}
+              </div>
+
               {% if not m.can_use_embed_widget or not m.can_use_custom_domain %}
                 <div class="mt-2 text-xs text-gray-500">
                   Embed + Custom Domain require an active Pro/Team plan (not trial).
@@ -605,6 +653,93 @@
       </div>
     {% endif %}
   </div>
+
+  <script>
+    (function () {
+      if (window.ccCopyInputValue) return;
+
+      function showCopied(msgId) {
+        var el = document.getElementById(msgId);
+        if (!el) return;
+        el.classList.remove('hidden');
+        window.clearTimeout(el.__ccHideTimer);
+        el.__ccHideTimer = window.setTimeout(function () {
+          el.classList.add('hidden');
+        }, 1600);
+      }
+
+      window.ccCopyInputValue = function (inputId, msgId) {
+        try {
+          var input = document.getElementById(inputId);
+          if (!input) return;
+          var text = (typeof input.value === 'string') ? input.value : (input.textContent || '');
+
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+              showCopied(msgId);
+            }).catch(function () {
+              try {
+                input.focus();
+                input.select();
+                document.execCommand('copy');
+                showCopied(msgId);
+              } catch (err) {}
+            });
+            return;
+          }
+
+          input.focus();
+          input.select();
+          document.execCommand('copy');
+          showCopied(msgId);
+        } catch (err) {}
+      };
+
+      window.ccCopyBookingLinkHtml = function (orgId, msgId) {
+        try {
+          var labelEl = document.getElementById('ccPublicLabel-' + orgId);
+          var urlEl = document.getElementById('ccPublicUrl-' + orgId);
+          if (!labelEl || !urlEl) return;
+          var label = (labelEl.value || '').trim() || 'Book Me Here';
+          var url = (urlEl.value || '').trim();
+          if (!url) return;
+
+          // Markdown link is broadly supported across many apps.
+          // Note: this is plain text; apps that don't render Markdown will show it as text.
+          var mdLabel = label.replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+          var mdUrl = url.replace(/\)/g, '%29');
+          var md = '[' + mdLabel + '](' + mdUrl + ')';
+
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(md).then(function () {
+              showCopied(msgId);
+            }).catch(function () {
+              try {
+                var tmp = document.createElement('textarea');
+                tmp.value = md;
+                document.body.appendChild(tmp);
+                tmp.select();
+                document.execCommand('copy');
+                document.body.removeChild(tmp);
+                showCopied(msgId);
+              } catch (err) {}
+            });
+            return;
+          }
+
+          try {
+            var tmp2 = document.createElement('textarea');
+            tmp2.value = md;
+            document.body.appendChild(tmp2);
+            tmp2.select();
+            document.execCommand('copy');
+            document.body.removeChild(tmp2);
+            showCopied(msgId);
+          } catch (err2) {}
+        } catch (err3) {}
+      };
+    })();
+  </script>
   </form>
   <div class="max-w-5xl mx-auto px-4 py-4 flex justify-end">
     <button type="button" class="save-profile-btn btn-primary py-2 px-4">Save Changes</button>

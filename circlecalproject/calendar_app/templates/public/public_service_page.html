@@ -584,6 +584,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   const dayGrid = document.getElementById("dayGrid");
   const monthHeader = document.getElementById("monthHeader");
   const calendarLoading = document.getElementById('calendarLoading');
+  const mainServiceSelectForCalendar = document.getElementById('mainServiceSelect');
   const prevBtn = document.getElementById('prevMonthBtn');
   const nextBtn = document.getElementById('nextMonthBtn');
   const timeModal = document.getElementById("timeModal");
@@ -715,6 +716,15 @@ document.addEventListener("DOMContentLoaded", async function () {
   const SERVICE_PAYMENT = JSON.parse(
     (document.getElementById('service-payment-controls') || {}).textContent || '{}'
   );
+
+  // Ensure we always have a deterministic service slug for calendar fetches.
+  // (Avoids occasional "all disabled" renders when the selected slug isn't set yet.)
+  try {
+    const initialSlug = (mainServiceSelectForCalendar && mainServiceSelectForCalendar.value)
+      ? mainServiceSelectForCalendar.value
+      : (window.selectedServiceSlug || '{{ service.slug }}');
+    window.selectedServiceSlug = initialSlug;
+  } catch (e) {}
 
   const now = new Date();
   let currentMonth = now.getMonth();
@@ -877,6 +887,15 @@ document.addEventListener("DOMContentLoaded", async function () {
     const isInitial = dayGrid && dayGrid.childElementCount === 0;
     setCalendarBusy(true, { immediate: isInitial });
     try {
+      const activeServiceSlug = (function () {
+        try {
+          const el = document.getElementById('mainServiceSelect');
+          if (el && el.value) return el.value;
+        } catch (e) {}
+        return window.selectedServiceSlug || '{{ service.slug }}';
+      })();
+      window.selectedServiceSlug = activeServiceSlug;
+
       // Fade out current view first; only clear after fade completes.
       dayGrid.classList.add('is-fading');
       monthHeader.classList.add('is-fading');
@@ -922,23 +941,24 @@ document.addEventListener("DOMContentLoaded", async function () {
     const monthStart = new Date(year, month, 1, 0, 0, 0);
     const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
     const cacheBuster = `&_t=${Date.now()}`;
-    const batchUrl = "{% url 'bookings:batch_availability_summary' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(monthStart))}&end=${encodeURIComponent(toIsoLocal(monthEnd))}${cacheBuster}`;
+    const batchUrl = "{% url 'bookings:batch_availability_summary' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', activeServiceSlug) + `?start=${encodeURIComponent(toIsoLocal(monthStart))}&end=${encodeURIComponent(toIsoLocal(monthEnd))}${cacheBuster}`;
     
     dayHasSlots = {};
+    let batchFailed = false;
     try {
       const resp = await fetch(batchUrl);
-      if (resp.ok) {
-        dayHasSlots = await resp.json();
-      }
+      if (resp.ok) dayHasSlots = await resp.json();
+      else batchFailed = true;
     } catch(e) {
       console.error('Batch availability fetch failed', e);
+      batchFailed = true;
     }
 
     // Prefetch server-effective settings for this service/date so month rendering
     // and the per-day detailed calls use the same (saved) increment/fixed flags.
-    let svcForLoop = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+    let svcForLoop = SERVICE_MAP[activeServiceSlug] || {};
     try {
-      const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + '?date=' + encodeURIComponent(toIsoLocal(monthStart).split('T')[0]);
+      const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', activeServiceSlug) + '?date=' + encodeURIComponent(toIsoLocal(monthStart).split('T')[0]);
       const effResp = await fetch(effUrl);
       if (effResp.ok) {
         const eff = await effResp.json();
@@ -995,7 +1015,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       const dateKey = `${yyyy}-${mm}-${dd}`;
       const summaryVal = dayHasSlots[dateKey];
       const isAvailable = hasAvailability(summaryVal);
-      if (date >= todayMidnight && isAvailable) {
+      // If the batch summary call fails, fall back to checking every day in-range.
+      // This prevents intermittent "all disabled" renders.
+      if (date >= todayMidnight && (batchFailed || isAvailable)) {
         const start = new Date(year, month, day, 0, 0, 0);
         const end = new Date(year, month, day, 23, 59, 59);
         const pad = n => String(n).padStart(2,'0');
@@ -1013,7 +1035,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           // Edge buffer behavior should only be controlled via explicit local override.
           return 0;
         }
-        const edgeVal = getEdgeBuffersForService(window.selectedServiceSlug || '{{ service.slug }}');
+        const edgeVal = getEdgeBuffersForService(activeServiceSlug);
         // If the service is configured to use fixed increments, do NOT force an `inc` param
         // so the server can apply duration+buffer spacing. Otherwise include the preview tick.
         // use `svcForLoop` prefetched above (may contain server effective settings)
@@ -1024,7 +1046,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           incQuery = `&inc=${incVal}`;
         }
         
-        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', window.selectedServiceSlug || '{{ service.slug }}') + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
+        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', activeServiceSlug) + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
         fetches.push(
           fetch(availUrl)
             .then(r => r.ok ? r.json() : [])
@@ -1129,40 +1151,47 @@ document.addEventListener("DOMContentLoaded", async function () {
     selectedDateLabel.innerText = date.toDateString();
     timeSlots.innerHTML = "";
 
-    // Guard: if summary indicates no slots, do not open
-    const summary = dayHasSlots[dateKey];
-    // Robust guard: treat ambiguous or empty shapes as no slots
-    let summaryNoSlots = (
-      summary === undefined || summary === null || summary === false || summary === 0 || summary === "0" ||
-      (Array.isArray(summary) && summary.length === 0)
-    );
-    if (!summaryNoSlots && typeof summary === 'object' && summary !== null) {
-      const hasCount = ('count' in summary) && Number(summary.count) === 0;
-      const hasEmptySlots = ('slots' in summary) && Array.isArray(summary.slots) && summary.slots.length === 0;
-      summaryNoSlots = hasCount || hasEmptySlots;
-    }
-    if (!summaryNoSlots && typeof summary === 'string') {
-      const s = summary.trim();
-      if (s === '' || s === 'false' || s === '0') {
-        summaryNoSlots = true;
-      } else if (s.startsWith('[') || s.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(s);
-          if (Array.isArray(parsed)) summaryNoSlots = parsed.length === 0;
-          else if (parsed && typeof parsed === 'object') {
-            const c0 = ('count' in parsed) && Number(parsed.count) === 0;
-            const e0 = ('slots' in parsed) && Array.isArray(parsed.slots) && parsed.slots.length === 0;
-            summaryNoSlots = c0 || e0;
+    // Guard: if summary indicates no slots, do not open.
+    // Important: if the summary is missing (e.g., batch fetch failed), don't block —
+    // the modal will fetch live availability below.
+    const hasSummary = (function () {
+      try { return Object.prototype.hasOwnProperty.call(dayHasSlots || {}, dateKey); } catch (e) { return false; }
+    })();
+    if (hasSummary) {
+      const summary = dayHasSlots[dateKey];
+      // Robust guard: treat ambiguous or empty shapes as no slots
+      let summaryNoSlots = (
+        summary === null || summary === false || summary === 0 || summary === "0" ||
+        (Array.isArray(summary) && summary.length === 0)
+      );
+      if (!summaryNoSlots && typeof summary === 'object' && summary !== null) {
+        const hasCount = ('count' in summary) && Number(summary.count) === 0;
+        const hasEmptySlots = ('slots' in summary) && Array.isArray(summary.slots) && summary.slots.length === 0;
+        summaryNoSlots = hasCount || hasEmptySlots;
+      }
+      if (!summaryNoSlots && typeof summary === 'string') {
+        const s = summary.trim();
+        if (s === '' || s === 'false' || s === '0') {
+          summaryNoSlots = true;
+        } else if (s.startsWith('[') || s.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) summaryNoSlots = parsed.length === 0;
+            else if (parsed && typeof parsed === 'object') {
+              const c0 = ('count' in parsed) && Number(parsed.count) === 0;
+              const e0 = ('slots' in parsed) && Array.isArray(parsed.slots) && parsed.slots.length === 0;
+              summaryNoSlots = c0 || e0;
+            }
+          } catch (_) {
+            summaryNoSlots = true;
           }
-        } catch (_) {
+        } else {
           summaryNoSlots = true;
         }
-      } else {
-        summaryNoSlots = true;
       }
-    }
-    if (summaryNoSlots) {
-      return; // prevent opening modal for fully booked day
+      if (summaryNoSlots) {
+        return; // prevent opening modal for fully booked day
+      }
     }
 
     // Build local ISO (avoid timezone drift like 1am)
@@ -1211,43 +1240,6 @@ document.addEventListener("DOMContentLoaded", async function () {
           }
         }
       } catch (e) {}
-
-      // Service data map for quick client-side updates
-      const SERVICE_MAP = {
-        {% if services %}
-          {% for s in services %}
-            "{{ s.slug }}": {
-              name: "{{ s.name|escapejs }}",
-              description: "{{ s.description|default:""|escapejs }}",
-              duration: {{ s.duration|default:0 }},
-              price: {{ s.price|default:0 }},
-              refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
-              refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
-              refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
-              buffer_after: {{ s.buffer_after|default:0 }},
-              allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
-              time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
-              use_fixed_increment: {{ s.use_fixed_increment|yesno:"true,false" }},
-              allow_squished_bookings: {{ s.allow_squished_bookings|yesno:"true,false" }},
-            },
-          {% endfor %}
-        {% else %}
-          "{{ service.slug }}": {
-            name: "{{ service.name|escapejs }}",
-            description: "{{ service.description|default:""|escapejs }}",
-            duration: {{ service.duration|default:0 }},
-            price: {{ service.price|default:0 }},
-            refunds_allowed: {{ service.refunds_allowed|yesno:"true,false" }},
-            refund_cutoff_hours: {{ service.refund_cutoff_hours|default:0 }},
-            refund_policy_text: "{{ service.refund_policy_text|default:""|escapejs }}",
-            buffer_after: {{ service.buffer_after|default:0 }},
-            allow_ends_after_availability: {{ service.allow_ends_after_availability|yesno:"true,false" }},
-            time_increment_minutes: {{ service.time_increment_minutes|default:30 }},
-            use_fixed_increment: {{ service.use_fixed_increment|yesno:"true,false" }},
-            allow_squished_bookings: {{ service.allow_squished_bookings|yesno:"true,false" }},
-          },
-        {% endif %}
-      };
 
       function updateServiceDetails(slug) {
         const d = SERVICE_MAP[slug];
