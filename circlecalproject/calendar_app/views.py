@@ -5820,10 +5820,110 @@ def bookings_recent(request, org_slug):
             'time_range': time_range,
             'client_name': b.client_name,
             'client_email': b.client_email,
+            'payment_method': getattr(b, 'payment_method', None),
+            'offline_payment_method': getattr(b, 'offline_payment_method', None),
             'created_at': b.created_at.isoformat(),
         })
 
     return JsonResponse({'items': items})
+
+
+@login_required
+@require_http_methods(['GET'])
+@require_roles(['owner', 'admin', 'manager', 'staff'])
+def booking_payment_details(request, org_slug, booking_id):
+    """Best-effort payment display details for a booking.
+
+    Used by the bookings list modal to show Stripe card brand/last4 without
+    storing card data in the DB.
+    """
+    org = request.organization
+    booking = get_object_or_404(Booking, id=booking_id, organization=org)
+
+    payment_method = (getattr(booking, 'payment_method', '') or '').lower()
+    offline_payment_method = getattr(booking, 'offline_payment_method', '') or ''
+
+    payload = {
+        'payment_method': payment_method,
+        'offline_payment_method': offline_payment_method,
+        'stripe_card_brand': '',
+        'stripe_card_last4': '',
+    }
+
+    if payment_method != 'stripe':
+        return JsonResponse(payload)
+
+    session_id = getattr(booking, 'stripe_checkout_session_id', None)
+    if not session_id:
+        return JsonResponse(payload)
+
+    try:
+        import stripe
+
+        stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
+        if not stripe.api_key:
+            return JsonResponse(payload)
+
+        acct = None
+        try:
+            if getattr(org, 'stripe_connect_charges_enabled', False):
+                acct = getattr(org, 'stripe_connect_account_id', None) or None
+        except Exception:
+            acct = None
+
+        def _retrieve(fn, *args, **kwargs):
+            if acct:
+                kwargs.setdefault('stripe_account', acct)
+            return fn(*args, **kwargs)
+
+        session = _retrieve(stripe.checkout.Session.retrieve, session_id, expand=['payment_intent'])
+        pi = getattr(session, 'payment_intent', None) or (session.get('payment_intent') if isinstance(session, dict) else None)
+        if not pi:
+            return JsonResponse(payload)
+
+        pi_id = None
+        if isinstance(pi, str):
+            pi_id = pi
+        else:
+            pi_id = getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None)
+
+        latest_charge_id = None
+        charges_list = None
+        if not isinstance(pi, str):
+            latest_charge_id = getattr(pi, 'latest_charge', None) or (pi.get('latest_charge') if isinstance(pi, dict) else None)
+
+        if not latest_charge_id and pi_id:
+            try:
+                pi_obj = _retrieve(stripe.PaymentIntent.retrieve, pi_id, expand=['charges.data.payment_method_details'])
+                latest_charge_id = getattr(pi_obj, 'latest_charge', None) or (pi_obj.get('latest_charge') if isinstance(pi_obj, dict) else None)
+                charges_list = (pi_obj.get('charges') if isinstance(pi_obj, dict) else getattr(pi_obj, 'charges', None))
+            except Exception:
+                latest_charge_id = None
+                charges_list = None
+
+        charge_obj = None
+        if latest_charge_id:
+            try:
+                charge_obj = _retrieve(stripe.Charge.retrieve, latest_charge_id)
+            except Exception:
+                charge_obj = None
+        elif charges_list:
+            try:
+                data = charges_list.get('data') if isinstance(charges_list, dict) else getattr(charges_list, 'data', None)
+                if data:
+                    charge_obj = data[-1]
+            except Exception:
+                charge_obj = None
+
+        if charge_obj:
+            pmd = charge_obj.get('payment_method_details', {}) if isinstance(charge_obj, dict) else (getattr(charge_obj, 'payment_method_details', None) or {})
+            card = (pmd.get('card') if isinstance(pmd, dict) else None) or {}
+            payload['stripe_card_brand'] = (card.get('brand') or '')
+            payload['stripe_card_last4'] = (card.get('last4') or '')
+
+        return JsonResponse(payload)
+    except Exception:
+        return JsonResponse(payload)
 
 
 @login_required
@@ -5886,6 +5986,261 @@ def delete_booking(request, org_slug, booking_id):
     return JsonResponse({'status': 'ok'})
 
 
+def _attempt_force_stripe_refund_for_booking(booking, org):
+    """Best-effort Stripe refund for a booking (Connect-aware).
+
+    Returns: (refund_id, error_message)
+    """
+    try:
+        pm = (getattr(booking, 'payment_method', '') or '').strip().lower()
+        if pm != 'stripe':
+            return (None, None)
+
+        session_id = (getattr(booking, 'stripe_checkout_session_id', '') or '').strip()
+        if not session_id:
+            return (None, 'Missing Stripe checkout session')
+
+        secret = getattr(settings, 'STRIPE_SECRET_KEY', None)
+        if not secret:
+            return (None, 'Stripe secret key not configured')
+
+        acct = None
+        try:
+            if org and getattr(org, 'stripe_connect_charges_enabled', False):
+                acct = getattr(org, 'stripe_connect_account_id', None) or None
+        except Exception:
+            acct = None
+
+        if not acct:
+            return (None, 'Payment account not available')
+
+        import stripe
+        stripe.api_key = secret
+
+        def _retrieve(fn, *args, **kwargs):
+            kwargs.setdefault('stripe_account', acct)
+            return fn(*args, **kwargs)
+
+        sess = _retrieve(stripe.checkout.Session.retrieve, session_id, expand=['payment_intent'])
+        pi = getattr(sess, 'payment_intent', None) or (sess.get('payment_intent') if isinstance(sess, dict) else None)
+        pi_id = pi if isinstance(pi, str) else (getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None))
+
+        latest_charge_id = None
+        charges_list = None
+        if not isinstance(pi, str) and pi is not None:
+            latest_charge_id = getattr(pi, 'latest_charge', None) or (pi.get('latest_charge') if isinstance(pi, dict) else None)
+
+        if not latest_charge_id and pi_id:
+            try:
+                pi_obj = _retrieve(stripe.PaymentIntent.retrieve, pi_id, expand=['charges.data'])
+                latest_charge_id = getattr(pi_obj, 'latest_charge', None) or (pi_obj.get('latest_charge') if isinstance(pi_obj, dict) else None)
+                charges_list = (pi_obj.get('charges') if isinstance(pi_obj, dict) else getattr(pi_obj, 'charges', None))
+            except Exception:
+                latest_charge_id = None
+                charges_list = None
+
+        charge_id = None
+        if latest_charge_id:
+            charge_id = latest_charge_id
+        elif charges_list:
+            try:
+                data = charges_list.get('data') if isinstance(charges_list, dict) else getattr(charges_list, 'data', None)
+                if data:
+                    last = data[-1]
+                    charge_id = (last.get('id') if isinstance(last, dict) else getattr(last, 'id', None))
+            except Exception:
+                charge_id = None
+
+        if not charge_id:
+            return (None, 'Unable to locate Stripe charge')
+
+        # Avoid double-refunding where possible
+        try:
+            ch = _retrieve(stripe.Charge.retrieve, charge_id)
+            refunded = (ch.get('refunded') if isinstance(ch, dict) else getattr(ch, 'refunded', False))
+            if refunded:
+                return (None, 'Already refunded')
+            amount = (ch.get('amount') if isinstance(ch, dict) else getattr(ch, 'amount', None))
+            amount_refunded = (ch.get('amount_refunded') if isinstance(ch, dict) else getattr(ch, 'amount_refunded', None))
+            if amount is not None and amount_refunded is not None and int(amount_refunded) >= int(amount):
+                return (None, 'Already refunded')
+        except Exception:
+            pass
+
+        refund = stripe.Refund.create(
+            charge=charge_id,
+            stripe_account=acct,
+            idempotency_key=f"bulk_cancel_refund_{booking.id}",
+            metadata={
+                'cc_booking_id': str(getattr(booking, 'id', '') or ''),
+                'cc_public_ref': str(getattr(booking, 'public_ref', '') or ''),
+                'cc_org_slug': str(getattr(org, 'slug', '') or ''),
+                'cc_service_slug': str(getattr(getattr(booking, 'service', None), 'slug', '') or ''),
+                'cc_start': str(getattr(booking, 'start', '') or ''),
+                'cc_bulk_action': 'cancelled',
+            },
+        )
+        refund_id = (refund.get('id') if isinstance(refund, dict) else getattr(refund, 'id', None))
+        return (refund_id or None, None)
+    except Exception:
+        return (None, 'Refund failed')
+
+
+@login_required
+@require_http_methods(['POST'])
+@require_roles(['owner', 'admin', 'manager'])
+def bulk_delete_bookings(request, org_slug):
+    """Bulk delete bookings with explicit action:
+
+    - action='cancelled': mark as cancelled and force refund when Stripe
+    - action='deleted': mark as deleted and do not refund
+    """
+    org = request.organization
+    try:
+        import json
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+
+    booking_ids = payload.get('booking_ids') or payload.get('ids') or []
+    action = (payload.get('action') or '').strip().lower()
+    explanation = payload.get('explanation')
+    try:
+        explanation = (str(explanation).strip() if explanation is not None else '')
+    except Exception:
+        explanation = ''
+
+    if action not in ('cancelled', 'deleted'):
+        return HttpResponseBadRequest('Invalid action')
+
+    if not isinstance(booking_ids, list) or not booking_ids:
+        return HttpResponseBadRequest('No booking ids provided')
+
+    # Normalize ids
+    norm_ids = []
+    for x in booking_ids:
+        try:
+            norm_ids.append(int(x))
+        except Exception:
+            continue
+    if not norm_ids:
+        return HttpResponseBadRequest('No valid booking ids provided')
+
+    now = timezone.now()
+    audits = []
+    errors = []
+    refund_success = 0
+    refund_failed = 0
+
+    for bid in norm_ids:
+        try:
+            booking = Booking.objects.filter(id=bid, organization=org).select_related('service').first()
+            if not booking:
+                errors.append({'booking_id': bid, 'error': 'Not found'})
+                continue
+
+            # Prevent deleting an ongoing appointment
+            try:
+                if booking.start and booking.end and (booking.start <= now <= booking.end):
+                    errors.append({'booking_id': bid, 'error': 'Cannot delete ongoing appointment'})
+                    continue
+            except Exception:
+                pass
+
+            if explanation:
+                try:
+                    setattr(booking, '_audit_extra', explanation)
+                except Exception:
+                    pass
+
+            if action == 'cancelled':
+                try:
+                    setattr(booking, '_audit_event_type', 'cancelled')
+                except Exception:
+                    pass
+
+                refund_id, refund_err = _attempt_force_stripe_refund_for_booking(booking, org)
+                if refund_id:
+                    refund_success += 1
+                    try:
+                        setattr(booking, '_audit_refund_forced', True)
+                        setattr(booking, '_audit_refund_id', refund_id)
+                    except Exception:
+                        pass
+                elif refund_err and refund_err not in ('Already refunded',):
+                    # Only count as failure when we actually attempted on stripe bookings.
+                    try:
+                        pm = (getattr(booking, 'payment_method', '') or '').strip().lower()
+                        if pm == 'stripe':
+                            refund_failed += 1
+                    except Exception:
+                        pass
+            else:
+                # deleted: default audit is deleted, but allow explicit override
+                try:
+                    setattr(booking, '_audit_event_type', 'deleted')
+                except Exception:
+                    pass
+
+            booking_id_for_audit = booking.id
+            booking.delete()
+
+            # Fetch created audit entry (best effort)
+            try:
+                ab = AuditBooking.objects.filter(organization=org, booking_id=booking_id_for_audit).order_by('-created_at').first()
+                if ab:
+                    audit_data = {
+                        'id': ab.id,
+                        'booking_id': ab.booking_id,
+                        'event_type': ab.event_type,
+                        'service': ab.service.name if ab.service else None,
+                        'service_price': float(ab.service.price) if (ab.service and getattr(ab.service, 'price', None) is not None) else None,
+                        'business': org.name,
+                        'start': ab.start.isoformat() if ab.start else None,
+                        'start_display': None,
+                        'end': ab.end.isoformat() if ab.end else None,
+                        'end_display': None,
+                        'client_name': ab.client_name,
+                        'client_email': ab.client_email,
+                        'created_at': ab.created_at.isoformat(),
+                        'snapshot': ab.booking_snapshot,
+                        'extra': getattr(ab, 'extra', '') or '',
+                    }
+                    try:
+                        org_tz_name = getattr(org, 'timezone', None) or 'UTC'
+                        org_tz = ZoneInfo(org_tz_name)
+
+                        def _fmt(dt):
+                            if not dt:
+                                return None
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+                            return dt.astimezone(org_tz).strftime('%b %d, %Y %I:%M %p')
+
+                        audit_data['start_display'] = _fmt(ab.start)
+                        audit_data['end_display'] = _fmt(ab.end)
+                        audit_data['created_display'] = _fmt(ab.created_at)
+                    except Exception:
+                        pass
+
+                    audits.append(audit_data)
+            except Exception:
+                pass
+
+        except Exception:
+            errors.append({'booking_id': bid, 'error': 'Failed'})
+
+    return JsonResponse({
+        'status': 'ok',
+        'action': action,
+        'deleted_count': len(audits),
+        'refund_success': refund_success,
+        'refund_failed': refund_failed,
+        'audits': audits,
+        'errors': errors,
+    })
+
+
 @login_required
 @require_roles(['owner', 'admin', 'manager', 'staff'])
 def bookings_audit_list(request, org_slug):
@@ -5929,7 +6284,11 @@ def bookings_audit_list(request, org_slug):
         non_refunded = False
         refund_within_cutoff = False
         try:
-            if a.event_type == AuditBooking.EVENT_CANCELLED and a.service and a.start and a.created_at:
+            snap = a.booking_snapshot if isinstance(a.booking_snapshot, dict) else {}
+            if a.event_type == AuditBooking.EVENT_CANCELLED and snap and (snap.get('refund_forced') or snap.get('refund_id')):
+                non_refunded = False
+                refund_within_cutoff = False
+            elif a.event_type == AuditBooking.EVENT_CANCELLED and a.service and a.start and a.created_at:
                 hrs = (a.start - a.created_at).total_seconds() / 3600.0
                 if getattr(a.service, 'refunds_allowed', False):
                     cutoff = float(getattr(a.service, 'refund_cutoff_hours', 0) or 0)

@@ -163,6 +163,33 @@ def booking_post_delete_audit(sender, instance, **kwargs):
             else:
                 event_type = AuditBooking.EVENT_DELETED
 
+            # Optional audit explanation (e.g. bulk action reason)
+            extra = getattr(instance, '_audit_extra', None)
+            try:
+                if extra is not None:
+                    extra = str(extra)
+            except Exception:
+                extra = None
+            if extra:
+                try:
+                    snapshot['explanation'] = extra
+                except Exception:
+                    pass
+
+            # If caller forced a refund (admin bulk cancellation), record it so
+            # the audit UI doesn't incorrectly label it as non-refunded.
+            try:
+                if getattr(instance, '_audit_refund_forced', False):
+                    snapshot['refund_forced'] = True
+            except Exception:
+                pass
+            try:
+                rid = getattr(instance, '_audit_refund_id', None)
+                if rid:
+                    snapshot['refund_id'] = str(rid)
+            except Exception:
+                pass
+
             org_id = getattr(instance, 'organization_id', None)
             if not org_id:
                 return
@@ -180,6 +207,7 @@ def booking_post_delete_audit(sender, instance, **kwargs):
                 end=instance.end if getattr(instance, 'end', None) else None,
                 client_name=getattr(instance, 'client_name', ''),
                 client_email=getattr(instance, 'client_email', ''),
+                extra=extra or '',
             )
         except Exception:
             # Do not let auditing break the delete flow

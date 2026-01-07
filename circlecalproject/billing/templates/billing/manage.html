@@ -388,7 +388,13 @@
             </td>
             <td class="p-2">
               {% if inv.raw.pseudo %}
-                <span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">{{ inv.raw.type|capfirst }}</span>
+                {% if inv.raw.type == 'subscription_change' %}
+                  <span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">{{ inv.raw.status|default:'scheduled'|capfirst }}</span>
+                {% elif inv.raw.type == 'applied_discount' %}
+                  <span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">Discount</span>
+                {% else %}
+                  <span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">{{ inv.raw.type|default:'scheduled'|capfirst }}</span>
+                {% endif %}
               {% else %}
                 {{ inv.status }}
               {% endif %}
@@ -462,6 +468,15 @@
             const mobile = document.getElementById('invoicesListMobile');
             // Allow rendering when either table or mobile container exists.
             if (!tbody && !mobile) return;
+            const escAttr = (v) => {
+              const s = (v === null || v === undefined) ? '' : String(v);
+              return s
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            };
             // Diagnostic logging to help trace why mobile cards might be missing
             try { console.debug('renderInvoiceRows called', { itemsCount: items.length, append: append, hasTbody: !!tbody, hasMobile: !!mobile }); } catch (e) {}
             const noResults = document.getElementById('no-results-row');
@@ -491,17 +506,36 @@
               const amount = inv.amount_display_dollars != null ? '$' + Number(inv.amount_display_dollars).toFixed(2) : '—';
               const cardLast4 = (inv.card_last4 || defaultCardLast4 || '');
               const card = cardLast4 ? ('**** ' + cardLast4 + (inv.card_brand ? (' (' + inv.card_brand + ')') : '')) : '—';
-              const status = inv.pseudo ? (inv.status || '') : (inv.status || '');
+              const status = inv.status || '';
               const hiddenAttr = inv.hidden ? '1' : '0';
               const dataInvId = inv.id || '';
               html += `<tr class="border-t cc-row${enterClass}" data-inv-id="${dataInvId}" data-amount="${amount}" data-card="${cardLast4}" data-status="${status}" data-created="${createdIso}" data-pseudo="${inv.pseudo ? '1' : '0'}" data-hidden="${hiddenAttr}">`;
               html += `<td class="p-2">${createdDateStr ? `<div>${createdDateStr}</div><div class="text-xs text-gray-500">${createdTimeStr}</div>` : '—'}</td>`;
               html += `<td class="p-2">${amount}</td>`;
               html += `<td class="p-2">${inv.pseudo ? '<span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-semibold">Scheduled change</span>' : card}</td>`;
-              html += `<td class="p-2">${inv.pseudo ? `<span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">${(inv.status||'').toString()}</span>` : (inv.status || '')}</td>`;
-              html += `<td class="p-2">`;
               if (inv.pseudo) {
-                html += `<button class="view-change-btn text-indigo-600" data-change-id="${dataInvId}">View change</button>`;
+                if (inv.type === 'applied_discount') {
+                  html += `<td class="p-2"><span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">Discount</span></td>`;
+                } else {
+                  html += `<td class="p-2"><span class="inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-800 text-sm">${escAttr((inv.status||'').toString())}</span></td>`;
+                }
+              } else {
+                html += `<td class="p-2">${escAttr(inv.status || '')}</td>`;
+              }
+              html += `<td class="p-2">`;
+              if (inv.pseudo && inv.type === 'subscription_change' && dataInvId) {
+                const effIso = inv.effective_at || inv.created_iso || '';
+                html += `<button class="view-change-btn text-indigo-600"`
+                  + ` data-change-id="${escAttr(dataInvId)}"`
+                  + ` data-change-type="${escAttr(inv.change_type || '')}"`
+                  + ` data-new-plan-name="${escAttr(inv.new_plan_name || '')}"`
+                  + ` data-effective-at="${escAttr(effIso)}"`
+                  + ` data-amount-cents="${escAttr(inv.amount_cents || 0)}"`
+                  + ` data-card-brand="${escAttr(inv.card_brand || '')}"`
+                  + ` data-card-last4="${escAttr(inv.card_last4 || '')}"`
+                  + ` data-stripe-invoice-id="${escAttr(inv.stripe_invoice_id || '')}"`
+                  + ` data-status="${escAttr(inv.status || '')}"`
+                  + `>View change</button>`;
               } else if (inv.hosted_invoice_url) {
                 html += `<a href="${inv.hosted_invoice_url}" class="text-indigo-600" target="_blank">View</a>`;
                 if (inv.hidden) html += ` <button class="text-sm ml-3 unhide-inv-btn text-green-600" data-inv-id="${dataInvId}">Unhide</button>`;
@@ -546,7 +580,7 @@
               const amount = inv.amount_display_dollars != null ? '$' + Number(inv.amount_display_dollars).toFixed(2) : '—';
               const cardLast4Mobile = (inv.card_last4 || defaultCardLast4 || '');
               const card = cardLast4Mobile ? ('**** ' + cardLast4Mobile) : '—';
-              const status = inv.status || '';
+              const status = (inv.pseudo && inv.type === 'applied_discount') ? 'Discount' : (inv.status || '');
               const hiddenBadge = inv.hidden ? '<span class="text-xs text-gray-500 ml-2">(archived)</span>' : '';
               mhtml += `<div class="border rounded p-3 bg-white shadow-sm cc-mobile-card${enterClassMobile}">`;
               mhtml += `<div class="flex justify-between items-start"><div class="text-sm font-medium">${createdDateStr || '—'}</div><div class="text-sm font-semibold">${amount}</div></div>`;

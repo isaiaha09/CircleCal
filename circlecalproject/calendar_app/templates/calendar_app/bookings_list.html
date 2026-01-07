@@ -47,6 +47,80 @@
     margin-right: 8px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Booking details modal: keep compact so it fits */
+  .cc-booking-modal-card {
+    background: white;
+    padding: 18px;
+    border-radius: 10px;
+    max-width: 420px;
+    width: 100%;
+    position: relative;
+    max-height: 80vh;
+    overflow: auto;
+  }
+  .cc-booking-modal-title { margin: 0 0 12px 0; font-size: 20px; }
+  .cc-booking-modal-grid { display: grid; gap: 10px; }
+  .cc-booking-modal-label { font-size: 13px; font-weight: 700; }
+  .cc-booking-modal-value { color: #666; margin-top: 3px; font-size: 13px; }
+  .cc-booking-modal-subvalue { color: #666; margin-top: 3px; font-size: 12px; }
+  .cc-booking-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .cc-booking-modal-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: #666;
+    line-height: 1;
+  }
+
+  /* Bulk delete modal */
+  .cc-bulk-modal-card {
+    background: white;
+    padding: 18px;
+    border-radius: 10px;
+    max-width: 720px;
+    width: 100%;
+    position: relative;
+    max-height: 80vh;
+    overflow: auto;
+  }
+  .cc-bulk-list {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 10px;
+    background: #f8f9fa;
+    max-height: 220px;
+    overflow: auto;
+  }
+  .cc-bulk-row {
+    padding: 8px 6px;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 13px;
+  }
+  .cc-bulk-row:last-child { border-bottom: none; }
+  .cc-bulk-row-title { font-weight: 700; }
+  .cc-bulk-row-sub { color: #6c757d; font-size: 12px; margin-top: 2px; }
+  .cc-bulk-option {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+  }
+  .cc-bulk-option-title { font-weight: 700; font-size: 13px; }
+  .cc-bulk-option-desc { color: #6c757d; font-size: 12px; margin-top: 4px; }
+  .cc-bulk-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 13px;
+    resize: vertical;
+  }
 </style>
 
 <div class="bookings-container">
@@ -74,7 +148,9 @@
         <option value="{{ service.id }}">{{ service.name }}</option>
       {% endfor %}
     </select>
-    <button id="deleteSelectedBtn" class="btn-sm btn-delete" onclick="deleteSelected()" style="display:none; margin-left:8px;">Delete selected</button>
+    {% if user_org_role != 'staff' %}
+      <button id="deleteSelectedBtn" class="btn-sm btn-delete" onclick="deleteSelected()" style="display:none; margin-left:8px;">Delete selected</button>
+    {% endif %}
     </div>
   </div>
 
@@ -101,6 +177,8 @@
           data-status="{% if booking.start <= now and booking.end >= now %}ongoing{% elif booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
           data-service-id="{{ booking.service.id|default:'' }}"
           data-service-price="{{ booking.service.price|default:'' }}"
+          data-payment-method="{{ booking.payment_method|default:'' }}"
+          data-offline-method="{{ booking.offline_payment_method|default:'' }}"
           data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }} {{ booking.public_ref|default:''|lower }} {{ booking.id }}">
           <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="{{ booking.id }}" style="margin-right:8px;"/></td>
           <td>
@@ -234,48 +312,53 @@
 
 <!-- Booking Detail Modal -->
 <div id="bookingModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000; padding: 20px;">
-  <div style="background: white; padding: 30px; border-radius: 12px; max-width: 500px; width: 100%; position: relative;">
-    <button onclick="closeModal()" style="position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">×</button>
+  <div class="cc-booking-modal-card">
+    <button onclick="closeModal()" class="cc-booking-modal-close">×</button>
     
-    <h2 style="margin-bottom: 20px; font-size: 24px;">Booking Details</h2>
+    <h2 class="cc-booking-modal-title">Booking Details</h2>
     
-    <div style="display: grid; gap: 15px;">
+    <div class="cc-booking-modal-grid">
       <div>
-        <strong>Date:</strong>
-        <div id="modalDate" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Date:</div>
+        <div id="modalDate" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Time:</strong>
-        <div id="modalTime" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Time:</div>
+        <div id="modalTime" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Booked At:</strong>
-        <div id="modalBookedAt" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Booked At:</div>
+        <div id="modalBookedAt" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Client Name:</strong>
-        <div id="modalClientName" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Client Name:</div>
+        <div id="modalClientName" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Client Email:</strong>
-        <div id="modalClientEmail" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Client Email:</div>
+        <div id="modalClientEmail" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Service:</strong>
-        <div id="modalService" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Service:</div>
+        <div id="modalService" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Duration:</strong>
-        <div id="modalDuration" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Duration:</div>
+        <div id="modalDuration" class="cc-booking-modal-value"></div>
       </div>
       <div>
-        <strong>Charge:</strong>
-        <div id="modalCharge" style="color: #666; margin-top: 4px;"></div>
+        <div class="cc-booking-modal-label">Charge:</div>
+        <div id="modalCharge" class="cc-booking-modal-value"></div>
+      </div>
+      <div>
+        <div class="cc-booking-modal-label">Payment:</div>
+        <div id="modalPayment" class="cc-booking-modal-value"></div>
+        <div id="modalPaymentSub" class="cc-booking-modal-subvalue"></div>
       </div>
     </div>
 
-    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px;">
-      <button onclick="closeModal()" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+    <div class="cc-booking-modal-actions">
+      <button onclick="closeModal()" style="padding: 8px 14px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Close</button>
     </div>
   </div>
 </div>
@@ -287,6 +370,51 @@
     <h2 style="margin-bottom:12px;">Audit Details</h2>
     <div id="auditContent" style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:8px; max-height:60vh; overflow:auto;"></div>
     <div style="display:flex; justify-content:flex-end; margin-top:12px;"><button onclick="closeAuditModal()" style="padding:8px 14px; background:#6c757d; color:white; border:none; border-radius:6px;">Close</button></div>
+  </div>
+</div>
+
+<!-- Bulk Delete Modal -->
+<div id="bulkDeleteModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000; padding: 20px;">
+  <div class="cc-bulk-modal-card">
+    <button onclick="closeBulkDeleteModal()" class="cc-booking-modal-close">×</button>
+    <h2 class="cc-booking-modal-title" style="margin-bottom: 8px;">Delete selected bookings</h2>
+    <div style="color:#6c757d; font-size: 13px; margin-bottom: 12px;">You have <span id="bulkDeleteCount">0</span> booking(s) selected.</div>
+
+    <div class="cc-bulk-list" id="bulkDeleteList"></div>
+
+    <div style="margin-top: 14px;">
+      <div style="font-weight: 700; font-size: 13px;">Choose what to do</div>
+
+      <label class="cc-bulk-option" style="display:block; cursor:pointer;">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <input type="radio" name="bulkDeleteAction" value="cancelled" />
+          <div>
+            <div class="cc-bulk-option-title">Mark as cancelled (refund always)</div>
+            <div class="cc-bulk-option-desc">Refunds Stripe card payments even if your refund rule would normally block it. Offline payments are not automatically refunded.</div>
+          </div>
+        </div>
+      </label>
+
+      <label class="cc-bulk-option" style="display:block; cursor:pointer;">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <input type="radio" name="bulkDeleteAction" value="deleted" checked />
+          <div>
+            <div class="cc-bulk-option-title">Mark as deleted (no refund)</div>
+            <div class="cc-bulk-option-desc">Removes the booking(s) without issuing a refund.</div>
+          </div>
+        </div>
+      </label>
+    </div>
+
+    <div style="margin-top: 14px;">
+      <div class="cc-booking-modal-label" style="margin-bottom: 6px;">Explanation (optional)</div>
+      <textarea id="bulkDeleteExplanation" class="cc-bulk-textarea" placeholder="Optional note for your records (shown in audit details)"></textarea>
+    </div>
+
+    <div class="cc-booking-modal-actions" style="margin-top: 16px;">
+      <button onclick="closeBulkDeleteModal()" id="bulkDeleteCancelBtn" style="padding: 8px 14px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Cancel</button>
+      <button onclick="submitBulkDelete()" id="bulkDeleteConfirmBtn" class="btn-sm btn-delete" style="padding: 8px 14px;">Confirm</button>
+    </div>
   </div>
 </div>
 
@@ -375,6 +503,7 @@ function viewAudit(btn) {
       // Business name (prefers parsed business, falls back to page org)
       parts.push(`<div><strong>Business:</strong> ${parsed.business || ORG_NAME}</div>`);
       if (parsed.service_slug) parts.push(`<div><strong>Service:</strong> ${parsed.service_slug}</div>`);
+      if (parsed.explanation) parts.push(`<div><strong>Explanation:</strong> ${parsed.explanation}</div>`);
       // Charge
       if (parsed.service_price !== undefined && parsed.service_price !== null) parts.push(`<div><strong>Charge:</strong> $${Number(parsed.service_price).toFixed(2)}</div>`);
       if (parsed.start) parts.push(`<div><strong>Start:</strong> ${new Date(parsed.start).toLocaleString()}</div>`);
@@ -479,6 +608,50 @@ function viewBooking(id) {
   }
   document.getElementById('modalCharge').textContent = priceText;
 
+  // Payment method
+  try {
+    const pm = (row.dataset.paymentMethod || '').toLowerCase();
+    const offlineMethod = (row.dataset.offlineMethod || '').toLowerCase();
+    const paymentEl = document.getElementById('modalPayment');
+    const paymentSubEl = document.getElementById('modalPaymentSub');
+    if (paymentSubEl) paymentSubEl.textContent = '';
+    if (paymentEl) {
+      if (pm === 'stripe') {
+        paymentEl.textContent = 'Paid by card';
+        if (paymentSubEl) paymentSubEl.textContent = 'Loading card details…';
+        fetch(`/bus/${orgSlug}/bookings/${encodeURIComponent(String(id))}/payment/`, { method: 'GET' })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            try {
+              if (!paymentSubEl) return;
+              const brand = (data && (data.stripe_card_brand || data.card_brand) || '').toString();
+              const last4 = (data && (data.stripe_card_last4 || data.card_last4) || '').toString();
+              if (last4) {
+                paymentSubEl.textContent = `${brand ? (brand.charAt(0).toUpperCase() + brand.slice(1) + ' ') : ''}ending in ${last4}`;
+              } else {
+                paymentSubEl.textContent = '';
+              }
+            } catch (e) {
+              if (paymentSubEl) paymentSubEl.textContent = '';
+            }
+          })
+          .catch(() => { if (paymentSubEl) paymentSubEl.textContent = ''; });
+      } else if (pm === 'offline') {
+        paymentEl.textContent = 'Offline payment';
+        if (paymentSubEl && offlineMethod) paymentSubEl.textContent = `Method: ${offlineMethod}`;
+      } else {
+        paymentEl.textContent = 'No payment required';
+      }
+    }
+  } catch (e) {
+    try {
+      const paymentEl = document.getElementById('modalPayment');
+      const paymentSubEl = document.getElementById('modalPaymentSub');
+      if (paymentEl) paymentEl.textContent = '';
+      if (paymentSubEl) paymentSubEl.textContent = '';
+    } catch (e2) {}
+  }
+
   document.getElementById('bookingModal').style.display = 'flex';
 }
 
@@ -541,6 +714,10 @@ function insertBookingRow(b, toTop=true) {
     if (b.duration !== undefined && b.duration !== null) newTr.setAttribute('data-duration', String(b.duration));
   }catch(e){}
   newTr.setAttribute('data-search', (b.client_name || '').toLowerCase() + ' ' + (b.client_email || '').toLowerCase());
+  try{
+    newTr.setAttribute('data-payment-method', (b.payment_method || b.paymentMethod || ''));
+    newTr.setAttribute('data-offline-method', (b.offline_payment_method || b.offlineMethod || ''));
+  }catch(e){ newTr.setAttribute('data-payment-method',''); newTr.setAttribute('data-offline-method',''); }
   newTr.innerHTML = `
     <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${bid}" style="margin-right:8px;"/></td>
     <td>
@@ -663,21 +840,159 @@ try{
 }catch(e){ }
 
 function deleteSelected(){
-  const selected = Array.from(document.querySelectorAll('.bookingRowCb')).filter(cb => cb.checked).map(cb => cb.value);
-  if (!selected || selected.length === 0) return;
-  if (!confirm(`Delete ${selected.length} selected booking(s)?`)) return;
-  for (const id of selected){
-    // attempt to extract date/client for nicer confirm UI in deleteBooking
-    const row = document.querySelector(`tr[data-booking-id="${id}"]`);
-    let dateTxt = '';
-    let clientTxt = '';
-    try{ const cells = row.querySelectorAll('td'); dateTxt = cells[1] ? cells[1].textContent.trim() : ''; clientTxt = cells[3] ? (cells[3].querySelector('div') ? cells[3].querySelector('div').textContent.trim() : cells[3].textContent.trim()) : ''; }catch(e){}
-    // call existing deleteBooking with skipConfirm true
-    try{ deleteBooking(id, dateTxt, clientTxt, true); }catch(e){ console.error('deleteSelected error', e); }
+  try{ openBulkDeleteModal(); }catch(e){ console.error('deleteSelected error', e); }
+}
+
+function closeBulkDeleteModal(){
+  try{ document.getElementById('bulkDeleteModal').style.display = 'none'; }catch(e){}
+}
+
+function _getSelectedBookingIds(){
+  try{
+    return Array.from(document.querySelectorAll('.bookingRowCb:checked'))
+      .map(cb => cb && cb.value)
+      .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
+      .map(v => Number(v));
+  }catch(e){
+    return [];
   }
-  // clear selection UI
-  try{ document.getElementById('selectAllBookings').checked = false; }catch(e){}
-  updateSelectionState();
+}
+
+function _summarizeBookingRow(tr){
+  if (!tr) return null;
+  try{
+    const cells = tr.querySelectorAll('td');
+    const dateDivs = cells[1] ? cells[1].querySelectorAll('div') : [];
+    const dateStr = dateDivs[0] ? dateDivs[0].textContent.trim() : '';
+    const timeStr = dateDivs[1] ? dateDivs[1].textContent.trim() : '';
+    const refStr = (tr.dataset && tr.dataset.publicRef) ? tr.dataset.publicRef : (cells[2] ? cells[2].textContent.trim() : '');
+    const clientDivs = cells[3] ? cells[3].querySelectorAll('div') : [];
+    const clientName = clientDivs[0] ? clientDivs[0].textContent.trim() : (cells[3] ? cells[3].textContent.trim() : '');
+    const clientEmail = clientDivs[1] ? clientDivs[1].textContent.trim() : '';
+    const serviceName = cells[4] ? cells[4].textContent.trim() : '';
+    return { refStr, dateStr, timeStr, clientName, clientEmail, serviceName };
+  }catch(e){
+    return null;
+  }
+}
+
+function openBulkDeleteModal(){
+  const ids = _getSelectedBookingIds();
+  if (!ids || ids.length === 0) return;
+
+  const listEl = document.getElementById('bulkDeleteList');
+  const countEl = document.getElementById('bulkDeleteCount');
+  if (countEl) countEl.textContent = String(ids.length);
+  if (listEl) listEl.innerHTML = '';
+
+  // Build a friendly list of selected bookings from the table
+  try{
+    for (const id of ids){
+      const tr = document.querySelector(`tr[data-booking-id="${id}"]`);
+      const info = _summarizeBookingRow(tr) || { refStr: String(id), dateStr: '', timeStr: '', clientName: '', clientEmail: '', serviceName: '' };
+      const row = document.createElement('div');
+      row.className = 'cc-bulk-row';
+      const top = `${info.clientName || 'No name'}${info.clientEmail ? ' (' + info.clientEmail + ')' : ''}`;
+      const sub = `${info.dateStr || ''}${info.timeStr ? ' • ' + stripLeadingZeroFromTime(info.timeStr) : ''}${info.serviceName ? ' • ' + info.serviceName : ''}${info.refStr ? ' • ' + info.refStr : ''}`.trim();
+      row.innerHTML = `<div class="cc-bulk-row-title">${top}</div><div class="cc-bulk-row-sub">${sub || '&nbsp;'}</div>`;
+      if (listEl) listEl.appendChild(row);
+    }
+  }catch(e){ console.error('bulk list build error', e); }
+
+  try{ document.getElementById('bulkDeleteExplanation').value = ''; }catch(e){}
+  // Default action to deleted (safer)
+  try{
+    document.querySelectorAll('input[name="bulkDeleteAction"]').forEach(r => {
+      r.checked = (r.value === 'deleted');
+    });
+  }catch(e){}
+
+  try{ document.getElementById('bulkDeleteModal').style.display = 'flex'; }catch(e){}
+}
+
+async function submitBulkDelete(){
+  const ids = _getSelectedBookingIds();
+  if (!ids || ids.length === 0){
+    closeBulkDeleteModal();
+    return;
+  }
+  let action = 'deleted';
+  try{
+    const sel = document.querySelector('input[name="bulkDeleteAction"]:checked');
+    if (sel && sel.value) action = String(sel.value);
+  }catch(e){}
+  let explanation = '';
+  try{ explanation = (document.getElementById('bulkDeleteExplanation').value || '').trim(); }catch(e){}
+
+  const confirmBtn = document.getElementById('bulkDeleteConfirmBtn');
+  const cancelBtn = document.getElementById('bulkDeleteCancelBtn');
+  try{ if (confirmBtn) confirmBtn.disabled = true; if (cancelBtn) cancelBtn.disabled = true; }catch(e){}
+  try{ if (confirmBtn) confirmBtn.textContent = 'Working...'; }catch(e){}
+
+  try{
+    const resp = await fetch(`/bus/${orgSlug}/bookings/bulk_delete/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ booking_ids: ids, action: action, explanation: explanation })
+    });
+    if (!resp.ok){
+      const txt = await resp.text();
+      showToast('error', txt || 'Bulk delete failed');
+      return;
+    }
+    const j = await resp.json();
+    if (!j || j.status !== 'ok'){
+      showToast('error', 'Bulk delete failed');
+      return;
+    }
+
+    // Remove the booking rows
+    try{
+      for (const id of ids){
+        const tr = document.querySelector(`tr[data-booking-id="${id}"]`);
+        if (tr) tr.remove();
+      }
+    }catch(e){}
+
+    // Insert audits (if returned)
+    try{
+      if (Array.isArray(j.audits)){
+        for (const a of j.audits){
+          try{ insertAuditRow(a); }catch(e){ console.error('bulk insertAuditRow', e); }
+        }
+      }
+    }catch(e){}
+
+    // Clear selection
+    try{ deselectAllBookings(); }catch(e){
+      try{ document.getElementById('selectAllBookings').checked = false; }catch(_e){}
+      try{ document.querySelectorAll('.bookingRowCb').forEach(cb => cb.checked = false); }catch(_e){}
+      updateSelectionState();
+    }
+
+    closeBulkDeleteModal();
+
+    // Show summary
+    try{
+      const okCount = Array.isArray(j.audits) ? j.audits.length : ids.length;
+      let msg = (action === 'cancelled') ? `Marked ${okCount} booking(s) as cancelled` : `Deleted ${okCount} booking(s)`;
+      if (action === 'cancelled'){
+        const rs = Number(j.refund_success || 0);
+        const rf = Number(j.refund_failed || 0);
+        if (rs || rf) msg += ` (refunds: ${rs} succeeded${rf ? ', ' + rf + ' failed' : ''})`;
+      }
+      if (j.errors && Array.isArray(j.errors) && j.errors.length){
+        msg += ` • ${j.errors.length} failed`;
+      }
+      showToast('success', msg);
+    }catch(e){ showToast('success', 'Done'); }
+  } catch(e){
+    console.error(e);
+    showToast('error', 'Bulk delete failed');
+  } finally {
+    try{ if (confirmBtn) confirmBtn.disabled = false; if (cancelBtn) cancelBtn.disabled = false; }catch(e){}
+    try{ if (confirmBtn) confirmBtn.textContent = 'Confirm'; }catch(e){}
+  }
 }
 
 

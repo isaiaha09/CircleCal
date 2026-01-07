@@ -59,14 +59,30 @@
                 </div>
                 {% endif %}
 
+                <div class="detail-row">
+                    <span class="detail-label">Payment:</span>
+                    <span class="detail-value">
+                        {% if payment_method == 'stripe' or booking.payment_method == 'stripe' %}
+                            Paid by card
+                            {% if stripe_card_last4 %}
+                                <span class="detail-subtext">{% if stripe_card_brand %}{{ stripe_card_brand|title }} {% endif %}ending in {{ stripe_card_last4 }}</span>
+                            {% endif %}
+                        {% elif payment_method == 'offline' or booking.payment_method == 'offline' %}
+                            Offline payment
+                            {% if offline_method %}
+                                <span class="detail-subtext">Selected method: {{ offline_method|title }}</span>
+                            {% endif %}
+                        {% else %}
+                            No payment required
+                        {% endif %}
+                    </span>
+                </div>
+
                                 {% if booking.payment_method == 'offline' %}
                                 <div class="detail-row">
-                                        <span class="detail-label">Payment:</span>
+                                        <span class="detail-label"></span>
                                         <span class="detail-value">
                                                 Payment is handled outside CircleCal and must be completed prior to your appointment.
-                                                {% if offline_method %}
-                                                    <span class="detail-subtext">Selected method: {{ offline_method|title }}</span>
-                                                {% endif %}
                                                 {% if offline_qr_url %}
                                                     <div class="detail-subtext" style="margin-top:10px;">
                                                         <strong>Scan to pay now:</strong><br>

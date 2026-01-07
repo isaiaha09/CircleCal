@@ -1709,19 +1709,52 @@ def manage_billing(request, org_slug):
             created_dt = inv.get('created')
             created_iso = created_dt.isoformat() if created_dt else None
             created_display = created_dt.strftime('%B %d, %Y %I:%M %p') if created_dt else None
-            return {
+            payload = {
                 'id': raw.get('id') if isinstance(raw, dict) else None,
                 'pseudo': bool(raw.get('pseudo')) if isinstance(raw, dict) else False,
                 'created_iso': created_iso,
                 'created_display': created_display,
                 'amount_display_dollars': inv.get('amount_display_dollars'),
-                'status': (raw.get('status') if isinstance(raw, dict) and raw.get('pseudo') else inv.get('status')),
+                'status': ((raw.get('status') or inv.get('status')) if isinstance(raw, dict) and raw.get('pseudo') else inv.get('status')),
                 'hosted_invoice_url': inv.get('hosted_invoice_url'),
                 'card_brand': inv.get('card_brand'),
                 'card_last4': (inv.get('card_last4') or fallback_last4),
                 'hidden': bool(inv.get('hidden')),
                 'discount': (raw.get('discount') if isinstance(raw, dict) and raw.get('discount') else applied_discount),
             }
+
+            # Include the pseudo-invoice type for UI rendering.
+            try:
+                if isinstance(raw, dict) and raw.get('pseudo'):
+                    payload['type'] = raw.get('type')
+            except Exception:
+                pass
+
+            # Include subscription-change details for pseudo-invoices so the
+            # billing UI can render the "View change" modal consistently even
+            # when invoice rows are built client-side.
+            try:
+                if isinstance(raw, dict) and raw.get('pseudo') and raw.get('type') == 'subscription_change':
+                    payload.update({
+                        'type': raw.get('type'),
+                        'change_type': raw.get('change_type'),
+                        'new_plan_name': raw.get('new_plan_name'),
+                        'amount_cents': raw.get('amount_cents'),
+                        'stripe_invoice_id': raw.get('stripe_invoice_id'),
+                    })
+                    eff = raw.get('effective_at')
+                    if eff is not None:
+                        try:
+                            payload['effective_at'] = eff.isoformat()
+                        except Exception:
+                            payload['effective_at'] = str(eff)
+                    else:
+                        payload['effective_at'] = None
+            except Exception:
+                # Never fail invoice listing because of extra serialization
+                pass
+
+            return payload
 
         data = [_serialize(i) for i in page_items]
         has_more = end < total

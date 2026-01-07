@@ -99,17 +99,101 @@ def send_booking_confirmation(booking):
     # Make the reschedule button in the confirmation email behave like the cancel button
     # so clients must cancel first before rescheduling. Point reschedule_url to cancel_url.
     reschedule_url = cancel_url
+    payment_method = (getattr(booking, 'payment_method', '') or '').strip().lower()
     context = {
         'booking': booking,
         'public_ref': getattr(booking, 'public_ref', None),
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
         'cancel_url': cancel_url,
         'reschedule_url': reschedule_url,
+        'payment_method': payment_method,
+        'stripe_card_brand': '',
+        'stripe_card_last4': '',
     }
+
+    # Stripe payment details (safe to show last4; do not include full card data)
+    try:
+        if payment_method == 'stripe':
+            session_id = (getattr(booking, 'stripe_checkout_session_id', '') or '').strip()
+            secret = getattr(settings, 'STRIPE_SECRET_KEY', None)
+            if session_id and secret:
+                import stripe  # local import to avoid dependency issues in non-Stripe environments
+                stripe.api_key = secret
+
+                org = getattr(booking, 'organization', None)
+                acct = None
+                try:
+                    if org and getattr(org, 'stripe_connect_charges_enabled', False):
+                        acct = getattr(org, 'stripe_connect_account_id', None) or None
+                except Exception:
+                    acct = None
+
+                def _retrieve(fn, *args, **kwargs):
+                    if acct:
+                        kwargs.setdefault('stripe_account', acct)
+                    return fn(*args, **kwargs)
+
+                # Minimal API calls: session -> payment_intent -> latest_charge -> card details
+                sess = _retrieve(stripe.checkout.Session.retrieve, session_id, expand=['payment_intent'])
+                pi = getattr(sess, 'payment_intent', None) or (sess.get('payment_intent') if isinstance(sess, dict) else None)
+
+                pi_id = None
+                if isinstance(pi, str):
+                    pi_id = pi
+                else:
+                    pi_id = getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None)
+
+                latest_charge = None
+                charges_list = None
+                # Prefer expanded PI's latest_charge when available
+                if not isinstance(pi, str) and pi is not None:
+                    latest_charge = getattr(pi, 'latest_charge', None) or (pi.get('latest_charge') if isinstance(pi, dict) else None)
+
+                # Fallback: retrieve PI expanded with charges if latest_charge missing
+                if not latest_charge and pi_id:
+                    try:
+                        pi_obj = _retrieve(
+                            stripe.PaymentIntent.retrieve,
+                            pi_id,
+                            expand=['charges.data.payment_method_details']
+                        )
+                        latest_charge = getattr(pi_obj, 'latest_charge', None) or (pi_obj.get('latest_charge') if isinstance(pi_obj, dict) else None)
+                        charges_list = (pi_obj.get('charges') if isinstance(pi_obj, dict) else getattr(pi_obj, 'charges', None))
+                    except Exception:
+                        latest_charge = None
+                        charges_list = None
+
+                charge_obj = None
+                if latest_charge:
+                    try:
+                        charge_obj = _retrieve(stripe.Charge.retrieve, latest_charge)
+                    except Exception:
+                        charge_obj = None
+                elif charges_list:
+                    try:
+                        data = charges_list.get('data') if isinstance(charges_list, dict) else getattr(charges_list, 'data', None)
+                        if data:
+                            # pick the last charge as the most recent
+                            charge_obj = data[-1]
+                    except Exception:
+                        charge_obj = None
+
+                if charge_obj:
+                    pmd = charge_obj.get('payment_method_details', {}) if isinstance(charge_obj, dict) else (getattr(charge_obj, 'payment_method_details', None) or {})
+                    card = (pmd.get('card') if isinstance(pmd, dict) else None) or {}
+                    brand = (card.get('brand') or '').strip()
+                    last4 = (card.get('last4') or '').strip()
+                    if brand:
+                        context['stripe_card_brand'] = brand
+                    if last4:
+                        context['stripe_card_last4'] = last4
+    except Exception:
+        # Never block sending confirmation email due to Stripe lookup issues
+        pass
 
     # Offline payment details (manual payments outside CircleCal)
     try:
-        if getattr(booking, 'payment_method', '') == 'offline':
+        if payment_method == 'offline':
             org = getattr(booking, 'organization', None)
             org_settings = getattr(org, 'settings', None) if org else None
             offline_method = (getattr(booking, 'offline_payment_method', '') or '').strip().lower()

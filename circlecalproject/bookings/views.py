@@ -737,6 +737,7 @@ def cancel_booking(request, booking_id):
     service_slug = booking.service.slug if booking.service else None
     # Decide refund eligibility based on the service's policy
     refund_info = None
+    refund_eligible = False
     if booking.service:
         svc = booking.service
         if svc.refunds_allowed:
@@ -749,7 +750,7 @@ def cancel_booking(request, booking_id):
             start_local = booking.start.astimezone(org_tz)
             hours_until = (start_local - now_local).total_seconds() / 3600.0
             if hours_until >= svc.refund_cutoff_hours:
-                # Placeholder: integrate with Stripe to issue refund if payment exists
+                refund_eligible = True
                 refund_info = "Refund eligible"
             else:
                 refund_info = f"No refund (within {svc.refund_cutoff_hours}h cutoff)"
@@ -770,6 +771,88 @@ def cancel_booking(request, booking_id):
 
     # POST -> perform the cancellation
     if request.method == 'POST':
+        # Best-effort: issue Stripe refund if this booking was paid by card and is eligible.
+        # Never block cancellation on refund failures; we surface status in refund_info.
+        try:
+            pm = (getattr(booking, 'payment_method', '') or '').strip().lower()
+            if refund_eligible and pm == 'stripe':
+                session_id = (getattr(booking, 'stripe_checkout_session_id', '') or '').strip()
+                secret = getattr(settings, 'STRIPE_SECRET_KEY', None)
+
+                org = getattr(booking, 'organization', None)
+                acct = None
+                try:
+                    if org and getattr(org, 'stripe_connect_charges_enabled', False):
+                        acct = getattr(org, 'stripe_connect_account_id', None) or None
+                except Exception:
+                    acct = None
+
+                if session_id and secret and acct:
+                    import stripe
+                    stripe.api_key = secret
+
+                    def _retrieve(fn, *args, **kwargs):
+                        kwargs.setdefault('stripe_account', acct)
+                        return fn(*args, **kwargs)
+
+                    sess = _retrieve(stripe.checkout.Session.retrieve, session_id, expand=['payment_intent'])
+                    pi = getattr(sess, 'payment_intent', None) or (sess.get('payment_intent') if isinstance(sess, dict) else None)
+                    pi_id = pi if isinstance(pi, str) else (getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None))
+
+                    latest_charge_id = None
+                    charges_list = None
+                    if not isinstance(pi, str) and pi is not None:
+                        latest_charge_id = getattr(pi, 'latest_charge', None) or (pi.get('latest_charge') if isinstance(pi, dict) else None)
+
+                    if not latest_charge_id and pi_id:
+                        try:
+                            pi_obj = _retrieve(stripe.PaymentIntent.retrieve, pi_id, expand=['charges.data.payment_method_details'])
+                            latest_charge_id = getattr(pi_obj, 'latest_charge', None) or (pi_obj.get('latest_charge') if isinstance(pi_obj, dict) else None)
+                            charges_list = (pi_obj.get('charges') if isinstance(pi_obj, dict) else getattr(pi_obj, 'charges', None))
+                        except Exception:
+                            latest_charge_id = None
+                            charges_list = None
+
+                    charge_id = None
+                    if latest_charge_id:
+                        charge_id = latest_charge_id
+                    elif charges_list:
+                        try:
+                            data = charges_list.get('data') if isinstance(charges_list, dict) else getattr(charges_list, 'data', None)
+                            if data:
+                                last = data[-1]
+                                charge_id = (last.get('id') if isinstance(last, dict) else getattr(last, 'id', None))
+                        except Exception:
+                            charge_id = None
+
+                    if charge_id:
+                        refund = stripe.Refund.create(
+                            charge=charge_id,
+                            stripe_account=acct,
+                            idempotency_key=f"booking_cancel_refund_{booking.id}",
+                            metadata={
+                                'cc_booking_id': str(getattr(booking, 'id', '') or ''),
+                                'cc_public_ref': str(getattr(booking, 'public_ref', '') or ''),
+                                'cc_org_slug': str(getattr(org, 'slug', '') or ''),
+                                'cc_service_slug': str(getattr(getattr(booking, 'service', None), 'slug', '') or ''),
+                                'cc_start': str(getattr(booking, 'start', '') or ''),
+                            },
+                        )
+                        refund_id = (refund.get('id') if isinstance(refund, dict) else getattr(refund, 'id', None))
+                        refund_info = "Refund issued" + (f" ({refund_id})" if refund_id else "")
+                    else:
+                        refund_info = "Refund eligible (unable to locate Stripe charge)"
+                elif refund_eligible and pm == 'stripe' and not acct:
+                    # Card payment configured, but Connect isn't fully enabled; avoid promising a refund.
+                    refund_info = "Refund eligible (payment account not available)"
+        except Exception:
+            # Keep original refund_info when possible.
+            try:
+                if refund_eligible:
+                    refund_info = refund_info or "Refund eligible"
+            except Exception:
+                pass
+
         # Mark this deletion as a client-initiated cancellation so audit records
         # can reflect 'cancelled' instead of 'deleted'. The post-delete signal
         # will read this attribute when creating the AuditBooking.
@@ -1888,6 +1971,17 @@ def public_service_page(request, org_slug, service_slug):
                         'org_slug': str(org.slug),
                         'service_slug': str(service.slug),
                     },
+                    # Put the same identifiers on the PaymentIntent so they are searchable
+                    # in the Stripe dashboard even if the Session view doesn't surface IDs.
+                    payment_intent_data={
+                        'metadata': {
+                            'cc_public_booking_intent_id': str(intent.id),
+                            'cc_org_slug': str(org.slug),
+                            'cc_service_slug': str(service.slug),
+                            'cc_slot_start': (start.isoformat() if start else ''),
+                            'cc_slot_end': (end.isoformat() if end else ''),
+                        }
+                    },
                     return_url=return_url,
                     stripe_account=connected_account_id,
                 )
@@ -2289,6 +2383,35 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         stripe_checkout_session_id=session_id,
         rescheduled_from_booking_id=getattr(intent, 'rescheduled_from_booking_id', None),
     )
+
+    # Add the finalized booking identifiers to the PaymentIntent metadata so
+    # Stripe search can locate appointments by booking id / public ref.
+    try:
+        import stripe
+        stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
+        acct = getattr(org, 'stripe_connect_account_id', None)
+        if stripe.api_key and acct:
+            sess = stripe.checkout.Session.retrieve(session_id, stripe_account=acct, expand=['payment_intent'])
+            pi = getattr(sess, 'payment_intent', None) or (sess.get('payment_intent') if isinstance(sess, dict) else None)
+            pi_id = pi if isinstance(pi, str) else (getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None))
+            if pi_id:
+                try:
+                    pi_obj = stripe.PaymentIntent.retrieve(pi_id, stripe_account=acct)
+                    existing = (pi_obj.get('metadata') if isinstance(pi_obj, dict) else getattr(pi_obj, 'metadata', None)) or {}
+                except Exception:
+                    existing = {}
+                new_meta = {
+                    'cc_booking_id': str(getattr(booking, 'id', '') or ''),
+                    'cc_public_ref': str(getattr(booking, 'public_ref', '') or ''),
+                    'cc_org_slug': str(org.slug),
+                    'cc_service_slug': str(service.slug),
+                }
+                # Merge without dropping existing metadata
+                merged = dict(existing)
+                merged.update({k: v for k, v in new_meta.items() if v is not None})
+                stripe.PaymentIntent.modify(pi_id, stripe_account=acct, metadata=merged)
+    except Exception:
+        pass
 
     try:
         intent.delete()
