@@ -142,11 +142,27 @@
     <button class="filter-btn" data-filter="ongoing">Ongoing</button>
     <button class="filter-btn" data-filter="today">Today</button>
     <button class="filter-btn" data-filter="past">Past</button>
-    <select id="serviceFilter" class="filter-btn" style="padding: 8px 12px;">
-      <option value="">All Services</option>
-      {% for service in services %}
-        <option value="{{ service.id }}">{{ service.name }}</option>
-      {% endfor %}
+    <select id="scopeFilter" class="filter-btn" style="padding: 8px 12px;">
+      <option value="" {% if not selected_scope %}selected{% endif %}>All Services</option>
+      <optgroup label="Members">
+        {% for opt in scope_member_options %}
+          <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+        {% endfor %}
+      </optgroup>
+
+      {% if scope_service_member_options %}
+      <optgroup label="Personal services">
+        {% for opt in scope_service_member_options %}
+          <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
+
+      <optgroup label="Other / Group Services">
+        {% for opt in scope_service_other_options %}
+          <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+        {% endfor %}
+      </optgroup>
     </select>
     {% if user_org_role != 'staff' %}
       <button id="deleteSelectedBtn" class="btn-sm btn-delete" onclick="deleteSelected()" style="display:none; margin-left:8px;">Delete selected</button>
@@ -248,9 +264,9 @@
         </select>
         <select id="auditServiceFilter" class="filter-btn" style="padding:6px 10px;">
           <option value="">All Services</option>
-          {% for service in services %}
-            <option value="{{ service.name|escapejs }}">{{ service.name }}</option>
-          {% endfor %}
+          {% for service in audit_services %}
+              <option value="{{ service.name|escapejs }}">{{ service.name }}</option>
+            {% endfor %}
         </select>
       </div>
       <div style="display:flex;gap:8px; align-items:center;">
@@ -533,17 +549,27 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 });
 
 document.getElementById('searchBox').addEventListener('input', filterBookings);
-document.getElementById('serviceFilter').addEventListener('change', filterBookings);
+document.getElementById('scopeFilter').addEventListener('change', function() {
+  try {
+    const val = this.value || '';
+    const params = new URLSearchParams(window.location.search || '');
+    if (val) params.set('scope', val);
+    else params.delete('scope');
+    const next = params.toString();
+    window.location.search = next ? ('?' + next) : '';
+  } catch (e) {
+    // fallback: simple reload to base URL
+    window.location.href = window.location.pathname;
+  }
+});
 
 function filterBookings() {
   const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
   const searchTerm = document.getElementById('searchBox').value.toLowerCase();
-  const serviceId = document.getElementById('serviceFilter').value;
 
   document.querySelectorAll('#bookingsTableBody tr').forEach(row => {
     const status = row.dataset.status;
     const search = row.dataset.search;
-    const rowServiceId = row.dataset.serviceId;
 
     let show = true;
 
@@ -552,9 +578,6 @@ function filterBookings() {
 
     // Search filter
     if (searchTerm && !search.includes(searchTerm)) show = false;
-
-    // Service filter
-    if (serviceId && rowServiceId !== serviceId) show = false;
 
     row.style.display = show ? '' : 'none';
   });

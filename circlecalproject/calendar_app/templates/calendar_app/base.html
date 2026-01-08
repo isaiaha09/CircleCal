@@ -169,9 +169,13 @@
     {% block extra_head %}{% endblock %}
 </head>
 
+{% if request.GET.embed == '1' or request.custom_domain_organization %}
+<body class="bg-transparent text-gray-900">
+{% else %}
 <body class="bg-blue-50  text-gray-900">
+{% endif %}
 
-    {% if request.GET.embed != '1' %}
+    {% if request.GET.embed != '1' and not request.custom_domain_organization %}
     <header class="bg-white border-b shadow-sm relative z-50">
         <div class="max-w-7xl mx-auto px-4 py-4">
             <div class="flex items-center justify-between">
@@ -249,21 +253,21 @@
                         {% if request.user.is_authenticated %}
                         {% if request.organization %}
                             {% if user_org_role == 'staff' or user_org_role == 'manager' %}
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-3">Dashboard</a>
+                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
                             {% else %}
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-3">Dashboard</a>
-                                <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-3">Calendar</a>
-                                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-3">Pricing</a>
-                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block text-gray-700 hover:text-blue-600 py-3">Team</a>
-                                <a href="{% url 'calendar_app:choose_business' %}" class="block text-gray-700 hover:text-blue-600 py-3">Switch Business</a>
+                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
+                                <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Calendar</a>
+                                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
+                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Team</a>
+                                <a href="{% url 'calendar_app:choose_business' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Switch Business</a>
                             {% endif %}
                         {% else %}
-                            <a href="{% url 'calendar_app:choose_business' %}" class="block text-blue-600 font-medium py-3">Create Business</a>
+                            <a href="{% url 'calendar_app:choose_business' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-blue-600 font-medium">Create Business</a>
                         {% endif %}
                         {% else %}
-                            <a href="{% url 'accounts:login' %}" class="block text-gray-700 hover:text-blue-600 py-3">Login</a>
-                            <a href="{% url 'accounts:reactivate' %}" class="block text-gray-700 hover:text-blue-600 py-3">Reactivate</a>
-                            <a href="{% url 'calendar_app:signup' %}" class="block text-blue-600 font-semibold py-3">Sign Up</a>
+                            <a href="{% url 'accounts:login' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Login</a>
+                            <a href="{% url 'accounts:reactivate' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Reactivate</a>
+                            <a href="{% url 'calendar_app:signup' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-blue-600 font-semibold">Sign Up</a>
                         {% endif %}
                     </div>
 
@@ -271,7 +275,7 @@
                         {% if request.user.is_authenticated %}
                             <form action="{% url 'accounts:logout' %}" method="post">
                                 {% csrf_token %}
-                                <button type="submit" class="w-full text-left px-3 py-3 bg-red-500 text-white rounded hover:bg-red-600">Logout</button>
+                                <button type="submit" class="w-full text-left px-4 py-3 bg-red-500 text-white rounded-lg shadow-sm hover:shadow transition hover:bg-red-600">Logout</button>
                             </form>
                         {% endif %}
                     </div>
@@ -566,6 +570,7 @@
 
         
 
+    {% if request.GET.embed != '1' and not request.custom_domain_organization %}
     <!-- Footer -->
     <footer class="bg-white border-t mt-12 py-8">
         <div class="max-w-7xl mx-auto px-4">
@@ -600,7 +605,7 @@
                 <div>
                     <h3 class="font-bold text-lg mb-3">Contact</h3>
                     <ul class="space-y-2 text-sm text-gray-600">
-                        <li><a href="{% url 'calendar_app:contact' %}" class="text-gray-600 hover:text-blue-600">Contact Form</a></li>
+                        <li><a href="{% url 'calendar_app:contact' %}" class="text-gray-600 hover:text-blue-600">CircleCal Support</a></li>
                     </ul>
                 </div>
             </div>
@@ -617,5 +622,6 @@
             </div>
         </div>
     </footer>
+    {% endif %}
 </body>
 </html>

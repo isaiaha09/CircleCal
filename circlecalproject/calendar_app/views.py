@@ -2229,6 +2229,7 @@ def calendar_view(request, org_slug):
             'slug': s.slug,
             'is_active': bool(getattr(s, 'is_active', True)),
             'duration': s.duration,
+            'buffer_after': int(getattr(s, 'buffer_after', 0) or 0),
             'time_increment_minutes': getattr(s, 'time_increment_minutes', 30),
             'use_fixed_increment': bool(getattr(s, 'use_fixed_increment', False)),
             'allow_squished_bookings': bool(getattr(s, 'allow_squished_bookings', False)),
@@ -5726,24 +5727,163 @@ def bookings_list(request, org_slug):
     Display all bookings for this organization.
     """
     org = request.organization
-    bookings = Booking.objects.filter(
+
+    # Base querysets
+    bookings_qs = Booking.objects.filter(
         organization=org,
-        is_blocking=False,           # Exclude full-day/blocking overrides
-        service__isnull=False        # Exclude availability overrides; include only real bookings
+        is_blocking=False,
+        service__isnull=False,
     ).select_related('service').order_by('-start')
-    
+
+    audit_qs = AuditBooking.objects.filter(organization=org).select_related('service').order_by('-created_at')
+
     services = Service.objects.filter(organization=org, is_active=True)
-    
+    members_list = list(
+        Membership.objects.filter(organization=org, is_active=True)
+        .values('id', 'user__first_name', 'user__last_name', 'user__email')
+        .order_by('user__first_name', 'user__last_name', 'user__email')
+    )
+
+    selected_scope = (request.GET.get('scope') or '').strip()
+
+    # Track scope-derived service ids so the template can show consistent service options
+    scope_service_id: int | None = None
+    scope_service_ids: list[int] | None = None
+
+    def _apply_scope(service_id: int | None, service_ids: list[int] | None):
+        nonlocal bookings_qs, audit_qs, scope_service_id, scope_service_ids
+        if service_id is not None:
+            scope_service_id = int(service_id)
+            scope_service_ids = None
+            bookings_qs = bookings_qs.filter(service_id=service_id)
+            audit_qs = audit_qs.filter(service_id=service_id)
+            return
+        if service_ids is not None:
+            scope_service_id = None
+            scope_service_ids = [int(x) for x in service_ids]
+            bookings_qs = bookings_qs.filter(service_id__in=service_ids)
+            audit_qs = audit_qs.filter(service_id__in=service_ids)
+
+    # Scope filter matches calendar.html conventions:
+    # - All services: no scope param (or empty)
+    # - Service scope: scope=svc:<service_id>
+    # - Member scope: scope=<membership_id> (filters to services assigned to that member)
+    if selected_scope:
+        if selected_scope.startswith('svc:'):
+            raw_id = selected_scope[4:].strip()
+            try:
+                _apply_scope(service_id=int(raw_id), service_ids=None)
+            except Exception:
+                selected_scope = ''
+        elif selected_scope.isdigit():
+            mid = int(selected_scope)
+            try:
+                from bookings.models import ServiceAssignment
+                has_any = ServiceAssignment.objects.filter(service__organization=org).exists()
+                svc_ids = list(
+                    ServiceAssignment.objects.filter(service__organization=org, membership_id=mid)
+                    .values_list('service_id', flat=True)
+                )
+                if svc_ids:
+                    _apply_scope(service_id=None, service_ids=[int(x) for x in svc_ids])
+                else:
+                    # If org uses assignments, member with 0 assigned services should show none.
+                    # If org doesn't use assignments at all, keep unfiltered.
+                    if has_any:
+                        _apply_scope(service_id=None, service_ids=[])
+            except Exception:
+                # If assignments aren't available, fall back to assigned_user-based filtering.
+                try:
+                    mem = Membership.objects.filter(id=mid, organization=org, is_active=True).select_related('user').first()
+                    uid = getattr(getattr(mem, 'user', None), 'id', None)
+                    if uid:
+                        bookings_qs = bookings_qs.filter(assigned_user_id=uid)
+                        # AuditBooking isn't user-assigned; can't reliably filter it in this fallback.
+                except Exception:
+                    pass
+        else:
+            selected_scope = ''
+
+    # Build calendar-like scope dropdown options:
+    # - Members
+    # - Member Services (solo-assigned services get labeled with member name)
+    # - Other / Group Services (unassigned or multi-assigned)
+    def _member_label(m: dict) -> str:
+        try:
+            fn = (m.get('user__first_name') or '').strip()
+            ln = (m.get('user__last_name') or '').strip()
+            em = (m.get('user__email') or '').strip()
+            name = (fn + ' ' + ln).strip()
+            if name and em:
+                return f"{name} ({em})"
+            return name or em or f"Member {m.get('id')}"
+        except Exception:
+            return 'Member'
+
+    member_label_by_id = {int(m['id']): _member_label(m) for m in members_list if m.get('id') is not None}
+
+    # Map service_id -> [membership_id,...]
+    svc_to_mids: dict[int, list[int]] = {}
+    try:
+        from bookings.models import ServiceAssignment
+        for sid, mid in ServiceAssignment.objects.filter(service__organization=org, service__is_active=True).values_list('service_id', 'membership_id'):
+            try:
+                svc_to_mids.setdefault(int(sid), []).append(int(mid))
+            except Exception:
+                continue
+    except Exception:
+        svc_to_mids = {}
+
+    scope_member_options = [
+        {'value': str(m['id']), 'label': _member_label(m)}
+        for m in members_list
+        if m.get('id') is not None
+    ]
+
+    scope_service_member_options: list[dict] = []
+    scope_service_other_options: list[dict] = []
+    for s in services.order_by('name'):
+        try:
+            mids = svc_to_mids.get(int(s.id), [])
+        except Exception:
+            mids = []
+        if len(mids) == 1 and int(mids[0]) in member_label_by_id:
+            scope_service_member_options.append({
+                'value': f"svc:{s.id}",
+                'label': f"{member_label_by_id[int(mids[0])]} - {s.name}",
+            })
+        else:
+            scope_service_other_options.append({
+                'value': f"svc:{s.id}",
+                'label': s.name,
+            })
+
+    # Audit service filter should only show services within the current scope
+    audit_services_qs = services
+    try:
+        if scope_service_id is not None:
+            audit_services_qs = services.filter(id=int(scope_service_id))
+        elif scope_service_ids is not None:
+            audit_services_qs = services.filter(id__in=[int(x) for x in scope_service_ids])
+    except Exception:
+        audit_services_qs = services
+
     now = timezone.now()
     today = date.today()
-    
+
     return render(request, "calendar_app/bookings_list.html", {
         "organization": org,
-        "bookings": bookings,
+        "bookings": bookings_qs,
         "services": services,
+        "members_list": members_list,
+        "scope_member_options": scope_member_options,
+        "scope_service_member_options": scope_service_member_options,
+        "scope_service_other_options": scope_service_other_options,
+        "audit_services": audit_services_qs,
+        "selected_scope": selected_scope,
         "now": now,
         "today": today,
-        "audit_entries": AuditBooking.objects.filter(organization=org).order_by('-created_at')[:50],
+        "audit_entries": audit_qs[:50],
     })
 
 

@@ -105,6 +105,47 @@
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
+/* Calendar loading overlay (service-scope parity) */
+#calendar.cc-calendar-loading .fc {
+    opacity: 0.45;
+    filter: grayscale(1);
+    pointer-events: none;
+}
+#calendar .cc-calendar-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    z-index: 120;
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(2px);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+    pointer-events: auto;
+}
+#calendar.cc-calendar-loading .cc-calendar-loading-overlay {
+    display: flex;
+}
+.cc-calendar-spinner {
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: 4px solid var(--gray-200);
+    border-top-color: var(--primary-500);
+    animation: cc-calendar-spin 0.8s linear infinite;
+}
+@keyframes cc-calendar-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+.cc-calendar-loading-text {
+    color: var(--gray-700);
+    font-weight: 600;
+    font-size: 14px;
+}
+
 /* Improved member/service select styling */
 #memberSelect {
     appearance: none;
@@ -1457,6 +1498,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
         <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Bookings</h3>
         <div style="display:flex; gap:8px; align-items:center;">
+            <a id="bookingsViewAllBtn" href="{% url 'calendar_app:bookings_list' organization.slug %}" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; text-decoration:none; display:inline-flex; align-items:center;">View all bookings</a>
             <input id="bookingsSearchInline" type="text" placeholder="Search name or email" style="padding:8px 10px; border:1px solid var(--gray-300); border-radius:6px; font-size:13px;" />
             <button id="bookingsRefreshBtn" type="button" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">Refresh</button>
         </div>
@@ -1488,7 +1530,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                 </div>
                 <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px;">
                 {% for a in audit_entries %}
-                    <li style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px; border-radius:8px; background:var(--gray-50);">
+                    <li class="cc-inline-audit-row" data-service-id="{{ a.service.id|default:'' }}" style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px; border-radius:8px; background:var(--gray-50);">
                         <input type="checkbox" class="auditRowCbInline" value="{{ a.id }}" style="margin-right:8px;">
                     <div style="flex:1;">
                         <div style="font-weight:600;">{{ a.get_event_type_display|capfirst }}{% if a.booking_id %} — #{{ a.booking_id }}{% endif %}</div>
@@ -1500,6 +1542,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                 </li>
                 {% endfor %}
             </ul>
+            <div id="inlineAuditEmptyScoped" style="color:var(--gray-600); display:none; padding:8px 0;">No recent audited deletions for this member/service.</div>
             {% else %}
                 <div style="color:var(--gray-600);">No recent audited deletions.</div>
             {% endif %}
@@ -1862,6 +1905,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     
     function updateUnavailableDays() {
+        // Service-scope parity: when a specific service is selected (svc:<id>),
+        // use the same backend availability computation as the public booking page.
+        // This ensures month visuals reflect *bookable* starts after applying bookings,
+        // buffers, min notice, max booking days, overrides, resources, and freezes.
+        try {
+            if (typeof refreshServiceScopeMonthParity === 'function' && SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')) {
+                refreshServiceScopeMonthParity();
+                // Still keep the overrides table updated (it lists per-date overrides regardless
+                // of whether a day has remaining slots).
+                try { renderOverridesTable(); } catch (e) { /* ignore */ }
+                return;
+            }
+        } catch (e) { /* fall through to legacy */ }
+
         // Compute per-date full-day blocks from background events (so per-date overrides take precedence)
         const blockedDates = new Set();
         const availableOverrideDates = new Set();
@@ -1938,6 +1995,293 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         // After updating day classes, refresh the overrides table so it reflects per-date overrides
         try { renderOverridesTable(); } catch (e) { console.warn('renderOverridesTable failed', e); }
+    }
+
+    // -----------------------------
+    // Service-scope parity (month)
+    // -----------------------------
+    let __svcParityToken = 0;
+    let __svcParityLastKey = null;
+    let __svcParityLastMap = null;
+
+    function _invalidateServiceScopeParityCache() {
+        // Any per-date override creation/deletion can change real bookable availability.
+        // When service scope is selected we must force a re-computation so day circles
+        // flip immediately (and don't get stuck on a cached month map).
+        try { __svcParityLastKey = null; } catch (e) {}
+        try { __svcParityLastMap = null; } catch (e) {}
+        // Bump token to cancel any in-flight background verification
+        try { __svcParityToken = (__svcParityToken || 0) + 1; } catch (e) {}
+    }
+
+    function _svcForSelectedScope() {
+        try {
+            if (!SELECTED_MEMBER) return null;
+            const raw = String(SELECTED_MEMBER);
+            if (!raw.startsWith('svc:')) return null;
+            const svcId = Number(raw.slice(4)) || null;
+            if (!svcId) return null;
+            const svc = (typeof svcById === 'function') ? svcById(svcId) : null;
+            if (!svc || !svc.slug) return null;
+            return svc;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function _visibleDayDates() {
+        const out = [];
+        try {
+            // Only include in-month cells; FullCalendar still renders out-of-month cells
+            // even if we hide them via CSS.
+            document.querySelectorAll('.fc-daygrid-day[data-date]:not(.fc-day-other)').forEach(el => {
+                const d = el.getAttribute('data-date');
+                if (d) out.push(d);
+            });
+        } catch (e) {}
+        // De-dupe while preserving order
+        try { return Array.from(new Set(out)); } catch (e) { return out; }
+    }
+
+    function _toIsoLocal(dateStr, hh, mm, ss) {
+        // dateStr: YYYY-MM-DD
+        try {
+            const parts = String(dateStr).split('-');
+            const y = Number(parts[0]);
+            const m = Number(parts[1]);
+            const d = Number(parts[2]);
+            const pad = n => String(n).padStart(2, '0');
+            return `${y}-${pad(m)}-${pad(d)}T${pad(hh)}:${pad(mm)}:${pad(ss || 0)}`;
+        } catch (e) {
+            return `${dateStr}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`;
+        }
+    }
+
+    function _applyServiceScopeDayClasses(dayHasSlots) {
+        try {
+            document.querySelectorAll('.fc-daygrid-day').forEach(dayCell => {
+                const dateStr = dayCell.dataset.date;
+                if (!dateStr) return;
+                const isPast = isPastDate(dateStr);
+                if (isPast) {
+                    dayCell.classList.remove('fc-day-unavailable');
+                    dayCell.classList.remove('fc-day-available');
+                    dayCell.classList.add('fc-day-past');
+                    const num = dayCell.querySelector('.fc-daygrid-day-number');
+                    if (num) {
+                        num.classList.add('past-day');
+                        num.classList.remove('unavailable-number');
+                        num.style.cursor = 'default';
+                    }
+                    return;
+                }
+
+                const enabled = !!(dayHasSlots && dayHasSlots[dateStr]);
+                if (enabled) {
+                    dayCell.classList.add('fc-day-available');
+                    dayCell.classList.remove('fc-day-unavailable');
+                } else {
+                    dayCell.classList.add('fc-day-unavailable');
+                    dayCell.classList.remove('fc-day-available');
+                }
+
+                dayCell.style.background = 'transparent';
+                const num = dayCell.querySelector('.fc-daygrid-day-number');
+                if (num) {
+                    // Keep clickable for override editing even when unavailable
+                    num.style.cursor = 'pointer';
+                    if (enabled) num.classList.remove('unavailable-number');
+                    else num.classList.add('unavailable-number');
+                }
+            });
+        } catch (e) { console.warn('applyServiceScopeDayClasses failed', e); }
+    }
+
+    // -----------------------------
+    // Service-scope calendar loading UX
+    // -----------------------------
+    function _ensureCalendarLoadingOverlay() {
+        try {
+            const calEl = document.getElementById('calendar');
+            if (!calEl) return null;
+            let overlay = calEl.querySelector('.cc-calendar-loading-overlay');
+            if (overlay) return overlay;
+            overlay = document.createElement('div');
+            overlay.className = 'cc-calendar-loading-overlay';
+            overlay.innerHTML = `
+                <div class="cc-calendar-spinner" aria-hidden="true"></div>
+                <div class="cc-calendar-loading-text">Loading availability…</div>
+            `;
+            calEl.appendChild(overlay);
+            return overlay;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function _setCalendarLoading(isLoading, message) {
+        try {
+            const calEl = document.getElementById('calendar');
+            if (!calEl) return;
+            const overlay = _ensureCalendarLoadingOverlay();
+            if (overlay) {
+                const textEl = overlay.querySelector('.cc-calendar-loading-text');
+                if (textEl && typeof message === 'string' && message.trim()) {
+                    textEl.textContent = message;
+                } else if (textEl) {
+                    textEl.textContent = 'Loading availability…';
+                }
+            }
+            if (isLoading) calEl.classList.add('cc-calendar-loading');
+            else calEl.classList.remove('cc-calendar-loading');
+        } catch (e) { /* ignore */ }
+    }
+
+    async function refreshServiceScopeMonthParity() {
+        const svc = _svcForSelectedScope();
+        if (!svc) return;
+        const dates = _visibleDayDates();
+        if (!dates || dates.length === 0) return;
+
+        const token = ++__svcParityToken;
+        const sorted = dates.slice().sort();
+        const minDate = sorted[0];
+        const maxDate = sorted[sorted.length - 1];
+        const key = `${svc.slug}|${minDate}|${maxDate}`;
+
+        // Fast path: re-apply cached results for the same visible month/service
+        if (__svcParityLastKey === key && __svcParityLastMap) {
+            _applyServiceScopeDayClasses(__svcParityLastMap);
+            try { _setCalendarLoading(false); } catch (e) {}
+            return;
+        }
+
+        // Grey out calendar until parity finishes (prevents confusing partial render)
+        try { _setCalendarLoading(true, 'Loading availability…'); } catch (e) {}
+
+        const today = new Date();
+        const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+        // Fetch server-effective settings (once) + batch summary in parallel.
+        const cacheBuster = `&_t=${Date.now()}`;
+        let eff = null;
+        let summary = {};
+        const startIsoRange = _toIsoLocal(minDate, 0, 0, 0);
+        const endIsoRange = _toIsoLocal(maxDate, 23, 59, 59);
+        try {
+            const effUrl = `/bus/${orgSlug}/services/${svc.slug}/effective/?date=${encodeURIComponent(minDate)}`;
+            const batchUrl = `/bus/${orgSlug}/services/${svc.slug}/availability/batch/?start=${encodeURIComponent(startIsoRange)}&end=${encodeURIComponent(endIsoRange)}${cacheBuster}`;
+            const [effResp, batchResp] = await Promise.all([
+                fetch(effUrl, { credentials: 'same-origin' }).catch(() => null),
+                fetch(batchUrl, { credentials: 'same-origin' }).catch(() => null),
+            ]);
+            try { if (effResp && effResp.ok) eff = await effResp.json(); } catch (e) { eff = null; }
+            try { if (batchResp && batchResp.ok) summary = await batchResp.json(); } catch (e) { summary = {}; }
+        } catch (e) {
+            eff = null;
+            summary = {};
+        }
+
+        const useFixed = (eff && typeof eff.use_fixed_increment === 'boolean') ? !!eff.use_fixed_increment : !!svc.use_fixed_increment;
+        const incVal = Math.max(5, Number((eff && eff.time_increment_minutes) || svc.time_increment_minutes || 30));
+        let allowEndsForAvail = false;
+        try {
+            allowEndsForAvail = (eff && typeof eff.allow_ends_after_availability === 'boolean') ? !!eff.allow_ends_after_availability : !!svc.allow_ends_after_availability;
+        } catch (e) { allowEndsForAvail = false; }
+
+        const edgeVal = (function(){
+            try {
+                const raw = localStorage.getItem('edge_buffers_' + svc.slug);
+                if (raw === '1' || raw === 'true') return 1;
+                if (raw === '0' || raw === 'false') return 0;
+            } catch (e) {}
+            return 0;
+        })();
+
+        // Fast paint (matches public month behavior): apply batch summary immediately.
+        // This makes circles appear quickly instead of waiting for per-day verification.
+        const dayHasSlots = {};
+        for (const dateStr of dates) {
+            dayHasSlots[dateStr] = false;
+            try {
+                const d = parseYMD(dateStr);
+                if (d < todayMidnight) continue;
+            } catch (e) {}
+            dayHasSlots[dateStr] = !!(summary && summary[dateStr]);
+        }
+
+        if (token !== __svcParityToken) return;
+        _applyServiceScopeDayClasses(dayHasSlots);
+        try { renderOverridesTable(); } catch (e) { /* ignore */ }
+        // Remove the overlay once we've painted the month; refine in background.
+        try { _setCalendarLoading(false); } catch (e) {}
+
+        // Background verification: for days batch marked true, confirm slots exist.
+        // This mirrors the public page's "verify detailed availability" idea, but
+        // does NOT block rendering.
+        const candidates = [];
+        for (const dateStr of dates) {
+            try {
+                const d = parseYMD(dateStr);
+                if (d < todayMidnight) continue;
+            } catch (e) {}
+            if (dayHasSlots[dateStr]) candidates.push(dateStr);
+        }
+
+        if (candidates.length === 0) {
+            __svcParityLastKey = key;
+            __svcParityLastMap = dayHasSlots;
+            return;
+        }
+
+        (async () => {
+            const incQueryBase = useFixed ? '' : `&inc=${incVal}`;
+            const concurrency = 4;
+            let idx = 0;
+            let pendingApply = null;
+            const scheduleApply = () => {
+                if (pendingApply) return;
+                pendingApply = setTimeout(() => {
+                    pendingApply = null;
+                    if (token !== __svcParityToken) return;
+                    _applyServiceScopeDayClasses(dayHasSlots);
+                }, 75);
+            };
+
+            async function worker() {
+                while (true) {
+                    const my = idx++;
+                    if (my >= candidates.length) return;
+                    const dateStr = candidates[my];
+                    try {
+                        const startIso = _toIsoLocal(dateStr, 0, 0, 0);
+                        const endIso = _toIsoLocal(dateStr, 23, 59, 59);
+                        const availUrl = `/bus/${orgSlug}/services/${svc.slug}/availability/?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}${incQueryBase}&edge_buffers=${edgeVal}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
+                        const r = await fetch(availUrl, { credentials: 'same-origin' });
+                        const slots = r.ok ? await r.json() : [];
+                        dayHasSlots[dateStr] = Array.isArray(slots) && slots.length > 0;
+                    } catch (e) {
+                        dayHasSlots[dateStr] = false;
+                    }
+                    scheduleApply();
+                }
+            }
+
+            try {
+                await Promise.all(Array.from({ length: Math.min(concurrency, candidates.length) }, () => worker()));
+            } catch (e) { /* ignore */ }
+            if (token !== __svcParityToken) return;
+
+            if (pendingApply) {
+                try { clearTimeout(pendingApply); } catch (e) {}
+                pendingApply = null;
+            }
+
+            __svcParityLastKey = key;
+            __svcParityLastMap = dayHasSlots;
+            _applyServiceScopeDayClasses(dayHasSlots);
+            try { renderOverridesTable(); } catch (e) { /* ignore */ }
+        })();
     }
 
     // -----------------------------
@@ -2653,6 +2997,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try { ccEnforceOverridesLock(); } catch(e) {}
 
+        // Keep service-scope month visuals in sync immediately after per-date override changes.
+        // This fixes cases where overrides apply server-side (public page correct) but the
+        // internal calendar stays visually stale due to parity caching.
+        (function ccHookOverrideMutations(){
+            try {
+                const _fetch = window.fetch;
+                if (typeof _fetch !== 'function') return;
+                // Avoid double-wrapping
+                if (window.__ccOverrideMutationHookInstalled) return;
+                window.__ccOverrideMutationHookInstalled = true;
+
+                window.fetch = function(input, init){
+                    let url = '';
+                    try {
+                        url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                    } catch (e) { url = ''; }
+
+                    const isOverrideMutation = !!(url && (url.includes(`/bus/${orgSlug}/bookings/batch_create/`) || url.includes(`/bus/${orgSlug}/bookings/batch_delete/`)));
+                    const p = _fetch.apply(this, arguments);
+                    if (!isOverrideMutation || !p || typeof p.then !== 'function') return p;
+
+                    return p.then((res) => {
+                        try {
+                            if (res && res.ok) {
+                                try { if (typeof _invalidateServiceScopeParityCache === 'function') _invalidateServiceScopeParityCache(); } catch (e) {}
+                                // Refresh day styles + table on the next tick (after any refetchEvents).
+                                try {
+                                    setTimeout(() => {
+                                        try { updateUnavailableDays(); } catch (e) {}
+                                        try { renderOverridesTable(); } catch (e) {}
+                                    }, 0);
+                                } catch (e) {}
+                            }
+                        } catch (e) {}
+                        return res;
+                    });
+                };
+            } catch (e) { /* ignore */ }
+        })();
+
         // Ensure each service has a weekly_map array (server should provide this, but keep a defensive fallback).
         try{
             if (Array.isArray(SERVICES)){
@@ -2680,6 +3064,37 @@ document.addEventListener('DOMContentLoaded', function() {
                 return getAssignedMembersForService(serviceObj).length === 1;
             } catch (e) {
                 return false;
+            }
+        }
+
+        function _soloServicesForMember(membershipId) {
+            try {
+                const idStr = String(membershipId);
+                if (!idStr) return [];
+                if (!Array.isArray(SERVICES)) return [];
+                return SERVICES.filter(s => {
+                    try {
+                        const assigned = getAssignedMembersForService(s);
+                        return assigned.length === 1 && String(assigned[0]) === idStr;
+                    } catch (e) {
+                        return false;
+                    }
+                });
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function _mergedSoloServiceIdForMemberScope(membershipId) {
+            try {
+                if (!membershipId) return null;
+                const solo = _soloServicesForMember(membershipId);
+                if (solo.length !== 1) return null;
+                const svc = solo[0];
+                const id = (svc && (svc.id != null)) ? svc.id : null;
+                return id != null ? String(id) : null;
+            } catch (e) {
+                return null;
             }
         }
 
@@ -2723,6 +3138,164 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch (e) { /* ignore */ }
                 });
             } catch (e) { /* ignore */ }
+        }
+
+        function _minutesFromTimeStr(t) {
+            try {
+                const s = String(t || '').trim();
+                const parts = s.split(':');
+                const hh = parseInt(parts[0] || '0', 10) || 0;
+                const mm = parseInt(parts[1] || '0', 10) || 0;
+                return (hh * 60) + mm;
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        function _timeStrFromMinutes(mins) {
+            try {
+                const m = Math.max(0, Math.min(24 * 60, Number(mins) || 0));
+                const hh = Math.floor(m / 60);
+                const mm = m % 60;
+                const ampm = hh >= 12 ? 'PM' : 'AM';
+                let h12 = hh % 12;
+                if (h12 === 0) h12 = 12;
+                return `${h12}:${String(mm).padStart(2, '0')} ${ampm}`;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _getDayBoundsLocal(dateStr) {
+            const d = parseYMD(dateStr);
+            const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+            const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+            return [start, end];
+        }
+
+        function _isRealBookingEvent(ev) {
+            try {
+                const xp = ev.extendedProps || {};
+                if (xp.is_blocking || xp.is_per_date || ev.display === 'background') return false;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function _isBookingInSelectedScope(ev) {
+            try {
+                if (!SELECTED_MEMBER) return true;
+                const xp = ev.extendedProps || {};
+
+                // Service-scoped selection: only consider bookings for that service
+                if (String(SELECTED_MEMBER).startsWith('svc:')) {
+                    const svcId = String(SELECTED_MEMBER).slice(4);
+                    const bookingSvc = (xp.service_id || xp.service || ev.service_id || null);
+                    if (!bookingSvc) return true; // conservative if id is missing
+                    return String(bookingSvc) === String(svcId);
+                }
+
+                // Member-scoped selection:
+                // Only merge bookings into the member view when that member has EXACTLY ONE
+                // solo-hosted service assigned. Otherwise, member availability remains flexible
+                // and should not be blocked by service bookings.
+                const mergedSvcId = _mergedSoloServiceIdForMemberScope(SELECTED_MEMBER);
+                if (!mergedSvcId) return false;
+
+                const bookingSvc = (xp.service_id || xp.service || ev.service_id || null);
+                if (!bookingSvc) return false;
+                return String(bookingSvc) === String(mergedSvcId);
+            } catch (e) {
+                return true;
+            }
+        }
+
+        function _getBookingsForDateInScope(dateStr) {
+            const out = [];
+            if (!calendar || typeof calendar.getEvents !== 'function') return out;
+            const [dayStart, dayEnd] = _getDayBoundsLocal(dateStr);
+
+            let events = [];
+            try { events = calendar.getEvents() || []; } catch (e) { events = []; }
+
+            for (const ev of events) {
+                try {
+                    if (!_isRealBookingEvent(ev)) continue;
+                    if (!_isBookingInSelectedScope(ev)) continue;
+                    const s = ev.start || null;
+                    const e = ev.end || null;
+                    if (!s) continue;
+                    const end = e || s;
+                    const overlaps = (s < dayEnd) && (end > dayStart);
+                    if (!overlaps) continue;
+                    out.push(ev);
+                } catch (e) { /* ignore */ }
+            }
+
+            try { out.sort((a,b) => (a.start?.getTime()||0) - (b.start?.getTime()||0)); } catch (e) {}
+            return out;
+        }
+
+        function _weeklyDefaultRangesForDate(dateStr) {
+            try {
+                const d = parseYMD(dateStr);
+                const dow = d.getDay();
+                const info = defaultAvailability[dow] || {};
+                const ranges = info.ranges && info.ranges.length ? info.ranges : (info.start && info.end ? [`${info.start}-${info.end}`] : []);
+                if (!ranges || !ranges.length) return [];
+                return ranges.map(r => {
+                    const parts = String(r || '').split('-');
+                    return { start: (parts[0] || '00:00').trim(), end: (parts[1] || '00:00').trim() };
+                }).filter(r => r.start && r.end && r.start < r.end);
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function _validateOverrideAgainstBookings(dateStr, rangesOrNull) {
+            const bookings = _getBookingsForDateInScope(dateStr);
+            if (!bookings.length) return { ok: true };
+
+            // Full-day unavailable (blocking): any booking blocks this action
+            if (!rangesOrNull || !Array.isArray(rangesOrNull) || rangesOrNull.length === 0) {
+                const first = bookings[0];
+                const s = first.start;
+                const e = first.end || first.start;
+                const msg = `Can’t block ${dateStr} because there’s already a booking (${s ? s.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—'}${e ? ' - ' + e.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''}).`;
+                return { ok: false, message: msg };
+            }
+
+            const parsedRanges = [];
+            for (const r of rangesOrNull) {
+                try {
+                    const start = _minutesFromTimeStr(r.start);
+                    const end = _minutesFromTimeStr(r.end);
+                    if (start < end) parsedRanges.push({ start, end });
+                } catch (e) {}
+            }
+            if (!parsedRanges.length) {
+                return _validateOverrideAgainstBookings(dateStr, null);
+            }
+
+            const [dayStart] = _getDayBoundsLocal(dateStr);
+            for (const b of bookings) {
+                try {
+                    const bs = b.start;
+                    const be = b.end || b.start;
+                    if (!bs) continue;
+                    const startMin = Math.max(0, Math.floor((bs.getTime() - dayStart.getTime()) / 60000));
+                    const endMin = Math.min(24 * 60, Math.ceil((be.getTime() - dayStart.getTime()) / 60000));
+
+                    const covered = parsedRanges.some(r => r.start <= startMin && endMin <= r.end);
+                    if (!covered) {
+                        const msg = `Can’t save availability for ${dateStr}. A booking (${_timeStrFromMinutes(startMin)} - ${_timeStrFromMinutes(endMin)}) would fall outside the new override ranges.`;
+                        return { ok: false, message: msg };
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            return { ok: true };
         }
 
         // Helper: return a human-friendly label for the current selection (member or service)
@@ -2892,6 +3465,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         try { calendar && calendar.refetchEvents(); } catch(e){}
                         try { displayDefaultAvailability(); } catch(e){}
                         try { syncAvailabilityToCalendar(); } catch(e){}
+                        try { if (typeof updateBookingsViewAllLink === 'function') updateBookingsViewAllLink(); } catch(e){}
+                        try { if (typeof filterInlineAuditBySelection === 'function') filterInlineAuditBySelection(); } catch(e){}
 
                         // Update scope menu button label (new UI)
                         try {
@@ -3286,65 +3861,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         },
 
-        // Handle click on existing event (a booked session)
+        // View changed (month navigated). Recompute day visuals and trim trailing weeks.
         datesSet: function() {
-            try {
-                // Compute per-date full-day blocks from background events so per-date overrides
-                // (created via make_unavailable) take precedence over weekly defaults.
-                const blockedDates = new Set();
-                const availableOverrideDates = new Set();
-                try {
-                    calendar.getEvents().forEach(ev => {
-                        try {
-                            const props = ev.extendedProps || {};
-                            if (props.override_type === 'blocked') {
-                                const s = ev.startStr.split('T')[0];
-                                blockedDates.add(s);
-                            } else if (props.override_type === 'available') {
-                                const s = ev.startStr.split('T')[0];
-                                availableOverrideDates.add(s);
-                            }
-                        } catch (e) { /* ignore single event errors */ }
-                    });
-                } catch (e) { /* ignore if calendar.getEvents fails */ }
-
-                document.querySelectorAll('.fc-daygrid-day').forEach(dayCell => {
-                    const dateStr = dayCell.dataset.date;
-                    if (!dateStr) return;
-                    const dow = parseYMD(dateStr).getDay(); // 0=Sunday (local parse)
-                    const info = defaultAvailability[dow] || {};
-
-
-                                // Hide trailing weeks comprised only of out-of-month days
-                                try { hideTrailingOtherRows(); } catch (e) { /* ignore */ }
-                    // Precedence: per-date full-day blocks (unavailable) > per-date available overrides > weekly defaults
-                    if (blockedDates.has(dateStr)) {
-                        dayCell.classList.add('fc-day-unavailable');
-                        dayCell.classList.remove('fc-day-available');
-                    } else if (availableOverrideDates.has(dateStr)) {
-                        dayCell.classList.add('fc-day-available');
-                        dayCell.classList.remove('fc-day-unavailable');
-                    } else if (info.unavailable) {
-                        dayCell.classList.add('fc-day-unavailable');
-                        dayCell.classList.remove('fc-day-available');
-                    } else {
-                        dayCell.classList.add('fc-day-available');
-                        dayCell.classList.remove('fc-day-unavailable');
-                    }
-
-                    // ensure frame transparent (we use classes for styling)
-                    dayCell.style.background = 'transparent';
-                    // Ensure the day number is always clickable so coaches can create per-day overrides
-                    const numberEl = dayCell.querySelector('.fc-daygrid-day-number');
-                    if (numberEl) {
-                        // Even if default is unavailable, make cursor pointer so it's clear it's interactive
-                        numberEl.style.cursor = 'pointer';
-                        // No per-element onclick here — we use a single delegated pointerup handler
-                    }
-                });
-            } catch (err) {
-                console.error('datesSet handler error', err);
-            }
+            try { updateUnavailableDays(); } catch(e) { console.warn('datesSet updateUnavailableDays failed', e); }
+            try { hideTrailingOtherRows(); } catch (e) { /* ignore */ }
         }
         });
     } catch (err) {
@@ -3393,8 +3913,17 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const parts = (r||'').split('-');
                                 return { start: (parts[0]||'09:00').trim(), end: (parts[1]||'17:00').trim() };
                             });
-                            // Use service-level increment if present (client view increment may differ)
-                            const inc = svc.time_increment_minutes || 30;
+                            // Use service-level increment; if fixed increments are enabled, use duration+buffer_after
+                            let inc = Number(svc.time_increment_minutes || 30);
+                            try {
+                                if (svc.use_fixed_increment) {
+                                    const dur = Number(svc.duration || 0);
+                                    const buf = Number(svc.buffer_after || 0);
+                                    if (!isNaN(dur) && !isNaN(buf) && (dur + buf) > 0) {
+                                        inc = dur + buf;
+                                    }
+                                }
+                            } catch (e) { /* ignore */ }
                             // Open the Day Schedule modal for this date
                             try { openTimeCirclesModal(foundDate, inc, 1, rangesObjs); } catch (e) { console.warn('auto-open modal failed', e); }
                             break;
@@ -3459,6 +3988,10 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const xp = ev.extendedProps || {};
                 if (xp.is_blocking || xp.is_per_date || ev.display === 'background') return false;
+                // Keep this in sync with Day Schedule booking scope behavior
+                try {
+                    if (typeof _isBookingInSelectedScope === 'function' && !_isBookingInSelectedScope(ev)) return false;
+                } catch (e) { /* ignore */ }
                 if (rangeStart && ev.start < rangeStart) return false;
                 if (rangeEnd && ev.start >= rangeEnd) return false;
                 return true;
@@ -3475,7 +4008,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         tbody.innerHTML = '';
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--gray-600); padding:16px;">No bookings for this period</td></tr>';
+            const msg = (typeof IS_TEAM !== 'undefined' && IS_TEAM) ? 'No bookings from this member/service' : 'No bookings for this period';
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--gray-600); padding:16px;">${msg}</td></tr>`;
             return;
         }
 
@@ -3487,7 +4021,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const xp = ev.extendedProps || {};
             const client = xp.client_name || xp.customer_name || '—';
             const email = xp.client_email || xp.customer_email || '';
-            const service = ev.title || xp.service_name || '—';
+            let service = xp.service_name || xp.service_slug || '';
+            if (!service) {
+                try {
+                    const svcId = (xp.service_id || ev.service_id || null);
+                    const svc = svcId ? svcById(svcId) : null;
+                    service = (svc && svc.name) ? svc.name : '';
+                } catch (e) { /* ignore */ }
+            }
+            if (!service) service = ev.title || '—';
             const start = ev.start;
             const end = ev.end || null;
 
@@ -3536,6 +4078,57 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function updateBookingsViewAllLink(){
+        try{
+            const a = document.getElementById('bookingsViewAllBtn');
+            if (!a) return;
+            const base = `/bus/${orgSlug}/bookings/`;
+            if (SELECTED_MEMBER) a.setAttribute('href', `${base}?scope=${encodeURIComponent(String(SELECTED_MEMBER))}`);
+            else a.setAttribute('href', base);
+        }catch(e){ /* ignore */ }
+    }
+
+    function filterInlineAuditBySelection(){
+        try{
+            const rows = Array.from(document.querySelectorAll('.cc-inline-audit-row'));
+            const empty = document.getElementById('inlineAuditEmptyScoped');
+            if (!rows.length) {
+                if (empty) empty.style.display = 'none';
+                return;
+            }
+
+            // allowed service ids for current scope
+            let allowed = null;
+            if (SELECTED_MEMBER) {
+                if (String(SELECTED_MEMBER).startsWith('svc:')) {
+                    allowed = new Set([String(SELECTED_MEMBER).slice(4)]);
+                } else {
+                    // Member selection -> show audit entries for visible services
+                    try { allowed = new Set((VISIBLE_SERVICES || []).map(s => String(s.id))); }
+                    catch (e) { allowed = new Set(); }
+                }
+            }
+
+            let shown = 0;
+            rows.forEach(li => {
+                try{
+                    const sid = String(li.getAttribute('data-service-id') || '');
+                    const show = (!allowed) ? true : (sid && allowed.has(sid));
+                    li.style.display = show ? 'flex' : 'none';
+                    if (!show) {
+                        const cb = li.querySelector('input.auditRowCbInline');
+                        if (cb) cb.checked = false;
+                    } else {
+                        shown += 1;
+                    }
+                }catch(e){ /* ignore */ }
+            });
+
+            if (empty) empty.style.display = (allowed && shown === 0) ? 'block' : 'none';
+            try { const selAll = document.getElementById('auditInlineSelectAll'); if (selAll) selAll.checked = false; } catch(e) {}
+        }catch(e){ /* ignore */ }
+    }
+
     // Search and manual refresh handlers
     try {
         document.getElementById('bookingsSearchInline')?.addEventListener('input', () => renderInlineBookings());
@@ -3544,6 +4137,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial render
     try { renderInlineBookings(); } catch (_) {}
+    try { updateBookingsViewAllLink(); } catch (_) {}
+    try { filterInlineAuditBySelection(); } catch (_) {}
 
     // Render the default availability UI and sync backgrounds to the calendar
     try { displayDefaultAvailability(); } catch (e) { console.warn('displayDefaultAvailability failed', e); }
@@ -4497,8 +5092,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 return { start: (p[0]||'09:00').trim(), end: (p[1]||'17:00').trim() };
             });
 
-            // Determine client increment (use time_increment_minutes unless use_fixed_increment true)
-            const increment = (!svc.use_fixed_increment && Number(svc.time_increment_minutes)) ? Number(svc.time_increment_minutes) : Number(svc.time_increment_minutes) || 30;
+            // Determine client increment (fixed increments use duration+buffer_after)
+            let increment = Number(svc.time_increment_minutes || 30);
+            try {
+                if (svc.use_fixed_increment) {
+                    const dur = Number(svc.duration || 0);
+                    const buf = Number(svc.buffer_after || 0);
+                    if (!isNaN(dur) && !isNaN(buf) && (dur + buf) > 0) {
+                        increment = dur + buf;
+                    }
+                }
+            } catch (e) { /* ignore */ }
 
             // Delay opening slightly to ensure calendar cells & modal DOM exist
             setTimeout(() => {
@@ -4594,15 +5198,68 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return;
                             }
 
+                            // Prevent reset-all if weekly defaults would exclude existing bookings.
+                            try {
+                                const bad = [];
+                                for (const d of dates) {
+                                    const weekly = _weeklyDefaultRangesForDate(d);
+                                    const verdict = _validateOverrideAgainstBookings(d, weekly);
+                                    if (!verdict.ok) {
+                                        bad.push(verdict.message || (`Reset blocked for ${d} due to existing booking(s).`));
+                                        if (bad.length >= 5) break;
+                                    }
+                                }
+                                if (bad.length) {
+                                    alert(bad.join('\n\n'));
+                                    return;
+                                }
+                            } catch (e) { /* ignore */ }
+
                             try {
                                 const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                                     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: (SELECTED_MEMBER || null) })
                                 });
                                 const data = await res.json().catch(() => null);
                                 if (res.ok) {
-                                    try { await calendar.refetchEvents(); } catch (e) {}
-                                    try { updateUnavailableDays(); } catch (e) {}
+                                    // Immediately remove per-date background events from the current scope so
+                                    // the overrides table can't stay stale even if refetch is slow.
+                                    try {
+                                        const svcScope = (typeof _svcForSelectedScope === 'function') ? _svcForSelectedScope() : null;
+                                        const isSvc = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
+                                        const svcId = isSvc ? String(SELECTED_MEMBER).slice(4) : null;
+                                        const userId = (!isSvc && SELECTED_MEMBER) ? getSelectedUserIdForMembership(SELECTED_MEMBER) : null;
+                                        const membershipId = (!isSvc && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
+
+                                        (calendar.getEvents() || []).forEach(ev => {
+                                            try {
+                                                if (!ev || ev.display !== 'background') return;
+                                                const xp = ev.extendedProps || {};
+                                                if (!xp.is_per_date) return;
+
+                                                // Scope match
+                                                if (SELECTED_MEMBER) {
+                                                    if (isSvc) {
+                                                        const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
+                                                        if (!assignedSvc || String(assignedSvc) !== String(svcId)) return;
+                                                    } else {
+                                                        const assignedUserId = xp.assigned_user_id || null;
+                                                        const assignedMembershipId = xp.assigned_membership_id || null;
+                                                        if (userId && assignedUserId && String(assignedUserId) !== String(userId)) return;
+                                                        if (!userId && assignedMembershipId && String(assignedMembershipId) !== String(membershipId)) return;
+                                                    }
+                                                }
+                                                ev.remove();
+                                            } catch (e) {}
+                                        });
+                                    } catch (e) {}
+
+                                    try { if (typeof _invalidateServiceScopeParityCache === 'function') _invalidateServiceScopeParityCache(); } catch (e) {}
                                     try { renderOverridesTable(); } catch (e) {}
+                                    try { updateUnavailableDays(); } catch (e) {}
+                                    // Still refetch to ensure canonical state
+                                    try { await calendar.refetchEvents(); } catch (e) {}
+                                    try { renderOverridesTable(); } catch (e) {}
+                                    try { updateUnavailableDays(); } catch (e) {}
                                     alert('All per-date overrides reset.');
                                 } else {
                                     const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
@@ -4729,6 +5386,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
             resetBtn.onclick = async () => {
                 if (!confirm(`Reset ${d} to weekly defaults? This will remove per-date overrides for this date.`)) return;
+
+                // Prevent reset if weekly defaults would exclude existing bookings.
+                try {
+                    const weekly = _weeklyDefaultRangesForDate(d);
+                    const verdict = _validateOverrideAgainstBookings(d, weekly);
+                    if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
+                } catch (e) { /* ignore */ }
                 resetBtn.disabled = true;
                 try {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
@@ -4833,6 +5497,23 @@ document.addEventListener('DOMContentLoaded', function() {
             const unique = [];
             const seen = new Set();
             for (const rr of ranges) { const k = `${rr.start}-${rr.end}`; if (!seen.has(k)) { seen.add(k); unique.push(rr); } }
+
+            // Prevent overrides that would conflict with existing bookings.
+            try {
+                const bad = [];
+                for (const d of (dates || [])) {
+                    const rangesToCheck = unique.length ? unique : _weeklyDefaultRangesForDate(d);
+                    const verdict = _validateOverrideAgainstBookings(d, rangesToCheck);
+                    if (!verdict.ok) {
+                        bad.push(verdict.message || (`Override blocked for ${d} due to existing booking(s).`));
+                        if (bad.length >= 5) break;
+                    }
+                }
+                if (bad.length) {
+                    alert(bad.join('\n\n'));
+                    return;
+                }
+            } catch (e) { /* ignore */ }
 
             try {
                 // Remove existing overrides for these dates
@@ -4977,6 +5658,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     restoreMake();
                     return;
                 }
+
+                // Prevent blocking a day that already has bookings in this scope.
+                try {
+                    const verdict = _validateOverrideAgainstBookings(dateStr, null);
+                    if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
+                } catch (e) { /* ignore */ }
                 if (!confirm(`Mark ${dateStr} as unavailable? This will block the whole day.`)) return;
                 try {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) }) });
@@ -5017,6 +5704,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // If coach removed all ranges for this single date, treat it as "make unavailable"
             if (ranges.length === 0) {
+                // Prevent blocking a day that already has bookings in this scope.
+                try {
+                    const verdict = _validateOverrideAgainstBookings(dateStr, null);
+                    if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
+                } catch (e) { /* ignore */ }
                 if (!confirm(`No time ranges provided. Mark ${dateStr} as unavailable for the whole day?`)) return;
                 try {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
@@ -5056,6 +5748,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             // replace ranges with unique set
             const rangesToCreate = uniqueRanges;
+
+            // Prevent saving ranges that would exclude existing bookings.
+            try {
+                const verdict = _validateOverrideAgainstBookings(dateStr, rangesToCreate);
+                if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
+            } catch (e) { /* ignore */ }
 
             try {
                 // remove existing per-date overrides for the date
@@ -5150,6 +5848,27 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Format YYYY-MM-DD -> "January 14th, 2026"
+    function formatDateLong(ymd) {
+        try {
+            const d = parseYMD(ymd);
+            const month = d.toLocaleString(undefined, { month: 'long' });
+            const day = d.getDate();
+            const year = d.getFullYear();
+            // ordinal suffix with 11/12/13 special-case
+            const v = day % 100;
+            let suf = 'th';
+            if (v < 11 || v > 13) {
+                switch (day % 10) {
+                    case 1: suf = 'st'; break;
+                    case 2: suf = 'nd'; break;
+                    case 3: suf = 'rd'; break;
+                }
+            }
+            return `${month} ${day}${suf}, ${year}`;
+        } catch (e) { return String(ymd); }
+    }
+
         function resetClientViewStyles() {
             const clientSettings = document.getElementById("clientTimeSettings");
             clientSettings.style.display = "flex"; // show for present/future days
@@ -5179,7 +5898,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Show modal
             modal.style.display = "flex";
-            title.textContent = `Schedule for ${dateStr}`;
+            title.textContent = `Schedule for ${formatDateLong(dateStr)}`;
             container.innerHTML = "";
 
             // Initialize block size & increment
@@ -5411,11 +6130,95 @@ document.addEventListener('DOMContentLoaded', function() {
         resetClientViewStyles();
 
         modal.style.display = "flex";
-        title.textContent = `Schedule for ${date}`;
+        title.textContent = `Schedule for ${formatDateLong(date)}`;
         
 
         let currentBlockSize = hourBlockSize;
         let currentIncrement = increment;
+
+        const svcScope = (typeof _svcForSelectedScope === 'function') ? _svcForSelectedScope() : null;
+        const isServiceScope = !!(svcScope && svcScope.slug);
+        let __svcEff = null;
+        let __svcSlots = null;
+
+        function _svcToIsoLocal(dateStr, hh, mm, ss) {
+            try {
+                const parts = String(dateStr).split('-');
+                const y = Number(parts[0]);
+                const m = Number(parts[1]);
+                const d = Number(parts[2]);
+                const pad = n => String(n).padStart(2, '0');
+                return `${y}-${pad(m)}-${pad(d)}T${pad(hh)}:${pad(mm)}:${pad(ss || 0)}`;
+            } catch (e) {
+                return `${dateStr}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`;
+            }
+        }
+
+        function _svcIsoToLocalMinutes(isoStr) {
+            try {
+                const m = String(isoStr || '').match(/T(\d{2}):(\d{2})/);
+                if (!m) return null;
+                const h = parseInt(m[1], 10);
+                const mm = parseInt(m[2], 10);
+                if (isNaN(h) || isNaN(mm)) return null;
+                return h * 60 + mm;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _svcLabelFromMin(totalMin) {
+            const h24 = Math.floor(totalMin / 60);
+            const m = totalMin % 60;
+            const ampm = h24 >= 12 ? 'PM' : 'AM';
+            let h = h24 % 12; if (h === 0) h = 12;
+            return `${h}:${String(m).padStart(2,'0')} ${ampm}`;
+        }
+
+        async function _fetchServiceScopeSlots() {
+            if (!isServiceScope) return [];
+            try {
+                // Server-effective settings (parity with public)
+                try {
+                    const effUrl = `/bus/${orgSlug}/services/${svcScope.slug}/effective/?date=${encodeURIComponent(date)}`;
+                    const effResp = await fetch(effUrl, { credentials: 'same-origin' });
+                    if (effResp.ok) __svcEff = await effResp.json();
+                } catch (e) { __svcEff = null; }
+
+                const useFixed = (__svcEff && typeof __svcEff.use_fixed_increment === 'boolean') ? !!__svcEff.use_fixed_increment : !!svcScope.use_fixed_increment;
+                const previewIncrement = Math.max(5, Number((__svcEff && __svcEff.time_increment_minutes) || svcScope.time_increment_minutes || currentIncrement || 30));
+                currentIncrement = previewIncrement;
+
+                let allowEndsForAvail = false;
+                try {
+                    allowEndsForAvail = (__svcEff && typeof __svcEff.allow_ends_after_availability === 'boolean') ? !!__svcEff.allow_ends_after_availability : !!svcScope.allow_ends_after_availability;
+                } catch (e) { allowEndsForAvail = false; }
+
+                const edgeVal = (function(){
+                    try {
+                        const raw = localStorage.getItem('edge_buffers_' + svcScope.slug);
+                        if (raw === '1' || raw === 'true') return 1;
+                        if (raw === '0' || raw === 'false') return 0;
+                    } catch (e) {}
+                    return 0;
+                })();
+
+                const startIso = _svcToIsoLocal(date, 0, 0, 0);
+                const endIso = _svcToIsoLocal(date, 23, 59, 59);
+                const incQuery = useFixed ? '' : `&inc=${previewIncrement}`;
+                const cacheBuster = `&_t=${Date.now()}`;
+                const availUrl = `/bus/${orgSlug}/services/${svcScope.slug}/availability/?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}${incQuery}&edge_buffers=${edgeVal}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
+                const resp = await fetch(availUrl, { credentials: 'same-origin' });
+                if (!resp.ok) { __svcSlots = []; return []; }
+                const slots = await resp.json();
+                __svcSlots = Array.isArray(slots) ? slots : [];
+                return __svcSlots;
+            } catch (e) {
+                console.error('service-scope availability fetch failed', e);
+                __svcSlots = [];
+                return [];
+            }
+        }
 
         // When coach changes preview increment or applies a custom increment,
         // update the visible time circles immediately so the modal reflects
@@ -5519,10 +6322,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch(`/bus/${orgSlug}/events/?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}&_t=${Date.now()}`);
                 if (response.ok) {
                     const allEvents = await response.json();
-                    // Keep only real service bookings (exclude per-date overrides entirely)
+                    // Keep only real bookings, scoped to the current selection.
+                    // Important: for member scope, bookings should only apply when the member
+                    // has exactly one solo-hosted service assigned (see _isBookingInSelectedScope).
                     bookingsForDate = allEvents.filter(e => {
-                        const xp = e.extendedProps || {};
-                        return !xp.is_blocking && !xp.is_per_date;
+                        try {
+                            if (!_isRealBookingEvent(e)) return false;
+                            return _isBookingInSelectedScope(e);
+                        } catch (err) {
+                            return false;
+                        }
                     });
                 }
             } catch (error) {
@@ -5607,6 +6416,119 @@ document.addEventListener('DOMContentLoaded', function() {
         function renderGrid(blockSize) {
             container.innerHTML = "";
             const blockMinutes = Math.max(1, blockSize) * 60;
+
+            // Service-scope parity: render ONLY server-provided starts (matches public)
+            if (isServiceScope) {
+                const slots = Array.isArray(__svcSlots) ? __svcSlots : [];
+                if (!slots || slots.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.style.color = '#6b7280';
+                    empty.textContent = 'No available times on this day.';
+                    container.appendChild(empty);
+                    return;
+                }
+
+                const startToEnd = new Map();
+                for (const s of slots) {
+                    const sm = _svcIsoToLocalMinutes(s.start);
+                    const em = _svcIsoToLocalMinutes(s.end);
+                    if (sm != null && em != null && em > sm) startToEnd.set(sm, em);
+                }
+                const validStarts = Array.from(startToEnd.keys()).sort((a,b)=>a-b);
+                if (validStarts.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.style.color = '#6b7280';
+                    empty.textContent = 'No available times on this day.';
+                    container.appendChild(empty);
+                    return;
+                }
+
+                const hours = [];
+                const hourMap = new Map();
+                for (const sm of validStarts) {
+                    const hourStart = Math.floor(sm/60) * 60;
+                    if (!hourMap.has(hourStart)) {
+                        hourMap.set(hourStart, []);
+                        hours.push(hourStart);
+                    }
+                    hourMap.get(hourStart).push(sm);
+                }
+
+                for (const hourStart of hours) {
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.justifyContent = 'space-between';
+                    row.style.gap = '8px';
+                    row.style.borderBottom = '1px solid #ccc';
+
+                    const hourLabel = document.createElement('div');
+                    hourLabel.style.width = '70px';
+                    hourLabel.style.fontWeight = 'bold';
+                    const labelDate = parseYMD(date);
+                    labelDate.setHours(Math.floor(hourStart/60), hourStart%60, 0, 0);
+                    const labelOpts = { hour: 'numeric', minute: (hourStart%60!==0?'2-digit':undefined), hour12: true };
+                    hourLabel.textContent = labelDate.toLocaleString(undefined, labelOpts);
+                    row.appendChild(hourLabel);
+
+                    const circlesContainer = document.createElement('div');
+                    circlesContainer.className = 'circles-for-hour';
+                    circlesContainer.style.display = 'flex';
+                    circlesContainer.style.flexWrap = 'wrap';
+                    circlesContainer.style.gap = '8px';
+                    circlesContainer.style.marginLeft = 'auto';
+
+                    for (const sm of (hourMap.get(hourStart) || [])) {
+                        const endMin = startToEnd.get(sm);
+                        const timeLabel = _svcLabelFromMin(sm);
+                        const circle = document.createElement('div');
+
+                        const slotDate = parseYMD(date);
+                        const h = Math.floor(sm / 60);
+                        const m = sm % 60;
+                        slotDate.setHours(h, m, 0, 0);
+                        const slotEndDate = new Date(slotDate.getTime() + Math.max(1, (endMin - sm)) * 60000);
+                        const now = new Date();
+
+                        const booking = bookingsForDate.find(b => {
+                            try {
+                                const bookingStart = convertOrgTimeToBrowser(b.start);
+                                const bookingEnd = convertOrgTimeToBrowser(b.end);
+                                if (!bookingStart || !bookingEnd) return false;
+                                return slotDate.getTime() < bookingEnd.getTime() && slotEndDate.getTime() > bookingStart.getTime();
+                            } catch (e) { return false; }
+                        });
+
+                        if (booking) {
+                            circle.className = 'time-circle booked';
+                            circle.textContent = 'Booked';
+                            circle.dataset.time = timeLabel;
+                            circle.dataset.bookingId = booking.id;
+                            circle.addEventListener('click', () => { showBookingInfo(booking); });
+                        } else if (slotDate < now) {
+                            circle.className = 'time-circle blocked';
+                            circle.textContent = timeLabel;
+                            circle.dataset.time = timeLabel;
+                            circle.style.background = '#6c757d';
+                            circle.style.cursor = 'not-allowed';
+                            circle.addEventListener('click', () => { alert(`This slot (${timeLabel}) is in the past.`); });
+                        } else {
+                            circle.className = 'time-circle open';
+                            circle.textContent = timeLabel;
+                            circle.dataset.time = timeLabel;
+                            circle.addEventListener('click', () => { alert(`Slot: ${timeLabel} is available`); });
+                        }
+
+                        circlesContainer.appendChild(circle);
+                    }
+
+                    row.appendChild(circlesContainer);
+                    container.appendChild(row);
+                }
+
+                if (container.lastElementChild) container.lastElementChild.style.borderBottom = 'none';
+                return;
+            }
 
             // Render per supplied range so multiple discontiguous ranges are supported
             for (const range of rangesArr) {
@@ -5740,7 +6662,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Fetch bookings first, then render grid
-        fetchBookings().then(() => {
+        fetchBookings().then(async () => {
+            try {
+                if (isServiceScope) {
+                    await _fetchServiceScopeSlots();
+                }
+            } catch (e) { /* ignore */ }
             renderGrid(currentBlockSize);
         });
 
@@ -5915,6 +6842,24 @@ document.addEventListener('DOMContentLoaded', function() {
         const selectedStartTime = document.getElementById('startTime')?.value || "09:00";
         const selectedEndTime = document.getElementById('endTime')?.value || "17:00";
         const datesArray = Array.from(selectedDates);
+
+        // Prevent applying overrides that would exclude existing bookings.
+        try {
+            const rangesToCheck = [{ start: selectedStartTime, end: selectedEndTime }];
+            const bad = [];
+            for (const d of datesArray) {
+                const verdict = _validateOverrideAgainstBookings(d, rangesToCheck);
+                if (!verdict.ok) {
+                    bad.push(verdict.message || (`Override blocked for ${d} due to existing booking(s).`));
+                    if (bad.length >= 5) break;
+                }
+            }
+            if (bad.length) {
+                alert(bad.join('\n\n'));
+                return;
+            }
+        } catch (e) { /* ignore */ }
+
         // Pre-clean: remove existing overrides for these dates to avoid duplicates
         fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
             method: 'POST',
@@ -6127,7 +7072,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 ccPromptOverridesUpgrade();
                                 return;
                             }
-                            if (!confirm(`Make ${dates[0]} available and open editor?`)) return;
+                            if (!confirm(`Make ${dates[0]} available?`)) return;
                             try {
                                 const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                                     method: 'POST',
@@ -6203,18 +7148,15 @@ document.addEventListener('DOMContentLoaded', function() {
                                     try { updateUnavailableDays(); } catch (e) {}
                                     try { calendar.refetchEvents(); } catch (e) {}
 
-                                    // Close the current selection modal and open the per-day available editor
+                                    // Exit out of the modal (match Make Unavailable behavior)
                                     try { modal.style.display = 'none'; } catch (e) {}
-                                    // Ensure modal buttons reflect the new available state: show View Day Schedule, hide Make Available
                                     try {
-                                        const viewDayBtn = document.getElementById('viewDayBtn');
-                                        const makeAvailableBtnEl = document.getElementById('makeAvailableBtn');
-                                        const makeUnavailableBtnEl = document.getElementById('makeUnavailableBtn');
-                                        if (viewDayBtn) viewDayBtn.style.display = 'inline-block';
-                                        if (makeAvailableBtnEl) makeAvailableBtnEl.style.display = 'none';
-                                        if (makeUnavailableBtnEl) makeUnavailableBtnEl.style.display = 'inline-block';
-                                    } catch(e){}
-                                    openMakeAvailableModal(dates[0]);
+                                        selectedDates.clear();
+                                        document.querySelectorAll('.fc-daygrid-day-number.selected').forEach(el => el.classList.remove('selected'));
+                                        updateClearButton();
+                                        updateSelectButtonText();
+                                    } catch (e) {}
+                                    alert('Date made available.');
                                 } else {
                                     const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
                                     alert('Error making available: ' + msg);
@@ -6425,6 +7367,21 @@ document.addEventListener('DOMContentLoaded', function() {
             makeUnavailableBtn.style.display = (anyPast || anyAlreadyUnavailable) ? 'none' : 'inline-block';
 
             makeUnavailableBtn.onclick = async () => {
+                // Prevent blocking any day that already has bookings in this scope.
+                try {
+                    const bad = [];
+                    for (const d of dates) {
+                        const verdict = _validateOverrideAgainstBookings(d, null);
+                        if (!verdict.ok) {
+                            bad.push(verdict.message || (`Can’t block ${d} because there’s already a booking.`));
+                            if (bad.length >= 5) break;
+                        }
+                    }
+                    if (bad.length) {
+                        alert(bad.join('\n\n'));
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
                 if (!confirm(`Mark ${dates.length} selected day(s) as unavailable? This will block each selected day.`)) return;
                 try {
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
@@ -6480,6 +7437,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 // falling back to weekly defaults.
                 if (dates.length === 1) {
                     const theDate = dates[0];
+                    // Prevent blocking a day that already has bookings in this scope.
+                    try {
+                        const verdict = _validateOverrideAgainstBookings(theDate, null);
+                        if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
+                    } catch (e) { /* ignore */ }
                     if (!confirm(`No time ranges provided. Mark ${theDate} as unavailable for the whole day?`)) return;
                     try {
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
@@ -6531,6 +7493,22 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (ranges.length === 0) return alert('No valid ranges to save.');
+
+            // Prevent saving ranges that would exclude existing bookings.
+            try {
+                const bad = [];
+                for (const d of dates) {
+                    const verdict = _validateOverrideAgainstBookings(d, ranges);
+                    if (!verdict.ok) {
+                        bad.push(verdict.message || (`Can’t save overrides for ${d} due to existing booking(s).`));
+                        if (bad.length >= 5) break;
+                    }
+                }
+                if (bad.length) {
+                    alert(bad.join('\n\n'));
+                    return;
+                }
+            } catch (e) { /* ignore */ }
 
             try {
                 // First remove existing per-date overrides for these dates
@@ -6589,6 +7567,23 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 // Work on a copy of dates
                 const targets = dates.slice();
+
+                // Prevent reset if weekly defaults would exclude existing bookings.
+                try {
+                    const bad = [];
+                    for (const d of targets) {
+                        const weekly = _weeklyDefaultRangesForDate(d);
+                        const verdict = _validateOverrideAgainstBookings(d, weekly);
+                        if (!verdict.ok) {
+                            bad.push(verdict.message || (`Reset blocked for ${d} due to existing booking(s).`));
+                            if (bad.length >= 5) break;
+                        }
+                    }
+                    if (bad.length) {
+                        alert(bad.join('\n\n'));
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
 
                 // Remove client-side background events for these dates so UI immediately reflects defaults
                 calendar.getEvents().forEach(ev => {

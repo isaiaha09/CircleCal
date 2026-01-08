@@ -35,7 +35,14 @@ from billing.utils import can_use_offline_payment_methods
 
 def _is_embed_request(request) -> bool:
     try:
-        return (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+        if (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1'):
+            return True
+        # Treat verified custom-domain traffic as embed mode.
+        # This keeps the booking flow "widget-like" even when users land on
+        # booking.<their-domain>.com without needing ?embed=1.
+        if getattr(request, 'custom_domain_organization', None):
+            return True
+        return False
     except Exception:
         return False
 
@@ -74,20 +81,29 @@ def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
 
     Embed is a Pro/Team feature and requires a matching per-business embed key.
     """
+    # If this request is coming through a verified custom domain for this org,
+    # we don't require the embed key in the URL. (The custom domain itself is
+    # the entitlement boundary.) We still enforce plan/subscription checks.
+    is_custom_domain_request = False
+    try:
+        is_custom_domain_request = bool(getattr(request, 'custom_domain_organization', None)) and (request.custom_domain_organization.id == org.id)
+    except Exception:
+        is_custom_domain_request = False
+
     key = None
     try:
         key = (request.GET.get('key') or request.POST.get('key') or '').strip()
     except Exception:
         key = ''
 
-    if not key:
-        return False, 'missing_key'
-
     if not bool(getattr(org, 'embed_enabled', False)):
         return False, 'embed_disabled'
 
-    if (getattr(org, 'embed_key', None) or '') != key:
-        return False, 'invalid_key'
+    if not is_custom_domain_request:
+        if not key:
+            return False, 'missing_key'
+        if (getattr(org, 'embed_key', None) or '') != key:
+            return False, 'invalid_key'
 
     try:
         plan_slug = get_plan_slug(org)
@@ -448,6 +464,8 @@ def booking_to_event(bk: Booking):
     # Include service metadata so admin/front-end can consider buffers
     try:
         if bk.service is not None:
+            event['extendedProps']['service_id'] = bk.service_id
+            event['extendedProps']['service_name'] = getattr(bk.service, 'name', None)
             event['extendedProps']['service_slug'] = bk.service.slug
             event['extendedProps']['service_buffer_after'] = int(getattr(bk.service, 'buffer_after', 0))
             event['extendedProps']['service_allow_ends_after_availability'] = bool(getattr(bk.service, 'allow_ends_after_availability', False))
@@ -686,6 +704,89 @@ def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int]
             return True
 
     return False
+
+
+def _solo_services_count_for_member(org: Organization, membership_id: int) -> int:
+    """Return count of solo services (services assigned to exactly this one member).
+
+    This mirrors the UI inheritance logic in calendar_app.views: if a member has
+    only one solo service, that service can inherit member availability.
+    """
+    try:
+        mid = int(membership_id)
+    except Exception:
+        return 0
+
+    try:
+        service_ids = list(
+            ServiceAssignment.objects.filter(
+                membership_id=mid,
+                service__organization=org,
+                service__is_active=True,
+            ).values_list('service_id', flat=True)
+        )
+    except Exception:
+        service_ids = []
+
+    if not service_ids:
+        return 0
+
+    try:
+        counts = (
+            ServiceAssignment.objects.filter(service_id__in=service_ids)
+            .values('service_id')
+            .annotate(c=Count('id'))
+        )
+        solo_ids = [row['service_id'] for row in counts if int(row.get('c') or 0) == 1]
+        return len(solo_ids)
+    except Exception:
+        return 0
+
+
+def _service_inherited_member_id(org: Organization, service: Optional[Service]) -> Optional[int]:
+    """Return the membership_id whose weekly availability a service should inherit.
+
+    Inheritance applies only when:
+    - service has exactly one assignee, AND
+    - that assignee has <= 1 solo service (so partitioning is not required), AND
+    - service does NOT have explicit service-weekly rows.
+
+    This is intended to keep public availability consistent with calendar.html UI.
+    """
+    if not service:
+        return None
+
+    try:
+        if _trial_single_active_service(org):
+            return None
+    except Exception:
+        return None
+
+    try:
+        if service.weekly_availability.filter(is_active=True).exists():
+            return None
+    except Exception:
+        return None
+
+    try:
+        assigned_ids = list(
+            ServiceAssignment.objects.filter(service=service)
+            .values_list('membership_id', flat=True)
+            .distinct()
+        )
+    except Exception:
+        assigned_ids = []
+
+    if len(assigned_ids) != 1:
+        return None
+
+    mid = assigned_ids[0]
+    try:
+        solo_count = _solo_services_count_for_member(org, mid)
+    except Exception:
+        solo_count = 0
+
+    return int(mid) if solo_count <= 1 else None
 
 
 def is_within_weekly_availability(org, start_dt, end_dt):
@@ -1035,6 +1136,40 @@ def is_within_availability(org, start_dt, end_dt, service=None):
     # Fallback to organization-wide weekly availability. If the service allows
     # ending after availability, relax the requirement to only ensure the slot
     # START is within a weekly window; otherwise require the slot END to also be within.
+
+    # If this service inherits a single member's weekly schedule, prefer that
+    # schedule over org-level weekly availability.
+    if service is not None:
+        try:
+            inherited_mid = _service_inherited_member_id(org, service)
+        except Exception:
+            inherited_mid = None
+
+        if inherited_mid:
+            try:
+                membership = Membership.objects.filter(id=inherited_mid, organization=org, is_active=True).first()
+            except Exception:
+                membership = None
+
+            if membership:
+                try:
+                    windows = _member_weekly_windows_for_date(org, membership, start_dt.astimezone(org_tz).date(), org_tz)
+                except Exception:
+                    windows = []
+
+                if windows:
+                    for ws, we in windows:
+                        try:
+                            if getattr(service, 'allow_ends_after_availability', False):
+                                if ws <= start_dt and start_dt < we:
+                                    return True
+                            else:
+                                if ws <= start_dt and end_dt <= we:
+                                    return True
+                        except Exception:
+                            continue
+                    return False
+
     any_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
     if not any_rows:
         return True
@@ -1562,7 +1697,7 @@ def _build_public_service_page_context(
 ):
     """Build template context for the public service booking page."""
 
-    is_embed = (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+    is_embed = _is_embed_request(request)
     embed_breakout = _embed_breakout_required(request, org) if is_embed else False
     org_stripe_connected = bool(getattr(org, 'stripe_connect_account_id', None)) and bool(getattr(org, 'stripe_connect_charges_enabled', False))
 
@@ -1683,7 +1818,7 @@ def public_service_page(request, org_slug, service_slug):
     POST -> create a Booking for the selected time
     """
     org = get_object_or_404(Organization, slug=org_slug)
-    is_embed = (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1')
+    is_embed = _is_embed_request(request)
 
     if is_embed:
         ok, _reason = _validate_embed_access(request, org)
@@ -2276,7 +2411,7 @@ def booking_success(request, org_slug, service_slug, booking_id):
     except Exception:
         offline_instructions = ''
 
-    is_embed = (request.GET.get('embed') == '1')
+    is_embed = _is_embed_request(request)
     resp = render(request, "public/booking_success.html", {
         "org": org,
         "service": service,
@@ -2818,12 +2953,33 @@ def service_availability(request, org_slug, service_slug):
                 if svc_is_scoped:
                     base_windows = []
                 else:
-                    weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
-                    base_windows = []
-                    for w in weekly_rows:
-                        w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
-                        w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
-                        base_windows.append((w_start, w_end))
+                    # Service inherits member availability when it has a single assignee
+                    # with only one solo service; otherwise fall back to org weekly.
+                    inherited_mid = None
+                    try:
+                        inherited_mid = _service_inherited_member_id(org, service)
+                    except Exception:
+                        inherited_mid = None
+
+                    if inherited_mid:
+                        try:
+                            membership = Membership.objects.filter(id=inherited_mid, organization=org, is_active=True).first()
+                        except Exception:
+                            membership = None
+                        if membership:
+                            try:
+                                base_windows = _member_weekly_windows_for_date(org, membership, original_range_start.date(), org_tz)
+                            except Exception:
+                                base_windows = []
+                        else:
+                            base_windows = []
+                    else:
+                        weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True, weekday=weekday)
+                        base_windows = []
+                        for w in weekly_rows:
+                            w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                            w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                            base_windows.append((w_start, w_end))
 
     # Determine slot increment: front-end may pass `?inc=` (minutes) to control
     # the UI tick spacing. If provided and valid, use it for slot iteration;
@@ -3333,24 +3489,43 @@ def batch_availability_summary(request, org_slug, service_slug):
                     if svc_is_scoped:
                         base_windows = []
                     else:
+                        inherited_mid = None
                         try:
-                            any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+                            inherited_mid = _service_inherited_member_id(org, service)
                         except Exception:
-                            any_org_rows = False
+                            inherited_mid = None
 
-                        if not any_org_rows:
-                            base_windows = [(day_start.replace(hour=0, minute=0, second=0, microsecond=0), day_start.replace(hour=23, minute=59, second=0, microsecond=0))]
+                        if inherited_mid:
+                            try:
+                                membership = Membership.objects.filter(id=inherited_mid, organization=org, is_active=True).first()
+                            except Exception:
+                                membership = None
+                            if membership:
+                                try:
+                                    base_windows = _member_weekly_windows_for_date(org, membership, day_start.date(), org_tz)
+                                except Exception:
+                                    base_windows = []
+                            else:
+                                base_windows = []
                         else:
-                            windows = WeeklyAvailability.objects.filter(
-                                organization=org,
-                                is_active=True,
-                                weekday=day_start.weekday()
-                            )
-                            for w in windows:
-                                ws = day_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
-                                we = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
-                                if we > ws:
-                                    base_windows.append((ws, we))
+                            try:
+                                any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
+                            except Exception:
+                                any_org_rows = False
+
+                            if not any_org_rows:
+                                base_windows = [(day_start.replace(hour=0, minute=0, second=0, microsecond=0), day_start.replace(hour=23, minute=59, second=0, microsecond=0))]
+                            else:
+                                windows = WeeklyAvailability.objects.filter(
+                                    organization=org,
+                                    is_active=True,
+                                    weekday=day_start.weekday()
+                                )
+                                for w in windows:
+                                    ws = day_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
+                                    we = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
+                                    if we > ws:
+                                        base_windows.append((ws, we))
 
         # If no base windows, day cannot be available.
         if not base_windows:
