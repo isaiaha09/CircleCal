@@ -29,7 +29,8 @@ from django.conf import settings
 from datetime import timedelta
 from bookings.emails import send_booking_confirmation
 from django.db.models import Count
-from django.core.mail import send_mail
+from django.core.mail import send_mail, EmailMultiAlternatives
+from django.template.loader import render_to_string
 from calendar_app.forms import ContactForm
 
 
@@ -2054,7 +2055,7 @@ def contact(request):
     if request.method == 'POST':
         form = ContactForm(request.POST)
         if form.is_valid():
-            business_name = form.cleaned_data['business_name']
+            business_name = (form.cleaned_data.get('business_name') or '').strip()
             name = form.cleaned_data['name']
             email = form.cleaned_data['email']
             subject_key = form.cleaned_data['subject']
@@ -2070,6 +2071,24 @@ def contact(request):
 
             final_subject = other_subject if subject_key == 'other' else subject_label
 
+            # If the user supplied a business_name, require it to exactly match
+            # an existing Organization (case-sensitive). If it does not match,
+            # add a helpful validation error and do not send the message.
+            if business_name:
+                try:
+                    from accounts.models import Business as Organization
+                    if not Organization.objects.filter(name__exact=business_name).exists():
+                        form.add_error(
+                            'business_name',
+                            'No organization found with that exact name. Make sure the name is spelled exactly (including capitalization), or leave this field empty if you have not created a business in CircleCal.'
+                        )
+                        return render(request, 'calendar_app/contact.html', {'form': form})
+                except Exception:
+                    # If anything goes wrong checking the DB, treat as a validation
+                    # failure to avoid sending potentially mis-attributed messages.
+                    form.add_error('business_name', 'Could not verify the business name. Please try again later or leave this field empty.')
+                    return render(request, 'calendar_app/contact.html', {'form': form})
+
             body = (
                 f"New contact form submission\n\n"
                 f"Business: {business_name}\n"
@@ -2083,24 +2102,91 @@ def contact(request):
             # If email is configured, attempt to send. If not, still accept the
             # submission to avoid breaking UX in local/dev environments.
             try:
-                to_addr = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or getattr(settings, 'SERVER_EMAIL', None) or None
+                # Prefer an explicit contact recipient address if configured.
+                to_addr = getattr(settings, 'CONTACT_RECIPIENT', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', None) or getattr(settings, 'SERVER_EMAIL', None) or None
                 if to_addr:
-                    send_mail(
+                    # Render templated HTML and text for admin notification
+                    context = {
+                        'business_name': business_name,
+                        'name': name,
+                        'email': email,
+                        'subject': final_subject,
+                        'message': message,
+                        'site_url': getattr(settings, 'SITE_URL', ''),
+                    }
+                    html_content = render_to_string('calendar_app/emails/contact_admin_email.html', context)
+                    text_content = render_to_string('calendar_app/emails/contact_admin_email.txt', context)
+
+                    from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or None
+                    msg = EmailMultiAlternatives(
                         subject=f"[CircleCal Contact] {final_subject}",
-                        message=body,
-                        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None) or None,
-                        recipient_list=[to_addr],
-                        fail_silently=False,
+                        body=text_content,
+                        from_email=from_email,
+                        to=[to_addr],
+                        reply_to=[email],
                     )
+                    msg.attach_alternative(html_content, "text/html")
+                    msg.send(fail_silently=False)
+
+                    # Send a confirmation email back to the user (plain + html)
+                    try:
+                        user_ctx = {
+                            'name': name,
+                            'message': message,
+                            'site_url': getattr(settings, 'SITE_URL', ''),
+                        }
+                        user_html = render_to_string('calendar_app/emails/contact_user_confirmation_email.html', user_ctx)
+                        user_text = render_to_string('calendar_app/emails/contact_user_confirmation_email.txt', user_ctx)
+                        user_msg = EmailMultiAlternatives(
+                            subject='Thanks for contacting CircleCal',
+                            body=user_text,
+                            from_email=from_email,
+                            to=[email],
+                        )
+                        user_msg.attach_alternative(user_html, 'text/html')
+                        user_msg.send(fail_silently=True)
+                    except Exception:
+                        # Do not block the admin notification if user email fails
+                        pass
             except Exception:
                 pass
 
-            messages.success(request, "Thanks — your message has been sent.")
+            try:
+                # Inform the user that a confirmation email was sent to their address.
+                messages.success(request, f"Thanks — your message has been sent. A confirmation email was sent to {email}.")
+            except Exception:
+                messages.success(request, "Thanks — your message has been sent.")
             return redirect('calendar_app:contact')
     else:
         form = ContactForm()
 
     return render(request, 'calendar_app/contact.html', {'form': form})
+
+
+def about(request):
+    """Public About page describing CircleCal features and plans."""
+    # Basic content can be enhanced later; provide features, plans summary, and purpose.
+    features = [
+        'Simple booking UI with powerful scheduling rules',
+        'Public booking pages and embeddable widgets',
+        'Team management and staff roles',
+        'Flexible pricing and subscription plans (Free, Pro, Team)',
+        'Notifications, confirmation emails, and integrations',
+    ]
+    plans = [
+        {'name': 'Free', 'desc': 'Basic booking features for solo users.'},
+        {'name': 'Pro', 'desc': 'Advanced booking features and embed/custom domains.'},
+        {'name': 'Team', 'desc': 'Resources and Team Scheduling.'},
+    ]
+    purpose = (
+        'CircleCal helps small businesses accept bookings with a clean, easy-to-use interface that ' 
+        'scales when needed. It combines a simple UX for customers with powerful admin tools for business owners.'
+    )
+    return render(request, 'calendar_app/about.html', {
+        'features': features,
+        'plans': plans,
+        'purpose': purpose,
+    })
 
 @login_required
 def post_login_redirect(request):

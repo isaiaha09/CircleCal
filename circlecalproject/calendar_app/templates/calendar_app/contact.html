@@ -31,10 +31,9 @@
                         type="text"
                         name="business_name"
                         id="id_business_name"
-                        required
                         value="{{ form.business_name.value|default_if_none:'' }}"
                         class="w-full px-4 py-3 text-base border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-blue-50/30"
-                        placeholder="Your business name"
+                        placeholder="Your business name (optional)"
                     >
                     {% if form.business_name.errors %}
                         <p class="mt-1 text-xs text-red-600">{{ form.business_name.errors.0 }}</p>

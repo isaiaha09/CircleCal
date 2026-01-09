@@ -31,6 +31,9 @@ from billing.utils import get_plan_slug, TEAM_SLUG, PRO_SLUG
 from billing.utils import can_use_offline_payment_methods
 from bookings.models import build_offline_payment_instructions
 from billing.utils import can_use_offline_payment_methods
+from django.http import HttpResponse
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
+from . import ics as bookings_ics
 
 
 def _is_embed_request(request) -> bool:
@@ -962,6 +965,8 @@ def cancel_booking(request, booking_id):
         except Exception:
             pass
 
+
+
         # Send cancellation email (include refund_info in context) and then delete
         try:
             from .emails import send_booking_cancellation
@@ -1190,6 +1195,48 @@ def is_within_availability(org, start_dt, end_dt, service=None):
             if w.start_time <= start_t and end_t <= w.end_time:
                 return True
     return False
+
+
+def booking_ics(request, booking_id):
+    """Return an .ics file for a booking when authorized.
+
+    Authorization: either a signed `token` query param (same signer used in emails)
+    or an authenticated user who is a member/owner of the booking organization.
+    """
+    token = request.GET.get('token')
+    signer = TimestampSigner()
+    booking = get_object_or_404(Booking, id=booking_id)
+
+    authorized = False
+    # token check (time-limited to 30 days)
+    if token:
+        try:
+            unsigned = signer.unsign(token, max_age=60*60*24*30)
+            if str(unsigned) == str(booking_id):
+                authorized = True
+        except (BadSignature, SignatureExpired):
+            authorized = False
+
+    # staff/owner membership check
+    if not authorized and request.user and request.user.is_authenticated:
+        try:
+            if booking.organization.owner and request.user == booking.organization.owner:
+                authorized = True
+            else:
+                from accounts.models import Membership
+                if Membership.objects.filter(user=request.user, organization=booking.organization, is_active=True).exists():
+                    authorized = True
+        except Exception:
+            authorized = authorized
+
+    if not authorized:
+        return HttpResponse(status=403)
+
+    ics_text = bookings_ics.booking_to_ics_string(booking)
+    filename = f"booking-{getattr(booking, 'public_ref', booking.id)}.ics"
+    resp = HttpResponse(ics_text, content_type='text/calendar; charset=utf-8')
+    resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return resp
 
 @csrf_exempt
 @require_http_methods(['GET'])
@@ -1674,7 +1721,33 @@ def public_org_page(request, org_slug):
                 pass
             return resp
 
-    services = org.services.filter(is_active=True)
+    services_qs = org.services.filter(is_active=True)
+    services = list(services_qs)
+    # Attach assigned member display names to each service so the public
+    # org list (including embeds) can show "With: ..." consistently.
+    try:
+        from .models import ServiceAssignment
+        ass_qs = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user__profile', 'service', 'membership__user')
+        ass_map = {}
+        for sa in ass_qs:
+            sslug = sa.service.slug
+            user = getattr(sa.membership, 'user', None)
+            name = ''
+            try:
+                profile = getattr(user, 'profile', None)
+                if profile and getattr(profile, 'display_name', None):
+                    name = profile.display_name
+                else:
+                    full = user.get_full_name() if getattr(user, 'get_full_name', None) else ''
+                    name = full if full else getattr(user, 'email', '')
+            except Exception:
+                name = getattr(user, 'email', '')
+            ass_map.setdefault(sslug, []).append(name)
+        for s in services:
+            s.assigned_names = ', '.join(ass_map.get(s.slug, []))
+    except Exception:
+        for s in services:
+            s.assigned_names = ''
     resp = render(request, "public/public_org_page.html", {"org": org, "services": services, "is_embed": is_embed, "embed_breakout": embed_breakout})
     if is_embed:
         try:
@@ -1711,34 +1784,33 @@ def _build_public_service_page_context(
             trialing_active = True
             trial_end_date = subscription.trial_end
 
-    # Attach assigned member display names to services for client UI (Team plan only)
-    if show_with_line:
-        try:
-            from .models import ServiceAssignment
-            ass_qs = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user__profile', 'service', 'membership__user')
-            ass_map = {}
-            for sa in ass_qs:
-                sslug = sa.service.slug
-                user = getattr(sa.membership, 'user', None)
-                name = ''
-                try:
-                    profile = getattr(user, 'profile', None)
-                    if profile and getattr(profile, 'display_name', None):
-                        name = profile.display_name
-                    else:
-                        full = user.get_full_name() if getattr(user, 'get_full_name', None) else ''
-                        name = full if full else getattr(user, 'email', '')
-                except Exception:
-                    name = getattr(user, 'email', '')
-                ass_map.setdefault(sslug, []).append(name)
-            for s in services:
-                s.assigned_names = ', '.join(ass_map.get(s.slug, []))
-            service.assigned_names = ', '.join(ass_map.get(service.slug, []))
-        except Exception:
-            for s in services:
-                s.assigned_names = ''
-            service.assigned_names = ''
-    else:
+    # Attach assigned member display names to services for client UI.
+    # Populate these regardless of the `show_with_line` flag so embed/custom
+    # views and custom domains receive the same per-service metadata. The
+    # template still controls whether the "With:" line is shown via
+    # `show_with_line`.
+    try:
+        from .models import ServiceAssignment
+        ass_qs = ServiceAssignment.objects.filter(service__in=services).select_related('membership__user__profile', 'service', 'membership__user')
+        ass_map = {}
+        for sa in ass_qs:
+            sslug = sa.service.slug
+            user = getattr(sa.membership, 'user', None)
+            name = ''
+            try:
+                profile = getattr(user, 'profile', None)
+                if profile and getattr(profile, 'display_name', None):
+                    name = profile.display_name
+                else:
+                    full = user.get_full_name() if getattr(user, 'get_full_name', None) else ''
+                    name = full if full else getattr(user, 'email', '')
+            except Exception:
+                name = getattr(user, 'email', '')
+            ass_map.setdefault(sslug, []).append(name)
+        for s in services:
+            s.assigned_names = ', '.join(ass_map.get(s.slug, []))
+        service.assigned_names = ', '.join(ass_map.get(service.slug, []))
+    except Exception:
         for s in services:
             s.assigned_names = ''
         service.assigned_names = ''

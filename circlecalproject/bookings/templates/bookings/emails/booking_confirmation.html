@@ -126,6 +126,14 @@
                 <a href="{{ reschedule_url }}" class="button" style="background-color:#28a745; color:#ffffff !important;">Reschedule this booking</a>
             </p>
             {% endif %}
+            <p>
+                {% if outlook_web_url %}
+                    <a href="{{ outlook_web_url }}" class="button" style="background-color:#0069d9; color:#ffffff !important;">Add to Outlook</a>
+                {% endif %}
+                {% if google_calendar_url %}
+                    <a href="{{ google_calendar_url }}" class="button" style="background-color:#34a853; color:#ffffff !important; margin-left:8px;">Add to Google Calendar</a>
+                {% endif %}
+            </p>
             
             
             <p style="margin-top: 30px;">See you soon!<br>

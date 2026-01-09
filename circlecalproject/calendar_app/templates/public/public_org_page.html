@@ -15,8 +15,24 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {% for service in services %}
         <div class="bg-white border border-gray-200 rounded-xl p-6 shadow-lg ring-1 ring-black/5 hover:shadow-xl transition">
-          <h2 class="text-xl font-semibold text-gray-900 mb-2">{{ service.name }}</h2>
-          <p class="text-gray-600 text-sm mb-4">{{ service.description|default:"No description provided." }}</p>
+          <h2 class="text-xl font-semibold text-gray-900 mb-2">
+            {{ service.name }}
+            {% if service.assigned_names %}
+              <span class="text-sm text-gray-500">- {{ service.assigned_names }}</span>
+            {% endif %}
+          </h2>
+          <p class="text-gray-600 text-sm mb-2">{{ service.description|default:"No description provided." }}</p>
+          {% if service.min_notice_hours or service.max_booking_days %}
+            <p class="text-sm text-gray-500 mb-4">
+              {% if service.min_notice_hours %}
+                Min notice: {{ service.min_notice_hours }} {{ service.min_notice_hours|pluralize:"hour,hours" }}
+              {% endif %}
+              {% if service.min_notice_hours and service.max_booking_days %}·{% endif %}
+              {% if service.max_booking_days %}
+                Book up to {{ service.max_booking_days }} days ahead
+              {% endif %}
+            </p>
+          {% endif %}
 
           <div class="text-sm text-gray-700 mb-4">
             <div class="flex justify-between mb-1">

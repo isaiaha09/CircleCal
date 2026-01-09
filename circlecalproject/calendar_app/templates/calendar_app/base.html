@@ -164,6 +164,17 @@
             .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 10px 25px rgba(37,99,235,0.12); filter: brightness(1.03); }
             .btn-ghost:hover { background: #f8fafc; border-color: #dbeafe; }
             .btn-danger:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(248,113,113,0.08); }
+            /* Prevent horizontal page scroll and guard against wide carousel overflow */
+            html, body { max-width: 100%; overflow-x: hidden; }
+
+            /* Allow visual overflow for large desktop carousels, but clamp on smaller screens
+               to avoid creating a horizontal scrollbar when transforms/absolute positioning
+               push children outside the viewport. */
+            #pricing-carousel { overflow: visible; }
+            @media (max-width: 1024px) {
+                #pricing-carousel { overflow-x: hidden; }
+                #pricing-track { position: relative; }
+            }
         </style>
 
     {% block extra_head %}{% endblock %}
@@ -232,6 +243,7 @@
                     {% endif %}
                 {% else %}
                     <nav class="hidden md:flex items-center space-x-4">
+                        <a href="{% url 'calendar_app:about' %}" class="text-gray-700 hover:text-blue-600">About</a>
                         <a href="{% url 'accounts:login' %}" class="text-gray-700 hover:text-blue-600">Login</a>
                         <a href="{% url 'accounts:reactivate' %}" class="text-gray-700 hover:text-blue-600">Reactivate</a>
                         <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 font-semibold">Sign Up</a>
@@ -265,6 +277,7 @@
                             <a href="{% url 'calendar_app:choose_business' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-blue-600 font-medium">Create Business</a>
                         {% endif %}
                         {% else %}
+                            <a href="{% url 'calendar_app:about' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">About</a>
                             <a href="{% url 'accounts:login' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Login</a>
                             <a href="{% url 'accounts:reactivate' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Reactivate</a>
                             <a href="{% url 'calendar_app:signup' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-blue-600 font-semibold">Sign Up</a>

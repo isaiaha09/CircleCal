@@ -5,6 +5,19 @@
 {% block content %}
 <div class="text-center py-14">
 
+    <style>
+    /* Page-specific responsive tweaks for index (mobile-first) */
+    @media (max-width: 640px) {
+        .hero-ctas a { display: block !important; width: 100% !important; margin: 0.5rem 0 !important; }
+        .card { padding: 1rem !important; }
+        #pricing-carousel .slide-wrapper { width: 92% !important; }
+        #pricing-track { gap: 12px !important; }
+        .text-4xl { font-size: 2rem; }
+        .text-3xl { font-size: 1.5rem; }
+        .max-w-6xl, .max-w-7xl { padding-left: 1rem !important; padding-right: 1rem !important; }
+    }
+    </style>
+
     <h1 class="text-4xl font-extrabold text-blue-600 mb-4">
         The Simplest Scheduling Calendar for Coaches & Businesses
     </h1>
@@ -14,14 +27,16 @@
         Perfect for solo coaches, teams, and enterprises.
     </p>
 
-    <a href="{% url 'calendar_app:signup' %}"
-       class="px-6 py-3 text-lg bg-blue-600 text-white rounded shadow hover:bg-blue-700">
-       Get Started
-    </a>
-    <a href="{% url 'calendar_app:demo_calendar' %}"
-       class="ml-4 px-6 py-3 text-lg bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300">
-       View Demo Calendar
-    </a>
+     <div class="hero-ctas" style="display:inline-block; margin-top:12px;">
+        <a href="{% url 'calendar_app:signup' %}"
+            class="px-6 py-3 text-lg bg-blue-600 text-white rounded shadow hover:bg-blue-700" style="display:inline-block;">
+            Get Started
+        </a>
+        <a href="{% url 'calendar_app:demo_calendar' %}"
+            class="ml-4 px-6 py-3 text-lg bg-gray-200 text-gray-800 rounded shadow hover:bg-gray-300" style="display:inline-block; margin-left:0.75rem;">
+            View Demo Calendar
+        </a>
+     </div>
 </div>
 
 <div id="plans" class="container mx-auto py-6 md:py-10 px-4 max-w-6xl">

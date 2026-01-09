@@ -216,6 +216,10 @@ EMAIL_TIMEOUT = 10
 
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'CircleCal <noreply@circlecal.app>')
 
+# Email address to receive site contact form submissions. Configure via env:
+# CONTACT_RECIPIENT=contactcirclecal@gmail.com
+CONTACT_RECIPIENT = os.getenv('CONTACT_RECIPIENT')
+
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")

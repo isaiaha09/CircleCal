@@ -1,0 +1,12 @@
+Thanks for contacting CircleCal.
+
+Hi {{ name }},
+
+Thanks for your message — we received it and will be in touch soon.
+
+Your message:
+{{ message }}
+
+— The CircleCal Team
+
+Visit: {{ site_url }}

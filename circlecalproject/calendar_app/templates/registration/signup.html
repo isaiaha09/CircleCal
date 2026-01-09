@@ -38,6 +38,21 @@
         .alt a { color: var(--primary); text-decoration: none; }
         .alt a:hover { text-decoration: underline; }
         .errorlist { list-style: none; padding: 0; margin: 8px 0 0 0; color: var(--danger); font-size: 13px; }
+        @media (max-width:640px) {
+            /* Stack the two-column form fields on small screens for better readability */
+            .grid { grid-template-columns: 1fr; gap: 0px; }
+        }
+        /* Mobile: make signup card use 95% of viewport and stay centered */
+        @media (max-width:640px) {
+            .card {
+                width: 95vw !important;
+                max-width: 95vw !important;
+                margin-left: calc(50% - 47.5vw) !important;
+                margin-right: calc(50% - 47.5vw) !important;
+                border-radius: 8px !important;
+                box-sizing: border-box !important;
+            }
+        }
     </style>
     {% load static %}
 </head>

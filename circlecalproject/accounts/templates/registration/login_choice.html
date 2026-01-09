@@ -43,6 +43,24 @@
     .alt { text-align: center; font-size: 13px; color: var(--muted); }
     .alt a { color: var(--muted); text-decoration: none; transition: color .12s ease; }
     .alt a:hover { color: var(--primary); text-decoration: underline; }
+    /* Ensure buttons are usable on narrow screens: stack and full width */
+    @media (max-width:480px) {
+      .actions { flex-direction: column; gap: 10px; }
+      .actions .btn { display: block; width: 100%; min-width: 0; }
+    }
+    /* Simple: make the card full-bleed on small screens */
+    @media (max-width:640px) {
+      .card {
+        /* Use 95% of the viewport width and center it */
+        width: 95vw !important;
+        max-width: 95vw !important;
+        margin-left: calc(50% - 47.5vw) !important;
+        margin-right: calc(50% - 47.5vw) !important;
+        border-radius: 8px !important;
+        box-sizing: border-box !important;
+      }
+      /* Keep page padding as-is; we offset the card instead of changing global padding. */
+    }
   </style>
   {% load static %}
 </head>

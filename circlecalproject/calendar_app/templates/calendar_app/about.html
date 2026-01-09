@@ -1,0 +1,148 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}About CircleCal{% endblock %}
+
+{% block main_class %}max-w-6xl mx-auto px-4 py-6 md:p-6{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="bg-white border border-blue-100 rounded-2xl shadow-lg p-8">
+        <div class="md:flex md:items-start md:gap-6">
+            <div class="flex-1">
+                <h1 class="text-3xl font-bold text-blue-700 mb-2">About CircleCal</h1>
+                <p class="text-sm text-gray-600 mb-4">CircleCal is a focused booking and scheduling platform for small businesses. It combines a clean, customer-facing booking flow with powerful admin controls so you can run bookings without the complexity.</p>
+
+                <p class="text-gray-700 mb-4">{{ purpose }}</p>
+
+                <h2 class="text-xl font-semibold mt-4 mb-2">Key Features</h2>
+                <ul class="list-disc list-inside text-gray-700 space-y-1 mb-4">
+                    {% for f in features %}
+                        <li>{{ f }}</li>
+                    {% endfor %}
+                </ul>
+
+                <h2 class="text-xl font-semibold mt-6 mb-2">Plans & Pricing (summary)</h2>
+                <div class="grid md:grid-cols-3 gap-3 mt-2 mb-4">
+                    {% for p in plans %}
+                        <div class="p-4 border rounded-lg bg-blue-50/50">
+                            <div class="font-semibold text-lg">{{ p.name }}</div>
+                            <div class="text-sm text-gray-700">{{ p.desc }}</div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="text-sm text-gray-600">Full pricing details are on the 
+                    {% if request.organization %}
+                        <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-blue-600 underline">pricing page</a>
+                    {% else %}
+                        <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 underline">pricing & sign up</a>
+                    {% endif %}.
+                    Read our <a href="{% url 'calendar_app:privacy' %}" class="text-blue-600 underline">privacy policy</a> or <a href="{% url 'calendar_app:contact' %}" class="text-blue-600 underline">contact support</a> if you have questions.
+                </div>
+                
+                <h2 class="text-xl font-semibold mt-6 mb-2">UI &amp; UX</h2>
+                <p class="text-gray-700">CircleCal is designed with a "simple where it counts, powerful when needed" philosophy. Customers see a minimal, fast booking flow that converts, while business owners get access to advanced scheduling rules, per-date overrides, resource management, and team permissions tucked into a clear admin UI. The interface surfaces complexity only when relevant, keeping everyday tasks straightforward.</p>
+            </div>
+        </div>
+
+        <section class="mt-8">
+            <h2 class="text-2xl font-semibold mb-3">Frequently Asked Questions</h2>
+            <div class="space-y-3">
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">Does CircleCal support custom domains?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Yes — verified custom domains (e.g. booking.yoursite.com) are supported. We verify ownership via a DNS TXT record and provision HTTPS for the domain.</div>
+                </div>
+
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">How do I accept payments?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Stripe is integrated for card payments and subscriptions. Offline payment instructions are available for Pro/Team plans.</div>
+                </div>
+
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">Can I embed the booking widget on my website?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Yes — the booking widget can be embedded via an iframe. Embeds support transparent backgrounds and responsive sizing; verified custom domains and embed keys control access and appearance.</div>
+                </div>
+
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">Can customers add bookings to their calendars?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Yes — CircleCal provides iCal/ICS feeds and per-booking calendar links that customers can subscribe to or add to Google Calendar, Outlook, Apple Calendar, and other clients (one-way export/subscription).</div>
+                </div>
+
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">Can I add team members or multiple coaches?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Yes — Team accounts support multiple coaches/staff with role-based access. See the Team plan for limits and permissions in the admin settings.</div>
+                </div>
+
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">How do I upgrade or change my plan?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Upgrades and downgrades are managed via the billing UI; upgrades typically take effect immediately while downgrades can be scheduled at period end. Billing is handled through Stripe.</div>
+                </div>
+
+                <div class="border rounded-lg">
+                    <button type="button" class="w-full text-left px-4 py-3 flex items-center justify-between faq-toggle">
+                        <span class="font-medium">Can I customize branding and the booking page?</span>
+                        <span class="text-sm text-gray-500">+</span>
+                    </button>
+                    <div class="px-4 py-3 hidden faq-body">Yes — Pro and Team plans include custom branding and page settings so you can match the booking experience to your site. Custom domains and embed controls are available on eligible plans.</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Testimonials removed per request -->
+
+        <div class="mt-8 text-center about-actions">
+            {% if request.organization %}
+                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="btn-primary">See full pricing</a>
+            {% else %}
+                <a href="{% url 'calendar_app:signup' %}" class="btn-primary">See full pricing</a>
+            {% endif %}
+            <a href="{% url 'calendar_app:contact' %}" class="ml-3 btn-ghost">Contact support</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Make action buttons align and stack on small screens */
+.about-actions { display:flex; justify-content:center; align-items:center; gap:12px; }
+.about-actions a { display:inline-block; vertical-align:middle; }
+.about-actions .btn-primary { min-width: 12rem; }
+@media (max-width:640px) {
+    .about-actions { flex-direction:column; gap:10px; padding:0 16px; }
+    .about-actions a { width:100%; max-width:420px; }
+    .about-actions .btn-primary { width:100%; min-width:0; }
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('.faq-toggle').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            const body = btn.nextElementSibling;
+            if (!body) return;
+            const open = !body.classList.contains('hidden');
+            body.classList.toggle('hidden', open);
+            btn.querySelector('span:last-child').textContent = open ? '+' : '−';
+        });
+    });
+});
+</script>
+{% endblock %}

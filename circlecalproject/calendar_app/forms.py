@@ -95,7 +95,9 @@ class InviteSignupForm(UserCreationForm):
 
 
 class ContactForm(forms.Form):
-    business_name = forms.CharField(max_length=160, required=True, label='Business Name')
+    # Business name is optional for people who haven't created an org yet.
+    # If provided, it must match an existing organization exactly (case-sensitive).
+    business_name = forms.CharField(max_length=160, required=False, label='Business Name')
     name = forms.CharField(max_length=120, required=True)
     email = forms.EmailField(required=True)
 

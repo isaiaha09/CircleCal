@@ -8,6 +8,7 @@ urlpatterns = [
 
     path("", views.home, name="home"),
     path("contact/", views.contact, name="contact"),
+    path("about/", views.about, name="about"),
     path("terms/", TemplateView.as_view(template_name="calendar_app/terms.html"), name="terms"),
     path("privacy/", TemplateView.as_view(template_name="calendar_app/privacy.html"), name="privacy"),
     path("plans/<slug:plan_slug>/", views.plan_detail, name="plan_detail"),

@@ -29,7 +29,15 @@
   .no-bookings { text-align: center; padding: 60px 20px; color: #6c757d; }
   .search-box { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; width: 200px; font-size: 13px; }
   /* Wrapper to constrain visible rows to ~10 and enable scrolling for overflow */
-  .table-wrapper { max-height: calc(var(--row-height) * 10); overflow: auto; }
+  .table-wrapper {
+    max-height: calc(var(--row-height) * 10);
+    overflow: auto;
+    background: white;
+    padding: 12px;
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(2,6,23,0.10);
+  }
+  /* Slightly lift the whole bookings area to give depth rather than flat table rows */
   /* Small visual tweak so scroller area shows rounded corners consistently */
   .table-wrapper .bookings-table { margin: 0; }
 
@@ -121,6 +129,9 @@
     font-size: 13px;
     resize: vertical;
   }
+  /* Elevated panel helper for audit and other sections */
+  .panel-elevated { margin-top: 28px; }
+  .panel-elevated h2 { font-weight: 700; }
 </style>
 
 <div class="bookings-container">
@@ -234,6 +245,7 @@
           <td>
               <div class="booking-actions">
               <button class="btn-sm btn-view" onclick="viewBooking({{ booking.id }})">View</button>
+              <a class="btn-sm" href="{% url 'bookings:booking_ics' booking.id %}" style="background:#0069d9; color:#fff; padding:6px 10px; border-radius:4px; text-decoration:none;">ICS</a>
             </div>
           </td>
         </tr>
@@ -251,7 +263,7 @@
   </div>
   
   <!-- Audit: Cancelled / Deleted Bookings -->
-  <div style="margin-top:28px;">
+  <div class="panel-elevated" style="margin-top:28px;">
     <h2 style="font-size:1.25rem; margin-bottom:8px;">Recently Cancelled / Deleted</h2>
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
       <div style="display:flex; gap:8px; align-items:center;">

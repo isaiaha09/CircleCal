@@ -1,5 +1,6 @@
 import logging
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
+import datetime
 import re
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
@@ -9,21 +10,14 @@ from zoneinfo import ZoneInfo
 from django.core.signing import TimestampSigner
 from django.urls import reverse
 from bookings.models import build_offline_payment_instructions, filter_offline_payment_instructions_for_method
-
-
-def _extract_offline_line_for_method(instructions: str, method: str) -> str:
-    """Extract a method-specific line from org offline instructions.
-
-    Looks for lines like:
-      "Venmo: @myhandle" or "Zelle - myemail@example.com"
-    """
+def _extract_offline_line_for_method(raw: str, method: str) -> str:
+    """Extract the line for a given offline method (venmo/zelle) from instructions."""
     try:
-        full = (instructions or '').strip()
         m = (method or '').strip().lower()
-        if not full or not m:
+        if not m:
             return ''
-        for raw in full.splitlines():
-            line = (raw or '').strip()
+        for line in (raw or '').splitlines():
+            line = (line or '').strip()
             if not line:
                 continue
             low = line.lower()
@@ -106,10 +100,39 @@ def send_booking_confirmation(booking):
         'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
         'cancel_url': cancel_url,
         'reschedule_url': reschedule_url,
+        'ics_url': f"{base_url}{reverse('bookings:booking_ics', args=[booking.id])}?token={quote(token)}",
         'payment_method': payment_method,
         'stripe_card_brand': '',
         'stripe_card_last4': '',
+        'outlook_web_url': '',
     }
+
+    # Add a Google Calendar quick-link (TEMPLATE action)
+    try:
+        dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
+        g_params = {
+            'text': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
+            'dates': f"{dtstart}/{dtend}",
+            'details': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
+            'location': getattr(booking.organization, 'name', ''),
+        }
+        context['google_calendar_url'] = gcal_base + '&' + urlencode(g_params)
+
+        outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
+        outlook_params = {
+            'rru': 'addevent',
+            'subject': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
+            'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'body': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
+            'location': getattr(booking.organization, 'name', ''),
+        }
+        context['outlook_web_url'] = outlook_base + '?' + urlencode(outlook_params)
+    except Exception:
+        context['google_calendar_url'] = ''
+        context['outlook_web_url'] = ''
 
     # Stripe payment details (safe to show last4; do not include full card data)
     try:
@@ -330,6 +353,43 @@ def send_owner_booking_notification(booking):
         'org_tz_name': org_tz_name,
         'site_url': getattr(settings, 'SITE_URL', ''),
     }
+
+    # Provide calendar links for owners (ICS + Google)
+    try:
+        signer = TimestampSigner()
+        token = signer.sign(str(booking.id))
+        base_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
+        context['ics_url'] = f"{base_url}{reverse('bookings:booking_ics', args=[booking.id])}?token={quote(token)}"
+        try:
+            dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+            dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+            # Google Calendar link
+            gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
+            g_params = {
+                'text': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
+                'dates': f"{dtstart}/{dtend}",
+                'details': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
+                'location': getattr(booking.organization, 'name', ''),
+            }
+            context['google_calendar_url'] = gcal_base + '&' + urlencode(g_params)
+
+            # Outlook Web deeplink
+            outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
+            outlook_params = {
+                'rru': 'addevent',
+                'subject': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
+                'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'body': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
+                'location': getattr(booking.organization, 'name', ''),
+            }
+            context['outlook_web_url'] = outlook_base + '?' + urlencode(outlook_params)
+        except Exception:
+            context['google_calendar_url'] = ''
+            context['outlook_web_url'] = ''
+    except Exception:
+        context['ics_url'] = ''
+        context['google_calendar_url'] = ''
 
     logger = logging.getLogger(__name__)
     html_content = render_to_string('bookings/emails/booking_owner_notification.html', context)

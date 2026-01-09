@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background:#f4f6f8; color:#334155; margin:0; padding:20px; }
+        .container { max-width:640px; margin:20px auto; background:white; border-radius:8px; overflow:hidden; box-shadow:0 6px 18px rgba(2,6,23,0.08); }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; padding:20px 24px; text-align:left; }
+        .header h1 { margin:0; font-size:18px; font-weight:600; }
+        .content { padding:20px 24px; }
+        .muted { color:#64748b; font-size:13px; }
+        .field { margin-bottom:12px; }
+        .label { font-weight:600; color:#0f172a; }
+        .value { margin-top:6px; color:#0f172a; }
+        .footer { background:#f8fafc; padding:16px; text-align:center; font-size:13px; color:#64748b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>New Contact Form Submission</h1>
+        </div>
+        <div class="content">
+            <p class="muted">A user submitted the contact form on {{ site_url }}. Details below.</p>
+
+            <div class="field">
+                <div class="label">Business</div>
+                <div class="value">{{ business_name|default:'(none provided)' }}</div>
+            </div>
+
+            <div class="field">
+                <div class="label">Name</div>
+                <div class="value">{{ name }}</div>
+            </div>
+
+            <div class="field">
+                <div class="label">Email</div>
+                <div class="value">{{ email }}</div>
+            </div>
+
+            <div class="field">
+                <div class="label">Subject</div>
+                <div class="value">{{ subject }}</div>
+            </div>
+
+            <div class="field">
+                <div class="label">Message</div>
+                <div class="value" style="white-space:pre-wrap;">{{ message }}</div>
+            </div>
+
+        </div>
+        <div class="footer">
+            Sent by CircleCal — <a href="{{ site_url }}" style="color:#667eea; text-decoration:none;">Open site</a>
+        </div>
+    </div>
+</body>
+</html>
