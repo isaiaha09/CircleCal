@@ -230,7 +230,7 @@ th[role='presentation'] { border-right-color: transparent !important; }
     /* smooth oscillation using multi-stop keyframes (no alternate) */
     animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
     animation-delay: var(--cc-wave-offset, 0s);
-    z-index: 2;
+    z-index: 0;
 }
 @keyframes cc-wave {
     0% { background-position: 0% 50%; }
@@ -272,7 +272,7 @@ th[role='presentation'] { border-right-color: transparent !important; }
     background-size: 400% 100%;
     animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
     animation-delay: var(--cc-wave-offset, 0s);
-    z-index: 50;
+    z-index: 0;
     pointer-events: none;
 }
 
@@ -306,7 +306,7 @@ th[role='presentation'] { border-right-color: transparent !important; }
             animation: cc-wave var(--cc-wave-duration, 14s) ease-in-out infinite;
             /* allow external sync via --cc-wave-offset */
             animation-delay: var(--cc-wave-offset, 0s);
-        z-index: 50;
+        z-index: 0;
         pointer-events: none;
     }
     #calendar { padding: 12px; }

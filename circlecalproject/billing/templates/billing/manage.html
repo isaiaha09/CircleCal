@@ -4,7 +4,27 @@
 {% block title %}Manage Billing – {{ org.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto mt-6 md:mt-10 bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 p-4 md:p-6">
+<style>
+  /* Default: keep next-charge inline on desktop */
+  .cc-next-charge { display: inline-flex; gap: 0.5rem; align-items: baseline; }
+  .cc-next-charge #nextChargeCountdown { margin-left: 0.5rem; margin-top: 0; }
+
+  /* Mobile: make billing card match auth modals (95vw centered) */
+  @media (max-width: 767px) {
+    .cc-billing-container { width: 95vw; margin-left: calc(50% - 47.5vw); }
+  }
+  /* Mobile tweaks for subscription row: separate next-charge lines and equalize buttons */
+  @media (max-width: 767px) {
+    .cc-subscription-row { flex-direction: column; align-items: stretch !important; gap: 0.6rem; }
+    .cc-subscription-row > .cc-sub-buttons { width: 100% !important; align-self: stretch !important; display: flex !important; justify-content: center !important; }
+    /* Remove Tailwind's horizontal spacing reversal variable on mobile so buttons don't hug edges */
+    .cc-sub-buttons { --tw-space-x-reverse: unset !important; display: flex !important; justify-content: center !important; gap: 0.5rem !important; margin: 0 auto; }
+    .cc-sub-buttons button { flex: none !important; width: calc(50% - 0.25rem) !important; padding-top: 0.5rem; padding-bottom: 0.5rem; font-size: 0.85rem; line-height: 1.2; }
+    .cc-next-charge { display: flex; flex-direction: column; gap: 0.15rem; }
+    .cc-next-charge #nextChargeCountdown { margin-left: 0; margin-top: 0.25rem; }
+  }
+</style>
+<div class="max-w-4xl mx-auto mt-6 md:mt-10 bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 p-4 md:p-6 cc-billing-container">
   <h1 class="text-xl md:text-2xl font-semibold mb-3 md:mb-4">Billing Management</h1>
   <p class="text-xs md:text-sm text-gray-600 mb-4 md:mb-6">Manage subscription, payment methods, and invoices for <strong>{{ org.name }}</strong>.</p>
 
@@ -106,7 +126,7 @@
     <h2 class="text-xl font-semibold mb-2">Subscription Details</h2>
     {% if subscription %}
       <div class="text-sm">
-        <div class="flex items-center justify-between space-x-4">
+        <div class="flex items-center justify-between space-x-4 cc-subscription-row">
           <div>
             <div><strong>Status:</strong> {{ subscription.status }}{% if subscription.cancel_at_period_end %} (cancels at period end){% endif %}</div>
             {% if subscription.current_period_end %}
@@ -114,13 +134,25 @@
             {% endif %}
             {# Show next charge amount/date in the subscription details when available #}
             {% if upcoming_invoice_adjusted %}
-              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}{% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %} <span class="ml-2 text-gray-600" id="nextChargeCountdown">—</span>{% endif %}</div>
+              <div class="mt-2 cc-next-charge">
+                <div><strong>Next charge:</strong> <strong>${{ upcoming_invoice_adjusted.adjusted|floatformat:2 }}</strong></div>
+                <div>{% if upcoming_invoice.billing_date %}on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
+                {% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %}
+                  <div class="text-gray-600 mt-1" id="nextChargeCountdown">—</div>
+                {% endif %}
+              </div>
               <div class="text-sm text-green-700 mt-1">Discount: -${{ upcoming_invoice_adjusted.discount_amount|floatformat:2 }} — Original: <s>${{ upcoming_invoice_adjusted.original|floatformat:2 }}</s></div>
             {% elif upcoming_invoice %}
-              <div class="mt-2"><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong>{% if upcoming_invoice.billing_date %} on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}{% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %} <span class="ml-2 text-gray-600" id="nextChargeCountdown">—</span>{% endif %}</div>
+              <div class="mt-2 cc-next-charge">
+                <div><strong>Next charge:</strong> <strong>${{ upcoming_invoice.amount_due_dollars|floatformat:2 }}</strong></div>
+                <div>{% if upcoming_invoice.billing_date %}on <strong>{{ upcoming_invoice.billing_date|date:"M j, Y g:i A" }}</strong>{% endif %}</div>
+                {% if not trial_remaining_seconds and next_billing_iso and not subscription.cancel_at_period_end %}
+                  <div class="text-gray-600 mt-1" id="nextChargeCountdown">—</div>
+                {% endif %}
+              </div>
             {% endif %}
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 cc-sub-buttons">
             {% if subscription.cancel_at_period_end %}
               <button id="reactivateBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-green-600 text-white hover:bg-green-700">Reactivate</button>
             {% else %}

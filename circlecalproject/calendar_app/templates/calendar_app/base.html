@@ -175,6 +175,36 @@
                 #pricing-carousel { overflow-x: hidden; }
                 #pricing-track { position: relative; }
             }
+            /* Ensure the mobile menu always sits above animated top-gradients
+               so gradients remain visible but render underneath the nav. */
+            #mobileMenu {
+                z-index: 9999; /* keep menu above page content */
+            }
+            /* Make the panel a fixed stacking context so it always overlays
+               the page (and its pseudo-elements), avoiding hide/show toggles. */
+            #mobileMenuPanel {
+                position: fixed;
+                top: var(--cc-header-h, 72px);
+                left: 0;
+                right: 0;
+                bottom: 0;
+                z-index: 10000;
+                /* preserve existing visuals */
+                background: white;
+            }
+            /* Prevent decorative gradient bars appearing on menu items inside
+               the mobile menu panel (we want gradients site-wide, but not on
+               simple nav buttons). This only targets elements inside the
+               menu panel and does not toggle based on open/close state. */
+            #mobileMenuPanel .section-card::before,
+            #mobileMenuPanel .border.rounded-lg::before,
+            #mobileMenuPanel .rounded-lg::before,
+            #mobileMenuPanel .section-card .section-title::before {
+                display: none !important;
+                height: 0 !important;
+                background: none !important;
+                content: none !important;
+            }
         </style>
 
     {% block extra_head %}{% endblock %}
@@ -478,6 +508,7 @@
             }
         }
 
+        let _mobileMenuTouchHandler = null;
         function openMobileMenu() {
             if (!(mobileMenu && mobileMenuPanel)) return;
             try {
@@ -486,7 +517,15 @@
                 document.documentElement.style.setProperty('--cc-header-h', (h || 72) + 'px');
             } catch (e) {}
             mobileMenu.classList.remove('hidden');
-            try { document.body.style.overflow = 'hidden'; } catch (e) {}
+            try { if (mobileMenuPanel) mobileMenuPanel.style.zIndex = '200'; } catch(e) {}
+            try { document.body.classList.add('mobile-menu-open'); } catch(e) {}
+            try {
+                document.body.style.overflow = 'hidden';
+                document.documentElement.style.overflow = 'hidden';
+                // Prevent touchmove (scroll) on mobile when menu is open
+                _mobileMenuTouchHandler = function(ev){ ev.preventDefault(); };
+                document.addEventListener('touchmove', _mobileMenuTouchHandler, { passive: false });
+            } catch (e) {}
             requestAnimationFrame(() => {
                 try { mobileMenuPanel.classList.remove('translate-x-full'); } catch (e) {}
             });
@@ -501,7 +540,16 @@
             _setMobileMenuIcon(false);
             setTimeout(() => {
                 try { mobileMenu.classList.add('hidden'); } catch (e) {}
-                try { document.body.style.overflow = ''; } catch (e) {}
+                try {
+                    document.body.style.overflow = '';
+                    document.documentElement.style.overflow = '';
+                    if (_mobileMenuTouchHandler) {
+                        document.removeEventListener('touchmove', _mobileMenuTouchHandler, { passive: false });
+                        _mobileMenuTouchHandler = null;
+                    }
+                    try { if (mobileMenuPanel) mobileMenuPanel.style.zIndex = ''; } catch(e) {}
+                    try { document.body.classList.remove('mobile-menu-open'); } catch(e) {}
+                } catch (e) {}
             }, 220);
         }
 
