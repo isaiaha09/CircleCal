@@ -1461,36 +1461,83 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     }
     #defaultAvailabilityContainer .range-start,
     #defaultAvailabilityContainer .range-end {
-        padding: 3px !important;
-        font-size: 9px !important;
+        padding: 2px 6px !important;
+        font-size: 8px !important;
         border-radius: 6px !important;
         min-width: 0 !important;
-        width: auto !important; /* compact but wide enough for times like 09:00 AM */
+        width: 86px !important; /* compact width to help layout on narrow phones */
         box-sizing: border-box !important;
     }
 
     /* Smaller action buttons */
     #defaultAvailabilityContainer .add-range-btn {
-        padding: 6px 8px !important;
-        font-size: 12px !important;
+        padding: 4px 6px !important;
+        font-size: 11px !important;
         border-radius: 6px !important;
+        min-height: 28px !important;
     }
     #defaultAvailabilityContainer .remove-range-btn {
-        padding: 2px 6px !important;
-        font-size: 12px !important;
+        padding: 0 4px !important;
+        font-size: 11px !important;
         border-radius: 4px !important;
+        height: 28px !important;
+        line-height: 28px !important;
     }
 
     /* Nudge the checkbox a bit less on small screens */
     #defaultAvailabilityContainer .unavailable-checkbox {
-        top: 4px !important;
-        left: 4px !important;
-        width: 16px !important;
-        height: 16px !important;
+        top: 3px !important;
+        left: 3px !important;
+        width: 14px !important;
+        height: 14px !important;
     }
 
     /* Ensure the time-picker appended to body doesn't overflow the card visually */
-    #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 280px !important; }
+    #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 240px !important; }
+}
+</style>
+
+<style>
+/* Extra compact adjustments for very small phones (narrow portrait devices) */
+@media (max-width: 420px) {
+    /* Tighten spacing so both time inputs + actions fit on one line */
+    #defaultAvailabilityContainer .range-row {
+        gap: 4px !important;
+    }
+    #defaultAvailabilityContainer .range-start,
+    #defaultAvailabilityContainer .range-end {
+        width: 68px !important;
+        padding: 2px 4px !important;
+        font-size: 7.5px !important;
+    }
+
+    /* Make the Add button more compact */
+    #defaultAvailabilityContainer .add-range-btn {
+        padding: 3px 6px !important;
+        font-size: 10px !important;
+        min-height: 26px !important;
+    }
+
+    /* Make the Remove button smaller and square */
+    #defaultAvailabilityContainer .remove-range-btn {
+        padding: 0 4px !important;
+        font-size: 10px !important;
+        height: 24px !important;
+        line-height: 24px !important;
+        border-radius: 6px !important;
+        gap: 6px !important;
+    }
+
+    /* Smaller unavailable checkbox */
+    #defaultAvailabilityContainer .unavailable-checkbox {
+        width: 12px !important;
+        height: 12px !important;
+        top: 2px !important;
+        left: 2px !important;
+    }
+
+    /* Slightly reduce the time-picker width on very small viewports */
+    #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 200px !important; }
 }
 </style>
 
