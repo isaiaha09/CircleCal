@@ -68,6 +68,66 @@
         </div>
   </div>
 </div>
+<script>
+// Wire bookings visible-rows select for calendar page after DOM is ready
+document.addEventListener('DOMContentLoaded', function(){
+    const key = 'cc_bookings_visible_rows';
+    const sel = document.getElementById('bookingsVisibleRowsSelect');
+    const customInput = document.getElementById('bookingsVisibleRowsCustomInput');
+    const container = document.getElementById('bookingsInlineSection');
+    const scrollWrapper = document.getElementById('bookingsScrollWrapper');
+    const auditWrapper = container ? container.querySelector('.inline-audit-wrapper') : null;
+
+    function apply(v){
+        try{
+            const defaultVal = Number(getComputedStyle(container || document.documentElement).getPropertyValue('--bookings-visible-default')) || 10;
+            if (!scrollWrapper) return;
+            if (v === 'all'){
+                scrollWrapper.classList.add('cc-visible-all');
+                if (auditWrapper) auditWrapper.classList.add('cc-visible-all');
+                scrollWrapper.style.removeProperty('--bookings-visible-rows');
+            } else {
+                scrollWrapper.classList.remove('cc-visible-all');
+                if (auditWrapper) auditWrapper.classList.remove('cc-visible-all');
+                const n = Number(v) || defaultVal;
+                scrollWrapper.style.setProperty('--bookings-visible-rows', String(n));
+                if (auditWrapper) auditWrapper.style.setProperty('--bookings-visible-rows', String(n));
+            }
+            if (sel) sel.value = String(v);
+            if (customInput){
+                if (sel && sel.value === 'custom'){ customInput.style.display = 'inline-block'; customInput.focus(); } else { customInput.style.display = 'none'; }
+            }
+        }catch(e){ console.error(e); }
+    }
+
+    function setAndStore(v){ try{ window.localStorage.setItem(key, String(v)); }catch(e){} apply(v); }
+
+    try{
+        const stored = window.localStorage.getItem(key);
+        if (stored) apply(stored); else apply(sel ? sel.value : String(Number(getComputedStyle(container || document.documentElement).getPropertyValue('--bookings-visible-default')) || 10));
+    }catch(e){ apply(sel ? sel.value : '10'); }
+
+    if (sel){
+        sel.addEventListener('change', function(){
+            const v = this.value;
+            if (v === 'custom'){
+                if (customInput){ customInput.style.display = 'inline-block'; customInput.focus(); }
+                return;
+            }
+            setAndStore(v);
+        });
+    }
+
+    if (customInput){
+        customInput.addEventListener('change', function(){
+            const n = Math.max(1, Number(this.value) || 10);
+            setAndStore(String(n));
+                if (sel) sel.value = 'custom';
+        });
+        customInput.addEventListener('keyup', function(e){ if (e.key === 'Enter') this.dispatchEvent(new Event('change')); });
+    }
+});
+</script>
 
 <!-- Assets moved to extra_head -->
 
@@ -311,7 +371,44 @@ th[role='presentation'] { border-right-color: transparent !important; }
     }
     #calendar { padding: 12px; }
     .fc .fc-view-harness { margin-top: 80px; }
-    .fc-daygrid-day-number { width: 40px; height: 40px; font-size: 1.1rem; }
+    /* Slightly smaller day circles on mobile to fit narrow columns */
+    .fc-daygrid-day-number { width: 36px; height: 36px; font-size: 14px !important; }
+    /* Ensure past / unavailable / today variants honor mobile sizing */
+    .fc-daygrid-day-number.past-day,
+    .fc-daygrid-day-number.unavailable-number,
+    .fc .fc-day-today .fc-daygrid-day-number {
+        width: 36px !important;
+        height: 36px !important;
+        line-height: 36px !important;
+        font-size: 14px !important;
+    }
+    /* Nav buttons: enforce square buttons and center icon */
+    .fc .fc-prev-button, .fc .fc-next-button {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        box-sizing: border-box;
+    }
+    /* Reset button line-height to avoid baseline offset (don't zero font-size) */
+    .fc .fc-button { line-height: 0; }
+    .fc .fc-button svg, .fc .fc-button .fc-icon { width: 14px; height: 14px; display: block; margin: 0; transform: none; }
+    /* Ensure any inner wrapper/span fills the button and centers its contents */
+    .fc .fc-prev-button > *,
+    .fc .fc-next-button > *,
+    .fc .fc-prev-button > .fc-icon, .fc .fc-next-button > .fc-icon,
+    .fc .fc-prev-button svg, .fc .fc-next-button svg {
+        width: 100%;
+        height: 100%;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
     .time-circle { width: 56px !important; height: 56px !important; font-size: 12px !important; }
 }
 .fc-daygrid-day-number {
@@ -949,6 +1046,72 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 </style>
 
 <style>
+/* Very small phones: keep title + actions on single line and shrink buttons to fit */
+@media (max-width: 480px) {
+    /* prevent the header row from wrapping so title and actions remain inline;
+       allow wrapping only to push the controls to a second row */
+    #bookingsInlineSection > div:first-child {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 8px !important;
+        flex-wrap: wrap !important;
+    }
+
+    /* allow the heading to shrink so the actions can fit and ensure it stays first */
+    #bookingsInlineSection > div:first-child h3 {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        margin: 0 8px 0 0 !important;
+        font-size: 16px !important;
+        line-height: 1.1 !important;
+        order: 1 !important;
+    }
+
+    /* keep the two action buttons grouped and small, and place them after the title */
+    #bookingsInlineSection > div:first-child .bookings-top-actions {
+        display: flex !important;
+        gap: 6px !important;
+        flex: 0 0 auto !important;
+        align-items: center !important;
+        order: 2 !important;
+        margin-left: auto !important;
+    }
+
+    /* Make both buttons compact and equal height */
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn {
+        padding: 4px 6px !important;
+        font-size: 12px !important;
+        height: 32px !important;
+        min-width: 56px !important;
+        border-radius: 6px !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+    }
+
+    /* Ensure search + rows controls drop to a second row but keep inputs aligned */
+    #bookingsInlineSection > div:first-child .bookings-controls {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        margin-top: 8px !important;
+        gap: 8px !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+    }
+
+    /* Slightly reduce select/input height to match compact buttons */
+    #bookingsInlineSection > div:first-child .bookings-controls input,
+    #bookingsInlineSection > div:first-child .bookings-controls select {
+        height: 32px !important;
+        padding: 6px 8px !important;
+        font-size: 13px !important;
+    }
+}
+</style>
+
+<style>
 /* Mobile-specific container height to ensure availability card has enough room */
 @media (max-width: 768px) {
     #defaultAvailabilityContainer {
@@ -1308,6 +1471,74 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                     <a id="cc-open-edit-service-from-calendar"
                        href="#"
                        style="display:none; padding:10px 12px; border-radius:10px; background:white; border:1px solid var(--primary-500); color:var(--primary-600); font-weight:700; cursor:pointer; text-decoration:none;">
+
+        <!-- Compact bookings header controls for mobile so they fit comfortably -->
+        <style>
+        @media (max-width: 768px) {
+            #bookingsInlineSection .booking-controls,
+            #bookingsInlineSection .bookings-top,
+            #bookingsInlineSection .bookings-actions {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                justify-content: flex-start;
+                flex-wrap: nowrap;
+            }
+
+            #bookingsInlineSection .booking-controls .calendar-btn,
+            #bookingsInlineSection .bookings-top .calendar-btn {
+                padding: 8px 10px !important;
+                font-size: 13px !important;
+                border-radius: 8px !important;
+                line-height: 1 !important;
+                white-space: nowrap !important;
+            }
+
+            /* Make search input compact and allow it to shrink */
+            #bookingsInlineSection .booking-controls input[type="search"],
+            #bookingsInlineSection input.search,
+            #bookingsInlineSection .search-input {
+                padding: 8px 10px !important;
+                font-size: 13px !important;
+                min-width: 0 !important;
+                flex: 1 1 auto !important;
+                max-width: 280px !important;
+            }
+
+            /* Small square refresh/icon buttons */
+            #bookingsInlineSection .refresh-btn,
+            #bookingsInlineSection .refresh-button,
+            #bookingsInlineSection button.refresh {
+                width: 36px !important;
+                height: 36px !important;
+                padding: 6px !important;
+                border-radius: 8px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+            }
+        }
+
+        @media (max-width: 420px) {
+            #bookingsInlineSection .booking-controls,
+            #bookingsInlineSection .bookings-top {
+                gap: 6px;
+            }
+
+            #bookingsInlineSection .booking-controls .calendar-btn,
+            #bookingsInlineSection .bookings-top .calendar-btn {
+                padding: 6px 8px !important;
+                font-size: 12px !important;
+            }
+
+            #bookingsInlineSection .booking-controls input[type="search"],
+            #bookingsInlineSection input.search {
+                font-size: 12px !important;
+                padding: 6px 8px !important;
+                max-width: 180px !important;
+            }
+        }
+        </style>
                         Open Edit Service
                     </a>
                 </div>
@@ -1551,18 +1782,193 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 
     /* Slightly reduce the time-picker width on very small viewports */
     #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 200px !important; }
+    /* Extra-small phones: make day circles and nav arrows even smaller */
+    .fc-daygrid-day-number { width: 32px !important; height: 32px !important; font-size: 13px !important; }
+    .fc-daygrid-day-number.past-day,
+    .fc-daygrid-day-number.unavailable-number,
+    .fc .fc-day-today .fc-daygrid-day-number {
+        width: 32px !important;
+        height: 32px !important;
+        line-height: 32px !important;
+        font-size: 13px !important;
+    }
+    .fc .fc-prev-button, .fc .fc-next-button {
+        width: 36px !important;
+        height: 36px !important;
+        padding: 0 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 6px !important;
+        box-sizing: border-box !important;
+    }
+    .fc .fc-button { line-height: 0 !important; }
+    .fc .fc-button svg, .fc .fc-button .fc-icon { width: 12px !important; height: 12px !important; display: block !important; margin: 0 !important; transform: none !important; }
+    .fc .fc-prev-button > *,
+    .fc .fc-next-button > *,
+    .fc .fc-prev-button > .fc-icon, .fc .fc-next-button > .fc-icon,
+    .fc .fc-prev-button svg, .fc .fc-next-button svg {
+        width: 100% !important;
+        height: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    /* Tighten calendar controls spacing on very small phones */
+    #calendar-controls { padding: 10px !important; gap: 8px !important; }
+}
+</style>
+
+<!-- Tight, specific mobile rules for the bookings header controls (targets inline IDs) -->
+<style>
+@media (max-width: 768px) {
+    /* make the control row non-wrapping and allow the search to shrink */
+    #bookingsInlineSection > div:first-child {
+        display: flex !important;
+        gap: 8px !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        flex-wrap: wrap !important;
+    }
+
+    /* compact the primary 'View all bookings' link and match Refresh size */
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn {
+        padding: 6px 12px !important;
+        font-size: 13px !important;
+        min-width: 86px !important;
+        height: 36px !important;
+        border-radius: 8px !important;
+        white-space: nowrap !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+
+    /* allow search to flex and shrink so it doesn't force overflow; align inputs/selects */
+    #bookingsInlineSection > div:first-child .bookings-controls input[type="search"],
+    #bookingsInlineSection > div:first-child .bookings-controls input#bookingsSearchInline,
+    #bookingsInlineSection > div:first-child .bookings-controls select,
+    #bookingsInlineSection > div:first-child .bookings-controls input[type="number"] {
+        padding: 6px 8px !important;
+        font-size: 13px !important;
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
+        max-width: 220px !important;
+        height: 36px !important;
+        line-height: normal !important;
+    }
+
+    /* place controls (search + rows) on their own row beneath the title/actions */
+    #bookingsInlineSection > div:first-child .bookings-controls {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        margin-top: 8px !important;
+        justify-content: flex-start !important;
+        gap: 8px !important;
+        align-items: center !important;
+    }
+
+    #bookingsInlineSection > div:first-child h3 {
+        order: 1 !important;
+        flex: 0 0 auto !important;
+    }
+
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn {
+        order: 2 !important;
+        flex: 0 0 auto !important;
+        margin-left: 8px !important;
+    }
+}
+
+@media (max-width: 420px) {
+    #bookingsInlineSection > div:first-child {
+        gap: 6px !important;
+    }
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn {
+        padding: 6px 6px !important;
+        font-size: 12px !important;
+    }
+    #bookingsInlineSection > div:first-child input#bookingsSearchInline {
+        padding: 6px 8px !important;
+        font-size: 12px !important;
+        max-width: 140px !important;
+    }
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn {
+        min-width: 72px !important;
+        height: 34px !important;
+        padding: 6px 10px !important;
+    }
 }
 </style>
 
 <div id="bookingsInlineSection" style="margin-top:24px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+<style>
+/* Final mobile overrides for bookings header (placed immediately before markup to beat earlier rules) */
+@media (max-width: 480px) {
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn {
+        padding: 3px 6px !important;
+        font-size: 12px !important;
+        height: 30px !important;
+        min-width: 40px !important;
+        border-radius: 6px !important;
+        box-sizing: border-box !important;
+    }
+    #bookingsInlineSection > div:first-child .bookings-top-actions { margin-left: auto !important; }
+    /* prefer full labels on slightly larger mobile widths */
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn .btn-full,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn .btn-full { display: inline !important; }
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn .btn-short,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn .btn-short { display: none !important; }
+}
+
+@media (max-width: 360px) {
+    /* show short labels and compress buttons further */
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn .btn-full,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn .btn-full { display: none !important; }
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn .btn-short,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn .btn-short { display: inline !important; }
+    #bookingsInlineSection > div:first-child a#bookingsViewAllBtn,
+    #bookingsInlineSection > div:first-child button#bookingsRefreshBtn {
+        padding: 2px 6px !important;
+        min-width: 36px !important;
+        height: 28px !important;
+        font-size: 12px !important;
+    }
+}
+</style>
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
         <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Bookings</h3>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <a id="bookingsViewAllBtn" href="{% url 'calendar_app:bookings_list' organization.slug %}" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; text-decoration:none; display:inline-flex; align-items:center;">View all bookings</a>
-            <input id="bookingsSearchInline" type="text" placeholder="Search name or email" style="padding:8px 10px; border:1px solid var(--gray-300); border-radius:6px; font-size:13px;" />
-            <button id="bookingsRefreshBtn" type="button" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">Refresh</button>
+        <div class="bookings-top-actions" style="display:flex; gap:8px; align-items:center;">
+            <a id="bookingsViewAllBtn" href="{% url 'calendar_app:bookings_list' organization.slug %}" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; justify-content:center;">View all bookings</a>
+            <button id="bookingsRefreshBtn" type="button" style="padding:8px 12px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">Refresh</button>
+        </div>
+        <div class="bookings-controls" style="display:flex; gap:8px; align-items:center; flex:1 1 100%; width:100%; margin-top:8px;">
+            <input id="bookingsSearchInline" type="text" placeholder="Search name or email" style="padding:8px 10px; border:1px solid var(--gray-300); border-radius:6px; font-size:13px; flex:1 1 auto; min-width:0;" />
+            <label for="bookingsVisibleRowsSelect" style="margin-left:6px; font-size:13px; color:var(--gray-700);">Rows:</label>
+            <select id="bookingsVisibleRowsSelect" style="padding:6px 8px; border-radius:6px; font-size:13px;">
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="all">All</option>
+                <option value="custom">Custom</option>
+            </select>
+            <input id="bookingsVisibleRowsCustomInput" type="number" min="1" placeholder="Rows" style="display:none; margin-left:6px; padding:6px 8px; width:90px; border-radius:6px;" />
         </div>
     </div>
+    <style>
+    /* bookings scroll sizing using CSS variables so JS can control visible rows */
+    #bookingsInlineSection { --bookings-row-height: 56px; --bookings-visible-default: 10; }
+    #bookingsScrollWrapper { --bookings-visible-rows: var(--bookings-visible, var(--bookings-visible-default)); max-height: calc(var(--bookings-row-height) * var(--bookings-visible-rows)); overflow:auto; }
+    #bookingsScrollWrapper.cc-visible-all { max-height: none !important; }
+    #bookingsInlineSection .inline-audit-wrapper { --bookings-visible-rows: var(--bookings-visible, var(--bookings-visible-default)); max-height: calc(var(--bookings-row-height) * var(--bookings-visible-rows)); overflow:auto; margin-top:8px; }
+    #bookingsInlineSection .inline-audit-wrapper.cc-visible-all { max-height: none !important; }
+    </style>
     <div id="bookingsScrollWrapper">
     <table style="width:100%; border-collapse:collapse;">
         <thead>
@@ -1582,7 +1988,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     <!-- Inline Audit Feed (recently deleted/cancelled) -->
     <div style="margin-top:16px;">
         <h4 style="margin:6px 0 8px 0; font-size:14px; font-weight:700; color:var(--gray-900);">Recent Deleted / Cancelled</h4>
-        <div style="font-size:13px; color:var(--gray-700);">
+        <div class="inline-audit-wrapper" style="font-size:13px; color:var(--gray-700);">
                 {% if audit_entries %}
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
                     <label style="font-size:13px;"><input type="checkbox" id="auditInlineSelectAll"> Select all</label>

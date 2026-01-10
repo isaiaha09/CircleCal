@@ -5,6 +5,8 @@
 {% block content %}
 <style>
   :root { --row-height: 64px; }
+  /* default visible rows if user hasn't selected one */
+  :root { --visible-rows-default: 10; }
   .bookings-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
   .bookings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
   .filter-controls { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -30,13 +32,16 @@
   .search-box { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; width: 200px; font-size: 13px; }
   /* Wrapper to constrain visible rows to ~10 and enable scrolling for overflow */
   .table-wrapper {
-    max-height: calc(var(--row-height) * 10);
+    /* use the selected visible rows (fallback to default) */
+    --visible-rows: var(--bookings-visible-rows, var(--visible-rows-default));
+    max-height: calc(var(--row-height) * var(--visible-rows));
     overflow: auto;
     background: white;
     padding: 12px;
     border-radius: 12px;
     box-shadow: 0 18px 40px rgba(2,6,23,0.10);
   }
+  .table-wrapper.cc-visible-all { max-height: none !important; }
   /* Slightly lift the whole bookings area to give depth rather than flat table rows */
   /* Small visual tweak so scroller area shows rounded corners consistently */
   .table-wrapper .bookings-table { margin: 0; }
@@ -136,12 +141,24 @@
 
 <div class="bookings-container">
     <div class="bookings-header">
-    <h1 style="font-size: 2rem; font-weight: bold; margin: 0;">Bookings</h1>
-    <div style="display:flex; gap:8px; align-items:center;">
+      <h1 style="font-size: 2rem; font-weight: bold; margin: 0;">Bookings</h1>
+      <div style="display:flex; gap:8px; align-items:center;">
       {% if user_org_role != 'staff' %}
         <a href="{% url 'calendar_app:calendar' organization.slug %}" class="btn-sm btn-view">View Calendar</a>
       {% endif %}
       <a href="{% url 'calendar_app:dashboard' organization.slug %}" class="btn-sm btn-view">Back to Dashboard</a>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <label for="visibleRowsSelect" style="font-size:13px; color:#555;">Rows:</label>
+      <select id="visibleRowsSelect" style="padding:6px 8px; border-radius:6px; font-size:13px;">
+        <option value="5">5</option>
+        <option value="10">10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+        <option value="all">All</option>
+        <option value="custom">Custom</option>
+      </select>
+      <input id="visibleRowsCustomInput" type="number" min="1" placeholder="Rows" style="display:none; margin-left:6px; padding:6px 8px; width:90px; border-radius:6px;" />
     </div>
   </div>
 
@@ -1697,5 +1714,62 @@ if (exportAuditBtn) {
     });
   }
 }
+</script>
+<script>
+// Visible rows selector: persist in localStorage and apply CSS variable
+(function(){
+  const key = 'cc_bookings_visible_rows';
+  const select = document.getElementById('visibleRowsSelect');
+  const customInput = document.getElementById('visibleRowsCustomInput');
+  const wrapper = document.querySelector('.table-wrapper');
+  function apply(val){
+    try{
+      if (!wrapper) return;
+      if (val === 'all'){
+        wrapper.classList.add('cc-visible-all');
+        wrapper.style.removeProperty('--bookings-visible-rows');
+      } else {
+        wrapper.classList.remove('cc-visible-all');
+        const n = Number(val) || Number(getComputedStyle(document.documentElement).getPropertyValue('--visible-rows-default')) || 10;
+        wrapper.style.setProperty('--bookings-visible-rows', String(n));
+      }
+      if (select) select.value = String(val);
+      if (customInput){
+        if (select && select.value === 'custom'){ customInput.style.display = 'inline-block'; } else { customInput.style.display = 'none'; }
+      }
+    }catch(e){console.error(e);}  }
+
+  function setAndStore(v){
+    try{ window.localStorage.setItem(key, String(v)); }catch(e){}
+    apply(v);
+  }
+
+  try{
+    const stored = window.localStorage.getItem(key);
+    if (stored) apply(stored);
+    else apply(select ? select.value : '10');
+  }catch(e){ apply(select ? select.value : '10'); }
+
+  if (select){
+    select.addEventListener('change', function(){
+      const v = this.value;
+      if (v === 'custom'){
+        if (customInput){ customInput.style.display = 'inline-block'; customInput.focus(); }
+        return;
+      }
+      setAndStore(v);
+    });
+  }
+
+  if (customInput){
+    customInput.addEventListener('change', function(){
+      const n = Math.max(1, Number(this.value) || 10);
+      setAndStore(String(n));
+      if (select) select.value = 'custom';
+    });
+    customInput.addEventListener('keyup', function(e){ if (e.key === 'Enter') this.dispatchEvent(new Event('change')); });
+  }
+
+})();
 </script>
 {% endblock %}
