@@ -180,6 +180,30 @@
             #mobileMenu {
                 z-index: 9999; /* keep menu above page content */
             }
+
+            /* Mobile hamburger button should feel like a real button:
+               - "pops up" when menu is open
+               - returns "down" when menu closes
+               (icon swap/rotation animation is handled in JS) */
+            #mobileMenuBtn {
+                padding: 8px;
+                border-radius: 12px;
+                border: 1px solid transparent;
+                transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease, border-color 160ms ease;
+                -webkit-tap-highlight-color: transparent;
+            }
+            #mobileMenuBtn:hover {
+                background-color: rgba(37, 99, 235, 0.06);
+            }
+            #mobileMenuBtn:active {
+                transform: translateY(0px) scale(0.98);
+            }
+            #mobileMenuBtn.cc-mobile-menu-btn-open {
+                background-color: #eff6ff; /* blue-50 */
+                border-color: #bfdbfe; /* blue-200 */
+                box-shadow: 0 10px 25px rgba(37, 99, 235, 0.18);
+                transform: translateY(-2px);
+            }
             /* Make the panel a fixed stacking context so it always overlays
                the page (and its pseudo-elements), avoiding hide/show toggles. */
             #mobileMenuPanel {
@@ -493,6 +517,16 @@
         const mobileMenuIconHamburger = document.getElementById('mobileMenuIconHamburger');
         const mobileMenuIconClose = document.getElementById('mobileMenuIconClose');
 
+        const _MOBILE_MENU_BTN_OPEN_CLASS = 'cc-mobile-menu-btn-open';
+
+        function _setMobileMenuBtnOpen(isOpen) {
+            if (!mobileMenuBtn) return;
+            try {
+                if (isOpen) mobileMenuBtn.classList.add(_MOBILE_MENU_BTN_OPEN_CLASS);
+                else mobileMenuBtn.classList.remove(_MOBILE_MENU_BTN_OPEN_CLASS);
+            } catch (e) {}
+        }
+
         function _setMobileMenuIcon(isOpen) {
             if (!(mobileMenuIconHamburger && mobileMenuIconClose)) return;
             if (isOpen) {
@@ -517,6 +551,7 @@
                 document.documentElement.style.setProperty('--cc-header-h', (h || 72) + 'px');
             } catch (e) {}
             mobileMenu.classList.remove('hidden');
+            _setMobileMenuBtnOpen(true);
             try { if (mobileMenuPanel) mobileMenuPanel.style.zIndex = '200'; } catch(e) {}
             try { document.body.classList.add('mobile-menu-open'); } catch(e) {}
             try {
@@ -535,6 +570,7 @@
 
         function closeMobileMenu() {
             if (!(mobileMenu && mobileMenuPanel)) return;
+            _setMobileMenuBtnOpen(false);
             try { mobileMenuPanel.classList.add('translate-x-full'); } catch (e) {}
             try { mobileMenuBtn.setAttribute('aria-expanded', 'false'); } catch (e) {}
             _setMobileMenuIcon(false);
