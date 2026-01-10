@@ -947,6 +947,15 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 }
 
 </style>
+
+<style>
+/* Mobile-specific container height to ensure availability card has enough room */
+@media (max-width: 768px) {
+    #defaultAvailabilityContainer {
+        min-height: 685px !important;
+    }
+}
+</style>
 <style>
 /* Animated, stylish calendar title */
 .calendar-title {
@@ -1437,13 +1446,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     /* day label and other tds slightly smaller */
     #defaultAvailabilityContainer table th,
     #defaultAvailabilityContainer table td {
-        font-size: 11px !important;
+        font-size: 10px !important;
         padding: 6px 6px !important;
         vertical-align: middle !important;
     }
     /* specifically reduce the first column (day name) padding and size */
     #defaultAvailabilityContainer tbody td:first-child {
-        font-size: 11px !important;
+        font-size: 10px !important;
         padding-top: 6px !important;
         padding-bottom: 6px !important;
         white-space: nowrap !important;
@@ -1471,17 +1480,19 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 
     /* Smaller action buttons */
     #defaultAvailabilityContainer .add-range-btn {
-        padding: 4px 6px !important;
-        font-size: 11px !important;
+        padding: 3px 6px !important;
+        font-size: 10px !important;
         border-radius: 6px !important;
-        min-height: 28px !important;
+        min-height: 26px !important;
+        line-height: 1 !important;
     }
     #defaultAvailabilityContainer .remove-range-btn {
         padding: 0 4px !important;
-        font-size: 11px !important;
+        font-size: 10px !important;
         border-radius: 4px !important;
-        height: 28px !important;
-        line-height: 28px !important;
+        height: 24px !important;
+        line-height: 24px !important;
+        min-width: 32px !important;
     }
 
     /* Nudge the checkbox a bit less on small screens */
@@ -1507,25 +1518,27 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     #defaultAvailabilityContainer .range-start,
     #defaultAvailabilityContainer .range-end {
         width: 68px !important;
-        padding: 2px 4px !important;
+        padding: 2px !important;
         font-size: 7.5px !important;
     }
 
-    /* Make the Add button more compact */
+    /* Make the Add button extra compact on very small phones */
     #defaultAvailabilityContainer .add-range-btn {
-        padding: 3px 6px !important;
-        font-size: 10px !important;
-        min-height: 26px !important;
+        padding: 2px 5px !important;
+        font-size: 9px !important;
+        min-height: 22px !important;
+        line-height: 1 !important;
     }
 
-    /* Make the Remove button smaller and square */
+    /* Make the Remove button extra small and square on very small phones */
     #defaultAvailabilityContainer .remove-range-btn {
-        padding: 0 4px !important;
-        font-size: 10px !important;
-        height: 24px !important;
-        line-height: 24px !important;
+        font-size: 9px !important;
+        height: 20px !important;
+        line-height: 20px !important;
         border-radius: 6px !important;
         gap: 6px !important;
+        min-width: 28px !important;
+        justify-content: center !important;
     }
 
     /* Smaller unavailable checkbox */
