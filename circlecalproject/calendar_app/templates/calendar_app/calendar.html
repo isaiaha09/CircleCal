@@ -94,7 +94,7 @@
                             width: 100% !important;
                             max-width: 260px !important;
                             padding: 4px 6px !important;
-                            font-size: 12px !important; /* smaller time text */
+                            font-size: 2px !important; /* smaller time text */
                             line-height: 20px !important;
                             box-sizing: border-box !important;
                             text-align: center !important;
@@ -1547,6 +1547,48 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 }
 </style>
 
+ <!-- Mobile responsive fixes for View Day Schedule / Time Circles modal -->
+<style>
+    @media (max-width: 480px) {
+        /* Shrink the modal wrapper so it fits within the viewport */
+        #timeCirclesModal { padding: 6px !important; }
+        #timeCirclesModal > div {
+            width: calc(100% - 20px) !important;
+            max-width: 96vw !important;
+            padding: 12px !important;
+            box-sizing: border-box !important;
+            border-radius: 12px !important;
+            max-height: 92vh !important;
+            overflow-y: auto !important;
+        }
+
+        /* Make any tables or grids inside responsive */
+        #timeCirclesModal table, #timeCirclesModal .time-circles-grid, #timeCirclesModal .time-circles-table {
+            width: 100% !important;
+            max-width: 100% !important;
+            table-layout: auto !important;
+            overflow-wrap: break-word !important;
+        }
+
+        /* Prevent fixed-width children from overflowing */
+        #timeCirclesModal * { box-sizing: border-box !important; }
+        #timeCirclesModal img, #timeCirclesModal svg { max-width: 100% !important; height: auto !important; }
+
+        /* If there is a horizontal scroller, make it touch friendly */
+        #timeCirclesModal .horizontal-scroll, #timeCirclesModal .time-scroll-container {
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            width: 100% !important;
+        }
+
+        /* Reduce inner spacing and keep action buttons readable */
+        #timeCirclesModal .tc-actions button, #timeCirclesModal button {
+            padding: 8px 10px !important;
+            font-size: 13px !important;
+        }
+    }
+</style>
+
 <!-- Controls will be overlaid inside the calendar area -->
 <!-- Removed mobile/medium @media rules that targeted the Default Weekly Availability UI -->
 <!-- Per-date Overrides Table - Modern Card (moved to top) -->
@@ -1819,8 +1861,8 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     }
     #defaultAvailabilityContainer .range-start,
     #defaultAvailabilityContainer .range-end {
-        padding: 2px 6px !important;
-        font-size: 8px !important;
+        padding: 2px !important;
+        font-size: 11px !important;
         border-radius: 6px !important;
         min-width: 0 !important;
         width: 86px !important; /* compact width to help layout on narrow phones */
@@ -1836,7 +1878,6 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         line-height: 1 !important;
     }
     #defaultAvailabilityContainer .remove-range-btn {
-        padding: 0 4px !important;
         font-size: 10px !important;
         border-radius: 4px !important;
         height: 24px !important;
@@ -2185,6 +2226,89 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         </div>
     </div>
 </div>
+
+<!-- Focused mobile modal CSS (non-stacking): keep time inputs inline and use full width) -->
+<style>
+@media (max-width: 480px) {
+    /* Expand modal to most of viewport so inputs can grow horizontally */
+    #timeModal > div {
+        width: calc(100% - 28px) !important;
+        max-width: 420px !important;
+        padding: 16px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Keep each range row inline — label + inputs + remove button */
+    #modalRangesContainer .modal-range-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        justify-content: flex-start !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        flex-wrap: nowrap !important;
+    }
+
+    /* Fixed (small) label width so inputs can take remaining space */
+    #modalRangesContainer .range-label {
+        flex: 0 0 60px !important;
+        min-width: 60px !important;
+        text-align: left !important;
+        font-size: 13px !important;
+        white-space: nowrap !important;
+    }
+
+    /* Let time input container expand to fill available horizontal space */
+    #modalRangesContainer .time-input-container {
+        flex: 1 1 auto !important;
+        min-width: 0 !important; /* allow flex child to shrink when needed */
+    }
+
+    /* Make time inputs occupy full width of their container and remove restrictive max-widths */
+    #modalRangesContainer input[type="time"],
+    #modalRangesContainer input.modal-range-start,
+    #modalRangesContainer input.modal-range-end {
+        width: 100% !important;
+        max-width: none !important;
+        padding: 8px 8px !important;
+        font-size: 14px !important;
+        box-sizing: border-box !important;
+        line-height: 1.2 !important;
+    }
+
+    /* Keep remove button compact and not growing */
+    #modalRangesContainer .remove-range-btn {
+        flex: 0 0 auto !important;
+        margin-left: 8px !important;
+    }
+
+    /* Slightly reduce modal actions to free horizontal room */
+    #timeModal > div > div button,
+    #timeModal button {
+        padding: 9px 12px !important;
+        font-size: 13px !important;
+    }
+}
+
+@media (max-width: 360px) {
+    /* Keep rows inline (no stacking) but tighten label and input sizing on very narrow screens */
+    #timeModal > div {
+        width: calc(100% - 20px) !important;
+        max-width: 400px !important;
+        padding: 12px !important;
+    }
+    #modalRangesContainer .range-label {
+        flex: 0 0 48px !important;
+        min-width: 48px !important;
+        font-size: 12px !important;
+    }
+    #modalRangesContainer input[type="time"] {
+        font-size: 13px !important;
+        padding: 6px 6px !important;
+    }
+    #timeModal button { padding: 8px 10px !important; font-size: 12px !important; }
+}
+</style>
 
 
 <!--==========================-->
