@@ -51,6 +51,124 @@
                     </div>
                 </div>
 
+                    <!-- Mobile tweaks: make the "Set Available Time" modal smaller and scale contents down -->
+                    <style>
+                    @media (max-width: 480px) {
+                        /* Shrink the modal card to fit narrow viewports while keeping proportions */
+                        #timeModal > div {
+                            width: min(92vw, 380px) !important;
+                            padding: 14px !important;
+                            border-radius: 12px !important;
+                            box-shadow: 0 14px 20px rgba(0,0,0,0.12) !important;
+                            max-height: 86vh !important;
+                            overflow: auto !important;
+                            -webkit-overflow-scrolling: touch !important;
+                            font-size: 0.92rem !important; /* slightly reduce base text size inside modal */
+                        }
+                        #timeModal h3 { font-size: 18px !important; margin-bottom:8px !important; }
+                        #timeModal p { font-size: 13px !important; margin-bottom:12px !important; }
+                        /* Reduce padding on action buttons so they fit on one line when possible */
+                        #timeModal button {
+                            padding: 8px 12px !important;
+                            border-radius: 8px !important;
+                            font-size: 13px !important;
+                        }
+                        /* Make inputs and selects a bit smaller and responsive */
+                        #timeModal input, #timeModal select {
+                            font-size: 13px !important;
+                            padding: 6px 8px !important;
+                            box-sizing: border-box !important;
+                        }
+                        /* Tighten ranges container spacing */
+                        #modalRangesContainer { gap:6px !important; margin-top:8px !important; }
+                        #addModalRangeBtn { padding:6px 10px !important; font-size:13px !important; }
+
+                        /* Ensure modal range rows shrink correctly and inputs do not overflow */
+                        #timeModal .modal-range-row { gap:6px !important; justify-content:flex-start !important; align-items:center !important; }
+                        #timeModal .modal-range-row label { min-width: 26px !important; width: auto !important; font-size:11px !important; text-align:right !important; }
+                        /* Give more horizontal room to time inputs while keeping them responsive */
+                        #timeModal .modal-range-row .time-input-container { flex: 1 1 260px !important; min-width: 0 !important; }
+                        #timeModal .modal-range-row input[type="time"],
+                        #timeModal .modal-range-row .modal-range-start,
+                        #timeModal .modal-range-row .modal-range-end {
+                            width: 100% !important;
+                            max-width: 260px !important;
+                            padding: 4px 6px !important;
+                            font-size: 12px !important; /* smaller time text */
+                            line-height: 20px !important;
+                            box-sizing: border-box !important;
+                            text-align: center !important;
+                        }
+                        /* Make the remove and action buttons smaller to save space */
+                        #timeModal .modal-range-row button,
+                        #timeModal button {
+                            padding:6px 8px !important;
+                            font-size:11px !important;
+                            border-radius:8px !important;
+                        }
+                        /* Ensure the remove button doesn't push inputs off-screen */
+                        #timeModal .modal-range-row button.remove-range-btn, #timeModal .modal-range-row > button {
+                            flex: 0 0 auto !important;
+                            margin-left: 8px !important;
+                        }
+                        /* Tweak webkit datetime fields to match smaller font/line-height */
+                        #timeModal input[type="time"]::-webkit-datetime-edit-hour-field,
+                        #timeModal input[type="time"]::-webkit-datetime-edit-minute-field,
+                        #timeModal input[type="time"]::-webkit-datetime-edit-text {
+                            font-size: 12px !important;
+                            line-height: 20px !important;
+                        }
+                    }
+                    </style>
+
+                    <!-- Additional mobile fix: ensure time input values are not clipped (line-height/appearance) -->
+                    <style>
+                    @media (max-width:480px) {
+                        #timeModal input[type="time"] {
+                            height: 36px !important;
+                            line-height: 36px !important;
+                            font-size: 14px !important;
+                            color: var(--gray-900) !important;
+                            padding: 6px 8px !important;
+                            box-sizing: border-box !important;
+                            -webkit-appearance: none !important;
+                            appearance: none !important;
+                            text-align: center !important;
+                            overflow: visible !important;
+                        }
+                        /* WebKit internal fields for time inputs */
+                        #timeModal input[type="time"]::-webkit-datetime-edit,
+                        #timeModal input[type="time"]::-webkit-datetime-edit-fields-wrapper,
+                        #timeModal input[type="time"]::-webkit-datetime-edit-hour-field,
+                        #timeModal input[type="time"]::-webkit-datetime-edit-minute-field,
+                        #timeModal input[type="time"]::-webkit-datetime-edit-text {
+                            color: var(--gray-900) !important;
+                            font-size: 14px !important;
+                            line-height: 36px !important;
+                            padding: 0 !important;
+                        }
+                    }
+                    </style>
+
+                <style>
+                /* Mobile: make the scope submenu open beneath the menu (full-width)
+                   instead of off to the right where it can overflow the viewport. */
+                @media (max-width: 480px) {
+                    #ccScopeMenu, #ccScopeSubmenu {
+                        left: 0 !important;
+                        right: auto !important;
+                        top: calc(100% + 6px) !important;
+                        width: 100% !important;
+                        box-shadow: 0 8px 20px rgba(0,0,0,0.12) !important;
+                        border-radius: 10px !important;
+                        position: absolute !important;
+                        transform: none !important;
+                    }
+                    /* Ensure inner scroll areas fit the mobile viewport comfortably */
+                    #ccScopeSubmenuInner, #ccScopeMenuMembers { max-height: 320px !important; overflow:auto !important; }
+                }
+                </style>
+
                 <div style="margin-top:6px; display:flex; justify-content:center;">
                     <span id="memberScopeBadge" style="font-size:12px;color:var(--gray-600);padding:6px 10px;border-radius:999px;border:1px solid var(--gray-200);background:transparent;">Showing org defaults</span>
                 </div>
