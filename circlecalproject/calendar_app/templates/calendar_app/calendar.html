@@ -903,6 +903,22 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
   display: block;
 }
 
+/* Center the custom time picker on small screens for better UX */
+@media (max-width: 480px) {
+    .custom-time-picker {
+        position: fixed !important;
+        left: 50% !important;
+        top: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: calc(100% - 32px) !important;
+        max-width: 420px !important;
+        min-width: auto !important;
+        padding: 12px !important;
+        z-index: 20000 !important;
+        box-shadow: 0 16px 35px rgba(0,0,0,0.25) !important;
+    }
+}
+
 .time-picker-header {
   font-size: 13px;
   font-weight: 600;
