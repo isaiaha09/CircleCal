@@ -1120,6 +1120,16 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     color: var(--gray-700);
 }
 
+/* Reset All Overrides button: shift left more on wide screens */
+#resetAllOverridesBtn {
+    transform: translateX(-16px);
+}
+@media (min-width: 1025px) {
+    #resetAllOverridesBtn {
+        transform: translateX(-36px);
+    }
+}
+
 /* Default Weekly Availability: prevent overflow and keep content visible */
 #defaultAvailabilityContainer table { table-layout: fixed; width: 100%; }
 #defaultAvailabilityContainer th, #defaultAvailabilityContainer td { white-space: nowrap; overflow: visible; }
@@ -2818,6 +2828,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     else num.classList.add('unavailable-number');
                 }
             });
+            // Now that service-scope parity has updated the month UI, recompute the
+            // fully-booked protection set (this is async relative to events refetch).
+            try { if (typeof _recomputeFullyBookedOutDates === 'function') _recomputeFullyBookedOutDates(); } catch (e) {}
         } catch (e) { console.warn('applyServiceScopeDayClasses failed', e); }
     }
 
@@ -2905,6 +2918,13 @@ document.addEventListener('DOMContentLoaded', function() {
             eff = null;
             summary = {};
         }
+
+        // Cache effective settings for the selected service so other logic (fully-booked gating)
+        // can distinguish policy-window unavailability (min notice / max booking days).
+        try {
+            if (!window.__ccServiceEffective) window.__ccServiceEffective = {};
+            if (eff && svc && svc.slug) window.__ccServiceEffective[String(svc.slug)] = eff;
+        } catch (e) { /* ignore */ }
 
         const useFixed = (eff && typeof eff.use_fixed_increment === 'boolean') ? !!eff.use_fixed_increment : !!svc.use_fixed_increment;
         const incVal = Math.max(5, Number((eff && eff.time_increment_minutes) || svc.time_increment_minutes || 30));
@@ -3504,7 +3524,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 // Save ONLY the current selection (member or service). Sending bulk maps here
                 // causes stale data to overwrite the current edits.
-                const target = (SELECTED_MEMBER || null);
+                const target = (ccOverrideTarget() || null);
 
                 const res = await fetch(`/bus/${orgSlug}/availability/save/`, {
                     method: 'POST',
@@ -3850,6 +3870,18 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
+        // Return the current override target (membership id or 'svc:<id>')
+        function ccOverrideTarget() {
+            try {
+                // Prefer explicit SELECTED_MEMBER value used across the template
+                if (typeof SELECTED_MEMBER !== 'undefined' && SELECTED_MEMBER) return SELECTED_MEMBER;
+                // Fallback to DOM member select if present
+                const sel = document.getElementById('memberSelect');
+                if (sel && sel.value) return sel.value;
+            } catch (e) { /* ignore */ }
+            return null;
+        }
+
         function purgeOptimisticPerDateEvents() {
             try {
                 if (!calendar || typeof calendar.getEvents !== 'function') return;
@@ -3921,15 +3953,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 // Member-scoped selection:
-                // Only merge bookings into the member view when that member has EXACTLY ONE
-                // solo-hosted service assigned. Otherwise, member availability remains flexible
-                // and should not be blocked by service bookings.
-                const mergedSvcId = _mergedSoloServiceIdForMemberScope(SELECTED_MEMBER);
-                if (!mergedSvcId) return false;
-
-                const bookingSvc = (xp.service_id || xp.service || ev.service_id || null);
-                if (!bookingSvc) return false;
-                return String(bookingSvc) === String(mergedSvcId);
+                // Consider bookings that are assigned to this member across any service.
+                // If a booking's assigned_user_id (or assigned membership id if present)
+                // matches the selected membership, treat it as in-scope for validation.
+                try {
+                    const mUserId = getSelectedUserIdForMembership(SELECTED_MEMBER);
+                    const assignedUserId = (xp.assigned_user_id || ev.assigned_user_id || null);
+                    if (assignedUserId && mUserId && String(assignedUserId) === String(mUserId)) return true;
+                    const assignedMembershipId = (xp.assigned_membership_id || ev.assigned_membership_id || null);
+                    if (assignedMembershipId && String(assignedMembershipId) === String(SELECTED_MEMBER)) return true;
+                    // Conservative fallback: if booking has no explicit assignee info, skip it
+                    return false;
+                } catch (e) {
+                    return true;
+                }
             } catch (e) {
                 return true;
             }
@@ -4532,11 +4569,28 @@ document.addEventListener('DOMContentLoaded', function() {
                                     const svcId = String(SELECTED_MEMBER).slice(4);
                                     const assignedSvc = (ext.assigned_scope_service_id || ext.assigned_scope_service || (ev.client_name && ev.client_name.replace && ev.client_name.replace('scope:svc:','')) || null);
                                     if (assignedSvc && String(assignedSvc) === svcId) return true;
+                                    // Also allow member-scoped per-date overrides when the assigned_user_id
+                                    // belongs to any member assigned to this service. This makes member
+                                    // overrides affect services the member participates in.
+                                    try {
+                                        const svcObj = (Array.isArray(SERVICES) ? SERVICES.find(s => String(s.id) === String(svcId)) : null) || null;
+                                        const assigned = getAssignedMembersForService(svcObj) || [];
+                                        const assignedUserId = ext.assigned_user_id || ev.assigned_user_id || null;
+                                        if (assignedUserId && assigned.length) {
+                                            for (const mid of assigned) {
+                                                const mUser = MEMBER_TO_USER[String(mid)] || null;
+                                                if (mUser && String(mUser) === String(assignedUserId)) return true;
+                                                if (String(mid) === String(ext.assigned_membership_id || ev.assigned_membership_id || '')) return true;
+                                            }
+                                        }
+                                    } catch (e) { /* ignore */ }
                                     return false;
                                 }
                                 // Membership selection -> compare assigned_user_id (map membership->user id when needed)
                                 const mUser = MEMBER_TO_USER[String(SELECTED_MEMBER)] || null;
                                 const assignedUserId = ext.assigned_user_id || ev.assigned_user_id || null;
+                                const assignedMembershipId = ext.assigned_membership_id || ev.assigned_membership_id || null;
+                                if (assignedMembershipId && String(assignedMembershipId) === String(SELECTED_MEMBER)) return true;
                                 if (assignedUserId && String(assignedUserId) === String(mUser)) return true;
                                 return false;
                             }
@@ -4563,6 +4617,7 @@ document.addEventListener('DOMContentLoaded', function() {
         eventsSet: function(events) {
             // After events load/refetch, recompute override/past/unavailable visuals & table
             try { updateUnavailableDays(); } catch(e) { console.warn('eventsSet updateUnavailableDays failed', e); }
+            try { if (typeof _recomputeFullyBookedOutDates === 'function') _recomputeFullyBookedOutDates(); } catch(e) { /* ignore */ }
             try { if (typeof renderOverridesTable === 'function') renderOverridesTable(); } catch(e) { console.warn('eventsSet renderOverridesTable failed', e); }
             try { styleOverridesTable(); } catch(e) { /* ignore */ }
             try { if (typeof renderInlineBookings === 'function') renderInlineBookings(); } catch(e) { console.warn('eventsSet renderInlineBookings failed', e); }
@@ -5472,12 +5527,13 @@ document.addEventListener('DOMContentLoaded', function() {
         function applyPerDateUnavailable(dateStr) {
             try {
                 // Add a background block for immediate visual feedback
+                const overrideTarget = (ccOverrideTarget() || null);
                 calendar.addEvent({
                     start: dateStr + 'T00:00',
                     end: dateStr + 'T23:59',
                     display: 'background',
                     color: '#e0e0e0',
-                    extendedProps: Object.assign({ is_per_date: true, override_type: 'blocked', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER))
+                    extendedProps: Object.assign({ is_per_date: true, override_type: 'blocked', optimistic: true }, getScopePropsForSelection(overrideTarget))
                 });
             } catch (e) { console.warn('applyPerDateUnavailable addEvent failed', e); }
 
@@ -5940,8 +5996,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             } catch (e) { /* ignore */ }
 
                             try {
+                                const overrideTarget = (ccOverrideTarget() || null);
                                 const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: (SELECTED_MEMBER || null) })
+                                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: overrideTarget })
                                 });
                                 const data = await res.json().catch(() => null);
                                 if (res.ok) {
@@ -6000,7 +6057,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { /* ignore header setup errors */ }
 
         const events = (typeof calendar.getEvents === 'function') ? calendar.getEvents() : [];
-        const perDate = {}; // date -> { rangesSet: Set, items: [] }
+        const perDate = {}; // date -> { rangesSet: Set, items: [], blocked: false }
 
         function fmtTime(h, m) {
             const hh = parseInt(h,10);
@@ -6011,11 +6068,76 @@ document.addEventListener('DOMContentLoaded', function() {
             return `${hour}:${String(mm).padStart(2,'0')} ${ampm}`;
         }
 
+        // determine the current scope
+        const isServiceScope = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
+        const currentServiceId = isServiceScope ? String(SELECTED_MEMBER).slice(4) : null;
+        const currentMemberId = (!isServiceScope && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
+
+        // Helper: decide if a per-date event should be visible in the current scope
+        function eventInCurrentScope(ev) {
+            try {
+                const xp = ev.extendedProps || {};
+                // Always include org-level view (no SELECTED_MEMBER)
+                if (!SELECTED_MEMBER) return true;
+
+                // Service scope: include events explicitly assigned to this service
+                // or member-level events for members assigned to this service
+                if (isServiceScope) {
+                    // service-level override
+                    const assignedSvc = xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null;
+                    if (assignedSvc && String(assignedSvc) === String(currentServiceId)) return true;
+
+                    // member-level override that should be applied to this service
+                    const assignedMembership = xp.assigned_membership_id ? String(xp.assigned_membership_id) : (xp.assigned_membership ? String(xp.assigned_membership) : null);
+                    const assignedUser = xp.assigned_user_id ? String(xp.assigned_user_id) : null;
+                    if (assignedMembership) {
+                        const svc = svcById(currentServiceId);
+                        if (svc) {
+                            const assigned = getAssignedMembersForService(svc) || [];
+                            if (assigned.indexOf(String(assignedMembership)) !== -1) return true;
+                        }
+                    }
+                    if (assignedUser) {
+                        // map user -> membership id for members assigned to service
+                        const svc = svcById(currentServiceId);
+                        if (svc) {
+                            const assigned = getAssignedMembersForService(svc) || [];
+                            for (const mem of assigned) {
+                                try { if (getSelectedUserIdForMembership(mem) && String(getSelectedUserIdForMembership(mem)) === String(assignedUser)) return true; } catch(e){}
+                            }
+                        }
+                    }
+                    return false;
+                }
+
+                // Member scope: include events assigned to this membership/user
+                if (currentMemberId) {
+                    const assignedMembership = xp.assigned_membership_id ? String(xp.assigned_membership_id) : (xp.assigned_membership ? String(xp.assigned_membership) : null);
+                    const assignedUser = xp.assigned_user_id ? String(xp.assigned_user_id) : null;
+                    if (assignedMembership && assignedMembership === currentMemberId) return true;
+                    if (assignedUser && String(getSelectedUserIdForMembership(currentMemberId)) === String(assignedUser)) return true;
+                    // Also include service-level overrides for any solo services owned by this member
+                    const svcAssigned = xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null;
+                    if (svcAssigned) {
+                        const svc = svcById(svcAssigned);
+                        if (svc) {
+                            const assigned = getAssignedMembersForService(svc) || [];
+                            if (assigned.length === 1 && assigned[0] === currentMemberId) return true;
+                        }
+                    }
+                    return false;
+                }
+
+                return false;
+            } catch (e) { return false; }
+        }
+
         events.forEach(ev => {
             try {
                 if (ev.display !== 'background') return;
                 const props = ev.extendedProps || {};
                 if (!props.is_per_date) return;
+                if (!eventInCurrentScope(ev)) return;
                 const startStr = ev.startStr || (ev.start ? ev.start.toISOString() : null);
                 if (!startStr) return;
                 const date = startStr.split('T')[0];
@@ -6118,9 +6240,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
                 } catch (e) { /* ignore */ }
                 resetBtn.disabled = true;
-                try {
+                    try {
+                    const overrideTarget = (ccOverrideTarget() || null);
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d], target: (SELECTED_MEMBER || null) })
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d], target: overrideTarget })
                     });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
@@ -6172,6 +6295,18 @@ document.addEventListener('DOMContentLoaded', function() {
             ccPromptOverridesUpgrade();
             return;
         }
+
+        // Fully-booked days cannot be overridden.
+        try {
+            if (typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled()) {
+                const blocked = (dates || []).map(String).filter(d => window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(d)));
+                if (blocked && blocked.length) {
+                    ccToastFullyBooked(blocked);
+                    return;
+                }
+            }
+        } catch (e) { /* ignore */ }
+
         const modal = document.getElementById('timeModal');
         const rangesContainer = document.getElementById('modalRangesContainer');
         const addBtn = document.getElementById('addModalRangeBtn');
@@ -6207,6 +6342,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function restoreHandlers() { if (restored) return; restored = true; saveBtnEl.onclick = prevSave; closeBtnEl.onclick = prevClose; }
 
         saveBtnEl.onclick = async () => {
+            const overrideTarget = (ccOverrideTarget() || null);
             // Gather ranges
             const rows = Array.from(rangesContainer.querySelectorAll('.modal-range-row'));
             const ranges = [];
@@ -6240,8 +6376,8 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) { /* ignore */ }
 
             try {
-                // Remove existing overrides for these dates
-                await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: (SELECTED_MEMBER || null) }) });
+                // Remove existing overrides for these dates (capture target at start)
+                await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: overrideTarget }) });
 
                 if (unique.length === 0) {
                     // No ranges -> simply deleted (reverts to weekly defaults)
@@ -6250,7 +6386,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     for (const rr of unique) {
                         await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                            body: JSON.stringify({ dates, start_time: rr.start, end_time: rr.end, target: (SELECTED_MEMBER || null) })
+                            body: JSON.stringify({ dates, start_time: rr.start, end_time: rr.end, target: overrideTarget })
                         });
                     }
                 }
@@ -6390,7 +6526,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 } catch (e) { /* ignore */ }
                 if (!confirm(`Mark ${dateStr} as unavailable? This will block the whole day.`)) return;
                 try {
-                    const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) }) });
+                    const overrideTarget = (ccOverrideTarget() || null);
+                    const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget }) });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
                         applyPerDateUnavailable(dateStr);
@@ -6435,10 +6572,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 } catch (e) { /* ignore */ }
                 if (!confirm(`No time ranges provided. Mark ${dateStr} as unavailable for the whole day?`)) return;
                 try {
+                    const overrideTarget = (ccOverrideTarget() || null);
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                        body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) })
+                        body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget })
                     });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
@@ -6481,7 +6619,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 // remove existing per-date overrides for the date
-                try { await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], target: (SELECTED_MEMBER || null) }) }); } catch(e){}
+                try { const overrideTarget = (ccOverrideTarget() || null); await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], target: overrideTarget }) }); } catch(e){}
 
                 // Remove existing optimistic background events for this date before adding new ones
                 try {
@@ -6498,12 +6636,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 for (const r of rangesToCreate) {
                     try {
                         // optimistic UI
-                        const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: r.start, end_time: r.end, target: (SELECTED_MEMBER || null) }) });
+                        const overrideTarget = (ccOverrideTarget() || null);
+                        const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: r.start, end_time: r.end, target: overrideTarget }) });
                         const data = await res.json().catch(() => null);
                         if (!res.ok) console.warn('Error creating per-date range', r, data);
                         else {
                             // On success add event (avoid transient duplicate before server cleanup)
-                            try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) }); } catch(e){}
+                            try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget)) }); } catch(e){}
                         }
                     } catch (err) { console.error('range create failed', err); }
                 }
@@ -6523,6 +6662,15 @@ document.addEventListener('DOMContentLoaded', function() {
     function toggleDateSelection(dateStr) {
         const numberEl = document.querySelector(`.fc-daygrid-day[data-date="${dateStr}"] .fc-daygrid-day-number`);
         if (!numberEl) return;
+
+        // Block selecting fully-booked days (no remaining availability) so users can't override them.
+        try {
+            const isSvcScope = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
+            if (isSvcScope && window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(dateStr))) {
+                try { ccToastFullyBooked([String(dateStr)]); } catch(e) {}
+                return;
+            }
+        } catch (e) { /* ignore */ }
 
         const isPast = isPastDate(dateStr);
 
@@ -6557,6 +6705,175 @@ document.addEventListener('DOMContentLoaded', function() {
 
         updateClearButton();
         updateSelectButtonText();
+    }
+
+    // -----------------------------
+    // Fully-booked day protection
+    // -----------------------------
+    // A "fully booked" day is one that:
+    // - is marked unavailable in the month view (no remaining bookable slots)
+    // - has at least one booking in the current scope
+    // - is NOT unavailable solely because of a full-day per-date override (those should remain editable)
+    try { if (!window.__ccFullyBookedOutDates) window.__ccFullyBookedOutDates = new Set(); } catch(e) {}
+
+    function _ccFullyBookedProtectionEnabled() {
+        try { return !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')); } catch (e) { return false; }
+    }
+
+    function ccShowToastSafe(type, message) {
+        try {
+            if (typeof showToast === 'function') return showToast(type, message);
+        } catch (e) {}
+        try { alert(String(message || '')); } catch (e) {}
+    }
+
+    function ccToastFullyBooked(dates) {
+        try {
+            const uniq = Array.from(new Set((dates || []).map(String))).filter(Boolean).sort();
+            if (!uniq.length) return;
+
+            // De-dupe: multiple handlers can detect the same blocked dates (click, drag, select button).
+            // Only show one toast for the same set within a short window.
+            try {
+                const key = uniq.join('|');
+                const now = Date.now();
+                const last = window.__ccLastFullyBookedToast || null;
+                if (last && last.key === key && (now - (last.ts || 0)) < 1500) {
+                    return;
+                }
+                window.__ccLastFullyBookedToast = { key, ts: now };
+            } catch (e) { /* ignore */ }
+
+            const count = uniq.length;
+            const formatted = uniq.map(d => {
+                try { return formatDateLong(d); } catch(e) { return d; }
+            });
+            const msg = count === 1
+                ? `That day is fully booked and can’t be overridden: ${formatted[0]}`
+                : `${count} fully booked day(s) can’t be overridden: ${formatted.join(', ')}`;
+            ccShowToastSafe('error', msg);
+        } catch (e) {
+            ccShowToastSafe('error', 'One or more selected days are fully booked and cannot be overridden.');
+        }
+    }
+
+    function _isFullDayBlockingPerDateOverrideInCurrentScope(dateStr) {
+        try {
+            if (!calendar || typeof calendar.getEvents !== 'function') return false;
+            const isSvc = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
+            const svcId = isSvc ? String(SELECTED_MEMBER).slice(4) : null;
+            const memberId = (!isSvc && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
+            const memberUserId = memberId ? getSelectedUserIdForMembership(memberId) : null;
+
+            const evs = calendar.getEvents() || [];
+            for (const ev of evs) {
+                try {
+                    if (!ev || ev.display !== 'background') continue;
+                    const xp = ev.extendedProps || {};
+                    if (!xp.is_per_date) continue;
+                    if (xp.override_type !== 'blocked') continue;
+                    if (!ev.start || !ev.end) continue;
+                    const evDate = formatYMD(ev.start);
+                    if (String(evDate) !== String(dateStr)) continue;
+                    const isFullDay = (ev.startStr && ev.endStr && ev.startStr.endsWith('T00:00') && ev.endStr.endsWith('T23:59'))
+                        || (ev.start.getHours() === 0 && ev.start.getMinutes() === 0 && ev.end.getHours() === 23 && ev.end.getMinutes() === 59);
+                    if (!isFullDay) continue;
+
+                    // Scope match (same rules as the event feed / table filters)
+                    if (!SELECTED_MEMBER) return true;
+                    if (isSvc) {
+                        const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null);
+                        if (assignedSvc && String(assignedSvc) === String(svcId)) return true;
+                        continue;
+                    }
+                    if (memberId) {
+                        const assignedMem = (xp.assigned_membership_id || xp.assigned_membership || null);
+                        if (assignedMem && String(assignedMem) === String(memberId)) return true;
+                        const assignedUser = (xp.assigned_user_id || null);
+                        if (assignedUser && memberUserId && String(assignedUser) === String(memberUserId)) return true;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore */ }
+        return false;
+    }
+
+    function _isDayMarkedUnavailable(dateStr) {
+        try {
+            const cell = document.querySelector(`.fc-daygrid-day[data-date="${dateStr}"]`);
+            if (!cell) return false;
+            const num = cell.querySelector('.fc-daygrid-day-number');
+            return cell.classList.contains('fc-day-unavailable') || (num && num.classList.contains('unavailable-number'));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function _isClosedByWeeklyDefaults(dateStr) {
+        try {
+            // Use the current UI's weekly defaults (org/member) to tell whether a day is
+            // "closed" rather than "booked out". Closed days should remain overrideable.
+            const dow = parseYMD(dateStr).getDay();
+            return !!(defaultAvailability && defaultAvailability[dow] && defaultAvailability[dow].unavailable);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function _getBookingsForDateInSelectedService(dateStr) {
+        const out = [];
+        try {
+            if (!calendar || typeof calendar.getEvents !== 'function') return out;
+            if (!SELECTED_MEMBER || !String(SELECTED_MEMBER).startsWith('svc:')) return out;
+            const svcId = String(SELECTED_MEMBER).slice(4);
+            const [dayStart, dayEnd] = _getDayBoundsLocal(dateStr);
+            const events = calendar.getEvents() || [];
+
+            for (const ev of events) {
+                try {
+                    if (!_isRealBookingEvent(ev)) continue;
+                    const xp = ev.extendedProps || {};
+                    const bookingSvc = (xp.service_id || xp.service || ev.service_id || null);
+                    if (!bookingSvc) continue;
+                    if (String(bookingSvc) !== String(svcId)) continue;
+                    const s = ev.start || null;
+                    const e = ev.end || null;
+                    if (!s) continue;
+                    const end = e || s;
+                    const overlaps = (s < dayEnd) && (end > dayStart);
+                    if (!overlaps) continue;
+                    out.push(ev);
+                } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore */ }
+        return out;
+    }
+
+    function _recomputeFullyBookedOutDates() {
+        try {
+            if (!window.__ccFullyBookedOutDates) window.__ccFullyBookedOutDates = new Set();
+            window.__ccFullyBookedOutDates.clear();
+            if (!calendar || typeof calendar.getEvents !== 'function') return;
+
+            // Fully-booked gating is only meaningful for service scope (matches public service page).
+            // In member/org scope, "unavailable" can mean weekly defaults or overrides, not "fully booked".
+            if (!_ccFullyBookedProtectionEnabled()) return;
+
+            const dates = (typeof _visibleDayDates === 'function') ? _visibleDayDates() : [];
+            for (const d of (dates || [])) {
+                try {
+                    if (!d || isPastDate(d)) continue;
+                    if (!_isDayMarkedUnavailable(d)) continue;
+                    // If the day is closed by weekly defaults, it is not "fully booked".
+                    if (_isClosedByWeeklyDefaults(d)) continue;
+                    if (_isFullDayBlockingPerDateOverrideInCurrentScope(d)) continue;
+                    const bookings = _getBookingsForDateInSelectedService(d) || [];
+                    if (bookings.length > 0) {
+                        window.__ccFullyBookedOutDates.add(String(d));
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore */ }
     }
 
     // --- Add this function here ---
@@ -7461,6 +7778,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const date = cell.dataset.date;
         const isPast = isPastDate(date);
 
+        // Fully-booked days cannot be overridden (don’t start selection/dragging).
+        try {
+            if (!isPast && (typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled()) && window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(date))) {
+                ccToastFullyBooked([String(date)]);
+                return;
+            }
+        } catch (e) { /* ignore */ }
+
         // Check for mixed selection immediately
         if (isPast && [...selectedDates].some(d => !isPastDate(d)) ||
             !isPast && [...selectedDates].some(d => isPastDate(d))) 
@@ -7525,10 +7850,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const maxDate = start > end ? start : end;
 
         const selector = dragStartIsUnavailable ? '.fc-daygrid-day.fc-day-unavailable' : '.fc-daygrid-day.fc-day-available';
+        const blockedDuringDrag = [];
         document.querySelectorAll(selector).forEach(c => {
             const dateStr = c.dataset.date;
             const numberEl = c.querySelector('.fc-daygrid-day-number');
             if (!numberEl || !dateStr) return;
+
+            // Skip fully-booked days during drag selection and remember them for a toast.
+            try {
+                if ((typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled()) && window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(dateStr))) {
+                    numberEl.classList.remove('temp-highlight');
+                    numberEl.classList.remove('selected');
+                    blockedDuringDrag.push(String(dateStr));
+                    return;
+                }
+            } catch (e) { /* ignore */ }
 
             const date = parseYMD(dateStr);
             if (date >= minDate && date <= maxDate) {
@@ -7541,11 +7877,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (dragMode === 'deselect' && selectedDates.has(dateStr)) numberEl.classList.add('selected');
             }
         });
+
+        // Stash blocked dates for mouseup toast (avoid spamming per-mousemove)
+        try {
+            if (!window.__ccDragBlockedFullyBooked) window.__ccDragBlockedFullyBooked = new Set();
+            for (const d of blockedDuringDrag) window.__ccDragBlockedFullyBooked.add(d);
+        } catch (e) { /* ignore */ }
     });
 
     document.addEventListener('mouseup', () => {
         if (!isDragging) return;
 
+        // Commit the ranged temp highlights.
         document.querySelectorAll('.fc-daygrid-day-number.temp-highlight').forEach(el => {
             el.classList.remove('temp-highlight');
             const date = el.closest('.fc-daygrid-day').dataset.date;
@@ -7560,12 +7903,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
         updateClearButton();
         updateSelectButtonText();
+
+        // If any fully-booked days were skipped during this drag, silently drop them.
+        // Toasting here is too noisy; the user will be told when they explicitly click a
+        // fully-booked day or try to open the modal/save with blocked days.
+        try {
+            if (window.__ccDragBlockedFullyBooked) window.__ccDragBlockedFullyBooked.clear();
+        } catch (e) { /* ignore */ }
     });
 
     function saveNewlySelectedDates() {
         const selectedStartTime = document.getElementById('startTime')?.value || "09:00";
         const selectedEndTime = document.getElementById('endTime')?.value || "17:00";
         const datesArray = Array.from(selectedDates);
+        const overrideTarget = (ccOverrideTarget() || null);
+
+        // Fully-booked days cannot be overridden.
+        try {
+            if (typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled()) {
+                const blocked = (datesArray || []).filter(d => window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(d)));
+                if (blocked && blocked.length) {
+                    ccToastFullyBooked(blocked);
+                    return;
+                }
+            }
+        } catch (e) { /* ignore */ }
 
         // Prevent applying overrides that would exclude existing bookings.
         try {
@@ -7588,7 +7950,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({ dates: datesArray, target: (SELECTED_MEMBER || null) })
+            body: JSON.stringify({ dates: datesArray, target: overrideTarget })
         }).then(r => {
             return r.json().catch(() => null);
         }).then(data => {
@@ -7597,7 +7959,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 datesArray.forEach(d => {
                     try {
-                        calendar.addEvent({ start: d + 'T' + selectedStartTime, end: d + 'T' + selectedEndTime, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) });
+                        calendar.addEvent({ start: d + 'T' + selectedStartTime, end: d + 'T' + selectedEndTime, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget)) });
                     } catch (e) { /* ignore */ }
                 });
             } catch (e) { console.warn('optimistic add failed', e); }
@@ -7606,7 +7968,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 dates: datesArray,  // e.g. ['2025-11-10', '2025-11-11']
                 start_time: selectedStartTime,
                 end_time: selectedEndTime,
-                target: (SELECTED_MEMBER || null)
+                target: overrideTarget
             };
             fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
             method: 'POST',
@@ -7644,6 +8006,65 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof ccEnforceOverridesLock === 'function') {
             try { ccEnforceOverridesLock(); } catch(e) {}
         }
+
+        // Fully-booked days cannot be overridden. Block the modal from opening.
+        try {
+            // Only enforce this in service scope; otherwise "unavailable" does not mean "fully booked".
+            if (!(typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled())) {
+                // noop
+            } else {
+            const blocked = [];
+            for (const d of (dates || [])) {
+                const ds = String(d);
+                let isBlocked = false;
+                try {
+                    if (window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(ds)) isBlocked = true;
+                } catch (e) {}
+                if (!isBlocked) {
+                    try {
+                        // Booking-window exclusions (min notice / max booking days)
+                        let inWindow = true;
+                        try {
+                            const eff = (typeof _ccSvcEffectiveForSelectedScope === 'function') ? _ccSvcEffectiveForSelectedScope() : null;
+                            const minNoticeHours = Math.max(0, Number((eff && eff.min_notice_hours) || 0));
+                            const maxBookingDays = Math.max(0, Number((eff && eff.max_booking_days) || 0));
+                            const orgNow = (typeof _ccNowInOrgTimezone === 'function') ? _ccNowInOrgTimezone() : new Date();
+                            const orgTodayMidnight = new Date(orgNow.getFullYear(), orgNow.getMonth(), orgNow.getDate(), 0, 0, 0, 0);
+                            if (minNoticeHours > 0) {
+                                const earliest = new Date(orgNow.getTime() + (minNoticeHours * 3600000));
+                                const earliestYMD = formatYMD(earliest);
+                                if (ds < String(earliestYMD)) inWindow = false;
+                            }
+                            if (maxBookingDays > 0) {
+                                const latest = new Date(orgTodayMidnight.getTime() + (maxBookingDays * 86400000));
+                                const latestYMD = formatYMD(latest);
+                                if (ds > String(latestYMD)) inWindow = false;
+                            }
+                        } catch (e) { inWindow = true; }
+
+                        // Fallback check (in case the cache is stale)
+                        if (inWindow && !_isFullDayBlockingPerDateOverrideInCurrentScope(ds) && _isDayMarkedUnavailable(ds) && !_isClosedByWeeklyDefaults(ds)) {
+                            const bookings = _getBookingsForDateInSelectedService(ds) || [];
+                            if (bookings.length > 0) isBlocked = true;
+                        }
+                    } catch (e) {}
+                }
+                if (isBlocked) blocked.push(ds);
+            }
+
+            if (blocked.length) {
+                // Auto-deselect blocked days so the user can proceed with the rest.
+                try {
+                    for (const b of blocked) selectedDates.delete(String(b));
+                    try { reapplySelections(); } catch(e) {}
+                    try { updateClearButton(); } catch(e) {}
+                    try { updateSelectButtonText(); } catch(e) {}
+                } catch (e) {}
+                ccToastFullyBooked(blocked);
+                return;
+            }
+            }
+        } catch (e) { /* ignore */ }
         
 
         const modal = document.getElementById('timeModal');
@@ -7797,11 +8218,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return;
                             }
                             if (!confirm(`Make ${dates[0]} available?`)) return;
-                            try {
-                                const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                    body: JSON.stringify({ dates: [dates[0]], target: (SELECTED_MEMBER || null) })
+                                    try {
+                                        const overrideTarget = (ccOverrideTarget() || null);
+                                        const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                                            body: JSON.stringify({ dates: [dates[0]], target: overrideTarget })
                                 });
                                 const data = await res.json().catch(() => null);
                                 if (res.ok) {
@@ -7830,10 +8252,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                         _createdStart = start;
                                         _createdEnd = end;
 
+                                        const overrideTarget = (ccOverrideTarget() || null);
                                         const createRes = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                                             method: 'POST',
                                             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                            body: JSON.stringify({ dates: [dates[0]], start_time: start, end_time: end, target: (SELECTED_MEMBER || null) })
+                                            body: JSON.stringify({ dates: [dates[0]], start_time: start, end_time: end, target: overrideTarget })
                                         });
                                         const createData = await createRes.json().catch(() => null);
                                         if (!createRes.ok) {
@@ -7857,15 +8280,15 @@ document.addEventListener('DOMContentLoaded', function() {
                                     } catch (e) { /* ignore */ }
 
                                     // Add a green background event for this date to mark it as available (optimistic UI)
-                                    try {
+                                        try {
                                         // Mark this optimistic available background as a per-date override
-                                        calendar.addEvent({
-                                            start: dates[0] + 'T' + _createdStart,
-                                            end: dates[0] + 'T' + _createdEnd,
-                                            display: 'background',
-                                            color: '#d0f0d0',
-                                            extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER))
-                                        });
+                                            calendar.addEvent({
+                                                start: dates[0] + 'T' + _createdStart,
+                                                end: dates[0] + 'T' + _createdEnd,
+                                                display: 'background',
+                                                color: '#d0f0d0',
+                                                extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget))
+                                            });
                                     } catch (e) { /* ignore */ }
 
                                     // Update classes immediately
@@ -7978,8 +8401,9 @@ document.addEventListener('DOMContentLoaded', function() {
                                             }
                                         } else if (info.start && info.end) { s = info.start; e = info.end; }
 
-                                        try {
-                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) });
+                                            try {
+                                            const overrideTarget = (ccOverrideTarget() || null);
+                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget)) });
                                         } catch (ee) { /* ignore addEvent errors */ }
 
                                         // Update day cell classes immediately
@@ -7999,10 +8423,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                 } catch (e) { console.warn('optimistic UI update failed', e); }
 
                                 // First, remove any per-day blocks or avails that explicitly block these dates
+                                const overrideTarget = (ccOverrideTarget() || null);
                                 const delRes = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                    body: JSON.stringify({ dates: dates, target: (SELECTED_MEMBER || null) })
+                                    body: JSON.stringify({ dates: dates, target: overrideTarget })
                                 });
                                 const delData = await delRes.json().catch(() => null);
                                 if (!delRes.ok) {
@@ -8019,7 +8444,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     return fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                        body: JSON.stringify({ dates: g.dates, start_time: g.start, end_time: g.end, target: (SELECTED_MEMBER || null) })
+                                        body: JSON.stringify({ dates: g.dates, start_time: g.start, end_time: g.end, target: overrideTarget })
                                     }).then(r => r.json().catch(() => null).then(data => ({ ok: r.ok, data })));
                                 });
 
@@ -8108,10 +8533,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 } catch (e) { /* ignore */ }
                 if (!confirm(`Mark ${dates.length} selected day(s) as unavailable? This will block each selected day.`)) return;
                 try {
+                    const overrideTarget = (ccOverrideTarget() || null);
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                        body: JSON.stringify({ dates: dates, start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) })
+                        body: JSON.stringify({ dates: dates, start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget })
                     });
                     const data = await res.json().catch(() => null);
                     if (res.ok) {
@@ -8168,10 +8594,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch (e) { /* ignore */ }
                     if (!confirm(`No time ranges provided. Mark ${theDate} as unavailable for the whole day?`)) return;
                     try {
+                        const overrideTarget = (ccOverrideTarget() || null);
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                            body: JSON.stringify({ dates: [theDate], start_time: '00:00', end_time: '23:59', is_blocking: true, target: (SELECTED_MEMBER || null) })
+                            body: JSON.stringify({ dates: [theDate], start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget })
                         });
                         const data = await res.json().catch(() => null);
                         if (res.ok) {
@@ -8237,8 +8664,9 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 // First remove existing per-date overrides for these dates
                 try {
+                    const overrideTarget = (ccOverrideTarget() || null);
                     const delRes = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: dates, target: (SELECTED_MEMBER || null) })
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: dates, target: overrideTarget })
                     });
                     // ignore result details — we'll refetch after creating
                 } catch (e) { /* ignore delete errors */ }
@@ -8256,14 +8684,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Now create each unique range for each selected date
                     for (const r of uniqueRanges) {
                     try {
+                        const overrideTarget = (ccOverrideTarget() || null);
                         // optimistic UI addition
                         dates.forEach(d => {
-                                            try { calendar.addEvent({ start: d + 'T' + r.start, end: d + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(SELECTED_MEMBER)) }); } catch(e) {}
+                                            try { calendar.addEvent({ start: d + 'T' + r.start, end: d + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget)) }); } catch(e) {}
                         });
 
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                            body: JSON.stringify({ dates: dates, start_time: r.start, end_time: r.end, target: (SELECTED_MEMBER || null) })
+                            body: JSON.stringify({ dates: dates, start_time: r.start, end_time: r.end, target: overrideTarget })
                         });
                         const data = await res.json().catch(() => null);
                         if (!res.ok) {
@@ -8347,10 +8776,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Best-effort: ask server to remove per-day overrides if endpoint exists
                 try {
+                    const overrideTarget = (ccOverrideTarget() || null);
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                        body: JSON.stringify({ dates: targets, target: (SELECTED_MEMBER || null) })
+                        body: JSON.stringify({ dates: targets, target: overrideTarget })
                     });
                     if (res.ok) {
                         try { await res.json(); } catch(e) {}

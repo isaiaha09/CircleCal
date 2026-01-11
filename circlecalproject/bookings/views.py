@@ -417,6 +417,67 @@ def _per_date_override_scope_q(service: Optional[Service]):
     return q
 
 
+def _service_assignee_users(service: Optional[Service]):
+    """Return list of assigned Users for a service (best-effort).
+
+    Note: membership/user rows may be missing in inconsistent DBs; this helper
+    is intentionally defensive.
+    """
+    if not service:
+        return []
+    try:
+        assigned = list(ServiceAssignment.objects.filter(service=service).select_related('membership__user'))
+    except Exception:
+        assigned = []
+    users = []
+    for a in assigned:
+        try:
+            u = getattr(getattr(a, 'membership', None), 'user', None)
+            if u is not None:
+                users.append(u)
+        except Exception:
+            continue
+    # de-dupe while preserving order
+    seen = set()
+    uniq = []
+    for u in users:
+        try:
+            uid = int(getattr(u, 'id', 0) or 0)
+        except Exception:
+            uid = None
+        key = uid if uid else id(u)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(u)
+    return uniq
+
+
+def _per_date_overrides_qs(org: Organization, day_start, day_end, *, service: Optional[Service] = None, users=None):
+    """Return per-date override Booking rows for a day, scoped to org/service/users.
+
+    - Org-scoped: assigned_user is NULL and NOT service-scoped marker
+    - Service-scoped: client_name == 'scope:svc:<id>'
+    - Member-scoped: assigned_user in users
+    """
+    qs = Booking.objects.filter(
+        organization=org,
+        service__isnull=True,
+        start__lt=day_end,
+        end__gt=day_start,
+    )
+
+    q = Q(assigned_user__isnull=True) & ~Q(client_name__startswith='scope:svc:')
+    if service is not None:
+        q = q | Q(client_name=f'scope:svc:{service.id}')
+    try:
+        if users:
+            q = q | Q(assigned_user__in=list(users))
+    except Exception:
+        pass
+    return qs.filter(q)
+
+
 def booking_to_event(bk: Booking):
     # Distinguish per-date override bookings (service NULL) from real service bookings
     event = {
@@ -439,6 +500,19 @@ def booking_to_event(bk: Booking):
     try:
         if getattr(bk, 'assigned_user', None):
             event['extendedProps']['assigned_user_id'] = getattr(bk.assigned_user, 'id', None)
+            # Also include the org membership id for this assigned user when available.
+            # This makes the calendar UI resilient even if it cannot map membership->user id.
+            try:
+                mem_id = (
+                    Membership.objects
+                    .filter(organization=getattr(bk, 'organization', None), user=bk.assigned_user)
+                    .values_list('id', flat=True)
+                    .first()
+                )
+                if mem_id:
+                    event['extendedProps']['assigned_membership_id'] = mem_id
+            except Exception:
+                pass
         # Legacy/service-scoped marker stored in client_name like 'scope:svc:<id>'
         if isinstance(bk.client_name, str) and bk.client_name.startswith('scope:svc:'):
             try:
@@ -1010,27 +1084,73 @@ def is_within_availability(org, start_dt, end_dt, service=None):
     if timezone.is_naive(end_dt):
         end_dt = make_aware(end_dt, org_tz)
 
-    # Query per-date overrides for that calendar day (service NULL so they are not actual client bookings)
+    # Query per-date overrides for that calendar day (service NULL so they are not actual client bookings).
     # Scoped so overrides only affect the intended member/service.
     day_start = start_dt.astimezone(org_tz).replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
-    override_qs = Booking.objects.filter(
-        organization=org,
-        service__isnull=True,
-        start__lt=day_end,
-        end__gt=day_start,
-    ).filter(_per_date_override_scope_q(service))
 
-    # Partition overrides
+    assignee_users = _service_assignee_users(service) if service is not None else []
+    is_shared_service = bool(service is not None and len(assignee_users) >= 2)
+
+    # For shared services (2+ assignees), member-scoped blocking overrides should NOT
+    # blank out the entire service; they only remove that member. We model that by
+    # applying member blocks only when ALL members are blocked for a slot.
+    service_override_qs = _per_date_overrides_qs(org, day_start, day_end, service=service, users=None)
+    member_override_qs = _per_date_overrides_qs(org, day_start, day_end, service=None, users=assignee_users) if assignee_users else Booking.objects.none()
+
+    # Partition overrides (service/org scoped)
     blocking_windows = []
     avail_windows = []
-    for bk in override_qs:
+    for bk in service_override_qs:
         if bk.is_blocking:
             blocking_windows.append((bk.start, bk.end))
         else:
             avail_windows.append((bk.start, bk.end))
 
-    # 1. Blocking override wins immediately
+    # Partition member-scoped overrides by user
+    member_blocking_by_uid = {}
+    member_avail_by_uid = {}
+    if assignee_users:
+        for bk in member_override_qs:
+            u = getattr(bk, 'assigned_user', None)
+            uid = getattr(u, 'id', None) if u else None
+            if not uid:
+                continue
+            if bk.is_blocking:
+                member_blocking_by_uid.setdefault(uid, []).append((bk.start, bk.end))
+            else:
+                member_avail_by_uid.setdefault(uid, []).append((bk.start, bk.end))
+
+    def _window_contains_slot(ws, we):
+        try:
+            if timezone.is_naive(ws):
+                ws = make_aware(ws, org_tz)
+            if timezone.is_naive(we):
+                we = make_aware(we, org_tz)
+        except Exception:
+            pass
+        return bool(ws <= start_dt and end_dt <= we)
+
+    def _member_blocked(u):
+        uid = getattr(u, 'id', None)
+        if not uid:
+            return False
+        for ws, we in member_blocking_by_uid.get(uid, []):
+            if _window_contains_slot(ws, we):
+                return True
+        return False
+
+    def _any_member_available_override():
+        for u in assignee_users:
+            uid = getattr(u, 'id', None)
+            if not uid:
+                continue
+            for ws, we in member_avail_by_uid.get(uid, []):
+                if _window_contains_slot(ws, we):
+                    return True
+        return False
+
+    # 1. Service/org blocking override wins immediately
     try:
         org_tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
     except Exception:
@@ -1044,7 +1164,23 @@ def is_within_availability(org, start_dt, end_dt, service=None):
         if bs <= start_dt and end_dt <= be:
             return False
 
-    # 2. Availability override allows slot
+    # 2. Member-scoped blocking: for shared services, only block if ALL assignees are blocked.
+    if service is not None and assignee_users:
+        if is_shared_service:
+            try:
+                if all(_member_blocked(u) for u in assignee_users):
+                    return False
+            except Exception:
+                pass
+        else:
+            # Solo service: block if the only assignee is blocked.
+            try:
+                if len(assignee_users) == 1 and _member_blocked(assignee_users[0]):
+                    return False
+            except Exception:
+                pass
+
+    # 3. Service/org availability override allows slot (subject to member blocking above)
     for avs, ave in avail_windows:
         if timezone.is_naive(avs):
             avs = make_aware(avs, org_tz)
@@ -1055,7 +1191,16 @@ def is_within_availability(org, start_dt, end_dt, service=None):
         if avs <= start_dt and (end_dt <= ave or (service and getattr(service, 'allow_ends_after_availability', False) and start_dt < ave)):
             return True
 
-    # 3. Fall back to weekly windows logic
+    # 4. Member-scoped availability override can allow slot even if not in service/org overrides.
+    # For shared services this means "at least one member explicitly marked available".
+    if service is not None and assignee_users:
+        try:
+            if _any_member_available_override():
+                return True
+        except Exception:
+            pass
+
+    # 5. Fall back to weekly windows logic
     # If a per-date ServiceSettingFreeze contains a weekly window snapshot for this
     # date, prefer it. This preserves booked dates when weekly availability is
     # edited later.
@@ -1500,6 +1645,40 @@ def batch_create(request, org_slug):
         if e <= s:
             continue
 
+        # Member-scope blocking guardrail: if a member has an existing booking on
+        # that day for any of their SOLO services, do not allow marking them unavailable.
+        # (Member-side overrides should not invalidate already-booked appointments.)
+        try:
+            if is_blocking and target and (not (isinstance(target, str) and target.startswith('svc:'))):
+                mid = int(target)
+                mem = Membership.objects.filter(id=mid, organization=org, is_active=True).select_related('user').first()
+                if mem and getattr(mem, 'user', None):
+                    # Find solo services for this member
+                    solo_service_ids = list(
+                        Service.objects.filter(organization=org, assignments__membership=mem)
+                        .annotate(num_assignees=Count('assignments'))
+                        .filter(num_assignees=1)
+                        .values_list('id', flat=True)
+                    )
+
+                    if solo_service_ids:
+                        day_start_chk = datetime(dobj.year, dobj.month, dobj.day, 0, 0, 0, tzinfo=tz)
+                        day_end_chk = day_start_chk + timedelta(days=1)
+                        has_existing = Booking.objects.filter(
+                            organization=org,
+                            service_id__in=[int(x) for x in solo_service_ids],
+                            service__isnull=False,
+                            start__lt=day_end_chk,
+                            end__gt=day_start_chk,
+                        ).exists()
+                        if has_existing:
+                            return HttpResponseBadRequest(
+                                "This team member already has a booking on that date for a solo service. Cancel/reschedule the booking before marking them unavailable."
+                            )
+        except Exception:
+            # Fail open rather than blocking override creation on unexpected DB issues.
+            pass
+
         # Guardrails for team + multi-solo services: service-scoped "available" overrides
         # cannot create overlapping availability across services or expand beyond weekly partitions.
         if target_service and team_multi_solo_membership and other_solo_service_ids:
@@ -1574,7 +1753,7 @@ def batch_create(request, org_slug):
                 else:
                     try:
                         mid = int(target)
-                        mem = Membership.objects.filter(id=mid).first()
+                        mem = Membership.objects.filter(id=mid, organization=org).select_related('user').first()
                         if mem and getattr(mem, 'user', None):
                             dup_qs = dup_qs.filter(assigned_user=mem.user)
                     except Exception:
@@ -1615,7 +1794,7 @@ def batch_create(request, org_slug):
                     # Membership target (membership id) -> assign to that membership's user
                     try:
                         mid = int(target)
-                        mem = Membership.objects.filter(id=mid).first()
+                        mem = Membership.objects.filter(id=mid, organization=org).select_related('user').first()
                         if mem and getattr(mem, 'user', None):
                             create_kwargs['assigned_user'] = mem.user
                     except Exception:
@@ -1686,7 +1865,7 @@ def batch_delete(request, org_slug):
                 else:
                     try:
                         mid = int(target)
-                        mem = Membership.objects.filter(id=mid).first()
+                        mem = Membership.objects.filter(id=mid, organization=org).select_related('user').first()
                         if mem and getattr(mem, 'user', None):
                             qs = qs.filter(assigned_user=mem.user)
                     except Exception:
@@ -2873,35 +3052,70 @@ def service_availability(request, org_slug, service_slug):
     if range_end > latest_allowed:
         range_end = latest_allowed
     # ---------------------------------------------
-    # Per-date overrides live as bookings with service NULL
-    # Fetch per-date overrides that overlap the requested day in org timezone,
-    # scoped to this service/member context.
+    # Per-date overrides live as bookings with service NULL.
+    # For shared services (2+ assignees), member-scoped blocking overrides should
+    # NOT blank out the entire service; they only remove that member. The service
+    # becomes unavailable for a slot/day only when *all* assignees are blocked.
     day_start_candidate = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end_candidate = day_start_candidate.replace(hour=23, minute=59, second=59)
-    override_qs = Booking.objects.filter(
-        organization=org,
-        service__isnull=True,
-        start__lt=day_end_candidate,
-        end__gt=day_start_candidate,
-    ).filter(_per_date_override_scope_q(service))
+
+    assignee_users = _service_assignee_users(service)
+    is_shared_service = bool(len(assignee_users) >= 2)
+
+    # Service/org scoped overrides (no member overrides)
+    service_override_qs = _per_date_overrides_qs(
+        org,
+        day_start_candidate,
+        day_end_candidate,
+        service=service,
+        users=None,
+    )
+
+    # Member scoped overrides for assigned users
+    member_override_qs = _per_date_overrides_qs(
+        org,
+        day_start_candidate,
+        day_end_candidate,
+        service=None,
+        users=assignee_users,
+    ) if assignee_users else Booking.objects.none()
+
     blocking_full_day = False
     availability_override_windows = []  # list of (start,end) datetimes in org timezone
-    for bk in override_qs:
-        # Normalize booking times to org timezone for consistent comparisons
+
+    # 1) Service/org scoped full-day blocks always win
+    for bk in service_override_qs:
         bk_start_org = bk.start.astimezone(org_tz)
         bk_end_org = bk.end.astimezone(org_tz)
-        # Detect a full-day blocking override (covers the entire requested day)
         if bk.is_blocking:
-            # Treat any blocking override that spans from <= day start to >= day end as full-day block
-            day_start_candidate = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end_candidate = day_start_candidate.replace(hour=23, minute=59, second=59)
             if bk_start_org <= day_start_candidate and bk_end_org >= day_end_candidate:
                 blocking_full_day = True
         else:
             availability_override_windows.append((bk_start_org, bk_end_org))
 
+    # 2) Member scoped full-day blocks only win when everyone is blocked
+    member_full_day_blocked = set()
+    if assignee_users:
+        for bk in member_override_qs:
+            if not bk.is_blocking:
+                continue
+            bk_start_org = bk.start.astimezone(org_tz)
+            bk_end_org = bk.end.astimezone(org_tz)
+            if bk_start_org <= day_start_candidate and bk_end_org >= day_end_candidate:
+                u = getattr(bk, 'assigned_user', None)
+                uid = getattr(u, 'id', None) if u else None
+                if uid:
+                    member_full_day_blocked.add(uid)
+
     if blocking_full_day:
         return JsonResponse([], safe=False)
+    if is_shared_service and assignee_users:
+        try:
+            all_uids = set([getattr(u, 'id', None) for u in assignee_users if getattr(u, 'id', None)])
+            if all_uids and member_full_day_blocked.issuperset(all_uids):
+                return JsonResponse([], safe=False)
+        except Exception:
+            pass
 
     # Existing busy bookings: ALWAYS include real service bookings (exclude all per-date overrides)
     # Use the full local day window to ensure we catch bookings even if range_start
@@ -3152,6 +3366,39 @@ def service_availability(request, org_slug, service_slug):
         if window_end - win_start < min_needed:
             continue
 
+        # For shared services, precompute member blocking windows for this date so
+        # we can skip slots where every member is blocked.
+        member_block_windows_by_uid = {}
+        if is_shared_service and assignee_users:
+            try:
+                for bk in member_override_qs:
+                    if not bk.is_blocking:
+                        continue
+                    u = getattr(bk, 'assigned_user', None)
+                    uid = getattr(u, 'id', None) if u else None
+                    if not uid:
+                        continue
+                    member_block_windows_by_uid.setdefault(uid, []).append((bk.start.astimezone(org_tz), bk.end.astimezone(org_tz)))
+            except Exception:
+                member_block_windows_by_uid = {}
+
+        def _all_members_blocked(slot_start, slot_end):
+            if not (is_shared_service and assignee_users):
+                return False
+            for u in assignee_users:
+                uid = getattr(u, 'id', None)
+                if not uid:
+                    # If we can't identify a user, don't count them as blocked.
+                    return False
+                blocked = False
+                for bs, be in member_block_windows_by_uid.get(uid, []):
+                    if bs <= slot_start and slot_end <= be:
+                        blocked = True
+                        break
+                if not blocked:
+                    return False
+            return True
+
         # Resource-aware availability: iterate candidate slots and include them when
         # at least one allowed resource is available.
         if svc_resource_ids:
@@ -3187,6 +3434,11 @@ def service_availability(request, org_slug, service_slug):
 
                 # Weekly availability enforcement
                 if not availability_override_windows and not is_within_availability(org, slot_start, slot_end, service):
+                    slot_start += slot_increment
+                    continue
+
+                # Member-scoped blocks for shared services: only skip if everyone is blocked.
+                if _all_members_blocked(slot_start, slot_end):
                     slot_start += slot_increment
                     continue
 
@@ -3289,6 +3541,11 @@ def service_availability(request, org_slug, service_slug):
                     slot_start += slot_increment
                     continue
 
+                # Member-scoped blocks for shared services: only skip if everyone is blocked.
+                if _all_members_blocked(slot_start, slot_end):
+                    slot_start += slot_increment
+                    continue
+
                 # Min notice handling: skip any slot earlier than the earliest allowed time
                 try:
                     if slot_start < earliest_allowed:
@@ -3367,6 +3624,15 @@ def service_effective_settings(request, org_slug, service_slug):
         out['use_fixed_increment'] = bool(out.get('use_fixed_increment', False))
         out['allow_ends_after_availability'] = bool(out.get('allow_ends_after_availability', False))
         out['allow_squished_bookings'] = bool(out.get('allow_squished_bookings', False))
+        # Ensure booking-window fields are always present for frontend parity.
+        try:
+            out['min_notice_hours'] = int(out.get('min_notice_hours', getattr(service, 'min_notice_hours', 0) or 0))
+        except Exception:
+            out['min_notice_hours'] = int(getattr(service, 'min_notice_hours', 0) or 0)
+        try:
+            out['max_booking_days'] = int(out.get('max_booking_days', getattr(service, 'max_booking_days', 0) or 0))
+        except Exception:
+            out['max_booking_days'] = int(getattr(service, 'max_booking_days', 0) or 0)
     else:
         out = {
             'duration': int(getattr(service, 'duration', 0) or 0),
@@ -3375,6 +3641,8 @@ def service_effective_settings(request, org_slug, service_slug):
             'use_fixed_increment': bool(getattr(service, 'use_fixed_increment', False)),
             'allow_ends_after_availability': bool(getattr(service, 'allow_ends_after_availability', False)),
             'allow_squished_bookings': bool(getattr(service, 'allow_squished_bookings', False)),
+            'min_notice_hours': int(getattr(service, 'min_notice_hours', 0) or 0),
+            'max_booking_days': int(getattr(service, 'max_booking_days', 0) or 0),
         }
 
     out['service_id'] = service.id
@@ -3474,19 +3742,32 @@ def batch_availability_summary(request, org_slug, service_slug):
             current += timedelta(days=1)
             continue
 
-        # Per-date overrides (service NULL bookings), scoped to the selected service.
-        # Consider overrides that overlap the day window (org timezone).
-        override_qs = Booking.objects.filter(
-            organization=org,
-            service__isnull=True,
-            start__lt=day_end,
-            end__gt=day_start,
-        ).filter(_per_date_override_scope_q(service))
+        # Per-date overrides (service NULL bookings).
+        # For shared services, member-scoped full-day blocks should only block
+        # the service day when *all* assignees are blocked.
+        assignee_users = _service_assignee_users(service)
+        is_shared_service = bool(len(assignee_users) >= 2)
+
+        service_override_qs = _per_date_overrides_qs(
+            org,
+            day_start,
+            day_end,
+            service=service,
+            users=None,
+        )
+        member_override_qs = _per_date_overrides_qs(
+            org,
+            day_start,
+            day_end,
+            service=None,
+            users=assignee_users,
+        ) if assignee_users else Booking.objects.none()
 
         availability_override_windows = []
-        has_avail = False
         full_block = False
-        for bk in override_qs:
+
+        # 1) Service/org scoped blocks + availability windows
+        for bk in service_override_qs:
             try:
                 bk_start_org = bk.start.astimezone(org_tz)
             except Exception:
@@ -3504,15 +3785,57 @@ def batch_availability_summary(request, org_slug, service_slug):
                 if covers_start and covers_end:
                     full_block = True
             else:
-                has_avail = True
                 if bk_end_org > bk_start_org:
                     availability_override_windows.append((bk_start_org, bk_end_org))
 
-        # Full-day block with no availability overrides => no availability for that date.
-        if full_block and not has_avail:
+        # 2) Member scoped full-day blocks
+        member_full_day_blocked = set()
+        if assignee_users:
+            for bk in member_override_qs:
+                if not getattr(bk, 'is_blocking', False):
+                    continue
+                try:
+                    bk_start_org = bk.start.astimezone(org_tz)
+                except Exception:
+                    bk_start_org = bk.start
+                try:
+                    bk_end_org = bk.end.astimezone(org_tz)
+                except Exception:
+                    bk_end_org = bk.end
+
+                covers_start = bk_start_org <= day_start + timedelta(minutes=1)
+                covers_end = bk_end_org >= day_end - timedelta(minutes=1)
+                if covers_start and covers_end:
+                    u = getattr(bk, 'assigned_user', None)
+                    uid = getattr(u, 'id', None) if u else None
+                    if uid:
+                        member_full_day_blocked.add(uid)
+
+        # Day-level blocking rules
+        if full_block:
             summary[current.strftime('%Y-%m-%d')] = False
             current += timedelta(days=1)
             continue
+
+        if assignee_users:
+            if is_shared_service:
+                try:
+                    all_uids = set([getattr(u, 'id', None) for u in assignee_users if getattr(u, 'id', None)])
+                    if all_uids and member_full_day_blocked.issuperset(all_uids):
+                        summary[current.strftime('%Y-%m-%d')] = False
+                        current += timedelta(days=1)
+                        continue
+                except Exception:
+                    pass
+            else:
+                try:
+                    uid = getattr(assignee_users[0], 'id', None)
+                    if uid and uid in member_full_day_blocked:
+                        summary[current.strftime('%Y-%m-%d')] = False
+                        current += timedelta(days=1)
+                        continue
+                except Exception:
+                    pass
 
         # Determine effective weekly windows for this day:
         # 1) availability override windows (if any)
