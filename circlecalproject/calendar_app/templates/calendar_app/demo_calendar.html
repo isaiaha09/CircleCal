@@ -272,6 +272,17 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
     transition: transform 0.2s ease, background-color 0.2s ease;
 }
 
+/* FullCalendar header buttons: keep arrow icons centered (demo-only) */
+#calendar .fc .fc-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+#calendar .fc .fc-button .fc-icon {
+    display: block;
+    margin: 0;
+}
+
 .fc-day-available .fc-daygrid-day-number { cursor:pointer !important; }
 .fc-day-unavailable .fc-daygrid-day-number { cursor:pointer !important; }
 
@@ -404,15 +415,15 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
 
     .fc .fc-view-harness { margin-top: 80px; }
 
-    /* Day circles: match calendar.html sizing */
-    .fc-daygrid-day-number { width: 36px !important; height: 36px !important; font-size: 14px !important; }
+    /* Day circles: slightly smaller on mobile for the demo */
+    .fc-daygrid-day-number { width: 32px !important; height: 32px !important; font-size: 13px !important; }
     .fc-daygrid-day-number.past-day,
     .fc-daygrid-day-number.unavailable-number,
     .fc .fc-day-today .fc-daygrid-day-number {
-        width: 36px !important;
-        height: 36px !important;
-        line-height: 32px !important;
-        font-size: 14px !important;
+        width: 32px !important;
+        height: 32px !important;
+        line-height: 28px !important;
+        font-size: 13px !important;
     }
 
     /* Nav buttons: square + centered icon (same approach as calendar.html) */
@@ -420,13 +431,28 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
     .fc .fc-next-button {
         width: 34px !important;
         height: 34px !important;
-        padding: 0 !important;
+        padding-left: 3px !important;
+        padding-bottom: 13px !important;
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
+        line-height: 0 !important;
     }
-    .fc .fc-button { line-height: 0 !important; }
-    .fc .fc-button .fc-icon { width: 14px; height: 14px; display: block; margin: 0; }
+    /* FullCalendar applies a small relative `top` offset to icons; override for perfect centering */
+    .fc .fc-button { line-height: 1 !important; }
+    .fc .fc-button .fc-icon {
+        width: 14px;
+        height: 14px;
+        display: block;
+        margin: 0 !important;
+        position: relative !important;
+        top: 0 !important;
+        left: 0 !important;
+        transform: none !important;
+        line-height: 1 !important;
+        vertical-align: middle !important;
+    }
+    .fc .fc-button .fc-icon:before { line-height: 1 !important; }
 
     .time-circle { width: 56px !important; height: 56px !important; font-size: 12px !important; }
 
@@ -524,6 +550,17 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
         left: 2px !important;
     }
     #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 200px !important; }
+
+    /* Extra-small phones: shrink day circles a bit more */
+    .fc-daygrid-day-number { width: 28px !important; height: 28px !important; font-size: 12px !important; }
+    .fc-daygrid-day-number.past-day,
+    .fc-daygrid-day-number.unavailable-number,
+    .fc .fc-day-today .fc-daygrid-day-number {
+        width: 28px !important;
+        height: 28px !important;
+        line-height: 24px !important;
+        font-size: 12px !important;
+    }
 }
 </style>
 
@@ -1030,11 +1067,8 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
             nowIndicator: true,
             height: 'auto',
             showNonCurrentDates: false,
-            headerToolbar: {
-                left: 'prev,next',
-                center: 'title',
-                right: ''
-            },
+            // All devices: arrows on each side of the month label
+            headerToolbar: { left: 'prev', center: 'title', right: 'next' },
             datesSet: function() {
                 applyDayCircleClasses();
                 ensureDemoToolbarInjected();

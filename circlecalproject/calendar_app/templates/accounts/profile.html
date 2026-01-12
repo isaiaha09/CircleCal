@@ -1,10 +1,11 @@
 {% extends "calendar_app/base.html" %}
 {% block title %}Profile{% endblock %}
+{% block main_class %}w-full max-w-none px-0 py-0{% endblock %}
 {% block content %}
-<div class="max-w-5xl mx-auto px-4 py-8">
-  <div class="flex items-center justify-between mb-4">
+<div class="w-[95vw] sm:w-full sm:max-w-5xl mx-auto px-0 sm:px-4 py-8 box-border overflow-x-hidden">
+  <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
     <h1 class="text-2xl font-bold text-blue-700">Your Profile</h1>
-    <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm">Save Changes</button>
+    <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm w-full sm:w-auto">Save Changes</button>
   </div>
 
   {# Require First/Last Name before leaving Profile (until saved). #}
@@ -329,8 +330,8 @@
     </div>
     <div class="grid grid-cols-1 gap-4 mt-4">
       <div class="bg-gray-50 border border-gray-100 rounded-lg p-4 timezone-panel">
-        <div class="flex items-center justify-center gap-8">
-          <div class="text-center">
+        <div class="flex flex-col items-stretch gap-4 md:flex-row md:items-center md:justify-center md:gap-8">
+          <div class="text-center md:text-left">
             <label class="block text-sm font-semibold text-blue-800 mb-1">Your Timezone <span class="text-xs font-medium text-gray-500">(for your account)</span></label>
             <p class="text-sm text-gray-700 font-medium"><span class="timezone-select">{{ form.timezone }}</span></p>
           </div>
@@ -345,11 +346,11 @@
     </div>
     <div class="col-span-2 mt-4">
       <label class="block text-sm font-semibold text-blue-800 mb-2">Profile Picture</label>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-3">
         <span class="text-sm text-gray-600">Change:</span>
         <label for="id_avatar" class="btn-ghost inline-flex items-center gap-2">Choose File</label>
-        <span id="cc-current-filename" data-fullname="{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% endif %}" class="text-sm text-gray-700">{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% else %}No file selected{% endif %}</span>
-        <div class="ml-3 clearable-file-inline">{{ form.avatar }}</div>
+        <span id="cc-current-filename" data-fullname="{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% endif %}" class="text-sm text-gray-700 break-all">{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% else %}No file selected{% endif %}</span>
+        <div class="ml-0 sm:ml-3 clearable-file-inline">{{ form.avatar }}</div>
       </div>
       {% if form.avatar.errors %}
         <div class="text-xs text-red-700 mt-1">{{ form.avatar.errors }}</div>
@@ -366,18 +367,18 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div class="md:col-span-2 flex flex-col gap-3">
-        <a href="{% url 'accounts:password_change' %}" class="btn-primary inline-flex items-center gap-2 w-60 justify-center py-2">Change Password</a>
+        <a href="{% url 'accounts:password_change' %}" class="btn-primary inline-flex items-center gap-2 w-full sm:w-60 justify-center py-2">Change Password</a>
 
         <div>
           {% if request.user.is_verified %}
-            <div class="flex items-center gap-3">
+            <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
               <span class="inline-flex items-center px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">2FA Enabled</span>
               <a href="{% url 'two_factor:backup_tokens' %}" class="btn-ghost">Backup Codes</a>
               <a href="{% url 'two_factor:disable' %}" class="btn-danger">Disable 2FA</a>
             </div>
             <p class="text-xs text-gray-500 mt-2">You have two-factor authentication enabled. Keep your backup codes in a safe place.</p>
           {% else %}
-            <a href="{% url 'two_factor:profile' %}" class="btn-primary inline-flex items-center gap-2 w-60 justify-center py-2">Enable Two-factor Authentication</a>
+            <a href="{% url 'two_factor:profile' %}" class="btn-primary inline-flex items-center gap-2 w-full sm:w-60 justify-center py-2">Enable Two-factor Authentication</a>
             <p class="text-xs text-gray-500 mt-2">Add an extra layer of security to your account by enabling 2FA (recommended).</p>
           {% endif %}
         </div>
@@ -454,7 +455,7 @@
 
   {% if organization and user_org_role != 'staff' %}
   <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-lg max-w-5xl mx-auto">
-    <div class="flex items-start justify-between gap-4">
+    <div class="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <h2 class="text-lg font-bold text-blue-700 mb-1">Stripe Account</h2>
         <p class="text-sm text-gray-600">
@@ -464,11 +465,11 @@
 
       {% if stripe_express_dashboard_url %}
         <a href="{{ stripe_express_dashboard_url }}" target="_blank" rel="noopener noreferrer"
-           class="btn-primary inline-flex items-center justify-center px-4 py-2">
+           class="btn-primary inline-flex items-center justify-center px-4 py-2 w-full sm:w-auto">
           Open Stripe Express Dashboard
         </a>
       {% elif stripe_connect_modal_enabled and stripe_connect_start_url %}
-        <button type="button" id="stripe-account-connect-cta" class="btn-primary inline-flex items-center justify-center px-4 py-2">
+        <button type="button" id="stripe-account-connect-cta" class="btn-primary inline-flex items-center justify-center px-4 py-2 w-full sm:w-auto">
           Connect Stripe
         </button>
       {% endif %}
@@ -564,17 +565,17 @@
                   <div><span class="font-semibold text-blue-800">Embed:</span> copy/paste booking code into your website</div>
                   <div><span class="font-semibold text-blue-800">Custom domain:</span> keep embedded bookings inside your site (recommended)</div>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-col items-stretch gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
                   {% if m.can_use_embed_widget %}
-                    <a href="{% url 'calendar_app:services_page' org_slug=m.organization.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">Get embed code</a>
+                    <a href="{% url 'calendar_app:services_page' org_slug=m.organization.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Get embed code</a>
                   {% else %}
-                    <button type="button" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm opacity-50 cursor-not-allowed" disabled aria-disabled="true">Get embed code</button>
+                    <button type="button" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Get embed code</button>
                   {% endif %}
 
                   {% if m.can_use_custom_domain %}
-                    <a href="{% url 'calendar_app:org_custom_domain_settings' org_slug=m.organization.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">Custom domain</a>
+                    <a href="{% url 'calendar_app:org_custom_domain_settings' org_slug=m.organization.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Custom domain</a>
                   {% else %}
-                    <button type="button" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm opacity-50 cursor-not-allowed" disabled aria-disabled="true">Custom domain</button>
+                    <button type="button" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Custom domain</button>
                   {% endif %}
                 </div>
               </div>
@@ -587,7 +588,7 @@
                   <div class="w-full sm:flex-1 space-y-2">
                     <div>
                       <div class="text-xs text-gray-500 mb-1">Link text (what people see)</div>
-                      <div class="flex items-center gap-2">
+                      <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                         <input
                           id="ccPublicLabel-{{ m.organization.id }}"
                           type="text"
@@ -596,7 +597,7 @@
                         />
                         <button
                           type="button"
-                          class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-32 shrink-0"
+                          class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-32 shrink-0"
                           onclick="window.ccCopyBookingLinkHtml && window.ccCopyBookingLinkHtml('{{ m.organization.id }}', 'ccPublicLinkMsgLink-{{ m.organization.id }}')"
                         >Copy link</button>
                         <span id="ccPublicLinkMsgLink-{{ m.organization.id }}" class="hidden text-xs text-emerald-700 font-semibold">Copied</span>
@@ -604,7 +605,7 @@
                     </div>
                     <div>
                       <div class="text-xs text-gray-500 mb-1">URL (the destination)</div>
-                      <div class="flex items-center gap-2">
+                      <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                         <input
                           id="ccPublicUrl-{{ m.organization.id }}"
                           type="text"
@@ -614,7 +615,7 @@
                         />
                         <button
                           type="button"
-                          class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-32 shrink-0"
+                          class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-32 shrink-0"
                           onclick="window.ccCopyInputValue && window.ccCopyInputValue('ccPublicUrl-{{ m.organization.id }}', 'ccPublicLinkMsgUrl-{{ m.organization.id }}')"
                         >Copy URL</button>
                         <span id="ccPublicLinkMsgUrl-{{ m.organization.id }}" class="hidden text-xs text-emerald-700 font-semibold">Copied</span>
@@ -741,8 +742,8 @@
     })();
   </script>
   </form>
-  <div class="max-w-5xl mx-auto px-4 py-4 flex justify-end">
-    <button type="button" class="save-profile-btn btn-primary py-2 px-4">Save Changes</button>
+  <div class="w-full py-4 flex justify-end">
+    <button type="button" class="save-profile-btn btn-primary py-2 px-4 w-full sm:w-auto">Save Changes</button>
   </div>
 </div>
 {% endblock %}
@@ -847,17 +848,116 @@
     .timezone-select select#id_timezone:focus,
     .timezone-select select[name="timezone"]:focus { box-shadow: 0 10px 30px rgba(79,70,229,0.12); border-color:#6366f1; }
 
+    /* Mobile: keep everything inside the ~95vw container */
+    @media (max-width: 640px) {
+      /* Let the outer wrapper control width; form should simply fill it. */
+      #profile-form {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        box-sizing: border-box !important;
+        padding: 14px !important;
+        overflow-x: hidden;
+      }
+
+      /* Compact the contents inside the form on mobile */
+      #profile-form label {
+        font-size: 0.9rem;
+        margin-bottom: 0.35rem;
+      }
+      #profile-form input,
+      #profile-form select,
+      #profile-form textarea {
+        font-size: 0.95rem !important;
+        padding-top: 0.65rem !important;
+        padding-bottom: 0.65rem !important;
+        padding-left: 0.9rem !important;
+        padding-right: 0.9rem !important;
+        border-radius: 0.75rem !important;
+      }
+      #profile-form p.text-xs { font-size: 0.7rem; }
+      #profile-form p.text-sm { font-size: 0.85rem; }
+      #profile-form .btn-primary,
+      #profile-form .btn-ghost,
+      #profile-form .btn-danger {
+        min-width: 0;
+        font-size: 0.9rem;
+      }
+
+      .timezone-panel { min-height: auto; }
+      .timezone-select select#id_timezone,
+      .timezone-select select[name="timezone"] {
+        min-width: 0;
+        width: 100%;
+      }
+      .timezone-info { max-width: none; width: 100%; }
+    }
+
     /* Right-side timezone info box tweaks */
     .timezone-info { max-width: 36ch; }
+
+    /* Different Payment Methods: make the example (placeholder) text smaller */
+    input[name="offline_venmo"]::placeholder,
+    input[name="offline_zelle"]::placeholder {
+      font-size: 0.9rem;
+    }
 
     /* Ensure the flex row spans full width and push the info box to the right edge */
     .timezone-panel > .flex { width: 100%; }
     .timezone-info { margin-left: auto; display: block; }
+
+    @media (max-width: 640px) {
+      input[name="offline_venmo"]::placeholder,
+      input[name="offline_zelle"]::placeholder {
+        font-size: 0.7rem;
+      }
+    }
   </style>
 {% endblock %}
 
 {% block extra_scripts %}
   <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
+  <script>
+    (function () {
+      var venmo = document.querySelector('input[name="offline_venmo"]');
+      var zelle = document.querySelector('input[name="offline_zelle"]');
+      if (!venmo && !zelle) return;
+
+      if (venmo && !venmo.dataset.desktopPlaceholder) {
+        venmo.dataset.desktopPlaceholder = venmo.getAttribute('placeholder') || '';
+      }
+      if (zelle && !zelle.dataset.desktopPlaceholder) {
+        zelle.dataset.desktopPlaceholder = zelle.getAttribute('placeholder') || '';
+      }
+
+      function applyPlaceholders(isMobile) {
+        if (venmo) {
+          venmo.placeholder = isMobile
+            ? (venmo.dataset.desktopPlaceholder || '').replace(/^e\.g\.\s*/i, '')
+            : (venmo.dataset.desktopPlaceholder || '');
+        }
+        if (zelle) {
+          zelle.placeholder = isMobile
+            ? 'Your@email.com or +1 (555) 555-5555'
+            : (zelle.dataset.desktopPlaceholder || '');
+        }
+      }
+
+      var mq = (window.matchMedia && window.matchMedia('(max-width: 640px)')) || null;
+      applyPlaceholders(mq ? mq.matches : (window.innerWidth <= 640));
+
+      if (mq) {
+        try {
+          if (mq.addEventListener) {
+            mq.addEventListener('change', function (e) { applyPlaceholders(e.matches); });
+          } else if (mq.addListener) {
+            mq.addListener(function (e) { applyPlaceholders(e.matches); });
+          }
+        } catch (err) {}
+      }
+    })();
+  </script>
       <script>
     (function() {
       const fileInput = document.getElementById('id_avatar');
