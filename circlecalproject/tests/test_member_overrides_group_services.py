@@ -157,3 +157,150 @@ class TestMemberBlockGuardrailForSoloBookings(TestCase):
             HTTP_HOST='127.0.0.1',
         )
         self.assertEqual(resp.status_code, 400)
+
+    def test_cannot_block_member_for_day_if_assigned_group_booking_exists(self):
+        # Create a group service and a booking assigned to this member on that date.
+        from zoneinfo import ZoneInfo
+        from django.conf import settings
+        from datetime import datetime, timedelta
+
+        u2 = get_user_model().objects.create_user(username='m2', email='m2@example.com', password='pass')
+        m2 = Membership.objects.create(user=u2, organization=self.org, role='staff', is_active=True)
+
+        group_svc = Service.objects.create(
+            organization=self.org,
+            name='Group',
+            slug=f'group-{uuid.uuid4().hex[:6]}',
+            duration=60,
+            max_booking_days=5000,
+        )
+        ServiceAssignment.objects.create(service=group_svc, membership=self.m1)
+        ServiceAssignment.objects.create(service=group_svc, membership=m2)
+
+        tz = ZoneInfo(getattr(self.org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        day = datetime(2030, 1, 7, 10, 0, 0, tzinfo=tz)
+        Booking.objects.create(
+            organization=self.org,
+            service=group_svc,
+            title='Group booked',
+            start=day,
+            end=day + timedelta(minutes=60),
+            is_blocking=False,
+            assigned_user=self.m1.user,
+        )
+
+        payload = {
+            'dates': ['2030-01-07'],
+            'start_time': '00:00',
+            'end_time': '23:59',
+            'is_blocking': True,
+            'target': str(self.m1.id),
+        }
+        resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp.status_code, 400)
+
+
+class TestServiceBlockGuardrailForBookings(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.client = Client()
+
+        self.owner = User.objects.create_user(username='owner', email='owner@example.com', password='pass')
+        self.org = Business.objects.create(name='Org', slug=f'org-{uuid.uuid4().hex[:8]}', owner=self.owner)
+        Membership.objects.create(user=self.owner, organization=self.org, role='owner', is_active=True)
+
+        plan = Plan.objects.create(name='Team', slug='team', description='Team', price=0, billing_period='monthly')
+        Subscription.objects.update_or_create(
+            organization=self.org,
+            defaults={'plan': plan, 'status': 'active', 'active': True},
+        )
+
+        self.client.force_login(self.owner)
+
+    def test_cannot_block_service_day_if_booking_exists_unassigned_service(self):
+        from zoneinfo import ZoneInfo
+        from django.conf import settings
+        from datetime import datetime, timedelta
+
+        svc = Service.objects.create(
+            organization=self.org,
+            name='No-assignees',
+            slug=f'noasg-{uuid.uuid4().hex[:6]}',
+            duration=60,
+            max_booking_days=5000,
+        )
+
+        tz = ZoneInfo(getattr(self.org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        day = datetime(2030, 1, 7, 10, 0, 0, tzinfo=tz)
+        Booking.objects.create(
+            organization=self.org,
+            service=svc,
+            title='Booked',
+            start=day,
+            end=day + timedelta(minutes=60),
+            is_blocking=False,
+        )
+
+        payload = {
+            'dates': ['2030-01-07'],
+            'start_time': '00:00',
+            'end_time': '23:59',
+            'is_blocking': True,
+            'target': f'svc:{svc.id}',
+        }
+        resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_cannot_block_service_day_if_booking_exists_assigned_service(self):
+        from zoneinfo import ZoneInfo
+        from django.conf import settings
+        from datetime import datetime, timedelta
+
+        u1 = get_user_model().objects.create_user(username='m1', email='m1@example.com', password='pass')
+        m1 = Membership.objects.create(user=u1, organization=self.org, role='staff', is_active=True)
+
+        svc = Service.objects.create(
+            organization=self.org,
+            name='Assigned',
+            slug=f'asg-{uuid.uuid4().hex[:6]}',
+            duration=60,
+            max_booking_days=5000,
+        )
+        ServiceAssignment.objects.create(service=svc, membership=m1)
+
+        tz = ZoneInfo(getattr(self.org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
+        day = datetime(2030, 1, 7, 10, 0, 0, tzinfo=tz)
+        Booking.objects.create(
+            organization=self.org,
+            service=svc,
+            title='Booked',
+            start=day,
+            end=day + timedelta(minutes=60),
+            is_blocking=False,
+            assigned_user=u1,
+        )
+
+        payload = {
+            'dates': ['2030-01-07'],
+            'start_time': '00:00',
+            'end_time': '23:59',
+            'is_blocking': True,
+            'target': f'svc:{svc.id}',
+        }
+        resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp.status_code, 400)

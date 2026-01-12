@@ -1645,35 +1645,79 @@ def batch_create(request, org_slug):
         if e <= s:
             continue
 
-        # Member-scope blocking guardrail: if a member has an existing booking on
-        # that day for any of their SOLO services, do not allow marking them unavailable.
-        # (Member-side overrides should not invalidate already-booked appointments.)
+        # Blocking guardrails: do not allow per-date "unavailable" overrides to
+        # invalidate already-booked appointments.
         try:
-            if is_blocking and target and (not (isinstance(target, str) and target.startswith('svc:'))):
-                mid = int(target)
-                mem = Membership.objects.filter(id=mid, organization=org, is_active=True).select_related('user').first()
-                if mem and getattr(mem, 'user', None):
-                    # Find solo services for this member
-                    solo_service_ids = list(
-                        Service.objects.filter(organization=org, assignments__membership=mem)
-                        .annotate(num_assignees=Count('assignments'))
-                        .filter(num_assignees=1)
-                        .values_list('id', flat=True)
-                    )
-
-                    if solo_service_ids:
-                        day_start_chk = datetime(dobj.year, dobj.month, dobj.day, 0, 0, 0, tzinfo=tz)
-                        day_end_chk = day_start_chk + timedelta(days=1)
-                        has_existing = Booking.objects.filter(
+            if is_blocking and target:
+                # Service-scoped: block if the service already has any appointment on that date.
+                if isinstance(target, str) and target.startswith('svc:'):
+                    try:
+                        svc_id = int(str(target).split(':', 1)[1])
+                    except Exception:
+                        svc_id = None
+                    if svc_id:
+                        has_service_booking = Booking.objects.filter(
                             organization=org,
-                            service_id__in=[int(x) for x in solo_service_ids],
+                            service_id=svc_id,
                             service__isnull=False,
-                            start__lt=day_end_chk,
-                            end__gt=day_start_chk,
+                            is_blocking=False,
+                            start__lt=e,
+                            end__gt=s,
                         ).exists()
-                        if has_existing:
-                            return HttpResponseBadRequest(
-                                "This team member already has a booking on that date for a solo service. Cancel/reschedule the booking before marking them unavailable."
+                        if has_service_booking:
+                            return JsonResponse(
+                                {
+                                    'error': (
+                                        f"Cannot mark {dobj.isoformat()} unavailable: this service already has booking(s) that day. "
+                                        "Cancel/reschedule the booking(s) first."
+                                    )
+                                },
+                                status=400,
+                            )
+                else:
+                    # Member-scoped: block if the member has any appointment that day they are
+                    # responsible for across ANY service.
+                    mid = int(target)
+                    mem = Membership.objects.filter(id=mid, organization=org, is_active=True).select_related('user').first()
+                    if mem and getattr(mem, 'user', None):
+                        # 1) Any booking explicitly assigned to this user (covers group services)
+                        has_assigned_booking = Booking.objects.filter(
+                            organization=org,
+                            assigned_user=mem.user,
+                            service__isnull=False,
+                            is_blocking=False,
+                            start__lt=e,
+                            end__gt=s,
+                        ).exists()
+
+                        # 2) Any booking in one of their solo services, even if assigned_user is NULL
+                        # (solo services are implicitly "assigned" to the only member).
+                        solo_service_ids = list(
+                            Service.objects.filter(organization=org, assignments__membership=mem)
+                            .annotate(num_assignees=Count('assignments'))
+                            .filter(num_assignees=1)
+                            .values_list('id', flat=True)
+                        )
+                        has_solo_service_booking = False
+                        if solo_service_ids:
+                            has_solo_service_booking = Booking.objects.filter(
+                                organization=org,
+                                service_id__in=[int(x) for x in solo_service_ids],
+                                service__isnull=False,
+                                is_blocking=False,
+                                start__lt=e,
+                                end__gt=s,
+                            ).exists()
+
+                        if has_assigned_booking or has_solo_service_booking:
+                            return JsonResponse(
+                                {
+                                    'error': (
+                                        f"Cannot mark {dobj.isoformat()} unavailable: this team member already has booking(s) that day. "
+                                        "Cancel/reschedule the booking(s) first."
+                                    )
+                                },
+                                status=400,
                             )
         except Exception:
             # Fail open rather than blocking override creation on unexpected DB issues.
@@ -3127,6 +3171,15 @@ def service_availability(request, org_slug, service_slug):
         start__lt=day_end,
         end__gt=day_start
     ).exclude(service__isnull=True)
+
+    # Team plan: service calendars are independent. A service's availability should not
+    # be reduced by bookings for other services (otherwise group/unassigned services
+    # appear to inherit an owner's schedule).
+    try:
+        if get_plan_slug(org) == TEAM_SLUG:
+            existing = existing.filter(service=service)
+    except Exception:
+        pass
 
     # Normalize busy windows into org timezone for consistent overlap checks
     busy = [(bk.start.astimezone(org_tz), bk.end.astimezone(org_tz)) for bk in existing]

@@ -5961,11 +5961,28 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (!confirm('Reset ALL per-date overrides to weekly defaults?')) return;
                             const evs = (typeof calendar.getEvents === 'function') ? calendar.getEvents() : [];
                             const dates = [];
+                            const _isSvcScopeHere = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
+                            const _svcIdHere = _isSvcScopeHere ? String(SELECTED_MEMBER).slice(4) : null;
+                            let _isTeamGroupSvcScopeHere = false;
+                            try {
+                                const _svcObj = (_isSvcScopeHere && _svcIdHere) ? (svcById(_svcIdHere) || null) : null;
+                                const _assigned = _svcObj ? (getAssignedMembersForService(_svcObj) || []) : [];
+                                _isTeamGroupSvcScopeHere = !!(IS_TEAM && _isSvcScopeHere && _assigned.length >= 2);
+                            } catch (e) { _isTeamGroupSvcScopeHere = false; }
                             evs.forEach(ev => {
                                 try {
                                     if (ev.display !== 'background') return;
                                     const isPer = ev.extendedProps && ev.extendedProps.is_per_date;
                                     if (!isPer) return;
+
+                                    // Team plan group service view: only allow resetting true service-scoped overrides
+                                    // (shared member-derived overrides must be reset from a member view).
+                                    if (_isTeamGroupSvcScopeHere) {
+                                        const xp = ev.extendedProps || {};
+                                        const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
+                                        if (!assignedSvc || String(assignedSvc) !== String(_svcIdHere)) return;
+                                    }
+
                                     const s = ev.startStr || (ev.start ? ev.start.toISOString() : null);
                                     if (!s) return;
                                     const d = s.split('T')[0];
@@ -6057,7 +6074,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { /* ignore header setup errors */ }
 
         const events = (typeof calendar.getEvents === 'function') ? calendar.getEvents() : [];
-        const perDate = {}; // date -> { rangesSet: Set, items: [], blocked: false }
+        const perDate = {}; // date -> { rangesSet: Set, items: [], blocked: false, source?: 'service'|'members' }
 
         function fmtTime(h, m) {
             const hh = parseInt(h,10);
@@ -6073,7 +6090,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const currentServiceId = isServiceScope ? String(SELECTED_MEMBER).slice(4) : null;
         const currentMemberId = (!isServiceScope && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
 
+        // Team plan: group service overrides table should not show member overrides unless
+        // they are identical across all assigned members.
+        const _currentSvcObj = (isServiceScope && currentServiceId) ? (svcById(currentServiceId) || null) : null;
+        const _assignedForCurrentSvc = _currentSvcObj ? (getAssignedMembersForService(_currentSvcObj) || []) : [];
+        const _isTeamGroupServiceScope = !!(IS_TEAM && isServiceScope && _assignedForCurrentSvc.length >= 2);
+
         // Helper: decide if a per-date event should be visible in the current scope
+        // (used for non-group contexts).
         function eventInCurrentScope(ev) {
             try {
                 const xp = ev.extendedProps || {};
@@ -6081,13 +6105,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!SELECTED_MEMBER) return true;
 
                 // Service scope: include events explicitly assigned to this service
-                // or member-level events for members assigned to this service
+                // or member-level events for members assigned to this service.
                 if (isServiceScope) {
-                    // service-level override
                     const assignedSvc = xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null;
                     if (assignedSvc && String(assignedSvc) === String(currentServiceId)) return true;
 
-                    // member-level override that should be applied to this service
                     const assignedMembership = xp.assigned_membership_id ? String(xp.assigned_membership_id) : (xp.assigned_membership ? String(xp.assigned_membership) : null);
                     const assignedUser = xp.assigned_user_id ? String(xp.assigned_user_id) : null;
                     if (assignedMembership) {
@@ -6098,7 +6120,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                     if (assignedUser) {
-                        // map user -> membership id for members assigned to service
                         const svc = svcById(currentServiceId);
                         if (svc) {
                             const assigned = getAssignedMembersForService(svc) || [];
@@ -6132,34 +6153,139 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) { return false; }
         }
 
-        events.forEach(ev => {
-            try {
-                if (ev.display !== 'background') return;
-                const props = ev.extendedProps || {};
-                if (!props.is_per_date) return;
-                if (!eventInCurrentScope(ev)) return;
-                const startStr = ev.startStr || (ev.start ? ev.start.toISOString() : null);
-                if (!startStr) return;
-                const date = startStr.split('T')[0];
+        // Group service scope (Team plan): show service-scoped per-date overrides, and only
+        // show member-scoped overrides when they are identical for ALL assigned members.
+        if (_isTeamGroupServiceScope) {
+            const memberDay = {}; // date -> memberId -> { blocked: bool, ranges: [[sH,sM,eH,eM],...] }
 
-                let sH = 0, sM = 0, eH = 23, eM = 59;
-                if (ev.start && ev.start.getHours) { sH = ev.start.getHours(); sM = ev.start.getMinutes(); }
-                else if (startStr.split('T')[1]) { const parts = startStr.split('T')[1].split(':'); sH = parseInt(parts[0]||'0',10); sM = parseInt(parts[1]||'0',10); }
-                if (ev.end && ev.end.getHours) { eH = ev.end.getHours(); eM = ev.end.getMinutes(); }
-                else if (ev.endStr && ev.endStr.split('T')[1]) { const parts = ev.endStr.split('T')[1].split(':'); eH = parseInt(parts[0]||'23',10); eM = parseInt(parts[1]||'59',10); }
-                if (!perDate[date]) perDate[date] = { rangesSet: new Set(), items: [], blocked: false };
-                const fullDay = (sH === 0 && sM === 0 && eH === 23 && eM === 59);
-                if (props.override_type === 'blocked' && fullDay) {
-                    perDate[date].blocked = true;
-                } else {
-                    const key = `${sH}:${sM}-${eH}:${eM}`;
-                    if (!perDate[date].rangesSet.has(key)) {
-                        perDate[date].rangesSet.add(key);
-                        perDate[date].items.push({ startH: sH, startM: sM, endH: eH, endM: eM });
+            const _ensureMemberEntry = (dateStr, memberId) => {
+                if (!memberDay[dateStr]) memberDay[dateStr] = {};
+                if (!memberDay[dateStr][memberId]) memberDay[dateStr][memberId] = { blocked: false, ranges: [] };
+                return memberDay[dateStr][memberId];
+            };
+
+            const _normSig = (entry) => {
+                if (!entry) return '';
+                if (entry.blocked) return 'blocked:fullday';
+                const r = (entry.ranges || []).slice().map(x => `${x[0]}:${x[1]}-${x[2]}:${x[3]}`);
+                r.sort();
+                return r.length ? `available:${r.join('|')}` : '';
+            };
+
+            // First pass: collect service-level overrides and aggregate member-level overrides.
+            events.forEach(ev => {
+                try {
+                    if (ev.display !== 'background') return;
+                    const props = ev.extendedProps || {};
+                    if (!props.is_per_date) return;
+                    const startStr = ev.startStr || (ev.start ? ev.start.toISOString() : null);
+                    if (!startStr) return;
+                    const date = startStr.split('T')[0];
+
+                    const assignedSvc = props.assigned_scope_service_id || props.assigned_scope_service || props.assigned_service_id || props.service_id || null;
+                    const assignedMembership = props.assigned_membership_id ? String(props.assigned_membership_id) : (props.assigned_membership ? String(props.assigned_membership) : null);
+
+                    let sH = 0, sM = 0, eH = 23, eM = 59;
+                    if (ev.start && ev.start.getHours) { sH = ev.start.getHours(); sM = ev.start.getMinutes(); }
+                    else if (startStr.split('T')[1]) { const parts = startStr.split('T')[1].split(':'); sH = parseInt(parts[0]||'0',10); sM = parseInt(parts[1]||'0',10); }
+                    if (ev.end && ev.end.getHours) { eH = ev.end.getHours(); eM = ev.end.getMinutes(); }
+                    else if (ev.endStr && ev.endStr.split('T')[1]) { const parts = ev.endStr.split('T')[1].split(':'); eH = parseInt(parts[0]||'23',10); eM = parseInt(parts[1]||'59',10); }
+                    const fullDay = (sH === 0 && sM === 0 && eH === 23 && eM === 59);
+
+                    // Service-scoped per-date override
+                    if (assignedSvc && String(assignedSvc) === String(currentServiceId)) {
+                        if (!perDate[date]) perDate[date] = { rangesSet: new Set(), items: [], blocked: false, source: 'service' };
+                        if (props.override_type === 'blocked' && fullDay) {
+                            perDate[date].blocked = true;
+                        } else {
+                            const key = `${sH}:${sM}-${eH}:${eM}`;
+                            if (!perDate[date].rangesSet.has(key)) {
+                                perDate[date].rangesSet.add(key);
+                                perDate[date].items.push({ startH: sH, startM: sM, endH: eH, endM: eM });
+                            }
+                        }
+                        return;
                     }
-                }
-            } catch (e) { /* ignore */ }
-        });
+
+                    // Member-scoped override: aggregate (but do not show unless unanimous)
+                    if (assignedMembership && _assignedForCurrentSvc.indexOf(String(assignedMembership)) !== -1) {
+                        const entry = _ensureMemberEntry(date, String(assignedMembership));
+                        if (props.override_type === 'blocked' && fullDay) {
+                            entry.blocked = true;
+                            entry.ranges = [];
+                        } else if (!entry.blocked) {
+                            entry.ranges.push([sH, sM, eH, eM]);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            });
+
+            // Second pass: only include member-scoped overrides when all assigned members match.
+            Object.keys(memberDay).forEach(dateStr => {
+                try {
+                    // If there is already a service-level override for the day, prefer it.
+                    if (perDate[dateStr]) return;
+
+                    let sig = null;
+                    for (const memId of _assignedForCurrentSvc) {
+                        const e = (memberDay[dateStr] || {})[String(memId)] || null;
+                        const s = _normSig(e);
+                        if (!s) { sig = null; break; }
+                        if (sig === null) sig = s;
+                        else if (sig !== s) { sig = null; break; }
+                    }
+
+                    if (!sig) return;
+
+                    // Shared across all members => show it in the group service overrides table
+                    if (!perDate[dateStr]) perDate[dateStr] = { rangesSet: new Set(), items: [], blocked: false, source: 'members' };
+                    if (sig === 'blocked:fullday') {
+                        perDate[dateStr].blocked = true;
+                        return;
+                    }
+                    const entry0 = (memberDay[dateStr] || {})[String(_assignedForCurrentSvc[0])] || null;
+                    const ranges = (entry0 && entry0.ranges) ? entry0.ranges.slice() : [];
+                    ranges.sort((a,b) => (a[0]*60+a[1]) - (b[0]*60+b[1]));
+                    for (const r of ranges) {
+                        const key = `${r[0]}:${r[1]}-${r[2]}:${r[3]}`;
+                        if (!perDate[dateStr].rangesSet.has(key)) {
+                            perDate[dateStr].rangesSet.add(key);
+                            perDate[dateStr].items.push({ startH: r[0], startM: r[1], endH: r[2], endM: r[3] });
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            });
+        } else {
+            // Default behavior (member scopes, solo services, non-team plans)
+            events.forEach(ev => {
+                try {
+                    if (ev.display !== 'background') return;
+                    const props = ev.extendedProps || {};
+                    if (!props.is_per_date) return;
+                    if (!eventInCurrentScope(ev)) return;
+                    const startStr = ev.startStr || (ev.start ? ev.start.toISOString() : null);
+                    if (!startStr) return;
+                    const date = startStr.split('T')[0];
+
+                    let sH = 0, sM = 0, eH = 23, eM = 59;
+                    if (ev.start && ev.start.getHours) { sH = ev.start.getHours(); sM = ev.start.getMinutes(); }
+                    else if (startStr.split('T')[1]) { const parts = startStr.split('T')[1].split(':'); sH = parseInt(parts[0]||'0',10); sM = parseInt(parts[1]||'0',10); }
+                    if (ev.end && ev.end.getHours) { eH = ev.end.getHours(); eM = ev.end.getMinutes(); }
+                    else if (ev.endStr && ev.endStr.split('T')[1]) { const parts = ev.endStr.split('T')[1].split(':'); eH = parseInt(parts[0]||'23',10); eM = parseInt(parts[1]||'59',10); }
+                    if (!perDate[date]) perDate[date] = { rangesSet: new Set(), items: [], blocked: false };
+                    const fullDay = (sH === 0 && sM === 0 && eH === 23 && eM === 59);
+                    if (props.override_type === 'blocked' && fullDay) {
+                        perDate[date].blocked = true;
+                    } else {
+                        const key = `${sH}:${sM}-${eH}:${eM}`;
+                        if (!perDate[date].rangesSet.has(key)) {
+                            perDate[date].rangesSet.add(key);
+                            perDate[date].items.push({ startH: sH, startM: sM, endH: eH, endM: eM });
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            });
+        }
 
         // Ensure earlier ranges render to the left: sort by ascending start time
         Object.keys(perDate).forEach(d => {
@@ -6184,6 +6310,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const entry = perDate[d];
             const items = entry.items;
             const type = entry.blocked ? 'Blocked' : 'Available';
+            const isTeamGroupDerived = !!(_isTeamGroupServiceScope && entry && entry.source === 'members');
             let times = '';
             if (entry.blocked) {
                 times = 'Blocked (Full Day)';
@@ -6212,78 +6339,117 @@ document.addEventListener('DOMContentLoaded', function() {
                     tdDate.textContent = d;
                 }
             } catch (e) { tdDate.textContent = d; }
-            const tdType = document.createElement('td'); tdType.style.padding = '8px'; tdType.textContent = type;
+            const tdType = document.createElement('td');
+            tdType.style.padding = '8px';
+            tdType.textContent = isTeamGroupDerived ? `${type} (All members)` : type;
             const tdTimes = document.createElement('td'); tdTimes.style.padding = '8px'; tdTimes.textContent = times;
             const tdAction = document.createElement('td'); tdAction.style.padding = '8px';
             const tdSelect = document.createElement('td'); tdSelect.style.padding = '8px';
 
-            const resetBtn = document.createElement('button');
-            resetBtn.type = 'button';
-            resetBtn.textContent = 'Reset';
-            resetBtn.setAttribute('data-label', 'Reset');
-            resetBtn.classList.add('overrides-btn');
-            // Use class-based styling; avoid inline white background which can hide white text
-            resetBtn.style.padding = '';
-            resetBtn.style.border = '';
-            resetBtn.style.borderRadius = '';
-            resetBtn.style.background = '';
-            resetBtn.style.cursor = '';
-            try { if (isPastDate(d)) { resetBtn.disabled = true; resetBtn.title = 'Cannot reset past dates'; resetBtn.style.opacity = '0.6'; resetBtn.style.cursor = 'not-allowed'; } } catch(e) {}
+            if (isTeamGroupDerived) {
+                tdAction.textContent = '—';
+                const note = document.createElement('span');
+                note.textContent = 'Edit/Reset in a member view';
+                note.style.color = '#666';
+                note.style.fontSize = '12px';
+                tdSelect.appendChild(note);
+            } else {
+                const resetBtn = document.createElement('button');
+                resetBtn.type = 'button';
+                resetBtn.textContent = 'Reset';
+                resetBtn.setAttribute('data-label', 'Reset');
+                resetBtn.classList.add('overrides-btn');
+                // Use class-based styling; avoid inline white background which can hide white text
+                resetBtn.style.padding = '';
+                resetBtn.style.border = '';
+                resetBtn.style.borderRadius = '';
+                resetBtn.style.background = '';
+                resetBtn.style.cursor = '';
+                try { if (isPastDate(d)) { resetBtn.disabled = true; resetBtn.title = 'Cannot reset past dates'; resetBtn.style.opacity = '0.6'; resetBtn.style.cursor = 'not-allowed'; } } catch(e) {}
 
-            resetBtn.onclick = async () => {
-                if (!confirm(`Reset ${d} to weekly defaults? This will remove per-date overrides for this date.`)) return;
+                resetBtn.onclick = async () => {
+                    if (!confirm(`Reset ${d} to weekly defaults? This will remove per-date overrides for this date.`)) return;
 
-                // Prevent reset if weekly defaults would exclude existing bookings.
-                try {
-                    const weekly = _weeklyDefaultRangesForDate(d);
-                    const verdict = _validateOverrideAgainstBookings(d, weekly);
-                    if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
-                } catch (e) { /* ignore */ }
-                resetBtn.disabled = true;
+                    // Prevent reset if weekly defaults would exclude existing bookings.
                     try {
-                    const overrideTarget = (ccOverrideTarget() || null);
-                    const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d], target: overrideTarget })
-                    });
-                    const data = await res.json().catch(() => null);
-                    if (res.ok) {
-                        try { calendar.getEvents().forEach(ev => { try { if (ev.display === 'background' && ev.startStr && ev.startStr.startsWith(d)) ev.remove(); } catch(e){} }); } catch(e){}
+                        const weekly = _weeklyDefaultRangesForDate(d);
+                        const verdict = _validateOverrideAgainstBookings(d, weekly);
+                        if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
+                    } catch (e) { /* ignore */ }
+                    resetBtn.disabled = true;
+                        try {
+                        const overrideTarget = (ccOverrideTarget() || null);
+                        const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d], target: overrideTarget })
+                        });
+                        const data = await res.json().catch(() => null);
+                        if (res.ok) {
+                            // Remove per-date background events for this DATE in the current SCOPE.
+                            try {
+                                const isSvc = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
+                                const svcId = isSvc ? String(SELECTED_MEMBER).slice(4) : null;
+                                const userId = (!isSvc && SELECTED_MEMBER) ? getSelectedUserIdForMembership(SELECTED_MEMBER) : null;
+                                const membershipId = (!isSvc && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
+                                (calendar.getEvents() || []).forEach(ev => {
+                                    try {
+                                        if (!ev || ev.display !== 'background') return;
+                                        if (!(ev.extendedProps && ev.extendedProps.is_per_date)) return;
+                                        const s = ev.startStr || (ev.start ? ev.start.toISOString() : null);
+                                        if (!s || !String(s).startsWith(d)) return;
+
+                                        const xp = ev.extendedProps || {};
+                                        if (SELECTED_MEMBER) {
+                                            if (isSvc) {
+                                                const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
+                                                if (!assignedSvc || String(assignedSvc) !== String(svcId)) return;
+                                            } else {
+                                                const assignedUserId = xp.assigned_user_id || null;
+                                                const assignedMembershipId = xp.assigned_membership_id || null;
+                                                if (userId && assignedUserId && String(assignedUserId) !== String(userId)) return;
+                                                if (!userId && assignedMembershipId && String(assignedMembershipId) !== String(membershipId)) return;
+                                            }
+                                        }
+                                        ev.remove();
+                                    } catch (e) {}
+                                });
+                            } catch(e){}
+                            try { await calendar.refetchEvents(); } catch(e){}
+                            try { updateUnavailableDays(); } catch(e){}
+                            try { renderOverridesTable(); } catch(e){}
+                            alert('Reset to weekly defaults completed.');
+                        } else {
+                            const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
+                            alert('Error resetting: ' + msg);
+                            try { await calendar.refetchEvents(); } catch(e){}
+                            try { updateUnavailableDays(); } catch(e){}
+                        }
+                    } catch (err) {
+                        console.error('Reset request failed', err);
+                        alert('Error: ' + (err && err.message ? err.message : String(err)));
                         try { await calendar.refetchEvents(); } catch(e){}
                         try { updateUnavailableDays(); } catch(e){}
-                        try { renderOverridesTable(); } catch(e){}
-                        alert('Reset to weekly defaults completed.');
-                    } else {
-                        const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
-                        alert('Error resetting: ' + msg);
-                        try { await calendar.refetchEvents(); } catch(e){}
-                        try { updateUnavailableDays(); } catch(e){}
-                    }
-                } catch (err) {
-                    console.error('Reset request failed', err);
-                    alert('Error: ' + (err && err.message ? err.message : String(err)));
-                    try { await calendar.refetchEvents(); } catch(e){}
-                    try { updateUnavailableDays(); } catch(e){}
-                } finally { try { resetBtn.disabled = isPastDate(d); } catch(e) { resetBtn.disabled = false; } }
-            };
+                    } finally { try { resetBtn.disabled = isPastDate(d); } catch(e) { resetBtn.disabled = false; } }
+                };
 
-            const selectBtn = document.createElement('button');
-            selectBtn.type = 'button';
-            selectBtn.className = 'override-select-btn';
-            selectBtn.textContent = 'Select';
-            selectBtn.setAttribute('data-label', 'Select');
-            selectBtn.classList.add('overrides-btn');
-            // Use class-based styling; avoid inline white background which can hide white text
-            selectBtn.style.padding = '';
-            selectBtn.style.border = '';
-            selectBtn.style.borderRadius = '';
-            selectBtn.style.background = '';
-            selectBtn.style.cursor = '';
-            selectBtn.onclick = () => {
-                try { openMakeAvailableModal(d); } catch (e) { console.error('Failed to open edit modal for', d, e); }
-            };
+                const selectBtn = document.createElement('button');
+                selectBtn.type = 'button';
+                selectBtn.className = 'override-select-btn';
+                selectBtn.textContent = 'Select';
+                selectBtn.setAttribute('data-label', 'Select');
+                selectBtn.classList.add('overrides-btn');
+                // Use class-based styling; avoid inline white background which can hide white text
+                selectBtn.style.padding = '';
+                selectBtn.style.border = '';
+                selectBtn.style.borderRadius = '';
+                selectBtn.style.background = '';
+                selectBtn.style.cursor = '';
+                selectBtn.onclick = () => {
+                    try { openMakeAvailableModal(d); } catch (e) { console.error('Failed to open edit modal for', d, e); }
+                };
 
-            tdSelect.appendChild(selectBtn);
-            tdAction.appendChild(resetBtn);
+                tdSelect.appendChild(selectBtn);
+                tdAction.appendChild(resetBtn);
+            }
             row.appendChild(tdDate); row.appendChild(tdType); row.appendChild(tdTimes); row.appendChild(tdAction); row.appendChild(tdSelect);
             tbody.appendChild(row);
         });
@@ -6528,14 +6694,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     const overrideTarget = (ccOverrideTarget() || null);
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget }) });
-                    const data = await res.json().catch(() => null);
+                    const { data, text } = await _ccReadJsonOrText(res);
                     if (res.ok) {
                         applyPerDateUnavailable(dateStr);
                         try { calendar.refetchEvents(); } catch(e){}
                         try { updateUnavailableDays(); } catch(e){}
                         alert('Date marked unavailable.');
                     } else {
-                        const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
+                        const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${res.status}`;
                         alert('Error marking unavailable: ' + msg);
                     }
                 } catch (err) { console.error('Make unavailable failed', err); alert('Error: ' + (err && err.message ? err.message : String(err))); }
@@ -6578,7 +6744,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                         body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget })
                     });
-                    const data = await res.json().catch(() => null);
+                    const { data, text } = await _ccReadJsonOrText(res);
                     if (res.ok) {
                         // Apply UI changes immediately
                         applyPerDateUnavailable(dateStr);
@@ -6586,7 +6752,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         try { updateUnavailableDays(); } catch (e) {}
                         alert('Date marked unavailable.');
                     } else {
-                        const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
+                        const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${res.status}`;
                         alert('Error marking unavailable: ' + msg);
                     }
                 } catch (err) {
@@ -6705,6 +6871,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
         updateClearButton();
         updateSelectButtonText();
+    }
+
+    async function _ccReadJsonOrText(res) {
+        try {
+            const text = await res.text();
+            if (!text) return { data: null, text: '' };
+            try {
+                return { data: JSON.parse(text), text };
+            } catch (e) {
+                return { data: null, text };
+            }
+        } catch (e) {
+            return { data: null, text: '' };
+        }
     }
 
     // -----------------------------

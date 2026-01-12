@@ -26,6 +26,33 @@
     .create-org { margin-top: 40px; }
     .create-btn { background: #4b59f0; padding: 12px 22px; border-radius: 8px; color: white; font-weight: 600; transition: background 0.2s ease; text-decoration: none; display: inline-block; }
     .create-btn:hover { background: #3743c4; }
+
+    /* Mobile: center cards and stack vertically */
+    @media (max-width: 600px) {
+        .org-page { margin: 24px auto; padding: 0 12px; }
+        .org-title { font-size: 2rem; }
+        .org-subtitle { margin-bottom: 24px; }
+
+        .org-list {
+            grid-template-columns: 1fr;
+            justify-items: center;
+            gap: 16px;
+            padding: 0;
+        }
+
+        .org-card {
+            width: 100%;
+            max-width: 360px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .org-actions { gap: 10px; }
+        .org-action-btn { padding: 10px 12px; font-size: 0.9rem; }
+
+        .create-org { margin-top: 28px; }
+        .create-btn { width: 100%; max-width: 360px; }
+    }
 </style>
 
 <div class="org-page">

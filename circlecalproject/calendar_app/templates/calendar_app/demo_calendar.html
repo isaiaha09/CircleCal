@@ -12,8 +12,8 @@
         </div>
     </div>
 
-    <div style="display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; justify-content:center;">
-        <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 520px; min-width:520px; margin-bottom:0; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+    <div class="cc-demo-layout" style="display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; justify-content:center;">
+        <div id="defaultAvailabilityContainer" class="availability-ui" style="min-width:520px; margin-bottom:0; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 10px 0;">
                     <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
                 </div>
@@ -37,7 +37,7 @@
                 </button>
         </div>
 
-        <div style="flex: 1 1 560px; min-width: 560px;">
+        <div class="cc-demo-calendar-col" style="flex: 1 1 560px; min-width: 560px;">
             <div id="calendarWrapper" style="position:relative;">
                 <div id="calendar"></div>
                 <div id="calendarLoading" aria-live="polite" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; border-radius:16px; background:rgba(255,255,255,0.85); z-index:200;">
@@ -107,6 +107,7 @@
     --gray-700: #374151;
     --gray-900: #111827;
     --cc-wave-duration: 14s;
+    --cc-page-gutter: 16px;
 }
 
 #calendar {
@@ -238,6 +239,9 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
     font-size: 13px;
 }
 .unavailable-checkbox {
+    position: relative;
+    top: 6px;
+    left: 6px;
     width: 18px;
     height: 18px;
 }
@@ -371,11 +375,155 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
 @keyframes modalSlideUp { from { transform: translateY(12px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
 
 @media (max-width: 768px) {
-    #calendar { padding: 12px; }
+    /* Page/container gutters (match calendar.html mobile feel) */
+    /* Make the page container full-width so child cards can reach ~95vw */
+    .cc-page {
+        max-width: none !important;
+        width: 100% !important;
+        padding: 16px 0 !important;
+    }
+
+    /* Stack demo cards vertically and keep them centered/full-width */
+    .cc-demo-layout {
+        flex-direction: column !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 16px !important;
+    }
+    #defaultAvailabilityContainer,
+    .cc-demo-calendar-col {
+        min-width: 0 !important;
+        /* Match calendar.html look: centered card that nearly fills the screen */
+        max-width: 95vw !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    #defaultAvailabilityContainer { padding: 16px !important; }
+    #calendar { padding: 12px !important; }
+
     .fc .fc-view-harness { margin-top: 80px; }
-    .fc-daygrid-day-number { width: 40px; height: 40px; font-size: 1.1rem; }
+
+    /* Day circles: match calendar.html sizing */
+    .fc-daygrid-day-number { width: 36px !important; height: 36px !important; font-size: 14px !important; }
+    .fc-daygrid-day-number.past-day,
+    .fc-daygrid-day-number.unavailable-number,
+    .fc .fc-day-today .fc-daygrid-day-number {
+        width: 36px !important;
+        height: 36px !important;
+        line-height: 32px !important;
+        font-size: 14px !important;
+    }
+
+    /* Nav buttons: square + centered icon (same approach as calendar.html) */
+    .fc .fc-prev-button,
+    .fc .fc-next-button {
+        width: 34px !important;
+        height: 34px !important;
+        padding: 0 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    .fc .fc-button { line-height: 0 !important; }
+    .fc .fc-button .fc-icon { width: 14px; height: 14px; display: block; margin: 0; }
+
     .time-circle { width: 56px !important; height: 56px !important; font-size: 12px !important; }
-    #defaultAvailabilityContainer { min-width: unset !important; }
+
+    /* Default Weekly Availability (demo): match calendar.html mobile behavior */
+    #defaultAvailabilityContainer {
+        text-align: left !important;
+        padding-left: 16px !important;
+        padding-right: 16px !important;
+        box-sizing: border-box !important;
+        font-size: 12px !important;
+    }
+    #defaultAvailabilityContainer h3 {
+        font-size: 14px !important;
+        margin-bottom: 10px !important;
+        text-align: left !important;
+    }
+    #defaultAvailabilityContainer table th,
+    #defaultAvailabilityContainer table td {
+        font-size: 10px !important;
+        padding: 6px 6px !important;
+        vertical-align: middle !important;
+    }
+    #defaultAvailabilityContainer tbody td:first-child {
+        font-size: 10px !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+        white-space: nowrap !important;
+    }
+    #defaultAvailabilityContainer .range-row {
+        gap: 6px !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        flex-wrap: nowrap !important;
+    }
+    #defaultAvailabilityContainer .range-start,
+    #defaultAvailabilityContainer .range-end {
+        padding: 2px !important;
+        font-size: 11px !important;
+        border-radius: 6px !important;
+        min-width: 0 !important;
+        width: 86px !important;
+        box-sizing: border-box !important;
+    }
+    #defaultAvailabilityContainer .add-range-btn {
+        padding: 3px 6px !important;
+        font-size: 10px !important;
+        border-radius: 6px !important;
+        min-height: 26px !important;
+        line-height: 1 !important;
+    }
+    #defaultAvailabilityContainer .remove-range-btn {
+        font-size: 10px !important;
+        border-radius: 4px !important;
+        height: 24px !important;
+        line-height: 24px !important;
+        min-width: 32px !important;
+    }
+    #defaultAvailabilityContainer .unavailable-checkbox {
+        top: 3px !important;
+        left: 3px !important;
+        width: 14px !important;
+        height: 14px !important;
+    }
+    #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 240px !important; }
+    #saveDefaultAvailabilityBtn { width: 100% !important; }
+}
+
+/* Extra compact adjustments for very small phones (narrow portrait devices) */
+@media (max-width: 420px) {
+    #defaultAvailabilityContainer .range-row { gap: 4px !important; }
+    #defaultAvailabilityContainer .range-start,
+    #defaultAvailabilityContainer .range-end {
+        width: 68px !important;
+        padding: 2px !important;
+        font-size: 7.5px !important;
+    }
+    #defaultAvailabilityContainer .add-range-btn {
+        font-size: 9px !important;
+        min-height: 18px !important;
+        line-height: 1 !important;
+    }
+    #defaultAvailabilityContainer .remove-range-btn {
+        font-size: 9px !important;
+        height: 15px !important;
+        line-height: 20px !important;
+        border-radius: 6px !important;
+        gap: 6px !important;
+        min-width: 24px !important;
+        justify-content: center !important;
+    }
+    #defaultAvailabilityContainer .unavailable-checkbox {
+        width: 12px !important;
+        height: 12px !important;
+        top: 2px !important;
+        left: 2px !important;
+    }
+    #defaultAvailabilityContainer .time-input-container .custom-time-picker { max-width: 200px !important; }
 }
 </style>
 
