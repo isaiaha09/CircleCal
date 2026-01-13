@@ -67,6 +67,20 @@
       align-items: stretch;
       gap: 10px;
     }
+
+    /* Mobile-only: swap Cancel and View public page positions (above title). */
+    .cc-page .svc-actionbar > a {
+      order: 2;
+    }
+    .cc-page .svc-actionbar .svc-actionbar-actions {
+      order: 1;
+    }
+    .cc-page .svc-actionbar #svc-view-btn {
+      order: 0;
+    }
+    .cc-page .svc-actionbar .svc-save-btn {
+      order: 1;
+    }
     .cc-page .svc-save-btn,
     .cc-page #svc-view-btn,
     .cc-page #svc-view-btn-bottom {
@@ -667,39 +681,7 @@
     {% endif %}
 
 
-    <!-- Slot increment settings are configured in the Day Schedule modal (calendar). Removed from edit page to avoid duplication. -->
-    <!-- Per-service slot settings (single, cleaned block) -->
-    <div class="section-card">
-      <div class="grid grid-cols-1 gap-3">
-        <div>
-          <label class="block text-sm font-medium text-gray-700">Client slot increment (minutes)</label>
-          <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="{{ service.time_increment_minutes|default:30 }}" min="5" class="cc-field mt-1 w-40">
-          <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
-        </div>
-        <div>
-          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
-            <label class="inline-flex items-center">
-              <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" {% if service.use_fixed_increment %}checked{% endif %}
-                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
-              <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
-            </label>
-            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
-          </div>
-          <p class="mt-1 text-xs text-gray-500">When enabled, clients will only see anchors spaced by the service duration plus cleanup buffer.</p>
-        </div>
-        <div>
-          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
-            <label class="inline-flex items-center">
-              <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" {% if service.allow_squished_bookings %}checked{% endif %}
-                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
-              <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
-            </label>
-            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
-          </div>
-          <p class="mt-1 text-xs text-gray-500">When enabled, the system will allow bookings that fit the service duration even if they don't satisfy the configured buffers. Owners will receive a notification when such bookings occur.</p>
-        </div>
-      </div>
-    </div>
+    <!-- Client slot settings moved into the Timing section below (keeps related settings together). -->
 
     <!-- Facility resources (cages/rooms/etc) -->
     <div class="section-card">
@@ -975,8 +957,10 @@
       });
       </script>
 
-    <!-- Group core timing settings into a clear section -->
+    <!-- Group timing + client slot settings into a clear section -->
     <div class="section-card">
+      <div class="text-base font-semibold text-center" style="color: var(--gray-900); margin-bottom: 14px;">Client Slot Settings and Price of Appointment</div>
+
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium text-gray-700">Duration</label>
@@ -985,9 +969,31 @@
             <span class="text-sm text-gray-600">Hours</span>
             <input id="duration_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes">
             <span class="text-sm text-gray-600">Minutes</span>
-        </div>
+          </div>
           <input type="hidden" name="duration" id="duration_hidden" value="{{ service.duration }}">
           <p class="mt-1 text-xs text-gray-500">Enter Hours and Minutes; they will be saved as total minutes.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Client slot increment (minutes)</label>
+          <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="{{ service.time_increment_minutes|default:30 }}" min="5" class="cc-field mt-1 w-full">
+          <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 mt-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Buffer Time Post Service Appointment</label>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+            <div class="mt-1 flex items-center gap-2">
+              <input id="buffer_hours" type="number" min="0" class="cc-field w-24" placeholder="Hours" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="text-sm text-gray-600">Hours</span>
+              <input id="buffer_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="text-sm text-gray-600">Minutes</span>
+            </div>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
+          <input type="hidden" name="buffer_after" id="buffer_hidden" value="{% if can_use_pro_team %}{{ service.buffer_after }}{% else %}0{% endif %}">
+          <p class="mt-1 text-xs text-gray-500">Enter buffer time after appointment; saved as total minutes.</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
@@ -996,21 +1002,31 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-4 mt-4">
-         <div>
-           <label class="block text-sm font-medium text-gray-700">Buffer Time Post Service Appointment</label>
-           <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
-             <div class="mt-1 flex items-center gap-2">
-                 <input id="buffer_hours" type="number" min="0" class="cc-field w-24" placeholder="Hours" {% if not can_use_pro_team %}disabled{% endif %}>
-               <span class="text-sm text-gray-600">Hours</span>
-                 <input id="buffer_minutes" type="number" min="0" max="59" class="cc-field w-24" placeholder="Minutes" {% if not can_use_pro_team %}disabled{% endif %}>
-               <span class="text-sm text-gray-600">Minutes</span>
-             </div>
-             {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
-           </div>
-           <input type="hidden" name="buffer_after" id="buffer_hidden" value="{% if can_use_pro_team %}{{ service.buffer_after }}{% else %}0{% endif %}">
-           <p class="mt-1 text-xs text-gray-500">Enter buffer time after appointment; saved as total minutes.</p>
-         </div>
+      <div class="grid grid-cols-1 gap-3 mt-4">
+        <div>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+            <label class="inline-flex items-center">
+              <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" {% if service.use_fixed_increment %}checked{% endif %}
+                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
+            </label>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
+          <p class="mt-1 text-xs text-gray-500">When enabled, clients will only see anchors spaced by the service duration plus cleanup buffer.</p>
+        </div>
+
+        <div>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
+            <label class="inline-flex items-center">
+              <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" {% if service.allow_squished_bookings %}checked{% endif %}
+                     class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+              <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
+            </label>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
+          <p class="mt-1 text-xs text-gray-500">When enabled, the system will allow bookings that fit the service duration even if they don't satisfy the configured buffers. Owners will receive a notification when such bookings occur.</p>
+        </div>
+
         <div>
           <label class="block text-sm font-medium text-gray-700">Allow appointment to end after availability?</label>
           <div class="mt-2">
@@ -1019,7 +1035,7 @@
                 <!-- hidden fallback ensures a value is always posted even when unchecked -->
                 <input type="hidden" name="allow_ends_after_availability" value="0">
                 <input type="checkbox" name="allow_ends_after_availability" value="1" {% if service.allow_ends_after_availability %}checked{% endif %}
-                         class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
                 <span class="ml-2 text-sm text-gray-700">Allow clients to book slots that start before the availability end even if they finish after it.</span>
               </label>
               {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}

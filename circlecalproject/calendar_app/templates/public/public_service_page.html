@@ -1556,7 +1556,11 @@ document.addEventListener("DOMContentLoaded", async function () {
         const v = selected ? String(selected.value || '').toLowerCase() : '';
         if (_isOfflineChoice(v)){
           if (v === 'venmo' || v === 'zelle'){
-            alert('This payment method must be paid prior to your appointment.\n\nPlease scan the QR code to pay now. If you prefer paying later, the QR code is included in your confirmation email.');
+            try {
+              const msg = 'This payment method must be paid prior to your appointment. Please scan the QR code to pay now. If you prefer paying later, the QR code is included in your confirmation email.';
+              if (typeof showToast === 'function') showToast('warning', msg, 0);
+              else alert(msg);
+            } catch (e) {}
           } else if (v === 'cash'){
             alert('Cash payments are handled directly with the business. Please bring cash to your appointment as required by the business owner.');
           }

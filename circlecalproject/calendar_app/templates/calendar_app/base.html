@@ -492,11 +492,23 @@
                     container.appendChild(el);
                     // animate in
                     requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'translateY(0)'; });
-                    const to = setTimeout(() => {
-                        try { el.style.opacity = '0'; el.style.transform = 'translateY(-6px)'; setTimeout(() => { try { el.remove(); } catch(e){} }, 220); } catch(e){}
-                    }, timeout);
-                    // dismiss on click of body also
-                    el.addEventListener('click', () => { clearTimeout(to); try { el.style.opacity = '0'; setTimeout(() => { el.remove(); }, 220); } catch(e){} });
+
+                    const ms = Number(timeout);
+                    const shouldAutoDismiss = Number.isFinite(ms) && ms > 0;
+                    let to = null;
+
+                    if (shouldAutoDismiss) {
+                        to = setTimeout(() => {
+                            try { el.style.opacity = '0'; el.style.transform = 'translateY(-6px)'; setTimeout(() => { try { el.remove(); } catch(e){} }, 220); } catch(e){}
+                        }, ms);
+                        // dismiss on click of body also
+                        el.addEventListener('click', () => {
+                            try { if (to) clearTimeout(to); } catch(e){}
+                            try { el.style.opacity = '0'; setTimeout(() => { el.remove(); }, 220); } catch(e){}
+                        });
+                    }
+
+                    // When timeout <= 0, toast stays until X is clicked.
                     return el;
                 } catch (e) { console.error('showToast failed', e); }
             }
