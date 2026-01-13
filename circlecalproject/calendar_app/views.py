@@ -1573,6 +1573,38 @@ def _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, proposed_clea
 
     weekday_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+    def _fmt_time_ampm(v):
+        """Best-effort: convert 'HH:MM' or time-like to 'H:MM AM/PM'."""
+        if v is None:
+            return ''
+        try:
+            # datetime.time or similar
+            if hasattr(v, 'hour') and hasattr(v, 'minute'):
+                hh = int(getattr(v, 'hour'))
+                mm = int(getattr(v, 'minute'))
+            else:
+                s = str(v).strip()
+                if ':' not in s:
+                    return s
+                hh_s, mm_s = s.split(':', 1)
+                if not hh_s.strip().isdigit():
+                    return s
+                hh = int(hh_s.strip())
+                mm_s = mm_s.strip()
+                mm2 = mm_s[:2]
+                if len(mm2) != 2 or not mm2.isdigit():
+                    return s
+                mm = int(mm2)
+
+            if not (0 <= hh <= 23) or not (0 <= mm <= 59):
+                return str(v)
+
+            suffix = 'PM' if hh >= 12 else 'AM'
+            hh12 = (hh % 12) or 12
+            return f"{hh12}:{mm:02d} {suffix}"
+        except Exception:
+            return str(v)
+
     def _within_any(sm, em, allowed_list):
         for a_s, a_e in (allowed_list or []):
             if a_s <= sm and em <= a_e:
@@ -1593,9 +1625,11 @@ def _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, proposed_clea
         if not _within_any(int(sm), int(em), allowed_model.get(wdi, [])):
             prefix = (str(err_prefix).strip() + ' ') if err_prefix else ''
             day = weekday_names[wdi] if 0 <= wdi <= 6 else f"weekday {wdi}"
+            start_s = _fmt_time_ampm(start) or str(start)
+            end_s = _fmt_time_ampm(end) or str(end)
             raise ValueError(
                 f"{prefix}Service availability must be within the allowed time for all assigned members "
-                f"(including time reserved by their other services). Offending window: {day} {start}-{end}."
+                f"(including time reserved by their other services). Offending window: {day} {start_s} - {end_s}."
             )
 
 

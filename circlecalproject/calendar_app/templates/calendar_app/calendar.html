@@ -1518,6 +1518,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     /* Title adjustments */
     .calendar-title {
         font-size: 24px !important;
+        margin-top: 20px !important;
+    }
+
+    /* Per-date overrides header: shrink title text on mobile (overrides inline styles) */
+    #overridesHeader {
+        font-size: 15px !important;
+        line-height: 1.25 !important;
     }
     /* Remove extra top offset on mobile since controls are not overlaid */
     .fc .fc-view-harness { margin-top: 0 !important; }
