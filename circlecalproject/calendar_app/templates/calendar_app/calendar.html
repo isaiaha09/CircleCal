@@ -4248,12 +4248,27 @@ document.addEventListener('DOMContentLoaded', function() {
             const hint = _availabilitySaveHint(message);
             const safeMsg = String(message || '').trim();
 
+            // If the banner is shown repeatedly, avoid stacking multiple timers.
+            try {
+                if (window.__ccAvailabilitySaveBannerTimer) {
+                    clearTimeout(window.__ccAvailabilitySaveBannerTimer);
+                    window.__ccAvailabilitySaveBannerTimer = null;
+                }
+            } catch (e) {}
+
             el.style.display = 'block';
             if (kind === 'success') {
                 el.style.border = '1px solid #86efac';
                 el.style.background = '#ecfdf5';
                 el.style.color = '#065f46';
                 el.innerHTML = `<div style="font-weight:700">Saved</div><div style="margin-top:2px">${safeMsg || 'Weekly availability saved.'}</div>`;
+
+                // Auto-dismiss success after 5 seconds.
+                try {
+                    window.__ccAvailabilitySaveBannerTimer = setTimeout(() => {
+                        try { _clearAvailabilitySaveBanner(); } catch (e) {}
+                    }, 5000);
+                } catch (e) {}
             } else {
                 el.style.border = '1px solid #fecaca';
                 el.style.background = '#fef2f2';
@@ -4766,9 +4781,18 @@ document.addEventListener('DOMContentLoaded', function() {
                         });
                     } catch (e) { console.warn('Failed to update local defaults after save', e); }
 
+                    // If we're in service scope, month "day circles" are driven by a cached
+                    // backend-computed parity map. Weekly default changes must invalidate that
+                    // cache so the current month updates immediately without a hard refresh.
+                    try { if (typeof _invalidateServiceScopeParityCache === 'function') _invalidateServiceScopeParityCache(); } catch (e) {}
+
                     // Re-render inputs and calendar backgrounds immediately
                     try { displayDefaultAvailability(); } catch (e) { console.warn('displayDefaultAvailability failed', e); }
-                    try { syncAvailabilityToCalendar(); } catch (e) { console.warn('syncAvailabilityToCalendar failed', e); }
+                    // Prefer the immediate sync (non-debounced) on save so changes paint instantly.
+                    try {
+                        if (typeof syncAvailabilityToCalendarImmediate === 'function') syncAvailabilityToCalendarImmediate();
+                        else syncAvailabilityToCalendar();
+                    } catch (e) { console.warn('syncAvailabilityToCalendar failed', e); }
                     try { updateUnavailableDays(); } catch (e) { console.warn('updateUnavailableDays failed', e); }
                     // Also refetch server events to pick up any server-side overrides
                     try { calendar.refetchEvents(); } catch (e) { /* ignore */ }
@@ -6974,6 +6998,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         }
+
+        // Keep a non-debounced version available for save-success flows.
+        // (The debounced version is great for typing/rapid interactions, but
+        // can make a successful save feel like it "didn't apply" immediately.)
+        const syncAvailabilityToCalendarImmediate = syncAvailabilityToCalendar;
 
         // Debounce sync to avoid expensive repeated recalculations on rapid events
         function debounce(fn, wait) {
