@@ -92,14 +92,21 @@
                             </ul>
 
                             <div>
-                                {% if request.user.is_authenticated %}
-                                    <a href="{% url 'calendar_app:choose_business' %}?plan_id={{ plan.id }}"
+                                {% if current_plan and current_plan.slug == plan.slug %}
+                                    <button type="button" disabled aria-disabled="true"
+                                        class="block w-full text-center {% if plan.slug == 'pro' %}bg-blue-600{% elif plan.slug == 'team' %}bg-green-600{% else %}bg-gray-700{% endif %} text-white font-semibold px-6 py-3 rounded-lg opacity-60 cursor-not-allowed">
+                                        Current Plan
+                                    </button>
                                 {% else %}
-                                    <a href="{% url 'calendar_app:plan_detail' plan.slug %}"
+                                    {% if request.user.is_authenticated %}
+                                        <a href="{% url 'calendar_app:choose_business' %}?plan_id={{ plan.id }}"
+                                    {% else %}
+                                        <a href="{% url 'calendar_app:plan_detail' plan.slug %}"
+                                    {% endif %}
+                                       class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
+                                        {% if request.user.is_authenticated %}Select plan{% else %}See details{% endif %}
+                                    </a>
                                 {% endif %}
-                                   class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
-                                    {% if request.user.is_authenticated %}Select plan{% else %}See details{% endif %}
-                                </a>
                             </div>
                         </div>
                     </div>

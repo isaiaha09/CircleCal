@@ -1,10 +1,11 @@
 {% extends "calendar_app/base.html" %}
 {% block title %}Terms of Service{% endblock %}
 
-{% block main_class %}max-w-4xl mx-auto px-4 py-8 md:px-6 md:py-10{% endblock %}
+{# Mobile-only: break out of base <main> constraints; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-4xl sm:mx-auto sm:px-4 sm:py-8 md:px-6 md:py-10{% endblock %}
 
 {% block content %}
-<div class="bg-white border rounded-lg shadow-sm p-6 md:p-8 text-left">
+<div class="w-[95vw] mx-auto mt-8 bg-white border rounded-lg shadow-sm p-6 md:p-8 text-left sm:w-full sm:mt-0">
     <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-2">Terms of Service</h1>
     <p class="text-sm text-gray-600 mb-6">Effective date: December 25, 2025</p>
 

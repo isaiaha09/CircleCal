@@ -10,6 +10,126 @@ from zoneinfo import ZoneInfo
 from django.core.signing import TimestampSigner
 from django.urls import reverse
 from bookings.models import build_offline_payment_instructions, filter_offline_payment_instructions_for_method
+
+
+def _dedupe_emails(emails):
+    """Return a stable, de-duped list of non-empty emails."""
+    seen = set()
+    out = []
+    for e in (emails or []):
+        try:
+            e = (e or '').strip()
+        except Exception:
+            e = ''
+        if not e:
+            continue
+        key = e.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
+
+
+def _booking_internal_recipients(booking):
+    """Compute internal notification recipients for a booking.
+
+    Rules:
+    - Always include org owner (if email exists)
+    - Always include org managers (Membership.role == 'manager')
+    - If service has any assignments, include all assigned members' emails
+    - Also include booking.assigned_user email if present
+
+    For unassigned services, only owner+managers receive internal notifications.
+    """
+    org = getattr(booking, 'organization', None)
+    service = getattr(booking, 'service', None)
+
+    base = []
+    try:
+        owner = getattr(org, 'owner', None)
+        if owner and getattr(owner, 'email', None):
+            base.append(owner.email)
+    except Exception:
+        pass
+
+    # Managers in this organization
+    try:
+        from accounts.models import Membership
+        mgrs = (
+            Membership.objects
+            .filter(organization=org, is_active=True, role='manager')
+            .select_related('user')
+            .values_list('user__email', flat=True)
+        )
+        base.extend(list(mgrs))
+    except Exception:
+        pass
+
+    assigned = []
+    try:
+        u = getattr(booking, 'assigned_user', None)
+        if u and getattr(u, 'email', None):
+            assigned.append(u.email)
+    except Exception:
+        pass
+
+    # Service assignments (team members assigned to the service)
+    has_assignments = False
+    try:
+        if service is not None:
+            from bookings.models import ServiceAssignment
+            rows = (
+                ServiceAssignment.objects
+                .filter(service=service)
+                .select_related('membership__user')
+                .values_list('membership__user__email', flat=True)
+            )
+            rows_list = [e for e in list(rows) if e]
+            if rows_list:
+                has_assignments = True
+                assigned.extend(rows_list)
+    except Exception:
+        # Table might not exist if migrations haven't been applied.
+        has_assignments = False
+
+    recipients = list(base)
+    if has_assignments:
+        recipients.extend(assigned)
+
+    recipients = _dedupe_emails(recipients)
+    # Never send internal notifications to the client email by accident.
+    try:
+        client_email = (getattr(booking, 'client_email', '') or '').strip()
+        if client_email:
+            recipients = [e for e in recipients if e.lower() != client_email.lower()]
+    except Exception:
+        pass
+    return recipients
+
+
+def _send_html_email(subject: str, html_content: str, to_emails, booking_id=None, fail_silently=False):
+    """Send a single HTML email using Django EmailMessage.
+
+    Uses BCC to avoid leaking recipient lists to each other.
+    """
+    to_emails = _dedupe_emails(to_emails)
+    if not to_emails:
+        return 0
+    from_email = settings.DEFAULT_FROM_EMAIL
+    msg = EmailMessage(subject, html_content, from_email, [from_email], bcc=to_emails)
+    msg.content_subtype = 'html'
+    try:
+        if booking_id is not None:
+            msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking_id)}
+    except Exception:
+        pass
+    try:
+        return msg.send(fail_silently=fail_silently)
+    except Exception:
+        if fail_silently:
+            return 0
+        raise
 def _extract_offline_line_for_method(raw: str, method: str) -> str:
     """Extract the line for a given offline method (venmo/zelle) from instructions."""
     try:
@@ -294,6 +414,42 @@ def send_booking_cancellation(booking, refund_info=None):
         return False
 
 
+def send_internal_booking_cancellation_notification(booking, refund_info=None):
+    """Send booking cancellation notification to internal recipients.
+
+    Recipients depend on whether the service is assigned (see _booking_internal_recipients).
+    Uses the same HTML template/styling as the client cancellation email.
+    """
+    recipients = _booking_internal_recipients(booking)
+    if not recipients:
+        return False
+
+    signer = TimestampSigner()
+    token = signer.sign(str(booking.id))
+    reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
+    base_url = getattr(settings, 'SITE_URL', 'http://localhost:8000')
+    reschedule_url = f"{base_url}{reschedule_path}?token={token}"
+
+    context = {
+        'booking': booking,
+        'public_ref': getattr(booking, 'public_ref', None),
+        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'refund_info': refund_info,
+        'reschedule_url': reschedule_url,
+    }
+
+    logger = logging.getLogger(__name__)
+    subject = f"Booking Cancelled - {booking.organization.name}"
+    html_content = render_to_string('bookings/emails/booking_cancellation.html', context)
+    try:
+        logger.info('Sending INTERNAL booking cancellation for booking=%s to=%s', getattr(booking, 'id', None), recipients)
+        _send_html_email(subject, html_content, recipients, booking_id=getattr(booking, 'id', None), fail_silently=True)
+        return True
+    except Exception:
+        logger.exception('Failed to send INTERNAL booking cancellation for booking=%s', getattr(booking, 'id', None))
+        return False
+
+
 def send_booking_reminder(booking):
     """Send booking reminder email to client (typically 24h before)."""
     if not booking.client_email:
@@ -325,10 +481,40 @@ def send_booking_reminder(booking):
         logger.exception('Failed to send booking reminder for booking=%s to=%s', booking.id, booking.client_email)
         return False
 
+
+def send_internal_booking_reminder_notification(booking):
+    """Send booking reminder notification to internal recipients.
+
+    Uses the same HTML template/styling as the client reminder email.
+    """
+    recipients = _booking_internal_recipients(booking)
+    if not recipients:
+        return False
+    context = {
+        'booking': booking,
+        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+    }
+    logger = logging.getLogger(__name__)
+    subject = f"Reminder: Upcoming Booking - {booking.organization.name}"
+    html_content = render_to_string('bookings/emails/booking_reminder.html', context)
+    try:
+        logger.info('Sending INTERNAL booking reminder for booking=%s to=%s', getattr(booking, 'id', None), recipients)
+        _send_html_email(subject, html_content, recipients, booking_id=getattr(booking, 'id', None), fail_silently=True)
+        return True
+    except Exception:
+        logger.exception('Failed to send INTERNAL booking reminder for booking=%s', getattr(booking, 'id', None))
+        return False
+
 def send_owner_booking_notification(booking):
-    """Send a styled HTML notification to the business owner for a new booking."""
+    """Send a styled HTML notification to internal recipients for a new booking.
+
+    Recipient rules:
+    - If service has NO assignments: owner + managers
+    - If service HAS assignments: assignees + managers + owner
+    """
     org = booking.organization
-    if not getattr(org, "owner", None) or not org.owner.email:
+    recipients = _booking_internal_recipients(booking)
+    if not recipients:
         return
 
     try:
@@ -394,18 +580,11 @@ def send_owner_booking_notification(booking):
     logger = logging.getLogger(__name__)
     html_content = render_to_string('bookings/emails/booking_owner_notification.html', context)
     from_email = settings.DEFAULT_FROM_EMAIL
-    recipient_list = [org.owner.email]
-    msg = EmailMessage(subject, html_content, from_email, recipient_list)
-    msg.content_subtype = "html"
     try:
-        msg.extra_headers = {**getattr(msg, 'extra_headers', {}), 'X-CircleCal-Booking-ID': str(booking.id)}
+        logger.info('Sending INTERNAL new-booking notification for booking=%s to=%s', booking.id, recipients)
+        _send_html_email(subject, html_content, recipients, booking_id=booking.id, fail_silently=True)
     except Exception:
-        pass
-    try:
-        logger.info('Sending owner notification for booking=%s to=%s', booking.id, org.owner.email)
-        msg.send(fail_silently=True)
-    except Exception:
-        logger.exception('Failed to send owner notification for booking=%s', booking.id)
+        logger.exception('Failed to send INTERNAL new-booking notification for booking=%s', booking.id)
 
 
 def send_booking_rescheduled(new_booking, old_booking_id=None):
@@ -535,6 +714,15 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
         logger.info('Sending booking rescheduled for booking=%s to=%s', booking.id, booking.client_email)
         sent = msg.send()
         logger.info('booking rescheduled send result for booking=%s sent=%s', booking.id, sent)
+        # Internal notification copy (same styling/template)
+        try:
+            recipients = _booking_internal_recipients(booking)
+            if recipients:
+                logger.info('Sending INTERNAL booking rescheduled for booking=%s to=%s', booking.id, recipients)
+                _send_html_email(subject, html_content, recipients, booking_id=booking.id, fail_silently=True)
+        except Exception:
+            logger.exception('Failed to send INTERNAL booking rescheduled for booking=%s', getattr(booking, 'id', None))
+
         return True
     except Exception:
         logger.exception('Failed to send booking rescheduled for booking=%s to=%s', booking.id, booking.client_email)

@@ -868,6 +868,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     font-size: 13px;
 }
 
+/* When a day is marked unavailable, Add range becomes disabled. Make it look disabled. */
+.add-range-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed !important;
+    filter: grayscale(1);
+}
+
 /* Removed mobile @media rules that targeted availability-specific classes so
    Default Weekly Availability keeps desktop baseline styles. */
 
@@ -1003,6 +1010,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
   font-weight: 600;
 }
 
+.time-option.disabled {
+    opacity: 0.35;
+    filter: grayscale(1);
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .time-picker-actions {
   display: flex;
   gap: 8px;
@@ -1054,6 +1068,91 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
   transition: background 0.15s ease;
 }
 
+/* Weekly editor constraint bar (service scope) */
+.cc-constraints-wrap {
+    display: none;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--gray-200);
+}
+.cc-constraints-bar {
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    border: 1px solid var(--gray-200);
+    background: rgba(243, 244, 246, 0.95);
+    overflow: hidden;
+}
+.cc-constraints-seg {
+    position: absolute;
+    top: 0;
+    height: 100%;
+}
+.cc-constraints-seg.member {
+    background: rgba(156, 163, 175, 0.6);
+}
+.cc-constraints-seg.other {
+    background: rgba(107, 114, 128, 0.7);
+}
+
+/* Service-scope explainer (client-facing mental model) */
+.cc-scope-explainer {
+    display: none;
+    margin: 10px 0 14px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    background: rgba(249, 250, 251, 0.95);
+}
+.cc-scope-explainer .title {
+    font-weight: 800;
+    font-size: 13px;
+    color: var(--gray-900);
+    margin-bottom: 4px;
+}
+.cc-scope-explainer .body {
+    font-size: 13px;
+    color: var(--gray-700);
+    line-height: 1.35;
+}
+.cc-scope-legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.cc-scope-legend .item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--gray-700);
+}
+.cc-scope-legend .swatch {
+    width: 18px;
+    height: 8px;
+    border-radius: 999px;
+    border: 1px solid var(--gray-200);
+}
+.cc-scope-legend .swatch.member { background: rgba(156, 163, 175, 0.6); }
+.cc-scope-legend .swatch.other { background: rgba(107, 114, 128, 0.7); }
+
+/* Fully blocked day (service scope): make row non-interactive */
+.cc-weekly-row-locked {
+    opacity: 0.55;
+}
+.cc-weekly-row-locked input,
+.cc-weekly-row-locked button {
+    pointer-events: none;
+}
+.cc-weekly-row-locked .add-range-btn,
+.cc-weekly-row-locked .remove-range-btn {
+    filter: grayscale(1);
+}
+.cc-weekly-row-locked td {
+    background: rgba(243, 244, 246, 0.55);
+}
+
 
 /* Per-date Overrides: enhanced card styling */
 #overridesContainer {
@@ -1077,6 +1176,12 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     pointer-events: none;
 }
 
+/* Quick attention flash when an override save is denied */
+.cc-overrides-flash {
+    outline: 3px solid rgba(239, 68, 68, 0.35);
+    outline-offset: 3px;
+}
+
 /* Pro/Team-only feature: when locked, keep visible but greyed out */
 .cc-overrides-disabled {
     opacity: 0.55;
@@ -1089,6 +1194,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     inset: 0;
     z-index: 60;
     background: transparent;
+    /* Default: do not block interaction when overrides are enabled */
+    display: none;
+    pointer-events: none;
+}
+.cc-overrides-disabled .cc-overrides-lock-overlay {
+    /* Locked state: capture clicks to show the upgrade prompt */
+    display: block;
     pointer-events: auto;
 }
 .cc-overrides-disabled button,
@@ -1180,6 +1292,33 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 }
 #overridesTable button.overrides-btn:active {
     transform: translateY(0);
+}
+
+/* Loading state for overrides buttons */
+#overridesTable button.overrides-btn.cc-btn-loading,
+#resetAllOverridesBtn.cc-btn-loading {
+    opacity: 0.85;
+    cursor: wait;
+}
+.cc-inline-spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    border: 2px solid rgba(59, 130, 246, 0.25);
+    border-top-color: rgba(59, 130, 246, 0.95);
+    display: inline-block;
+    vertical-align: middle;
+    animation: cc-inline-spin 0.7s linear infinite;
+}
+@keyframes cc-inline-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+.cc-btn-loading-content {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
 }
 
 /* Fallback: if a button in overrides table has no inner text, show its data-label */
@@ -1622,6 +1761,12 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     {% if not can_use_overrides %}
         <div class="cc-overrides-lock-overlay" aria-hidden="true"></div>
     {% endif %}
+    <div id="cc-overrides-save-banner" role="status" aria-live="polite" style="display:none; margin:0 0 14px 0; padding:12px 12px; border-radius:12px; border:1px solid #fecaca; background:#fef2f2; color:#7f1d1d; font-size:14px; line-height:1.35;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+            <div id="cc-overrides-save-banner-body"></div>
+            <button type="button" id="cc-overrides-save-banner-close" onclick="try{window.ccDismissOverrideBanner&&window.ccDismissOverrideBanner();}catch(e){}" style="border:0; background:transparent; color:#7f1d1d; font-weight:700; cursor:pointer; padding:2px 6px; border-radius:8px;">×</button>
+        </div>
+    </div>
     <h3 id="overridesHeader" class="overrides-header" style="margin:0 0 20px 0; font-size:18px; font-weight:700; color:var(--gray-900);">
         <span class="overrides-base" style="font-weight:600;">Per-date Overrides for </span>
                 {% if is_team_plan %}
@@ -1653,7 +1798,12 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 <div id="weeklyCalendarRow" style="display:flex; gap:40px; align-items:stretch; flex-wrap:nowrap; margin-top:24px; width:100%;">
         <div id="defaultAvailabilityContainer" class="availability-ui" style="flex:1 1 540px; min-width:540px; margin-bottom:32px; padding:24px; background:white; border:none; border-radius:16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 10px 0;">
-                    <h3 style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <h3 id="cc-weekly-availability-title" style="margin:0; font-size:18px; font-weight:700; color:var(--gray-900);">Default Weekly Availability</h3>
+                        <div id="cc-weekly-availability-desc" style="display:none; font-size:13px; color:var(--gray-600); line-height:1.4; max-width:640px;">
+                            This is the staff member's overall weekly availability. Services that are assigned to this specific staff must fit within their overall weekly availability.
+                        </div>
+                    </div>
                     <a id="cc-open-edit-service-from-calendar"
                        href="#"
                        style="display:none; padding:10px 12px; border-radius:10px; background:white; border:1px solid var(--primary-500); color:var(--primary-600); font-weight:700; cursor:pointer; text-decoration:none;">
@@ -1733,6 +1883,17 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
                         Tip: When you select a service scope, this weekly schedule is interchangeable with that service’s availability on the Edit Service page.
                     </div>
                 {% endif %}
+
+                <div id="ccServiceScopeExplainer" class="cc-scope-explainer" role="note" aria-live="polite">
+                    <div class="title" id="ccServiceScopeExplainerTitle">Client-facing availability</div>
+                    <div class="body" id="ccServiceScopeExplainerBody">
+                        Select a service to preview what clients can actually book.
+                    </div>
+                    <div class="cc-scope-legend">
+                        <span class="item"><span class="swatch member"></span>Outside member availability</span>
+                        <span class="item"><span class="swatch other"></span>Reserved by other services</span>
+                    </div>
+                </div>
     <table style="width:100%; border-collapse:collapse;">
         <thead>
         <tr style="border-bottom:2px solid var(--gray-200); background:var(--gray-50);">
@@ -1744,8 +1905,8 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         <tbody id="defaultAvailabilityTable"></tbody>
     </table>
     <button id="saveDefaultAvailabilityBtn" 
-            style="margin-top:20px; padding:12px 24px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-        Save Defaults
+            style="display:none; margin-top:20px; padding:12px 24px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+        Save Changes
     </button>
     </div>
 
@@ -3043,6 +3204,102 @@ document.addEventListener('DOMContentLoaded', function() {
         const isStart = inputElement.classList.contains('modal-range-start') || inputElement.classList.contains('range-start');
         const headerText = isStart ? 'Start Time' : 'End Time';
 
+        function _ccGetAllowedIntervalsForInput(el){
+            try {
+                // Only constrain weekly editor rows for service scope selections.
+                const dayIdx = parseInt(String(el?.dataset?.day ?? ''), 10);
+                if (isNaN(dayIdx)) return null;
+                const c = window.__ccWeeklyServiceConstraints || null;
+                if (!c || !c.days || !c.days[dayIdx]) return null;
+                const d = c.days[dayIdx];
+                // Remaining = memberAllowed minus otherBlocked (mixed signature).
+                if (!d || !Array.isArray(d.remaining)) return null;
+                return d.remaining.slice();
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _ccMinutesFromHHMM(v){
+            try { return _minutesFromTimeStr(String(v || '00:00')); } catch (e) { return null; }
+        }
+
+        function _ccIsMinuteAllowed(min){
+            try {
+                if (min === null || min === undefined || isNaN(min)) return false;
+
+                const allowed = _ccGetAllowedIntervalsForInput(inputElement);
+                if (allowed === null) return true; // unconstrained
+                if (!allowed.length) return false;
+
+                // Also respect the other bound in the current row, if present.
+                const row = inputElement.closest('.range-row, .modal-range-row');
+                const startEl = row ? row.querySelector('.range-start, .modal-range-start') : null;
+                const endEl = row ? row.querySelector('.range-end, .modal-range-end') : null;
+                const startMin = startEl ? _ccMinutesFromHHMM(startEl.value) : null;
+                const endMin = endEl ? _ccMinutesFromHHMM(endEl.value) : null;
+
+                // Determine membership in allowed intervals.
+                const inAllowed = allowed.some(r => {
+                    try {
+                        const s = parseInt(r.start, 10);
+                        const e = parseInt(r.end, 10);
+                        if (isNaN(s) || isNaN(e)) return false;
+                        // Start: [s, e)
+                        // End: (s, e]
+                        if (isStart) return (s <= min) && (min < e);
+                        return (s < min) && (min <= e);
+                    } catch (e) {
+                        return false;
+                    }
+                });
+                if (!inAllowed) return false;
+
+                // Enforce start < end within row.
+                if (isStart && endMin !== null && !isNaN(endMin)) {
+                    if (!(min < endMin)) return false;
+                }
+                if (!isStart && startMin !== null && !isNaN(startMin)) {
+                    if (!(min > startMin)) return false;
+                }
+
+                return true;
+            } catch (e) {
+                return true;
+            }
+        }
+
+        function _ccFirstAllowedMinuteForHour(hour){
+            try {
+                const h = parseInt(hour, 10);
+                if (isNaN(h)) return null;
+                const base = h * 60;
+                for (let m = 0; m < 60; m++){
+                    const min = base + m;
+                    if (_ccIsMinuteAllowed(min)) return min;
+                }
+            } catch (e) {}
+            return null;
+        }
+
+        function _ccSnapToAllowed(hh, mm){
+            try {
+                const h = parseInt(hh, 10);
+                const m = parseInt(mm, 10);
+                if (isNaN(h) || isNaN(m)) return null;
+                const cur = h*60 + m;
+                if (_ccIsMinuteAllowed(cur)) return cur;
+                // Try first allowed in this hour
+                const firstInHour = _ccFirstAllowedMinuteForHour(h);
+                if (firstInHour !== null) return firstInHour;
+                // Otherwise, scan forward for the next allowed minute in the day.
+                for (let t = 0; t < 24*60; t++){
+                    if (_ccIsMinuteAllowed(t)) return t;
+                }
+            } catch (e) {}
+            return null;
+        }
+
         picker.innerHTML = `
             <div class="time-picker-header">${headerText}</div>
             <div class="time-picker-display">${formatDisplayTime(selectedHour, selectedMinute)}</div>
@@ -3067,13 +3324,26 @@ document.addEventListener('DOMContentLoaded', function() {
             const hourStr = String(h).padStart(2, '0');
             const opt = document.createElement('div');
             opt.className = 'time-option';
+            // Disable hours that have no valid minutes under constraints.
+            try {
+                if (_ccFirstAllowedMinuteForHour(h) === null) opt.classList.add('disabled');
+            } catch (e) {}
             if (hourStr === selectedHour) opt.classList.add('selected');
             opt.textContent = formatHour(h);
             opt.addEventListener('click', () => {
                 hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 selectedHour = hourStr;
+                // If current minute is no longer allowed, snap to first allowed minute in this hour.
+                try {
+                    const snapped = _ccSnapToAllowed(selectedHour, selectedMinute);
+                    if (snapped !== null) {
+                        selectedHour = String(Math.floor(snapped / 60)).padStart(2, '0');
+                        selectedMinute = String(snapped % 60).padStart(2, '0');
+                    }
+                } catch (e) {}
                 updateDisplay();
+                try { syncMinuteOptions(); } catch (e) {}
                 opt.scrollIntoView({ behavior: 'smooth', block: 'center' });
             });
             hourContainer.appendChild(opt);
@@ -3094,6 +3364,53 @@ document.addEventListener('DOMContentLoaded', function() {
                 opt.scrollIntoView({ behavior: 'smooth', block: 'center' });
             });
             minuteContainer.appendChild(opt);
+        }
+
+        function syncMinuteOptions(){
+            try {
+                const h = parseInt(selectedHour, 10);
+                const opts = Array.from(minuteContainer.querySelectorAll('.time-option'));
+                let hasSelected = false;
+                for (const o of opts){
+                    const mm = parseInt(o.textContent, 10);
+                    const min = (isNaN(h) || isNaN(mm)) ? null : (h*60 + mm);
+                    const ok = _ccIsMinuteAllowed(min);
+                    o.classList.toggle('disabled', !ok);
+                    if (ok && o.classList.contains('selected')) hasSelected = true;
+                }
+                if (!hasSelected){
+                    const snap = _ccFirstAllowedMinuteForHour(h);
+                    if (snap !== null) {
+                        selectedHour = String(Math.floor(snap / 60)).padStart(2, '0');
+                        selectedMinute = String(snap % 60).padStart(2, '0');
+                        // Update selections
+                        hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                        hourContainer.querySelectorAll('.time-option').forEach(o => {
+                            if (String(o.textContent || '').includes(formatHour(parseInt(selectedHour,10)).split(' ')[0])) {
+                                // no-op: we'll set selected by hourStr match below
+                            }
+                        });
+                        hourContainer.querySelectorAll('.time-option').forEach(o => {
+                            // hour options store hourStr, but only via closure; re-select by index
+                        });
+                        const hourIdx = parseInt(selectedHour, 10);
+                        const hourOpt = hourContainer.querySelectorAll('.time-option')[hourIdx];
+                        if (hourOpt) hourOpt.classList.add('selected');
+
+                        minuteContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                        const minuteOpt = minuteContainer.querySelectorAll('.time-option')[parseInt(selectedMinute,10)];
+                        if (minuteOpt) minuteOpt.classList.add('selected');
+                        updateDisplay();
+                        // Recompute disabled state for the now-selected hour
+                        for (const o of opts){
+                            const mm = parseInt(o.textContent, 10);
+                            const min = (isNaN(hourIdx) || isNaN(mm)) ? null : (hourIdx*60 + mm);
+                            const ok = _ccIsMinuteAllowed(min);
+                            o.classList.toggle('disabled', !ok);
+                        }
+                    }
+                }
+            } catch (e) { /* ignore */ }
         }
 
         function updateDisplay() {
@@ -3117,9 +3434,30 @@ document.addEventListener('DOMContentLoaded', function() {
             minuteContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' });
         }, 50);
 
+        // Apply constraints immediately (snap initial selection + disable invalid options)
+        try {
+            const snapped = _ccSnapToAllowed(selectedHour, selectedMinute);
+            if (snapped !== null) {
+                selectedHour = String(Math.floor(snapped / 60)).padStart(2, '0');
+                selectedMinute = String(snapped % 60).padStart(2, '0');
+                // Apply selection state
+                hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                const hourIdx = parseInt(selectedHour, 10);
+                const hourOpt = hourContainer.querySelectorAll('.time-option')[hourIdx];
+                if (hourOpt) hourOpt.classList.add('selected');
+                minuteContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                const minuteOpt = minuteContainer.querySelectorAll('.time-option')[parseInt(selectedMinute,10)];
+                if (minuteOpt) minuteOpt.classList.add('selected');
+                updateDisplay();
+            }
+            syncMinuteOptions();
+        } catch (e) {}
+
         picker.querySelector('.confirm').addEventListener('click', (e) => {
             e.stopPropagation();
             inputElement.value = `${selectedHour}:${selectedMinute}`;
+            try { inputElement.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) {}
+            try { inputElement.dispatchEvent(new Event('change', { bubbles: true })); } catch (err) {}
             picker.remove();
         });
         picker.querySelector('.cancel').addEventListener('click', (e) => {
@@ -3138,10 +3476,356 @@ document.addEventListener('DOMContentLoaded', function() {
         return picker;
     }
 
+    // Weekly availability save button: show only when there are unsaved changes.
+    // Baseline is tracked per current selection (member/service/org target).
+    const __ccWeeklyBaselineByTarget = {};
+    let __ccWeeklyIniting = false;
+
+    function __ccWeeklyTargetKey(){
+        try { return String((typeof ccOverrideTarget === 'function' ? ccOverrideTarget() : null) || ''); } catch (e) { return ''; }
+    }
+
+    function __ccWeeklySetSaveVisible(visible){
+        const btn = document.getElementById('saveDefaultAvailabilityBtn');
+        if (!btn) return;
+        btn.style.display = visible ? 'inline-block' : 'none';
+    }
+
     function displayDefaultAvailability() {
         const container = document.getElementById("defaultAvailabilityTable");
         container.innerHTML = "";
         const days = ["Sunday", "Monday","Tuesday","Wednesday","Thursday","Friday", "Saturday"];
+
+        function _ccNormalizeWeeklyStateFromUI(){
+            // Read the current UI state (not in-memory defaultAvailability) so the time picker is included.
+            const out = [];
+            for (let day = 0; day < 7; day++) {
+                const containerEl = document.getElementById(`ranges-container-${day}`);
+                const rows = containerEl ? Array.from(containerEl.querySelectorAll('.range-row')) : [];
+                const ranges = [];
+                for (const r of rows) {
+                    const s = (r.querySelector('.range-start')?.value || '').trim();
+                    const e = (r.querySelector('.range-end')?.value || '').trim();
+                    if (!s || !e) continue;
+                    ranges.push(`${s}-${e}`);
+                }
+                const cb = document.querySelector(`.unavailable-checkbox[data-day='${day}']`);
+                const unavailableChecked = !!(cb && cb.checked);
+                const unavailable = unavailableChecked || ranges.length === 0;
+
+                // Normalize + sort ranges for stable comparison
+                const normRanges = (unavailable ? [] : ranges)
+                    .map(x => String(x).trim())
+                    .filter(Boolean)
+                    .map(x => {
+                        const parts = x.split('-');
+                        const a = (parts[0] || '').trim();
+                        const b = (parts[1] || '').trim();
+                        return { a, b, raw: `${a}-${b}` };
+                    })
+                    .filter(r => r.a && r.b)
+                    .sort((r1, r2) => (r1.a === r2.a ? (r1.b < r2.b ? -1 : (r1.b > r2.b ? 1 : 0)) : (r1.a < r2.a ? -1 : 1)))
+                    .map(r => r.raw);
+
+                out.push({ unavailable: !!unavailable, ranges: normRanges });
+            }
+            return JSON.stringify(out);
+        }
+
+        function _ccUpdateWeeklySaveVisibility(){
+            if (__ccWeeklyIniting) return;
+            const key = __ccWeeklyTargetKey();
+            if (!key) {
+                __ccWeeklySetSaveVisible(false);
+                return;
+            }
+            const cur = _ccNormalizeWeeklyStateFromUI();
+            if (!Object.prototype.hasOwnProperty.call(__ccWeeklyBaselineByTarget, key)) {
+                __ccWeeklyBaselineByTarget[key] = cur;
+                __ccWeeklySetSaveVisible(false);
+                return;
+            }
+            __ccWeeklySetSaveVisible(cur !== __ccWeeklyBaselineByTarget[key]);
+        }
+
+        function _ccSigKey(svc){
+            try {
+                if (svc && Array.isArray(svc.schedule_signature) && svc.schedule_signature.length) {
+                    return svc.schedule_signature.map(x => String(x)).join('|');
+                }
+                // Fallback (older payloads)
+                return [
+                    String(svc?.duration ?? ''),
+                    String(svc?.buffer_after ?? ''),
+                    String(svc?.time_increment_minutes ?? ''),
+                    String(!!svc?.use_fixed_increment),
+                    String(!!svc?.allow_squished_bookings),
+                    String(!!svc?.allow_ends_after_availability),
+                    String(svc?.min_notice_hours ?? ''),
+                    String(svc?.max_booking_days ?? ''),
+                ].join('|');
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _ccMinutes(hhmm){
+            try { return _minutesFromTimeStr(String(hhmm || '00:00')); } catch (e) { return 0; }
+        }
+
+        function _ccMergeRanges(ranges){
+            const out = [];
+            const sorted = (ranges || []).slice().filter(r => r && r.start < r.end).sort((a,b) => a.start - b.start);
+            for (const r of sorted){
+                if (!out.length){ out.push({start:r.start,end:r.end}); continue; }
+                const last = out[out.length-1];
+                if (r.start <= last.end){ last.end = Math.max(last.end, r.end); }
+                else out.push({start:r.start,end:r.end});
+            }
+            return out;
+        }
+
+        function _ccSubtractRanges(allowed, blocked){
+            // Return segments in allowed that are not covered by blocked
+            const A = _ccMergeRanges(allowed);
+            const B = _ccMergeRanges(blocked);
+            const out = [];
+            let j = 0;
+            for (const a of A){
+                let cur = a.start;
+                while (j < B.length && B[j].end <= cur) j++;
+                let k = j;
+                while (k < B.length && B[k].start < a.end){
+                    const b = B[k];
+                    if (b.start > cur) out.push({start: cur, end: Math.min(b.start, a.end)});
+                    cur = Math.max(cur, b.end);
+                    if (cur >= a.end) break;
+                    k++;
+                }
+                if (cur < a.end) out.push({start: cur, end: a.end});
+            }
+            return _ccMergeRanges(out);
+        }
+
+        function _ccInvertRanges(allowed){
+            const merged = _ccMergeRanges(allowed);
+            const blocked = [];
+            let cur = 0;
+            for (const r of merged){
+                if (cur < r.start) blocked.push({start:cur, end:r.start});
+                cur = Math.max(cur, r.end);
+            }
+            if (cur < 24*60) blocked.push({start:cur, end:24*60});
+            return blocked;
+        }
+
+        function _ccIntersectRanges(a, b){
+            const A = _ccMergeRanges(a);
+            const B = _ccMergeRanges(b);
+            const out = [];
+            let i=0, j=0;
+            while (i < A.length && j < B.length){
+                const s = Math.max(A[i].start, B[j].start);
+                const e = Math.min(A[i].end, B[j].end);
+                if (s < e) out.push({start:s,end:e});
+                if (A[i].end < B[j].end) i++; else j++;
+            }
+            return out;
+        }
+
+        function _ccRangesFromWeeklyMap(weeklyMap, uiDayIdx){
+            const out = [];
+            try {
+                const dayArr = (weeklyMap && Array.isArray(weeklyMap) && weeklyMap.length === 7) ? weeklyMap[uiDayIdx] : null;
+                const ranges = Array.isArray(dayArr) ? dayArr : [];
+                for (const r of ranges){
+                    const parts = String(r || '').split('-');
+                    const s = (parts[0] || '').trim();
+                    const e = (parts[1] || '').trim();
+                    if (!s || !e) continue;
+                    const sm = _ccMinutes(s);
+                    const em = _ccMinutes(e);
+                    if (sm < em) out.push({start:sm,end:em});
+                }
+            } catch (e) {}
+            return _ccMergeRanges(out);
+        }
+
+        function _ccGetWeeklyEditorConstraints(){
+            // Applies when editing a service scope. For solo services: member availability minus
+            // other solo services (mixed signature). For shared/group services: intersection of
+            // member availability minus ALL members' other services.
+            try {
+                if (!SELECTED_MEMBER || !String(SELECTED_MEMBER).startsWith('svc:')) return null;
+                const svcId = String(SELECTED_MEMBER).slice(4);
+                const svc = SERVICES.find(s => String(s.id) === String(svcId));
+                if (!svc) return null;
+
+                const assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(svc) || []) : (svc.assigned_members || []);
+                const daysOut = [];
+
+                if (!assigned || !assigned.length) return null;
+
+                function _memberWeeklyMapFor(mid){
+                    const memberPayload = (memberAvailMap && memberAvailMap[mid]) ? memberAvailMap[mid] : null;
+                    const memberBuilt = memberPayload ? buildAvailabilityFromPayload(memberPayload) : orgDefaultAvailability;
+
+                    // Convert memberBuilt (defaultAvailability-like) to a weeklyMap style for parsing.
+                    const memberWeeklyMap = [[],[],[],[],[],[],[]];
+                    for (let d=0; d<7; d++){
+                        const info = memberBuilt[d] || {};
+                        let ranges = [];
+                        if (info && info.unavailable) {
+                            ranges = [];
+                        } else if (info.ranges && info.ranges.length) {
+                            ranges = info.ranges;
+                        } else if (info.start && info.end) {
+                            ranges = [`${info.start}-${info.end}`];
+                        }
+                        memberWeeklyMap[d] = Array.isArray(ranges) ? ranges.slice() : [];
+                    }
+                    return memberWeeklyMap;
+                }
+
+                if (assigned.length === 1){
+                    const mid = String(assigned[0]);
+                    const memberWeeklyMap = _memberWeeklyMapFor(mid);
+                    const mySig = _ccSigKey(svc);
+                    const others = (typeof personalServicesForMember === 'function') ? (personalServicesForMember(mid) || []) : [];
+                    const otherSvcs = others.filter(os => String(os.id) !== String(svcId));
+
+                    for (let d=0; d<7; d++){
+                        const memberAllowed = _ccRangesFromWeeklyMap(memberWeeklyMap, d);
+                        // Block other solo services only when signatures differ (align with backend rule).
+                        let otherRaw = [];
+                        for (const os of otherSvcs){
+                            try {
+                                if (_ccSigKey(os) === mySig) continue;
+                                otherRaw = otherRaw.concat(_ccRangesFromWeeklyMap(os.weekly_map, d));
+                            } catch (e) {}
+                        }
+                        const otherBlocked = _ccIntersectRanges(_ccMergeRanges(otherRaw), memberAllowed);
+                        const remaining = _ccSubtractRanges(memberAllowed, otherBlocked);
+                        const fullyBlocked = (memberAllowed.length === 0) || (remaining.length === 0);
+                        const shouldShow = fullyBlocked || (otherBlocked && otherBlocked.length > 0);
+                        daysOut[d] = {
+                            memberAllowed,
+                            memberBlocked: (memberAllowed.length ? _ccInvertRanges(memberAllowed) : [{start:0,end:24*60}]),
+                            otherBlocked,
+                            remaining,
+                            fullyBlocked,
+                            shouldShow,
+                        };
+                    }
+                    return { serviceId: svcId, membershipId: mid, assignedMembers: [mid], days: daysOut };
+                }
+
+                // Shared/group service: common member availability minus ALL members' other services.
+                const memberWeeklyMaps = assigned.map(m => ({ mid: String(m), map: _memberWeeklyMapFor(String(m)) }));
+
+                function _servicesForMember(mid){
+                    try {
+                        const idStr = String(mid);
+                        return (Array.isArray(SERVICES) ? SERVICES : []).filter(s => {
+                            const a = getAssignedMembersForService(s);
+                            return a && a.some(x => String(x) === idStr);
+                        });
+                    } catch (e) { return []; }
+                }
+
+                for (let d=0; d<7; d++){
+                    // Intersect memberAllowed across all assigned members
+                    let commonAllowed = null;
+                    for (const mm of memberWeeklyMaps){
+                        const allowed = _ccRangesFromWeeklyMap(mm.map, d);
+                        commonAllowed = (commonAllowed === null) ? allowed : _ccIntersectRanges(commonAllowed, allowed);
+                        if (!commonAllowed.length) break;
+                    }
+
+                    // Union of all other services (any signature) across all members
+                    let otherRaw = [];
+                    for (const mm of memberWeeklyMaps){
+                        const svcs = _servicesForMember(mm.mid);
+                        for (const os of (svcs || [])){
+                            try {
+                                if (String(os.id) === String(svcId)) continue;
+                                otherRaw = otherRaw.concat(_ccRangesFromWeeklyMap(os.weekly_map, d));
+                            } catch (e) {}
+                        }
+                    }
+
+                    const otherBlocked = _ccIntersectRanges(_ccMergeRanges(otherRaw), (commonAllowed || []));
+                    const remaining = _ccSubtractRanges((commonAllowed || []), otherBlocked);
+                    const fullyBlocked = (!commonAllowed || !commonAllowed.length) || (!remaining.length);
+                    const shouldShow = fullyBlocked || (otherBlocked && otherBlocked.length > 0);
+
+                    daysOut[d] = {
+                        memberAllowed: (commonAllowed || []),
+                        memberBlocked: ((commonAllowed && commonAllowed.length) ? _ccInvertRanges(commonAllowed) : [{start:0,end:24*60}]),
+                        otherBlocked,
+                        remaining,
+                        fullyBlocked,
+                        shouldShow,
+                    };
+                }
+
+                return { serviceId: svcId, membershipId: null, assignedMembers: assigned.map(String), days: daysOut };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _ccFirstRemainingInterval(dayIndex){
+            try {
+                if (!_ccConstraints || !_ccConstraints.days || !_ccConstraints.days[dayIndex]) return null;
+                const d = _ccConstraints.days[dayIndex];
+                const rem = (d && Array.isArray(d.remaining)) ? d.remaining : [];
+                if (!rem.length) return null;
+                return { start: rem[0].start, end: rem[0].end };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _ccRenderConstraintsForDay(dayIndex, constraints){
+            try {
+                const wrap = document.querySelector(`.cc-constraints-wrap[data-day='${dayIndex}']`);
+                const bar = document.querySelector(`.cc-constraints-bar[data-day='${dayIndex}']`);
+                if (!wrap || !bar) return;
+                if (!constraints || !constraints.days || !constraints.days[dayIndex]) {
+                    wrap.style.display = 'none';
+                    bar.innerHTML = '';
+                    return;
+                }
+
+                const d = constraints.days[dayIndex];
+                if (!d.shouldShow) {
+                    wrap.style.display = 'none';
+                    bar.innerHTML = '';
+                    return;
+                }
+
+                wrap.style.display = 'block';
+                bar.innerHTML = '';
+                const toPct = (min) => (Math.max(0, Math.min(24*60, min)) / (24*60)) * 100;
+                const addSeg = (seg, cls) => {
+                    const div = document.createElement('div');
+                    div.className = `cc-constraints-seg ${cls}`;
+                    const left = toPct(seg.start);
+                    const width = Math.max(0, toPct(seg.end) - left);
+                    div.style.left = left + '%';
+                    div.style.width = width + '%';
+                    bar.appendChild(div);
+                };
+
+                // Member blocked is the baseline constraint; other-service blocks overlay.
+                for (const seg of (d.memberBlocked || [])) addSeg(seg, 'member');
+                for (const seg of (d.otherBlocked || [])) addSeg(seg, 'other');
+            } catch (e) { /* ignore */ }
+        }
+
+        const _ccConstraints = _ccGetWeeklyEditorConstraints();
+        try { window.__ccWeeklyServiceConstraints = _ccConstraints || null; } catch (e) {}
 
         // Custom Time Picker Creator
         function createCustomTimePicker(inputElement) {
@@ -3235,6 +3919,8 @@ document.addEventListener('DOMContentLoaded', function() {
             picker.querySelector('.confirm').addEventListener('click', (e) => {
                 e.stopPropagation();
                 inputElement.value = `${selectedHour}:${selectedMinute}`;
+                try { inputElement.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) {}
+                try { inputElement.dispatchEvent(new Event('change', { bubbles: true })); } catch (err) {}
                 picker.remove();
             });
             
@@ -3270,8 +3956,12 @@ document.addEventListener('DOMContentLoaded', function() {
             start.type = 'time';
             start.className = 'range-start';
             start.value = startVal || '09:00';
+            start.dataset.day = String(dayIndex);
             start.readOnly = true;
             start.style.cursor = 'pointer';
+            start.addEventListener('change', function(){
+                try { _ccUpdateWeeklySaveVisibility(); } catch (e) {}
+            });
             
             start.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -3295,8 +3985,12 @@ document.addEventListener('DOMContentLoaded', function() {
             end.type = 'time';
             end.className = 'range-end';
             end.value = endVal || '17:00';
+            end.dataset.day = String(dayIndex);
             end.readOnly = true;
             end.style.cursor = 'pointer';
+            end.addEventListener('change', function(){
+                try { _ccUpdateWeeklySaveVisibility(); } catch (e) {}
+            });
             
             end.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -3337,6 +4031,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                 } catch (e) {}
+                try { _ccUpdateWeeklySaveVisibility(); } catch (e) {}
             });
 
             row.appendChild(startContainer);
@@ -3355,6 +4050,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 <td colspan="2" style="vertical-align:top; padding-left:24px;">
                     <div id="ranges-container-${dayIndex}" style="display:flex; flex-direction:column; gap:4px;"></div>
                     <div style="margin-top:6px;"><button type="button" class="add-range-btn" data-day="${dayIndex}" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:6px; cursor:pointer;">Add range</button></div>
+                    <div class="cc-constraints-wrap" data-day="${dayIndex}">
+                        <div class="cc-constraints-bar" data-day="${dayIndex}"></div>
+                    </div>
                 </td>
                 <td style="text-align:right; vertical-align:top; padding-top:18px; padding-right:8px;"><input type="checkbox" class="unavailable-checkbox" data-day="${dayIndex}" ${defaultAvailability[dayIndex].unavailable ? "checked" : ""}></td>
             `;
@@ -3380,9 +4078,52 @@ document.addEventListener('DOMContentLoaded', function() {
             // Add button handler
             const addBtn = row.querySelector('.add-range-btn');
             addBtn.addEventListener('click', () => {
+                // Under service-scope constraints, default to the first remaining allowed interval.
+                try {
+                    const first = _ccFirstRemainingInterval(dayIndex);
+                    if (first) {
+                        const s = _timeStrFromMinutes(first.start);
+                        const e = _timeStrFromMinutes(first.end);
+                        rangesContainer.appendChild(createRangeRow(dayIndex, s, e));
+                        return;
+                    }
+                } catch (e) {}
                 rangesContainer.appendChild(createRangeRow(dayIndex, '09:00', '17:00'));
+                try { _ccUpdateWeeklySaveVisibility(); } catch (e) {}
             });
+
+            // Render constraint bar (service scope only)
+            try { _ccRenderConstraintsForDay(dayIndex, _ccConstraints); } catch (e) {}
+
+            // If this day is fully blocked in service scope, grey out and prevent editing.
+            try {
+                const dayInfo = (_ccConstraints && _ccConstraints.days) ? _ccConstraints.days[dayIndex] : null;
+                if (dayInfo && dayInfo.fullyBlocked) {
+                    row.classList.add('cc-weekly-row-locked');
+                    // Force UI to show unavailable + non-clickable
+                    const cb = row.querySelector(`.unavailable-checkbox[data-day='${dayIndex}']`);
+                    if (cb) {
+                        cb.checked = true;
+                        cb.disabled = true;
+                    }
+                    try {
+                        if (addBtn) {
+                            addBtn.disabled = true;
+                            addBtn.style.display = 'none';
+                        }
+                    } catch (e) {}
+                    // Remove any existing range rows in UI for this day (can't be valid anyway).
+                    try { rangesContainer.innerHTML = ''; } catch (e) {}
+                    try {
+                        defaultAvailability[dayIndex].unavailable = true;
+                        defaultAvailability[dayIndex].ranges = [];
+                    } catch (e) {}
+                }
+            } catch (e) {}
         });
+
+        // During initial render, suppress dirty detection while we sync checkbox UI state.
+        __ccWeeklyIniting = true;
 
         // Handle unavailable checkbox toggles (disable ranges UI when unavailable)
         // NOTE: do NOT apply changes to the calendar immediately here. Changes should
@@ -3412,10 +4153,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     addBtn.disabled = false;
                 }
                 // Do not call updateUnavailableDays() here; wait for Save Defaults to apply
+                try { _ccUpdateWeeklySaveVisibility(); } catch (e) {}
             });
             // Trigger initial state (this will only set UI inputs; calendar not updated until save)
             checkbox.dispatchEvent(new Event('change'));
         });
+
+        // End init: set baseline for this target to the freshly rendered state.
+        __ccWeeklyIniting = false;
+        try {
+            const k = __ccWeeklyTargetKey();
+            if (k) __ccWeeklyBaselineByTarget[k] = _ccNormalizeWeeklyStateFromUI();
+        } catch (e) {}
+        __ccWeeklySetSaveVisible(false);
 
         // Save handler (use onclick to avoid duplicate listeners)
         const saveBtn = document.getElementById('saveDefaultAvailabilityBtn');
@@ -3486,6 +4236,396 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!el) return;
             el.style.display = 'none';
             el.textContent = '';
+        }
+
+        function _ccEscapeHtml(s){
+            try {
+                return String(s == null ? '' : s)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _ensureOverridesSaveBanner(){
+            const el = document.getElementById('cc-overrides-save-banner');
+            const body = document.getElementById('cc-overrides-save-banner-body');
+            const closeBtn = document.getElementById('cc-overrides-save-banner-close');
+            if (!el || !body) return null;
+
+            if (!el.__ccBound) {
+                el.__ccBound = true;
+
+                // Close button
+                try {
+                    if (closeBtn) {
+                        closeBtn.addEventListener('click', (e) => {
+                            try { e.preventDefault(); } catch (err) {}
+                            _clearOverridesSaveBanner();
+                        });
+                    }
+                } catch (e) {}
+
+                // Action buttons inside banner
+                try {
+                    el.addEventListener('click', (e) => {
+                        const btn = e && e.target && e.target.closest ? e.target.closest('button[data-cc-selection]') : null;
+                        if (!btn) return;
+                        try { e.preventDefault(); } catch (err) {}
+                        const sel = btn.getAttribute('data-cc-selection');
+                        if (!sel) return;
+                        try {
+                            if (typeof applySelection === 'function') applySelection(sel);
+                            _clearOverridesSaveBanner();
+                        } catch (err) { console.warn('Failed to switch selection', err); }
+                    }, true);
+                } catch (e) {}
+            }
+
+            return el;
+        }
+
+        function _ensureOverridesSaveBannerFloating(){
+            try {
+                const existing = document.getElementById('cc-overrides-save-banner-floating');
+                if (existing) {
+                    try {
+                        try { existing.style.zIndex = '1000001'; } catch (e) {}
+                        try { existing.style.pointerEvents = 'auto'; } catch (e) {}
+                        if (!existing.__ccBound) {
+                            existing.__ccBound = true;
+                            const closeBtn = document.getElementById('cc-overrides-save-banner-floating-close');
+                            if (closeBtn) {
+                                try { closeBtn.setAttribute('onclick', "try{window.ccDismissOverrideBanner&&window.ccDismissOverrideBanner();}catch(e){}"); } catch (e) {}
+                                try { closeBtn.style.position = 'relative'; closeBtn.style.zIndex = '1000002'; closeBtn.style.pointerEvents = 'auto'; } catch (e) {}
+                                closeBtn.addEventListener('click', (e) => {
+                                    try { e.preventDefault(); } catch (err) {}
+                                    try { window.ccDismissOverrideBanner && window.ccDismissOverrideBanner(); } catch (e2) { try { _clearOverridesSaveBanner(); } catch (e3) {} }
+                                });
+                            }
+                            existing.addEventListener('click', (e) => {
+                                const btn = e && e.target && e.target.closest ? e.target.closest('button[data-cc-selection]') : null;
+                                if (!btn) return;
+                                try { e.preventDefault(); } catch (err) {}
+                                const sel = btn.getAttribute('data-cc-selection');
+                                if (!sel) return;
+                                try {
+                                    if (typeof applySelection === 'function') applySelection(sel);
+                                    _clearOverridesSaveBanner();
+                                } catch (err) { console.warn('Failed to switch selection', err); }
+                            }, true);
+                        }
+                    } catch (e) {}
+                    return existing;
+                }
+
+                const el = document.createElement('div');
+                el.id = 'cc-overrides-save-banner-floating';
+                el.setAttribute('role', 'status');
+                el.setAttribute('aria-live', 'polite');
+                el.style.display = 'none';
+                el.style.position = 'fixed';
+                el.style.left = '50%';
+                el.style.top = '14px';
+                el.style.transform = 'translateX(-50%)';
+                el.style.zIndex = '1000001';
+                el.style.pointerEvents = 'auto';
+                el.style.maxWidth = 'min(920px, calc(100vw - 24px))';
+                el.style.width = 'min(920px, calc(100vw - 24px))';
+                el.style.padding = '12px 12px';
+                el.style.borderRadius = '12px';
+                el.style.border = '1px solid #fecaca';
+                el.style.background = '#fef2f2';
+                el.style.color = '#7f1d1d';
+                el.style.boxShadow = '0 10px 22px rgba(0,0,0,0.18)';
+                el.style.fontSize = '14px';
+                el.style.lineHeight = '1.35';
+
+                el.innerHTML = `
+                    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+                        <div id="cc-overrides-save-banner-floating-body"></div>
+                        <button type="button" id="cc-overrides-save-banner-floating-close" onclick="try{window.ccDismissOverrideBanner&&window.ccDismissOverrideBanner();}catch(e){}" style="border:0; background:transparent; color:#7f1d1d; font-weight:800; cursor:pointer; padding:2px 6px; border-radius:8px;">×</button>
+                    </div>
+                `;
+
+                document.body.appendChild(el);
+
+                // Close button
+                try {
+                    const closeBtn = document.getElementById('cc-overrides-save-banner-floating-close');
+                    if (closeBtn) {
+                        try { closeBtn.style.position = 'relative'; closeBtn.style.zIndex = '1000002'; closeBtn.style.pointerEvents = 'auto'; } catch (e) {}
+                        closeBtn.addEventListener('click', (e) => {
+                            try { e.preventDefault(); } catch (err) {}
+                            try { window.ccDismissOverrideBanner && window.ccDismissOverrideBanner(); } catch (e2) { _clearOverridesSaveBanner(); }
+                        });
+                    }
+                } catch (e) {}
+
+                // Action buttons inside banner
+                try {
+                    el.addEventListener('click', (e) => {
+                        const btn = e && e.target && e.target.closest ? e.target.closest('button[data-cc-selection]') : null;
+                        if (!btn) return;
+                        try { e.preventDefault(); } catch (err) {}
+                        const sel = btn.getAttribute('data-cc-selection');
+                        if (!sel) return;
+                        try {
+                            if (typeof applySelection === 'function') applySelection(sel);
+                            _clearOverridesSaveBanner();
+                        } catch (err) { console.warn('Failed to switch selection', err); }
+                    }, true);
+                } catch (e) {}
+
+                try { el.__ccBound = true; } catch (e) {}
+
+                return el;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _clearOverridesSaveBanner(){
+            // Clear whichever banners exist; do not return early if one is missing.
+            try {
+                const el = document.getElementById('cc-overrides-save-banner');
+                const body = document.getElementById('cc-overrides-save-banner-body');
+                if (el) el.style.display = 'none';
+                if (body) body.innerHTML = '';
+            } catch (e) {}
+
+            try {
+                const fel = document.getElementById('cc-overrides-save-banner-floating');
+                const fbody = document.getElementById('cc-overrides-save-banner-floating-body');
+                if (fel) fel.style.display = 'none';
+                if (fbody) fbody.innerHTML = '';
+            } catch (e) {}
+
+            try {
+                const hel = document.getElementById('cc-overrides-save-banner-hard');
+                const hbody = document.getElementById('cc-overrides-save-banner-hard-body');
+                if (hel) hel.style.display = 'none';
+                if (hbody) hbody.innerHTML = '';
+            } catch (e) {}
+        }
+
+        // Expose a global dismiss helper so inline onclick fallbacks work.
+        try {
+            window.ccDismissOverrideBanner = function(){
+                try { window.__ccOverrideBannerSuppressUntil = Date.now() + 5000; } catch (e) {}
+                try { _clearOverridesSaveBanner(); } catch (e) {}
+            };
+        } catch (e) {}
+
+        function _ccSelectedServiceObj(){
+            try {
+                if (!SELECTED_MEMBER || !String(SELECTED_MEMBER).startsWith('svc:')) return null;
+                const svcId = String(SELECTED_MEMBER).slice(4);
+                return (Array.isArray(SERVICES) ? SERVICES.find(s => String(s.id) === String(svcId)) : null) || null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _ccMemberNameByMembershipId(mid){
+            try {
+                const m = (Array.isArray(MEMBERS) ? MEMBERS.find(mm => String(mm.id) === String(mid)) : null);
+                if (!m) return 'Member';
+                if (typeof memberDisplayName === 'function') return memberDisplayName(m);
+                return String(m.user__first_name || m.user__email || 'Member');
+            } catch (e) {
+                return 'Member';
+            }
+        }
+
+        function _ccOrdinalSuffix(n){
+            const v = Number(n) || 0;
+            const mod100 = v % 100;
+            if (mod100 >= 11 && mod100 <= 13) return 'th';
+            switch (v % 10) {
+                case 1: return 'st';
+                case 2: return 'nd';
+                case 3: return 'rd';
+                default: return 'th';
+            }
+        }
+
+        function _ccPrettyDateFromYMD(ymd){
+            try {
+                const s = String(ymd || '').trim();
+                const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (!m) return s;
+                const year = Number(m[1]);
+                const month = Number(m[2]);
+                const day = Number(m[3]);
+                const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                const name = monthNames[month - 1] || null;
+                if (!name || !day) return s;
+                return `${name} ${day}${_ccOrdinalSuffix(day)}`;
+            } catch (e) {
+                return String(ymd || '');
+            }
+        }
+
+        function _ccHumanizeOverrideMessage(message){
+            try {
+                const msg = String(message || '');
+                // Replace ISO dates (YYYY-MM-DD) with friendly month/day format.
+                return msg.replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (full, ymd) => _ccPrettyDateFromYMD(ymd));
+            } catch (e) {
+                return String(message || '');
+            }
+        }
+
+        // Export so global banner helpers (outside this closure) can use it.
+        try { window.__ccHumanizeOverrideMessage = _ccHumanizeOverrideMessage; } catch (e) {}
+
+        function _overrideSaveHints(message){
+            const m = String(message || '').toLowerCase();
+            const hints = [];
+            if (m.includes('no overlapping availability') || m.includes('overlapping availability for this group service')) {
+                hints.push('This is a group service: open per-date or weekly availability for the assigned members first (the times must overlap), then retry the service override.');
+            }
+            if (m.includes('member calendar override') || m.includes('member calendar first') || m.includes('unavailable by default for this member')) {
+                hints.push("This is a solo-service constraint: create the per-date override in the member's calendar first, then switch back to the service and retry.");
+            }
+            if (m.includes('within the assigned member\'s weekly availability')) {
+                hints.push("Expand the member's weekly availability (or shrink the override range), then retry.");
+            }
+            if (m.includes("within this service's weekly availability")) {
+                hints.push('Expand the service weekly availability for that day (or choose a time inside it), then retry.');
+            }
+            if (m.includes('overlaps')) {
+                hints.push('If you need this time for this service, override the other solo service to unavailable for that date (or adjust weekly partitions first).');
+            }
+            return hints;
+        }
+
+        // Export for any code paths that run outside this closure.
+        try { window.__ccOverrideSaveHints = _overrideSaveHints; } catch (e) {}
+
+        function _overrideSaveActions(serverData){
+            const actions = [];
+            try {
+                // If server tells us which member must be edited first, offer a one-click switch.
+                if (serverData && serverData.membership_id != null) {
+                    const mid = String(serverData.membership_id);
+                    actions.push({ selection: mid, label: `Open ${_ccMemberNameByMembershipId(mid)} calendar` });
+                }
+
+                // In service scope, also offer switches to assigned members (group services).
+                let svcId = null;
+                try {
+                    if (SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')) svcId = String(SELECTED_MEMBER).slice(4);
+                    else if (window.__ccLastOverrideTarget && String(window.__ccLastOverrideTarget).startsWith('svc:')) svcId = String(window.__ccLastOverrideTarget).slice(4);
+                    else {
+                        const selEl = document.getElementById('memberSelect');
+                        const domVal = selEl && selEl.value ? String(selEl.value) : '';
+                        if (domVal && domVal.startsWith('svc:')) svcId = domVal.slice(4);
+                        else {
+                            const stored = (function(){ try { return localStorage.getItem('cc_selected_member'); } catch (e) { return null; } })();
+                            const s = stored ? String(stored) : '';
+                            if (s && s.startsWith('svc:')) svcId = s.slice(4);
+                        }
+                    }
+                } catch (e) {}
+
+                if (svcId != null) {
+                    const svc = (Array.isArray(SERVICES) ? SERVICES.find(s => String(s.id) === String(svcId)) : null) || null;
+                    const assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(svc) || []) : (svc && svc.assigned_members ? svc.assigned_members.map(String) : []);
+                    const unique = Array.from(new Set((assigned || []).map(String)));
+                    if (unique.length >= 1) {
+                        unique.forEach(mid => {
+                            // Avoid duplicating the server-specified member action
+                            if (serverData && String(serverData.membership_id) === String(mid)) return;
+                            actions.push({ selection: String(mid), label: `Open ${_ccMemberNameByMembershipId(mid)} calendar` });
+                        });
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            return actions;
+        }
+
+        // Export for any code paths that run outside this closure.
+        try { window.__ccOverrideSaveActions = _overrideSaveActions; } catch (e) {}
+
+        function _showOverridesSaveBanner(message, opts){
+            const el = _ensureOverridesSaveBanner();
+            const body = document.getElementById('cc-overrides-save-banner-body');
+            const fel = _ensureOverridesSaveBannerFloating();
+            const fbody = document.getElementById('cc-overrides-save-banner-floating-body');
+
+            const status = opts && opts.status ? Number(opts.status) : null;
+            const data = opts && opts.data ? opts.data : null;
+
+            const msg = String(message || '').trim();
+            const humanMsg = _ccHumanizeOverrideMessage(msg);
+            const hints = _overrideSaveHints(msg);
+            const actions = _overrideSaveActions(data);
+
+            const actionsHtml = actions.length
+                ? `<div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+                        ${actions.map(a => {
+                            const sel = _ccEscapeHtml(a.selection);
+                            const lbl = _ccEscapeHtml(a.label);
+                            return `<button type="button" data-cc-selection="${sel}" style="border:1px solid #fca5a5; background:#fff; color:#7f1d1d; padding:7px 10px; border-radius:10px; cursor:pointer; font-weight:600;">${lbl}</button>`;
+                        }).join('')}
+                    </div>`
+                : '';
+
+            const hintsHtml = hints.length
+                ? `<div style="margin-top:10px; color:#991b1b;">
+                        ${hints.slice(0, 3).map(h => `<div style="margin-top:6px;"><strong>•</strong> ${_ccEscapeHtml(h)}</div>`).join('')}
+                    </div>`
+                : '';
+
+            const html = `
+                <div style="font-weight:800;">Couldn't save override</div>
+                <div style="margin-top:3px;">${_ccEscapeHtml(humanMsg || (status ? `Server returned ${status}` : 'The server rejected this override.'))}</div>
+                ${hintsHtml}
+                ${actionsHtml}
+            `;
+
+            // In-card banner (if present)
+            try {
+                if (el && body) {
+                    body.innerHTML = html;
+                    el.style.display = 'block';
+                }
+            } catch (e) {}
+
+            // Floating banner fallback (always try to show)
+            try {
+                if (fel && fbody) {
+                    fbody.innerHTML = html;
+                    fel.style.display = 'block';
+                }
+            } catch (e) {}
+
+            // Make it hard to miss: flash the overrides card briefly.
+            try {
+                const oc = document.getElementById('overridesContainer');
+                if (oc) {
+                    oc.classList.add('cc-overrides-flash');
+                    setTimeout(() => { try { oc.classList.remove('cc-overrides-flash'); } catch (e) {} }, 1400);
+                }
+            } catch (e) {}
+
+            // Scroll to banner (some modal flows lock scrolling; fallback to window.scrollTo).
+            try {
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (e) {
+                try {
+                    const r = (el && el.getBoundingClientRect) ? el.getBoundingClientRect() : null;
+                    if (!r) return;
+                    const top = (r.top || 0) + (window.pageYOffset || document.documentElement.scrollTop || 0);
+                    window.scrollTo({ top: Math.max(0, top - 18), behavior: 'smooth' });
+                } catch (e2) {}
+            }
         }
 
         saveBtn.onclick = async function() {
@@ -3765,6 +4905,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return p.then((res) => {
                         try {
                             if (res && res.ok) {
+                                try { _clearOverridesSaveBanner(); } catch (e) {}
                                 try { if (typeof _invalidateServiceScopeParityCache === 'function') _invalidateServiceScopeParityCache(); } catch (e) {}
                                 // Refresh day styles + table on the next tick (after any refetchEvents).
                                 try {
@@ -3773,6 +4914,23 @@ document.addEventListener('DOMContentLoaded', function() {
                                         try { renderOverridesTable(); } catch (e) {}
                                     }, 0);
                                 } catch (e) {}
+                            } else if (res && !res.ok) {
+                                // Surface the denial reason in the UI banner (do not consume the original body).
+                                try {
+                                    const clone = (typeof res.clone === 'function') ? res.clone() : null;
+                                    if (clone && typeof _ccReadJsonOrText === 'function') {
+                                        _ccReadJsonOrText(clone).then(({ data, text }) => {
+                                            try {
+                                                const msg = (data && (data.error || data.message)) || (String(text || '').trim()) || `Server returned ${res.status}`;
+                                                _showOverridesSaveBanner(msg, { status: res.status, data: data || null });
+                                            } catch (e) {}
+                                        }).catch(() => {
+                                            try { _showOverridesSaveBanner(`Server returned ${res.status}`, { status: res.status }); } catch (e) {}
+                                        });
+                                    } else {
+                                        try { _showOverridesSaveBanner(`Server returned ${res.status}`, { status: res.status }); } catch (e) {}
+                                    }
+                                } catch (e) { /* ignore */ }
                             }
                         } catch (e) {}
                         return res;
@@ -3870,14 +5028,44 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
+        function ccSetBtnLoading(btn, isLoading, loadingLabel) {
+            try {
+                if (!btn) return;
+                if (isLoading) {
+                    if (!btn.dataset.ccOrigHtml) btn.dataset.ccOrigHtml = btn.innerHTML;
+                    if (btn.dataset.ccOrigDisabled == null) btn.dataset.ccOrigDisabled = String(!!btn.disabled);
+                    btn.classList.add('cc-btn-loading');
+                    btn.disabled = true;
+                    const label = (loadingLabel != null) ? String(loadingLabel) : 'Working…';
+                    btn.innerHTML = `<span class="cc-btn-loading-content"><span class="cc-inline-spinner" aria-hidden="true"></span><span>${label}</span></span>`;
+                } else {
+                    btn.classList.remove('cc-btn-loading');
+                    if (btn.dataset.ccOrigHtml) {
+                        btn.innerHTML = btn.dataset.ccOrigHtml;
+                        delete btn.dataset.ccOrigHtml;
+                    }
+                    if (btn.dataset.ccOrigDisabled != null) {
+                        btn.disabled = (btn.dataset.ccOrigDisabled === 'true');
+                        delete btn.dataset.ccOrigDisabled;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
         // Return the current override target (membership id or 'svc:<id>')
         function ccOverrideTarget() {
             try {
                 // Prefer explicit SELECTED_MEMBER value used across the template
-                if (typeof SELECTED_MEMBER !== 'undefined' && SELECTED_MEMBER) return SELECTED_MEMBER;
+                if (typeof SELECTED_MEMBER !== 'undefined' && SELECTED_MEMBER) {
+                    try { window.__ccLastOverrideTarget = SELECTED_MEMBER; } catch (e) {}
+                    return SELECTED_MEMBER;
+                }
                 // Fallback to DOM member select if present
                 const sel = document.getElementById('memberSelect');
-                if (sel && sel.value) return sel.value;
+                if (sel && sel.value) {
+                    try { window.__ccLastOverrideTarget = sel.value; } catch (e) {}
+                    return sel.value;
+                }
             } catch (e) { /* ignore */ }
             return null;
         }
@@ -4166,6 +5354,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                     badge.style.color = 'var(--success-600)';
                                     return;
                                 }
+                                // Inheritance case: weekly_map has ranges but there are no explicit service-weekly rows.
+                                // This commonly happens for single-assignee solo services.
+                                if (hasAnyRanges && svc && !(svc.has_service_weekly_windows || false)){
+                                    let label = 'Inheriting member availability';
+                                    try {
+                                        const assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(svc) || []) : (svc.assigned_members || []);
+                                        if (assigned && assigned.length === 1) {
+                                            const m = MEMBERS.find(mm => String(mm.id) === String(assigned[0]));
+                                            const mLabel = m ? memberDisplayName(m) : null;
+                                            if (mLabel) label = `Inheriting ${mLabel} availability`;
+                                        }
+                                    } catch (e) { /* ignore */ }
+                                    badge.textContent = label;
+                                    badge.style.borderColor = 'rgba(107,114,128,0.18)';
+                                    badge.style.background = 'rgba(107,114,128,0.06)';
+                                    badge.style.color = 'var(--gray-700)';
+                                    return;
+                                }
                             }
                             if (selection && memberAvailMap && memberAvailMap[String(selection)]){
                                 badge.textContent = 'Member-specific availability';
@@ -4193,12 +5399,22 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const url = String(EDIT_SERVICE_URL_TEMPLATE).replace('/0/edit/', '/' + svcId + '/edit/');
                                 btn.setAttribute('href', url);
                                 btn.style.display = 'inline-flex';
+                                note.style.display = 'block';
                                 note.textContent = 'These weekly service availability settings are interchangeable with the Edit Service page. You can update them in either place.';
+                                return;
+                            }
+
+                            // Member scope: no interchange tip (it reads like a service setting).
+                            if (selection && !String(selection).startsWith('svc:')){
+                                btn.style.display = 'none';
+                                btn.setAttribute('href', '#');
+                                note.style.display = 'none';
                                 return;
                             }
 
                             btn.style.display = 'none';
                             btn.setAttribute('href', '#');
+                            note.style.display = 'block';
                             note.textContent = 'Tip: When you select a service scope, this weekly schedule is interchangeable with that service’s availability on the Edit Service page.';
                         }catch(e){ /* ignore */ }
                     }
@@ -4208,12 +5424,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Initialize the Calendar <-> Edit Service cross-link based on the current scope.
                 try { updateInterchangeLink(SELECTED_MEMBER); } catch(e){}
+                try { updateServiceScopeExplainer(); } catch(e){}
+                try { updateWeeklyAvailabilityTitleAndDesc(); } catch(e){}
 
                 function applySelection(selection){
                     try{
                         SELECTED_MEMBER = selection || null;
                         if (SELECTED_MEMBER) localStorage.setItem('cc_selected_member', SELECTED_MEMBER);
                         else localStorage.removeItem('cc_selected_member');
+
+                        // Remember the last scope selection so denial banners can offer relevant actions
+                        // even if the UI state changes (modal close, refetch, etc.).
+                        try { window.__ccLastOverrideTarget = SELECTED_MEMBER; } catch (e) {}
+
+                        try { _clearOverridesSaveBanner(); } catch (e) {}
 
                         // Prevent optimistic per-date overrides from "carrying over" when switching
                         // member/service: clear any locally added background events.
@@ -4223,6 +5447,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         try { selectDefaultAvailabilityFor(SELECTED_MEMBER); } catch(e){}
                         try { updateSelectionBadge(SELECTED_MEMBER); } catch(e){}
                         try { updateInterchangeLink(SELECTED_MEMBER); } catch(e){}
+                        try { updateServiceScopeExplainer(); } catch(e){}
+                        try { updateWeeklyAvailabilityTitleAndDesc(); } catch(e){}
                         try { calendar && calendar.refetchEvents(); } catch(e){}
                         try { displayDefaultAvailability(); } catch(e){}
                         try { syncAvailabilityToCalendar(); } catch(e){}
@@ -4235,6 +5461,122 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (lbl) lbl.textContent = getSelectionLabel();
                         } catch (e) {}
                     }catch(e){ console.warn('applySelection failed', e); }
+                }
+
+                function _ccPossessiveName(displayName, lastName){
+                    try {
+                        const base = String(displayName || '').trim();
+                        if (!base) return "Member's";
+                        let token = String(lastName || '').trim();
+                        if (!token) {
+                            const parts = base.split(/\s+/).filter(Boolean);
+                            token = (parts.length ? parts[parts.length - 1] : base);
+                        }
+                        const endsWithS = /s$/i.test(token);
+                        return endsWithS ? `${base}'` : `${base}'s`;
+                    } catch (e) {
+                        return "Member's";
+                    }
+                }
+
+                function updateWeeklyAvailabilityTitleAndDesc(){
+                    const titleEl = document.getElementById('cc-weekly-availability-title');
+                    const descEl = document.getElementById('cc-weekly-availability-desc');
+                    if (!titleEl || !descEl) return;
+
+                    const sel = SELECTED_MEMBER;
+
+                    // Org defaults
+                    if (!sel){
+                        titleEl.textContent = 'Default Weekly Availability';
+                        descEl.style.display = 'none';
+                        return;
+                    }
+
+                    // Service scope: show service weekly availability title (client-facing).
+                    if (String(sel).startsWith('svc:')){
+                        const svcId = String(sel).slice(4);
+                        const svc = (Array.isArray(SERVICES) ? SERVICES.find(s => String(s.id) === String(svcId)) : null);
+                        const svcName = (svc && svc.name) ? String(svc.name) : 'Service';
+                        titleEl.textContent = `${svcName} Weekly Availability (client-facing)`;
+                        descEl.style.display = 'none';
+                        return;
+                    }
+
+                    // Member scope: show member-specific title + explanatory description.
+                    const m = MEMBERS.find(mm => String(mm.id) === String(sel));
+                    const display = m ? memberDisplayName(m) : 'Member';
+                    const lname = m ? (m.user__last_name || '') : '';
+                    const poss = _ccPossessiveName(display, lname);
+
+                    titleEl.textContent = `${poss} Overall Weekly Availability`;
+                    descEl.style.display = 'block';
+                }
+
+                function updateServiceScopeExplainer(){
+                    const box = document.getElementById('ccServiceScopeExplainer');
+                    const title = document.getElementById('ccServiceScopeExplainerTitle');
+                    const body = document.getElementById('ccServiceScopeExplainerBody');
+                    if (!box || !title || !body) return;
+
+                    const sel = SELECTED_MEMBER;
+                    if (!sel || !String(sel).startsWith('svc:')){
+                        box.style.display = 'none';
+                        return;
+                    }
+
+                    const svcId = String(sel).slice(4);
+                    const svc = (Array.isArray(SERVICES) ? SERVICES.find(s => String(s.id) === String(svcId)) : null);
+                    const svcName = (svc && svc.name) ? String(svc.name) : 'this service';
+
+                    let assigned = [];
+                    try {
+                        assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(svc) || []) : (svc && svc.assigned_members ? svc.assigned_members : []);
+                    } catch (e) { assigned = []; }
+
+                    const names = [];
+                    try {
+                        for (const mid of (assigned || [])){
+                            const m = MEMBERS.find(mm => String(mm.id) === String(mid));
+                            if (m) names.push(memberDisplayName(m));
+                        }
+                    } catch (e) {}
+
+                    title.textContent = `Client-facing availability for: ${svcName}`;
+
+                    // Build the body safely (no innerHTML) to avoid accidental injection.
+                    body.textContent = '';
+                    while (body.firstChild) body.removeChild(body.firstChild);
+
+                    const line1 = document.createElement('div');
+                    if (assigned && assigned.length > 1){
+                        line1.appendChild(document.createTextNode('Assigned members: '));
+                        const strong = document.createElement('strong');
+                        strong.textContent = (names.length ? names.join(', ') : `${assigned.length} members`);
+                        line1.appendChild(strong);
+                    } else {
+                        line1.appendChild(document.createTextNode('Assigned member: '));
+                        const strong = document.createElement('strong');
+                        strong.textContent = (names[0] || 'Member');
+                        line1.appendChild(strong);
+                    }
+                    body.appendChild(line1);
+
+                    const line2 = document.createElement('div');
+                    line2.style.marginTop = '6px';
+                    if (assigned && assigned.length > 1){
+                        line2.textContent = 'Clients can only book time that fits within all members’ overall weekly availability, minus time reserved by those members’ other services.';
+                    } else {
+                        line2.textContent = 'Clients can only book time within the member’s overall weekly availability (and within service partition rules when applicable).';
+                    }
+                    body.appendChild(line2);
+
+                    const line3 = document.createElement('div');
+                    line3.style.marginTop = '6px';
+                    line3.textContent = 'Per-date overrides can open/close time, but they still must stay within member availability.';
+                    body.appendChild(line3);
+
+                    box.style.display = 'block';
                 }
 
                 // ---- New nested menu wiring ----
@@ -5959,41 +7301,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         resetBtn.onclick = async () => {
                             if (!confirm('Reset ALL per-date overrides to weekly defaults?')) return;
-                            const evs = (typeof calendar.getEvents === 'function') ? calendar.getEvents() : [];
-                            const dates = [];
-                            const _isSvcScopeHere = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
-                            const _svcIdHere = _isSvcScopeHere ? String(SELECTED_MEMBER).slice(4) : null;
-                            let _isTeamGroupSvcScopeHere = false;
-                            try {
-                                const _svcObj = (_isSvcScopeHere && _svcIdHere) ? (svcById(_svcIdHere) || null) : null;
-                                const _assigned = _svcObj ? (getAssignedMembersForService(_svcObj) || []) : [];
-                                _isTeamGroupSvcScopeHere = !!(IS_TEAM && _isSvcScopeHere && _assigned.length >= 2);
-                            } catch (e) { _isTeamGroupSvcScopeHere = false; }
-                            evs.forEach(ev => {
+
+                            ccSetBtnLoading(resetBtn, true, 'Resetting…');
+
+                            // Reset exactly what is currently rendered in the overrides table.
+                            const cache = (window._perDateOverridesCache && typeof window._perDateOverridesCache === 'object') ? window._perDateOverridesCache : {};
+                            const byTarget = {}; // target -> dates[]
+
+                            Object.keys(cache || {}).forEach(dateStr => {
                                 try {
-                                    if (ev.display !== 'background') return;
-                                    const isPer = ev.extendedProps && ev.extendedProps.is_per_date;
-                                    if (!isPer) return;
-
-                                    // Team plan group service view: only allow resetting true service-scoped overrides
-                                    // (shared member-derived overrides must be reset from a member view).
-                                    if (_isTeamGroupSvcScopeHere) {
-                                        const xp = ev.extendedProps || {};
-                                        const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
-                                        if (!assignedSvc || String(assignedSvc) !== String(_svcIdHere)) return;
-                                    }
-
-                                    const s = ev.startStr || (ev.start ? ev.start.toISOString() : null);
-                                    if (!s) return;
-                                    const d = s.split('T')[0];
-                                    if (dates.indexOf(d) === -1) dates.push(d);
-                                } catch (e) {}
+                                    const entry = cache[dateStr] || {};
+                                    const t = (entry && entry.target != null) ? String(entry.target) : '';
+                                    if (!t) return;
+                                    if (!byTarget[t]) byTarget[t] = [];
+                                    byTarget[t].push(String(dateStr));
+                                } catch (e) { /* ignore */ }
                             });
 
-                            if (dates.length === 0) {
-                                alert('No per-date overrides to reset.');
+                            const targets = Object.keys(byTarget);
+                            if (!targets.length) {
+                                alert('No per-date overrides to reset for this view.');
+                                ccSetBtnLoading(resetBtn, false);
                                 return;
                             }
+
+                            // Dedupe dates across targets for guardrail checks
+                            const dates = Array.from(new Set(targets.flatMap(t => byTarget[t] || [])));
 
                             // Prevent reset-all if weekly defaults would exclude existing bookings.
                             try {
@@ -6008,64 +7341,107 @@ document.addEventListener('DOMContentLoaded', function() {
                                 }
                                 if (bad.length) {
                                     alert(bad.join('\n\n'));
+                                    ccSetBtnLoading(resetBtn, false);
                                     return;
                                 }
                             } catch (e) { /* ignore */ }
 
-                            try {
-                                const overrideTarget = (ccOverrideTarget() || null);
-                                const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: overrideTarget })
-                                });
-                                const data = await res.json().catch(() => null);
-                                if (res.ok) {
-                                    // Immediately remove per-date background events from the current scope so
-                                    // the overrides table can't stay stale even if refetch is slow.
-                                    try {
-                                        const svcScope = (typeof _svcForSelectedScope === 'function') ? _svcForSelectedScope() : null;
-                                        const isSvc = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
-                                        const svcId = isSvc ? String(SELECTED_MEMBER).slice(4) : null;
-                                        const userId = (!isSvc && SELECTED_MEMBER) ? getSelectedUserIdForMembership(SELECTED_MEMBER) : null;
-                                        const membershipId = (!isSvc && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
+                            function _ccLocalRemovePerDateEventsForTarget(dateList, target) {
+                                try {
+                                    if (!calendar || typeof calendar.getEvents !== 'function') return;
+                                    const dateSet = new Set((dateList || []).map(String));
+                                    const t = String(target || '');
+                                    if (!t || !dateSet.size) return;
+                                    const isSvc = t.startsWith('svc:');
+                                    const svcId = isSvc ? t.slice(4) : null;
+                                    const memId = !isSvc ? t : null;
 
-                                        (calendar.getEvents() || []).forEach(ev => {
-                                            try {
-                                                if (!ev || ev.display !== 'background') return;
-                                                const xp = ev.extendedProps || {};
-                                                if (!xp.is_per_date) return;
+                                    (calendar.getEvents() || []).forEach(ev => {
+                                        try {
+                                            if (!ev || ev.display !== 'background') return;
+                                            const xp = ev.extendedProps || {};
+                                            if (!xp.is_per_date) return;
+                                            const startStr = ev.startStr || (ev.start ? ev.start.toISOString() : null);
+                                            if (!startStr) return;
+                                            const dateStr = String(startStr).split('T')[0];
+                                            if (!dateSet.has(dateStr)) return;
 
-                                                // Scope match
-                                                if (SELECTED_MEMBER) {
-                                                    if (isSvc) {
-                                                        const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
-                                                        if (!assignedSvc || String(assignedSvc) !== String(svcId)) return;
-                                                    } else {
-                                                        const assignedUserId = xp.assigned_user_id || null;
-                                                        const assignedMembershipId = xp.assigned_membership_id || null;
-                                                        if (userId && assignedUserId && String(assignedUserId) !== String(userId)) return;
-                                                        if (!userId && assignedMembershipId && String(assignedMembershipId) !== String(membershipId)) return;
-                                                    }
+                                            let matches = false;
+                                            if (isSvc) {
+                                                const assignedSvc = xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null;
+                                                if (assignedSvc != null && String(assignedSvc) === String(svcId)) matches = true;
+                                            } else {
+                                                const assignedMembership = (xp.assigned_membership_id != null) ? String(xp.assigned_membership_id) : (xp.assigned_membership != null ? String(xp.assigned_membership) : null);
+                                                if (assignedMembership && assignedMembership === String(memId)) {
+                                                    matches = true;
+                                                } else if (xp.assigned_user_id != null && Array.isArray(MEMBERS)) {
+                                                    const uId = String(xp.assigned_user_id);
+                                                    const m = MEMBERS.find(mm => {
+                                                        try {
+                                                            const uid = (mm.user__id || mm.user_id || (mm.user && (mm.user.id || mm.user.pk)) || null);
+                                                            return uid != null && String(uid) === uId;
+                                                        } catch (e) { return false; }
+                                                    });
+                                                    if (m && m.id != null && String(m.id) === String(memId)) matches = true;
                                                 }
-                                                ev.remove();
-                                            } catch (e) {}
-                                        });
-                                    } catch (e) {}
+                                            }
 
-                                    try { if (typeof _invalidateServiceScopeParityCache === 'function') _invalidateServiceScopeParityCache(); } catch (e) {}
-                                    try { renderOverridesTable(); } catch (e) {}
-                                    try { updateUnavailableDays(); } catch (e) {}
-                                    // Still refetch to ensure canonical state
-                                    try { await calendar.refetchEvents(); } catch (e) {}
-                                    try { renderOverridesTable(); } catch (e) {}
-                                    try { updateUnavailableDays(); } catch (e) {}
-                                    alert('All per-date overrides reset.');
-                                } else {
-                                    const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
-                                    alert('Error resetting: ' + msg);
+                                            if (matches) ev.remove();
+                                        } catch (e) { /* ignore */ }
+                                    });
+                                } catch (e) { /* ignore */ }
+                            }
+
+                            try {
+                                let totalDeleted = 0;
+                                for (const t of targets) {
+                                    const chunk = Array.from(new Set(byTarget[t] || []));
+                                    const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+                                        body: JSON.stringify({ dates: chunk, target: t })
+                                    });
+                                    const data = await res.json().catch(() => null);
+                                    if (!res.ok) {
+                                        const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
+                                        alert('Error resetting: ' + msg);
+                                        return;
+                                    }
+                                    try { totalDeleted += Number((data && data.deleted) || 0) || 0; } catch (e) {}
                                 }
+
+                                // Make the overrides table update immediately (no refresh needed)
+                                try {
+                                    for (const t of targets) {
+                                        _ccLocalRemovePerDateEventsForTarget(byTarget[t] || [], t);
+                                    }
+                                } catch (e) { /* ignore */ }
+                                try {
+                                    const cacheObj = (window._perDateOverridesCache && typeof window._perDateOverridesCache === 'object') ? window._perDateOverridesCache : null;
+                                    if (cacheObj) {
+                                        for (const t of targets) {
+                                            for (const d of (byTarget[t] || [])) {
+                                                try { delete cacheObj[String(d)]; } catch (e) {}
+                                            }
+                                        }
+                                    }
+                                } catch (e) { /* ignore */ }
+                                try { renderOverridesTable(); } catch (e) {}
+
+                                if (totalDeleted <= 0) {
+                                    alert('No overrides were deleted. This usually means the visible overrides belong to a different scope (member vs service).');
+                                }
+
+                                try { if (typeof _invalidateServiceScopeParityCache === 'function') _invalidateServiceScopeParityCache(); } catch (e) {}
+                                try { await calendar.refetchEvents(); } catch (e) {}
+                                try { updateUnavailableDays(); } catch (e) {}
+                                try { renderOverridesTable(); } catch (e) {}
+                                alert('All per-date overrides reset.');
                             } catch (err) {
                                 console.error('Reset all failed', err);
                                 alert('Error resetting: ' + (err && err.message ? err.message : String(err)));
+                            } finally {
+                                ccSetBtnLoading(resetBtn, false);
                             }
                         };
                     }
@@ -6074,7 +7450,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { /* ignore header setup errors */ }
 
         const events = (typeof calendar.getEvents === 'function') ? calendar.getEvents() : [];
-        const perDate = {}; // date -> { rangesSet: Set, items: [], blocked: false, source?: 'service'|'members' }
+        const perDate = {}; // date -> { rangesSet: Set, items: [], blocked: false, source?: 'service'|'members', target?: string|null }
 
         function fmtTime(h, m) {
             const hh = parseInt(h,10);
@@ -6194,7 +7570,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     // Service-scoped per-date override
                     if (assignedSvc && String(assignedSvc) === String(currentServiceId)) {
-                        if (!perDate[date]) perDate[date] = { rangesSet: new Set(), items: [], blocked: false, source: 'service' };
+                        if (!perDate[date]) perDate[date] = { rangesSet: new Set(), items: [], blocked: false, source: 'service', target: `svc:${currentServiceId}` };
                         if (props.override_type === 'blocked' && fullDay) {
                             perDate[date].blocked = true;
                         } else {
@@ -6238,7 +7614,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!sig) return;
 
                     // Shared across all members => show it in the group service overrides table
-                    if (!perDate[dateStr]) perDate[dateStr] = { rangesSet: new Set(), items: [], blocked: false, source: 'members' };
+                    if (!perDate[dateStr]) perDate[dateStr] = { rangesSet: new Set(), items: [], blocked: false, source: 'members', target: null };
                     if (sig === 'blocked:fullday') {
                         perDate[dateStr].blocked = true;
                         return;
@@ -6267,12 +7643,52 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!startStr) return;
                     const date = startStr.split('T')[0];
 
+                    // Determine owning scope for this override (membership id or svc:<id>) so Reset deletes the correct record.
+                    let owningTarget = null;
+                    try {
+                        if (!SELECTED_MEMBER) {
+                            owningTarget = null;
+                        } else if (isServiceScope) {
+                            const assignedSvc = props.assigned_scope_service_id || props.assigned_scope_service || null;
+                            if (assignedSvc && String(assignedSvc) === String(currentServiceId)) {
+                                owningTarget = `svc:${currentServiceId}`;
+                            } else if (props.assigned_membership_id != null) {
+                                owningTarget = String(props.assigned_membership_id);
+                            } else if (props.assigned_user_id != null && Array.isArray(MEMBERS)) {
+                                const uId = String(props.assigned_user_id);
+                                const m = MEMBERS.find(mm => {
+                                    try {
+                                        const uid = (mm.user__id || mm.user_id || (mm.user && (mm.user.id || mm.user.pk)) || null);
+                                        return uid != null && String(uid) === uId;
+                                    } catch (e) { return false; }
+                                });
+                                if (m && m.id != null) owningTarget = String(m.id);
+                            }
+                        } else {
+                            // Member scope: most overrides are member-scoped, but we may also be showing
+                            // service-scoped overrides for solo services owned by this member.
+                            const svcAssigned = props.assigned_scope_service_id || props.assigned_scope_service || null;
+                            if (svcAssigned != null) owningTarget = `svc:${String(svcAssigned)}`;
+                            else owningTarget = currentMemberId;
+                        }
+                    } catch (e) { owningTarget = null; }
+
                     let sH = 0, sM = 0, eH = 23, eM = 59;
                     if (ev.start && ev.start.getHours) { sH = ev.start.getHours(); sM = ev.start.getMinutes(); }
                     else if (startStr.split('T')[1]) { const parts = startStr.split('T')[1].split(':'); sH = parseInt(parts[0]||'0',10); sM = parseInt(parts[1]||'0',10); }
                     if (ev.end && ev.end.getHours) { eH = ev.end.getHours(); eM = ev.end.getMinutes(); }
                     else if (ev.endStr && ev.endStr.split('T')[1]) { const parts = ev.endStr.split('T')[1].split(':'); eH = parseInt(parts[0]||'23',10); eM = parseInt(parts[1]||'59',10); }
-                    if (!perDate[date]) perDate[date] = { rangesSet: new Set(), items: [], blocked: false };
+                    if (!perDate[date]) {
+                        perDate[date] = { rangesSet: new Set(), items: [], blocked: false, target: owningTarget };
+                    } else {
+                        const existingTarget = (perDate[date].target != null) ? String(perDate[date].target) : null;
+                        const newTarget = (owningTarget != null) ? String(owningTarget) : null;
+                        if (existingTarget && newTarget && existingTarget !== newTarget) {
+                            perDate[date].target = null;
+                        } else if (!existingTarget && newTarget) {
+                            perDate[date].target = newTarget;
+                        }
+                    }
                     const fullDay = (sH === 0 && sM === 0 && eH === 23 && eM === 59);
                     if (props.override_type === 'blocked' && fullDay) {
                         perDate[date].blocked = true;
@@ -6367,7 +7783,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 resetBtn.style.cursor = '';
                 try { if (isPastDate(d)) { resetBtn.disabled = true; resetBtn.title = 'Cannot reset past dates'; resetBtn.style.opacity = '0.6'; resetBtn.style.cursor = 'not-allowed'; } } catch(e) {}
 
+                const rowTarget = (entry && entry.target != null) ? String(entry.target) : null;
+                if (!rowTarget) {
+                    resetBtn.disabled = true;
+                    resetBtn.title = 'This override day contains multiple sources; reset from a specific member/service view.';
+                    resetBtn.style.opacity = '0.6';
+                    resetBtn.style.cursor = 'not-allowed';
+                }
+
                 resetBtn.onclick = async () => {
+                    if (!rowTarget) return;
                     if (!confirm(`Reset ${d} to weekly defaults? This will remove per-date overrides for this date.`)) return;
 
                     // Prevent reset if weekly defaults would exclude existing bookings.
@@ -6376,20 +7801,30 @@ document.addEventListener('DOMContentLoaded', function() {
                         const verdict = _validateOverrideAgainstBookings(d, weekly);
                         if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
                     } catch (e) { /* ignore */ }
-                    resetBtn.disabled = true;
-                        try {
-                        const overrideTarget = (ccOverrideTarget() || null);
+                    ccSetBtnLoading(resetBtn, true, 'Resetting…');
+                    try {
+                        const overrideTarget = rowTarget;
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [d], target: overrideTarget })
                         });
                         const data = await res.json().catch(() => null);
                         if (res.ok) {
+                            try {
+                                const deleted = Number((data && data.deleted) || 0) || 0;
+                                if (deleted <= 0) {
+                                    alert('No overrides were deleted. This override may belong to a different scope (member vs service).');
+                                    try { await calendar.refetchEvents(); } catch(e){}
+                                    try { updateUnavailableDays(); } catch(e){}
+                                    try { renderOverridesTable(); } catch(e){}
+                                    return;
+                                }
+                            } catch (e) { /* ignore */ }
                             // Remove per-date background events for this DATE in the current SCOPE.
                             try {
-                                const isSvc = !!(SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:'));
-                                const svcId = isSvc ? String(SELECTED_MEMBER).slice(4) : null;
-                                const userId = (!isSvc && SELECTED_MEMBER) ? getSelectedUserIdForMembership(SELECTED_MEMBER) : null;
-                                const membershipId = (!isSvc && SELECTED_MEMBER) ? String(SELECTED_MEMBER) : null;
+                                const isSvcTarget = !!(overrideTarget && String(overrideTarget).startsWith('svc:'));
+                                const svcId = isSvcTarget ? String(overrideTarget).slice(4) : null;
+                                const membershipId = (!isSvcTarget && overrideTarget) ? String(overrideTarget) : null;
+                                const userId = membershipId ? getSelectedUserIdForMembership(membershipId) : null;
                                 (calendar.getEvents() || []).forEach(ev => {
                                     try {
                                         if (!ev || ev.display !== 'background') return;
@@ -6398,15 +7833,18 @@ document.addEventListener('DOMContentLoaded', function() {
                                         if (!s || !String(s).startsWith(d)) return;
 
                                         const xp = ev.extendedProps || {};
-                                        if (SELECTED_MEMBER) {
-                                            if (isSvc) {
-                                                const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || null);
-                                                if (!assignedSvc || String(assignedSvc) !== String(svcId)) return;
+                                        if (isSvcTarget) {
+                                            const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || (xp.client_name && String(xp.client_name).replace('scope:svc:','')) || null);
+                                            if (!assignedSvc || String(assignedSvc) !== String(svcId)) return;
+                                        } else {
+                                            const assignedUserId = xp.assigned_user_id || null;
+                                            const assignedMembershipId = xp.assigned_membership_id || null;
+                                            if (assignedMembershipId && String(assignedMembershipId) === String(membershipId)) {
+                                                // ok
+                                            } else if (userId && assignedUserId && String(assignedUserId) === String(userId)) {
+                                                // ok
                                             } else {
-                                                const assignedUserId = xp.assigned_user_id || null;
-                                                const assignedMembershipId = xp.assigned_membership_id || null;
-                                                if (userId && assignedUserId && String(assignedUserId) !== String(userId)) return;
-                                                if (!userId && assignedMembershipId && String(assignedMembershipId) !== String(membershipId)) return;
+                                                return;
                                             }
                                         }
                                         ev.remove();
@@ -6428,7 +7866,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert('Error: ' + (err && err.message ? err.message : String(err)));
                         try { await calendar.refetchEvents(); } catch(e){}
                         try { updateUnavailableDays(); } catch(e){}
-                    } finally { try { resetBtn.disabled = isPastDate(d); } catch(e) { resetBtn.disabled = false; } }
+                    } finally {
+                        ccSetBtnLoading(resetBtn, false);
+                        try {
+                            // Restore disabled state based on rules
+                            if (!rowTarget) {
+                                resetBtn.disabled = true;
+                            } else {
+                                resetBtn.disabled = isPastDate(d);
+                            }
+                        } catch(e) { resetBtn.disabled = false; }
+                    }
                 };
 
                 const selectBtn = document.createElement('button');
@@ -6508,6 +7956,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function restoreHandlers() { if (restored) return; restored = true; saveBtnEl.onclick = prevSave; closeBtnEl.onclick = prevClose; }
 
         saveBtnEl.onclick = async () => {
+            ccSetBtnLoading(saveBtnEl, true, 'Saving…');
             const overrideTarget = (ccOverrideTarget() || null);
             // Gather ranges
             const rows = Array.from(rangesContainer.querySelectorAll('.modal-range-row'));
@@ -6543,17 +7992,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 // Remove existing overrides for these dates (capture target at start)
-                await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: overrideTarget }) });
+                {
+                    const resDel = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates, target: overrideTarget }) });
+                    if (!resDel.ok) {
+                        const { data, text } = await _ccReadJsonOrText(resDel);
+                        const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${resDel.status}`;
+                        try { _showOverridesSaveBanner(msg, { status: resDel.status, data: data || null }); } catch (e) {}
+                        alert('Error applying bulk update: ' + msg);
+                        return;
+                    }
+                }
 
                 if (unique.length === 0) {
                     // No ranges -> simply deleted (reverts to weekly defaults)
                 } else {
                     // Create new ranges; batch by each distinct range across all selected dates
                     for (const rr of unique) {
-                        await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
+                        const resCreate = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                             body: JSON.stringify({ dates, start_time: rr.start, end_time: rr.end, target: overrideTarget })
                         });
+                        if (!resCreate.ok) {
+                            const { data, text } = await _ccReadJsonOrText(resCreate);
+                            const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${resCreate.status}`;
+                            try { _showOverridesSaveBanner(msg, { status: resCreate.status, data: data || null }); } catch (e) {}
+                            alert('Error applying bulk update: ' + msg);
+                            return;
+                        }
                     }
                 }
                 try { await calendar.refetchEvents(); } catch(e){}
@@ -6563,6 +8028,8 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (err) {
                 console.error('Bulk update failed', err);
                 alert('Error applying bulk update.');
+            } finally {
+                ccSetBtnLoading(saveBtnEl, false);
             }
 
             modal.style.display = 'none';
@@ -6691,6 +8158,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!verdict.ok) { alert(verdict.message || 'This day already has a booking.'); return; }
                 } catch (e) { /* ignore */ }
                 if (!confirm(`Mark ${dateStr} as unavailable? This will block the whole day.`)) return;
+                ccSetBtnLoading(makeUnavailableBtn, true, 'Saving…');
                 try {
                     const overrideTarget = (ccOverrideTarget() || null);
                     const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: '00:00', end_time: '23:59', is_blocking: true, target: overrideTarget }) });
@@ -6702,9 +8170,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert('Date marked unavailable.');
                     } else {
                         const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${res.status}`;
+                        try { _showOverridesSaveBanner(msg, { status: res.status, data: data || null }); } catch (e) {}
                         alert('Error marking unavailable: ' + msg);
                     }
-                } catch (err) { console.error('Make unavailable failed', err); alert('Error: ' + (err && err.message ? err.message : String(err))); }
+                } catch (err) {
+                    console.error('Make unavailable failed', err);
+                    alert('Error: ' + (err && err.message ? err.message : String(err)));
+                } finally {
+                    ccSetBtnLoading(makeUnavailableBtn, false);
+                }
                 modal.style.display = 'none';
                 restoreHandlers();
                 restoreMake();
@@ -6719,6 +8193,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 restoreHandlers();
                 return;
             }
+            ccSetBtnLoading(saveBtnEl, true, 'Saving…');
             const rows = Array.from(rangesContainer.querySelectorAll('.modal-range-row'));
             const ranges = [];
             for (const r of rows) {
@@ -6753,11 +8228,14 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert('Date marked unavailable.');
                     } else {
                         const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${res.status}`;
+                        try { _showOverridesSaveBanner(msg, { status: res.status, data: data || null }); } catch (e) {}
                         alert('Error marking unavailable: ' + msg);
                     }
                 } catch (err) {
                     console.error('Make unavailable failed', err);
                     alert('Error: ' + (err && err.message ? err.message : String(err)));
+                } finally {
+                    ccSetBtnLoading(saveBtnEl, false);
                 }
 
                 modal.style.display = 'none';
@@ -6799,14 +8277,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                 } catch (e) { /* ignore removal errors */ }
 
+                let anyFailed = false;
                 for (const r of rangesToCreate) {
                     try {
                         // optimistic UI
                         const overrideTarget = (ccOverrideTarget() || null);
                         const res = await fetch(`/bus/${orgSlug}/bookings/batch_create/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: [dateStr], start_time: r.start, end_time: r.end, target: overrideTarget }) });
-                        const data = await res.json().catch(() => null);
-                        if (!res.ok) console.warn('Error creating per-date range', r, data);
-                        else {
+                        const { data, text } = await _ccReadJsonOrText(res);
+                        if (!res.ok) {
+                            anyFailed = true;
+                            const msg = (data && (data.error || data.message)) || (text || '').trim() || `Server returned ${res.status}`;
+                            try { _showOverridesSaveBanner(msg, { status: res.status, data: data || null }); } catch (e) {}
+                            console.warn('Error creating per-date range', r, data || text);
+                        } else {
                             // On success add event (avoid transient duplicate before server cleanup)
                             try { calendar.addEvent({ start: dateStr + 'T' + r.start, end: dateStr + 'T' + r.end, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget)) }); } catch(e){}
                         }
@@ -6815,8 +8298,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 try { await calendar.refetchEvents(); } catch(e){}
                 try { updateUnavailableDays(); } catch(e){}
-                alert('Per-date availability saved.');
-            } catch (err) { console.error('Save per-date failed', err); alert('Error saving: ' + (err && err.message ? err.message : String(err))); }
+                if (!anyFailed) alert('Per-date availability saved.');
+            } catch (err) {
+                console.error('Save per-date failed', err);
+                alert('Error saving: ' + (err && err.message ? err.message : String(err)));
+            } finally {
+                ccSetBtnLoading(saveBtnEl, false);
+            }
 
             modal.style.display = 'none';
             restoreHandlers();
@@ -6901,11 +8389,257 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function ccShowToastSafe(type, message) {
+        // For override-denial cases, show ONLY the banner (no toast).
+        try {
+            const t = String(type || '').toLowerCase();
+            const msg = String(message || '').trim();
+            if (t === 'error' && _ccLooksLikeOverrideDenialMessage(msg)) {
+                ccMaybeShowOverrideBannerFromToast(type, msg);
+                return;
+            }
+        } catch (e) {}
+
         try {
             if (typeof showToast === 'function') return showToast(type, message);
-        } catch (e) {}
+        } catch (e) { /* ignore */ }
+
         try { alert(String(message || '')); } catch (e) {}
     }
+
+    function _ccLooksLikeOverrideDenialMessage(msg){
+        try {
+            const lower = String(msg || '').toLowerCase();
+            return (
+                lower.includes('not authorized') ||
+                lower.includes('no overlapping availability') ||
+                lower.includes('group service') ||
+                lower.includes('member calendar override') ||
+                lower.includes('member calendar first') ||
+                lower.includes('overlaps another solo service') ||
+                lower.includes('error making available')
+            );
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function _ccEnsureOverrideBannerHardFallback(){
+        try {
+            const existing = document.getElementById('cc-overrides-save-banner-hard');
+            if (existing) {
+                try {
+                    try { existing.style.zIndex = '1000001'; } catch (e) {}
+                    try { existing.style.pointerEvents = 'auto'; } catch (e) {}
+                    if (!existing.__ccBound) {
+                        existing.__ccBound = true;
+                        const btn = document.getElementById('cc-overrides-save-banner-hard-close');
+                        if (btn) {
+                            try { btn.setAttribute('onclick', "try{window.ccDismissOverrideBanner&&window.ccDismissOverrideBanner();}catch(e){}"); } catch (e) {}
+                            try { btn.style.position = 'relative'; btn.style.zIndex = '1000002'; btn.style.pointerEvents = 'auto'; } catch (e) {}
+                            btn.addEventListener('click', (e) => {
+                                try { e.preventDefault(); } catch (err) {}
+                                try { window.ccDismissOverrideBanner && window.ccDismissOverrideBanner(); } catch (e2) { try { _clearOverridesSaveBanner(); } catch (e3) {} }
+                            });
+                        }
+                        existing.addEventListener('click', (e) => {
+                            const b = e && e.target && e.target.closest ? e.target.closest('button[data-cc-selection]') : null;
+                            if (!b) return;
+                            try { e.preventDefault(); } catch (err) {}
+                            const sel = b.getAttribute('data-cc-selection');
+                            if (!sel) return;
+                            try {
+                                if (typeof applySelection === 'function') applySelection(sel);
+                                _clearOverridesSaveBanner();
+                            } catch (err) { console.warn('Failed to switch selection', err); }
+                        }, true);
+                    }
+                } catch (e) {}
+                return existing;
+            }
+            const el = document.createElement('div');
+            el.id = 'cc-overrides-save-banner-hard';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            el.style.display = 'none';
+            el.style.position = 'fixed';
+            el.style.left = '50%';
+            el.style.top = '14px';
+            el.style.transform = 'translateX(-50%)';
+            el.style.zIndex = '1000001';
+            el.style.pointerEvents = 'auto';
+            el.style.maxWidth = 'min(920px, calc(100vw - 24px))';
+            el.style.width = 'min(920px, calc(100vw - 24px))';
+            el.style.padding = '12px 12px';
+            el.style.borderRadius = '12px';
+            el.style.border = '1px solid #fecaca';
+            el.style.background = '#fef2f2';
+            el.style.color = '#7f1d1d';
+            el.style.boxShadow = '0 10px 22px rgba(0,0,0,0.18)';
+            el.style.fontSize = '14px';
+            el.style.lineHeight = '1.35';
+            el.innerHTML = `
+                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+                    <div id="cc-overrides-save-banner-hard-body"></div>
+                    <button type="button" id="cc-overrides-save-banner-hard-close" onclick="try{window.ccDismissOverrideBanner&&window.ccDismissOverrideBanner();}catch(e){}" style="border:0; background:transparent; color:#7f1d1d; font-weight:800; cursor:pointer; padding:2px 6px; border-radius:8px;">×</button>
+                </div>
+            `;
+            document.body.appendChild(el);
+            try {
+                const btn = document.getElementById('cc-overrides-save-banner-hard-close');
+                if (btn) {
+                    try { btn.style.position = 'relative'; btn.style.zIndex = '1000002'; btn.style.pointerEvents = 'auto'; } catch (e) {}
+                    btn.addEventListener('click', (e) => {
+                        try { e.preventDefault(); } catch (err) {}
+                        try { window.ccDismissOverrideBanner && window.ccDismissOverrideBanner(); } catch (e2) { try { _clearOverridesSaveBanner(); } catch (e3) {} }
+                    });
+                }
+            } catch (e) {}
+
+            // Action buttons inside banner (member switch)
+            try {
+                el.addEventListener('click', (e) => {
+                    const btn = e && e.target && e.target.closest ? e.target.closest('button[data-cc-selection]') : null;
+                    if (!btn) return;
+                    try { e.preventDefault(); } catch (err) {}
+                    const sel = btn.getAttribute('data-cc-selection');
+                    if (!sel) return;
+                    try {
+                        if (typeof applySelection === 'function') applySelection(sel);
+                        _clearOverridesSaveBanner();
+                    } catch (err) { console.warn('Failed to switch selection', err); }
+                }, true);
+            } catch (e) {}
+            try { el.__ccBound = true; } catch (e) {}
+            return el;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function ccShowOverrideBannerGuaranteed(message, opts){
+        const msg = String(message || '').trim();
+
+        // If the user just dismissed the banner, don't immediately re-open it.
+        try {
+            const until = Number(window.__ccOverrideBannerSuppressUntil || 0) || 0;
+            if (until && Date.now() < until) return false;
+        } catch (e) {}
+
+        // Try the full banner first.
+        try {
+            if (typeof _showOverridesSaveBanner === 'function') {
+                _showOverridesSaveBanner(msg, opts || {});
+            }
+        } catch (e) {
+            try { console.error('_showOverridesSaveBanner failed', e); } catch (e2) {}
+        }
+
+        // Always populate the top banner (hard fallback) with instructional HTML.
+        try {
+            const el = _ccEnsureOverrideBannerHardFallback();
+            const body = document.getElementById('cc-overrides-save-banner-hard-body');
+            if (el && body) {
+                try {
+                    const esc = (typeof _ccEscapeHtml === 'function') ? _ccEscapeHtml : (s => String(s || ''));
+                    const humanizeFn = (typeof _ccHumanizeOverrideMessage === 'function')
+                        ? _ccHumanizeOverrideMessage
+                        : ((window && typeof window.__ccHumanizeOverrideMessage === 'function') ? window.__ccHumanizeOverrideMessage : null);
+                    const humanMsg = humanizeFn ? humanizeFn(msg) : msg;
+                    const hintsFn = (typeof _overrideSaveHints === 'function')
+                        ? _overrideSaveHints
+                        : ((window && typeof window.__ccOverrideSaveHints === 'function') ? window.__ccOverrideSaveHints : null);
+                    const actionsFn = (typeof _overrideSaveActions === 'function')
+                        ? _overrideSaveActions
+                        : ((window && typeof window.__ccOverrideSaveActions === 'function') ? window.__ccOverrideSaveActions : null);
+                    const hints = hintsFn ? (hintsFn(msg) || []) : [];
+                    const actions = actionsFn ? (actionsFn((opts && opts.data) ? opts.data : null) || []) : [];
+                    const actionsHtml = actions.length
+                        ? `<div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+                                ${actions.map(a => {
+                                    const sel = esc(a.selection);
+                                    const lbl = esc(a.label);
+                                    return `<button type="button" data-cc-selection="${sel}" style="border:1px solid #fca5a5; background:#fff; color:#7f1d1d; padding:7px 10px; border-radius:10px; cursor:pointer; font-weight:600;">${lbl}</button>`;
+                                }).join('')}
+                           </div>`
+                        : '';
+                    const hintsHtml = hints.length
+                        ? `<div style="margin-top:10px; color:#991b1b;">
+                                ${hints.slice(0, 3).map(h => `<div style="margin-top:6px;"><strong>•</strong> ${esc(h)}</div>`).join('')}
+                           </div>`
+                        : '';
+                    body.innerHTML = `
+                        <div style="font-weight:800;">Couldn't save override</div>
+                        <div style="margin-top:3px;">${esc(humanMsg || 'The server rejected this override.')}</div>
+                        ${hintsHtml}
+                        ${actionsHtml}
+                    `;
+                } catch (e) {
+                    body.textContent = msg || 'The server rejected this override.';
+                }
+                el.style.display = 'block';
+                return true;
+            }
+        } catch (e) {
+            try { console.error('hard fallback banner failed', e); } catch (e2) {}
+        }
+        return false;
+    }
+
+    function ccMaybeShowOverrideBannerFromToast(type, message){
+        try {
+            const t = String(type || '').toLowerCase();
+            const msg = String(message || '').trim();
+            if (t !== 'error') return;
+            if (!_ccLooksLikeOverrideDenialMessage(msg)) return;
+            const clean = msg.replace(/^error making available:\s*/i, '').trim();
+            // Defer slightly so the toast renders first and any modal-close completes.
+            setTimeout(() => {
+                ccShowOverrideBannerGuaranteed(clean || msg, { status: 403, data: null });
+            }, 0);
+        } catch (e) {
+            try { console.error('ccMaybeShowOverrideBannerFromToast failed', e); } catch (e2) {}
+        }
+    }
+
+    // If the UI is already showing a toast for an override denial, always mirror it
+    // into the instructional banner so staff see the “what to do next” guidance.
+    (function ccHookShowToastForOverrideBanner(){
+        try {
+            if (window.__ccShowToastOverrideBannerHookInstalled) return;
+            window.__ccShowToastOverrideBannerHookInstalled = true;
+            if (typeof window.showToast !== 'function') return;
+
+            const _orig = window.showToast;
+            window.showToast = function(type, message) {
+                try {
+                    const t = String(type || '').toLowerCase();
+                    const msg = String(message || '').trim();
+                    if (t !== 'error') return _orig.apply(this, arguments);
+
+                    // Only mirror override-related errors.
+                    const lower = msg.toLowerCase();
+                    const looksLikeOverrideDenial =
+                        lower.includes('not authorized') ||
+                        lower.includes('no overlapping availability') ||
+                        lower.includes('group service') ||
+                        lower.includes('member calendar override') ||
+                        lower.includes('member calendar first') ||
+                        lower.includes('overlaps another solo service') ||
+                        lower.includes('error making available');
+                    if (!looksLikeOverrideDenial) return _orig.apply(this, arguments);
+
+                    // Normalize common prefixes so the banner headline reads cleanly.
+                    const clean = msg.replace(/^error making available:\s*/i, '').trim();
+                    // For override denials, show ONLY the banner (skip toast).
+                    ccShowOverrideBannerGuaranteed(clean || msg, { status: 403, data: null });
+                    return;
+                } catch (e) {}
+
+                // Non-override errors: keep original toast behavior.
+                try { return _orig.apply(this, arguments); } catch (e) {}
+            };
+        } catch (e) { /* ignore */ }
+    })();
 
     function ccToastFullyBooked(dates) {
         try {
@@ -8158,8 +9892,25 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify(_payload)
         })
-        .then(r => r.json())
-        .then(data => {
+        .then(async (res) => {
+            const { data, text } = await _ccReadJsonOrText(res);
+            if (!res.ok) {
+                const msg = (data && (data.error || data.message)) || (String(text || '').trim()) || `Server returned ${res.status}`;
+                // Roll back optimistic background events for these dates.
+                try {
+                    calendar.getEvents().forEach(ev => {
+                        try {
+                            const xp = ev.extendedProps || {};
+                            if (ev.display !== 'background' || !xp.is_per_date || !xp.optimistic) return;
+                            const start = String(ev.startStr || '');
+                            const datePart = start.split('T')[0];
+                            if (datesArray.includes(datePart)) ev.remove();
+                        } catch (e) { /* ignore */ }
+                    });
+                } catch (e) {}
+                try { _showOverridesSaveBanner(msg, { status: res.status, data: data || null }); } catch (e) {}
+                return;
+            }
             // Refresh events to reconcile with server truth (server may attach ids/changes)
             try { calendar.refetchEvents(); } catch(e) { console.warn('refetchEvents failed', e); }
         })
@@ -8405,7 +10156,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                                             body: JSON.stringify({ dates: [dates[0]], target: overrideTarget })
                                 });
-                                const data = await res.json().catch(() => null);
+                                const { data, text } = await _ccReadJsonOrText(res);
                                 if (res.ok) {
                                     // Persist a default available range immediately so "Make Available" actually
                                     // creates a per-date override (otherwise users expect availability to save
@@ -8438,15 +10189,23 @@ document.addEventListener('DOMContentLoaded', function() {
                                             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                                             body: JSON.stringify({ dates: [dates[0]], start_time: start, end_time: end, target: overrideTarget })
                                         });
-                                        const createData = await createRes.json().catch(() => null);
+                                        const { data: createData, text: createText } = await _ccReadJsonOrText(createRes);
                                         if (!createRes.ok) {
-                                            const msg = (createData && (createData.error || createData.message)) || `Server returned ${createRes.status}`;
-                                            alert('Error making available: ' + msg);
+                                            const msg = (createData && (createData.error || createData.message)) || (String(createText || '').trim()) || `Server returned ${createRes.status}`;
+                                            // Close modal so the banner is visible (banner sits behind modal overlay).
+                                            try { modal.style.display = 'none'; } catch (e) {}
+                                            try { setTimeout(() => { ccShowOverrideBannerGuaranteed(msg, { status: createRes.status, data: createData || null }); }, 0); } catch (e) {}
+                                            // Reconcile with server (delete may have succeeded, create failed).
+                                            try { await calendar.refetchEvents(); } catch(e){}
+                                            try { updateUnavailableDays(); } catch(e){}
                                             return;
                                         }
                                     } catch (e) {
                                         console.warn('makeAvailable batch_create failed', e);
-                                        alert('Error making available (create step failed).');
+                                        try { modal.style.display = 'none'; } catch (e) {}
+                                        try { ccShowToastSafe('error', 'Error making available (create step failed).'); } catch (e) {}
+                                        try { await calendar.refetchEvents(); } catch(e){}
+                                        try { updateUnavailableDays(); } catch(e){}
                                         return;
                                     }
 
@@ -8483,14 +10242,20 @@ document.addEventListener('DOMContentLoaded', function() {
                                         updateClearButton();
                                         updateSelectButtonText();
                                     } catch (e) {}
-                                    alert('Date made available.');
+                                    try { ccShowToastSafe('success', 'Date made available.'); } catch (e) {}
                                 } else {
-                                    const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
-                                    alert('Error making available: ' + msg);
+                                    const msg = (data && (data.error || data.message)) || (String(text || '').trim()) || `Server returned ${res.status}`;
+                                    try { modal.style.display = 'none'; } catch (e) {}
+                                    try { setTimeout(() => { ccShowOverrideBannerGuaranteed(msg, { status: res.status, data: data || null }); }, 0); } catch (e) {}
+                                    try { await calendar.refetchEvents(); } catch(e){}
+                                    try { updateUnavailableDays(); } catch(e){}
                                 }
                             } catch (err) {
                                 console.error('Make available failed', err);
-                                alert('Error: ' + (err && err.message ? err.message : String(err)));
+                                try { modal.style.display = 'none'; } catch (e) {}
+                                try { ccShowToastSafe('error', 'Error making available: ' + (err && err.message ? err.message : String(err))); } catch (e) {}
+                                try { await calendar.refetchEvents(); } catch(e){}
+                                try { updateUnavailableDays(); } catch(e){}
                             }
                         };
                     } else {
@@ -8558,50 +10323,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                     } catch (e) { console.warn('grouping date failed', d, e); }
                                 }
 
-                                // Optimistic UI: remove grey blocks and mark days available immediately
-                                try {
-                                    for (const d of dates) {
-                                        // remove any full-day grey background events for this date
-                                        calendar.getEvents().forEach(ev => {
-                                            try {
-                                                if (ev.display === 'background' && ev.startStr && ev.startStr.startsWith(d) && (ev.backgroundColor === '#e0e0e0' || ev.color === '#e0e0e0')) {
-                                                    ev.remove();
-                                                }
-                                            } catch (e) { /* ignore per-event */ }
-                                        });
-
-                                        // add a per-date available background using the date's default time
-                                        const dow = parseYMD(d).getDay();
-                                        const info = defaultAvailability[dow] || {};
-                                        let s = '09:00', e = '17:00';
-                                        if (info.ranges && info.ranges.length) {
-                                            const first = info.ranges[0];
-                                            if (first && first.includes('-')) {
-                                                const parts = first.split('-'); s = parts[0].trim(); e = parts[1].trim();
-                                            }
-                                        } else if (info.start && info.end) { s = info.start; e = info.end; }
-
-                                            try {
-                                            const overrideTarget = (ccOverrideTarget() || null);
-                                            calendar.addEvent({ start: d + 'T' + s, end: d + 'T' + e, display: 'background', color: '#d0f0d0', extendedProps: Object.assign({ is_per_date: true, override_type: 'available', optimistic: true }, getScopePropsForSelection(overrideTarget)) });
-                                        } catch (ee) { /* ignore addEvent errors */ }
-
-                                        // Update day cell classes immediately
-                                        try {
-                                            const cell = document.querySelector(`.fc-daygrid-day[data-date="${d}"]`);
-                                            if (cell) {
-                                                cell.classList.remove('fc-day-unavailable');
-                                                cell.classList.add('fc-day-available');
-                                                const num = cell.querySelector('.fc-daygrid-day-number');
-                                                if (num) {
-                                                    num.classList.remove('unavailable-number');
-                                                    num.style.cursor = 'pointer';
-                                                }
-                                            }
-                                        } catch (e) { /* ignore per-cell errors */ }
-                                    }
-                                } catch (e) { console.warn('optimistic UI update failed', e); }
-
                                 // First, remove any per-day blocks or avails that explicitly block these dates
                                 const overrideTarget = (ccOverrideTarget() || null);
                                 const delRes = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
@@ -8609,11 +10330,14 @@ document.addEventListener('DOMContentLoaded', function() {
                                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                                     body: JSON.stringify({ dates: dates, target: overrideTarget })
                                 });
-                                const delData = await delRes.json().catch(() => null);
+                                const { data: delData, text: delText } = await _ccReadJsonOrText(delRes);
                                 if (!delRes.ok) {
-                                    const msg = (delData && (delData.error || delData.message)) || `Server returned ${delRes.status}`;
-                                    alert('Error making available (cleanup step): ' + msg);
-                                    // Re-fetch server state to revert optimistic edits
+                                    const msg = (delData && (delData.error || delData.message)) || (String(delText || '').trim()) || `Server returned ${delRes.status}`;
+                                    // Close the modal so the banner is actually visible.
+                                    try { modal.style.display = 'none'; } catch (e) {}
+                                    // Defer banner until after the modal closes (some modal flows disable page scroll).
+                                    try { setTimeout(() => { ccShowOverrideBannerGuaranteed(msg, { status: delRes.status, data: delData || null }); }, 0); } catch (e) {}
+                                    // Re-fetch server state to revert
                                     try { await calendar.refetchEvents(); } catch(e){}
                                     try { updateUnavailableDays(); } catch(e){}
                                     return;
@@ -8625,7 +10349,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
                                         body: JSON.stringify({ dates: g.dates, start_time: g.start, end_time: g.end, target: overrideTarget })
-                                    }).then(r => r.json().catch(() => null).then(data => ({ ok: r.ok, data })));
+                                    }).then(async (r) => {
+                                        const { data, text } = await _ccReadJsonOrText(r);
+                                        return { ok: r.ok, status: r.status, data, text };
+                                    });
                                 });
 
                                 const creationResults = await Promise.all(creationPromises);
@@ -8633,16 +10360,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const failed = creationResults.filter(r => !r.ok);
                                 if (failed.length) {
                                     console.warn('Some per-date creation requests failed', failed);
-                                    alert('Some dates could not be made available. Check console for details.');
+                                    const first = failed[0] || {};
+                                    const msg = (first.data && (first.data.error || first.data.message)) || (String(first.text || '').trim()) || `Server returned ${first.status || ''}`;
+                                    // Close the modal so the banner is actually visible.
+                                    try { modal.style.display = 'none'; } catch (e) {}
+                                    // Defer banner until after the modal closes (some modal flows disable page scroll).
+                                    try { setTimeout(() => { ccShowOverrideBannerGuaranteed(msg, { status: first.status || 400, data: first.data || null }); }, 0); } catch (e) {}
                                 }
 
                                 // Refresh UI from server to reconcile authoritative state
                                 try { await calendar.refetchEvents(); } catch(e){}
                                 try { updateUnavailableDays(); } catch(e){}
-                                alert('Selected days made available.');
+                                if (!failed.length) {
+                                    try { ccShowToastSafe('success', 'Selected days made available.'); } catch (e) {}
+                                }
                             } catch (err) {
                                 console.error('Make available failed', err);
-                                alert('Error: ' + (err && err.message ? err.message : String(err)));
+                                try { modal.style.display = 'none'; } catch (e) {}
+                                try { ccShowToastSafe('error', (err && err.message) ? err.message : String(err)); } catch (e) {}
                                 try { await calendar.refetchEvents(); } catch(e){}
                                 try { updateUnavailableDays(); } catch(e){}
                             }

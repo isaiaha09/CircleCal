@@ -54,6 +54,14 @@ class Service(models.Model):
 
     is_active = models.BooleanField(default=True)
 
+    # Public booking page visibility: an active service can still be hidden from
+    # the public booking page until it is fully configured.
+    show_on_public_calendar = models.BooleanField(default=True)
+
+    # If true, this service requires facility resources/capacity and must be
+    # linked to at least one FacilityResource via ServiceResource.
+    requires_facility_resources = models.BooleanField(default=False)
+
     # Refund policy
     refunds_allowed = models.BooleanField(default=True, help_text="Whether clients can receive refunds on cancellation.")
     refund_cutoff_hours = models.PositiveIntegerField(default=24, help_text="Hours before start time within which refunds are NOT permitted.")

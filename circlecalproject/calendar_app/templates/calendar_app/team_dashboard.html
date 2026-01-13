@@ -1,4 +1,8 @@
 {% extends "calendar_app/base.html" %}
+
+{# Mobile-only: break out of base <main> constraints; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-10{% endblock %}
+
 {% block content %}
 
 <style>
@@ -52,6 +56,70 @@
     
     .empty-state { text-align: center; padding: 60px 20px; color: #9ca3af; }
     .empty-state svg { width: 80px; height: 80px; margin-bottom: 16px; }
+
+    /* Mobile-only: 95% width containers + prevent right overflow */
+    @media (max-width: 640px) {
+        .team-container {
+            width: 95vw;
+            max-width: 95vw;
+            margin: 24px auto;
+            padding: 0;
+        }
+
+        .team-header { margin-bottom: 28px; }
+        .team-header h1 { font-size: 2rem; }
+        .team-header p { font-size: 1rem; }
+
+        .members-grid {
+            grid-template-columns: 1fr;
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .member-card { padding: 18px; }
+
+        .member-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .member-info p,
+        .member-info h3 {
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .member-actions {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+        }
+
+        .action-btn { width: 100%; }
+
+        /* Keep dropdown menu from overflowing card bounds on mobile */
+        .dropdown { width: 100%; }
+        .dropdown-content {
+            left: 0;
+            right: 0;
+            width: 100%;
+            min-width: 0;
+        }
+
+        .invite-section {
+            width: 100%;
+            max-width: 100%;
+            padding: 18px;
+        }
+
+        /* Toasts should not create horizontal scroll */
+        #cc-toast-container {
+            right: 12px !important;
+            left: 12px !important;
+        }
+        #cc-toast-container > div { min-width: 0 !important; width: auto !important; }
+    }
 </style>
 
 <div class="team-container">

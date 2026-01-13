@@ -2,6 +2,9 @@
 {% load tz %}
 {% block title %}Bookings - {{ organization.name }}{% endblock %}
 
+{# Mobile-only: break out of base <main> constraints; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-10{% endblock %}
+
 {% block content %}
 <style>
   :root { --row-height: 64px; }
@@ -137,18 +140,228 @@
   /* Elevated panel helper for audit and other sections */
   .panel-elevated { margin-top: 28px; }
   .panel-elevated h2 { font-weight: 700; }
+
+  /* Scope filter: native select on desktop; custom dropdown on mobile */
+  .cc-scope-wrap { position: relative; }
+  /* Progressive enhancement: keep native <select> visible unless JS enables custom UI */
+  .cc-scope-wrap .cc-scope-btn,
+  .cc-scope-wrap .cc-scope-menu { display: none; }
+  .cc-scope-wrap.cc-scope-enhanced #scopeFilter { display: none; }
+  .cc-scope-wrap.cc-scope-enhanced .cc-scope-btn,
+  .cc-scope-wrap.cc-scope-enhanced .cc-scope-menu { display: block; }
+
+  /* When JS toggles `hidden`, it must override the enhanced display rule */
+  .cc-scope-wrap.cc-scope-enhanced .cc-scope-menu[hidden] { display: none !important; }
+
+  .cc-scope-btn {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 14px;
+    line-height: 1.25;
+    white-space: normal;
+  }
+  .cc-scope-btn::after {
+    content: "\25BE";
+    float: right;
+    color: #6b7280;
+    margin-left: 10px;
+  }
+  .cc-scope-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 18px 40px rgba(2,6,23,0.18);
+    z-index: 1000;
+    max-height: min(55vh, 360px);
+    overflow: auto;
+  }
+  .cc-scope-menu[hidden] { display: none; }
+
+  /* Larger screens: allow a taller menu so it's easier to browse */
+  @media (min-width: 641px) {
+    .cc-scope-menu {
+      /* Wider popover on desktop/tablet while staying within viewport */
+      left: 50%;
+      right: auto;
+      width: min(560px, 92vw);
+      max-width: min(560px, 92vw);
+      transform: translateX(-50%);
+      max-height: min(70vh, 520px);
+    }
+  }
+  .cc-scope-group {
+    padding: 8px 10px;
+    font-weight: 800;
+    color: #111827;
+    background: #f3f4f6;
+    border-radius: 10px;
+    margin: 6px 4px 4px 4px;
+    font-size: 13px;
+  }
+  .cc-scope-item {
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    padding: 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1.25;
+    word-break: break-word;
+  }
+  .cc-scope-item:hover { background: #f9fafb; }
+  .cc-scope-item.is-selected { background: #e8f0ff; font-weight: 700; }
+
+  /* Mobile-only: 95% width containers + prevent horizontal overflow */
+  @media (max-width: 640px) {
+    :root { --row-height: 78px; }
+
+    .bookings-container {
+      width: 95vw;
+      max-width: 95vw;
+      margin: 24px auto;
+      padding: 0;
+    }
+
+    /* Ensure padding/borders don't create overflow */
+    .bookings-container, .bookings-container * { box-sizing: border-box; }
+
+    .bookings-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .bookings-header h1 {
+      width: 100%;
+      text-align: center;
+    }
+
+    .cc-bookings-actions,
+    .cc-bookings-rows {
+      width: 100%;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    #visibleRowsSelect,
+    #visibleRowsCustomInput {
+      max-width: 100%;
+    }
+
+    .filter-controls { width: 100%; gap: 10px; }
+    .filter-controls .search-box { width: 100%; max-width: 100%; }
+    .filter-controls select { max-width: 100%; }
+
+    /* Ensure the "All Services" dropdown fits mobile width */
+    #scopeFilter {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+      box-sizing: border-box;
+    }
+
+    .cc-scope-wrap { flex: 1 1 100%; width: 100%; }
+
+    /* Make filter buttons wrap in a predictable grid-like way */
+    .filter-controls button.filter-btn {
+      flex: 1 1 calc(33.333% - 10px);
+      text-align: center;
+      white-space: nowrap;
+    }
+    /* Service/member scope dropdown should be full-width on mobile */
+    .filter-controls select.filter-btn {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+
+    /* Audit controls: stack and keep inputs/selects inside viewport */
+    .cc-audit-controls {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .cc-audit-left,
+    .cc-audit-right {
+      width: 100%;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    #auditSearch { width: 100% !important; max-width: 100% !important; }
+    #auditEventFilter,
+    #auditServiceFilter {
+      flex: 1 1 calc(50% - 8px);
+      max-width: 100%;
+    }
+    #exportAuditBtn,
+    #deleteAuditBtn {
+      flex: 1 1 calc(50% - 8px);
+    }
+
+    .table-wrapper {
+      width: 100%;
+      max-width: 100%;
+      padding: 12px;
+      border-radius: 12px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Mobile: keep rows looking like desktop by allowing horizontal scroll (no squished columns) */
+    .table-wrapper .bookings-table {
+      width: max-content !important;
+      min-width: 920px;
+    }
+    .bookings-table th,
+    .bookings-table td {
+      white-space: nowrap;
+    }
+
+    /* Taller rows + slightly larger text (we have a scroller, so readability > density) */
+    .bookings-table th,
+    .bookings-table td {
+      padding: 12px 10px;
+      font-size: 13px;
+      line-height: 1.35;
+      vertical-align: top;
+    }
+    .bookings-table th { font-size: 13px; }
+    .bookings-table td div { font-size: 13px !important; }
+    .status-badge { font-size: 12px; padding: 4px 8px; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .booking-actions { flex-wrap: wrap; }
+
+    /* Modals: keep within viewport on mobile */
+    .cc-booking-modal-card,
+    .cc-bulk-modal-card {
+      max-width: 95vw;
+    }
+
+    /* Audit modal also needs to fit */
+    #auditModal > div { max-width: 95vw; }
+  }
 </style>
 
 <div class="bookings-container">
     <div class="bookings-header">
       <h1 style="font-size: 2rem; font-weight: bold; margin: 0;">Bookings</h1>
-      <div style="display:flex; gap:8px; align-items:center;">
+      <div class="cc-bookings-actions" style="display:flex; gap:8px; align-items:center;">
       {% if user_org_role != 'staff' %}
         <a href="{% url 'calendar_app:calendar' organization.slug %}" class="btn-sm btn-view">View Calendar</a>
       {% endif %}
       <a href="{% url 'calendar_app:dashboard' organization.slug %}" class="btn-sm btn-view">Back to Dashboard</a>
     </div>
-    <div style="display:flex; gap:8px; align-items:center;">
+    <div class="cc-bookings-rows" style="display:flex; gap:8px; align-items:center;">
       <label for="visibleRowsSelect" style="font-size:13px; color:#555;">Rows:</label>
       <select id="visibleRowsSelect" style="padding:6px 8px; border-radius:6px; font-size:13px;">
         <option value="5">5</option>
@@ -170,32 +383,37 @@
     <button class="filter-btn" data-filter="ongoing">Ongoing</button>
     <button class="filter-btn" data-filter="today">Today</button>
     <button class="filter-btn" data-filter="past">Past</button>
-    <select id="scopeFilter" class="filter-btn" style="padding: 8px 12px;">
-      <option value="" {% if not selected_scope %}selected{% endif %}>All Services</option>
-      <optgroup label="Members">
-        {% for opt in scope_member_options %}
-          <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
-        {% endfor %}
-      </optgroup>
+    <div id="ccScopeWrap" class="cc-scope-wrap">
+      <select id="scopeFilter" class="filter-btn" style="padding: 8px 12px;">
+        <option value="" {% if not selected_scope %}selected{% endif %}>All Services</option>
+        <optgroup label="Members">
+          {% for opt in scope_member_options %}
+            <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </optgroup>
 
-      {% if scope_service_member_options %}
-      <optgroup label="Personal services">
-        {% for opt in scope_service_member_options %}
-          <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
-        {% endfor %}
-      </optgroup>
-      {% endif %}
+        {% if scope_service_member_options %}
+        <optgroup label="Personal services">
+          {% for opt in scope_service_member_options %}
+            <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
 
-      <optgroup label="Other / Group Services">
-        {% for opt in scope_service_other_options %}
-          <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
-        {% endfor %}
-      </optgroup>
-    </select>
+        <optgroup label="Other / Group Services">
+          {% for opt in scope_service_other_options %}
+            <option value="{{ opt.value }}" {% if selected_scope == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </optgroup>
+      </select>
+
+      {# Mobile-only custom dropdown (prevents popup leaking past viewport width) #}
+      <button type="button" id="ccScopeBtn" class="filter-btn cc-scope-btn" aria-haspopup="listbox" aria-expanded="false"></button>
+      <div id="ccScopeMenu" class="cc-scope-menu" role="listbox" aria-label="Service scope" hidden></div>
+    </div>
     {% if user_org_role != 'staff' %}
       <button id="deleteSelectedBtn" class="btn-sm btn-delete" onclick="deleteSelected()" style="display:none; margin-left:8px;">Delete selected</button>
     {% endif %}
-    </div>
   </div>
 
   <!-- Bookings Table -->
@@ -282,8 +500,8 @@
   <!-- Audit: Cancelled / Deleted Bookings -->
   <div class="panel-elevated" style="margin-top:28px;">
     <h2 style="font-size:1.25rem; margin-bottom:8px;">Recently Cancelled / Deleted</h2>
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
-      <div style="display:flex; gap:8px; align-items:center;">
+    <div class="cc-audit-controls" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+      <div class="cc-audit-left" style="display:flex; gap:8px; align-items:center;">
           <input type="text" id="auditSearch" class="search-box" placeholder="Search audit (client, ref, email...)" style="width:260px;">
         <select id="auditEventFilter" class="filter-btn" style="padding:6px 10px;">
           <option value="all">All events</option>
@@ -298,7 +516,7 @@
             {% endfor %}
         </select>
       </div>
-      <div style="display:flex;gap:8px; align-items:center;">
+      <div class="cc-audit-right" style="display:flex;gap:8px; align-items:center;">
         <button class="btn-sm btn-view" id="exportAuditBtn">Export (PDF)</button>
         <button class="btn-sm btn-delete" id="deleteAuditBtn">Delete selected</button>
       </div>
@@ -591,6 +809,101 @@ document.getElementById('scopeFilter').addEventListener('change', function() {
     window.location.href = window.location.pathname;
   }
 });
+
+// Scope dropdown (custom UI to keep menu within container width)
+(function initScopeDropdown(){
+  const wrap = document.getElementById('ccScopeWrap');
+  const select = document.getElementById('scopeFilter');
+  const btn = document.getElementById('ccScopeBtn');
+  const menu = document.getElementById('ccScopeMenu');
+  if (!wrap || !select || !btn || !menu) return;
+
+  try{ wrap.classList.add('cc-scope-enhanced'); }catch(e){}
+
+  function setButtonLabel(){
+    try{
+      const opt = select.selectedOptions && select.selectedOptions[0];
+      btn.textContent = (opt && opt.textContent) ? String(opt.textContent).trim() : 'All Services';
+    }catch(e){ btn.textContent = 'All Services'; }
+  }
+
+  function closeMenu(){
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  function openMenu(){
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  function clearSelectedVisual(){
+    try{ menu.querySelectorAll('.cc-scope-item.is-selected').forEach(el => el.classList.remove('is-selected')); }catch(e){}
+  }
+
+  function addOption(optionEl){
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'cc-scope-item';
+    item.textContent = optionEl.textContent || '';
+    item.dataset.value = optionEl.value;
+    if (optionEl.selected) item.classList.add('is-selected');
+    item.addEventListener('click', function(){
+      try{
+        select.value = optionEl.value;
+        clearSelectedVisual();
+        item.classList.add('is-selected');
+        setButtonLabel();
+        // trigger existing navigation behavior
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }catch(e){}
+      closeMenu();
+    });
+    menu.appendChild(item);
+  }
+
+  // Build menu contents from the <select>
+  try{
+    menu.innerHTML = '';
+    Array.from(select.children).forEach(child => {
+      const tag = String(child.tagName || '').toUpperCase();
+      if (tag === 'OPTGROUP') {
+        const header = document.createElement('div');
+        header.className = 'cc-scope-group';
+        header.textContent = child.label || '';
+        menu.appendChild(header);
+        Array.from(child.children).forEach(opt => {
+          if (String(opt.tagName || '').toUpperCase() === 'OPTION') addOption(opt);
+        });
+      } else if (tag === 'OPTION') {
+        addOption(child);
+      }
+    });
+  }catch(e){}
+
+  btn.addEventListener('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    if (menu.hidden) openMenu(); else closeMenu();
+  });
+
+  document.addEventListener('click', function(e){
+    try{ if (!wrap.contains(e.target)) closeMenu(); }catch(err){}
+  });
+
+  select.addEventListener('change', function(){
+    setButtonLabel();
+    // keep selected highlight in sync
+    try{
+      const val = select.value;
+      clearSelectedVisual();
+      const match = menu.querySelector(`.cc-scope-item[data-value="${CSS.escape(val)}"]`);
+      if (match) match.classList.add('is-selected');
+    }catch(e){}
+  });
+
+  setButtonLabel();
+  closeMenu();
+})();
 
 function filterBookings() {
   const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;

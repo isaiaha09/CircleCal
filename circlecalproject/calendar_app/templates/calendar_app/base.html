@@ -40,6 +40,41 @@
                     border-radius: 0.375rem;
                     display: inline-block;
                     margin-top: 0.5rem;
+                    max-width: 100%;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
+                    word-break: break-all;
+                }
+
+                /* Some django-two-factor-auth templates render the secret as plain text (no .secret-value).
+                   Ensure any long unbroken strings wrap instead of overflowing the card on mobile/desktop. */
+                .twofactor-page {
+                    max-width: 100%;
+                    overflow-wrap: anywhere;
+                    word-break: break-word;
+                }
+                .twofactor-page p,
+                .twofactor-page li,
+                .twofactor-page div,
+                .twofactor-page span {
+                    overflow-wrap: anywhere;
+                    word-break: break-word;
+                }
+                .twofactor-page code,
+                .twofactor-page pre,
+                .twofactor-page kbd,
+                .twofactor-page samp {
+                    overflow-wrap: anywhere;
+                    word-break: break-all;
+                    max-width: 100%;
+                }
+
+                /* Mobile: make long secrets always fit without leaking */
+                @media (max-width:640px) {
+                    .twofactor-page .secret-value {
+                        display: block;
+                        width: 100%;
+                    }
                 }
 
                 /* Disable action: make links/buttons reading 'Disable' more prominent */

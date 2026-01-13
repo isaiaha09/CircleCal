@@ -2,6 +2,9 @@
 
 {% block title %}Edit Service • {{ org.name }}{% endblock %}
 
+{# Mobile-only: break out of base <main> constraints; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-6 md:px-6 md:py-8{% endblock %}
+
 {% block content %}
 {% block extra_head %}
 <style>
@@ -35,8 +38,125 @@
   }
   .cc-field[disabled] { background:#f8fafc; opacity:.9; }
   .cc-field:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 4px rgba(37,99,235,0.08); }
-  .cc-page { max-width:78rem; margin:0 auto; padding:2.5rem 1.5rem; }
+  /* Mobile: use ~95% screen width; restore existing padding on sm+ */
+  .cc-page { width:95vw; max-width:78rem; margin:0 auto; padding:2.5rem 0; }
+  @media (min-width:640px){ .cc-page { width:auto; padding:2.5rem 1.5rem; } }
   @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
+
+  /* Mobile-only: slightly smaller placeholder/example text */
+  @media (max-width: 640px) {
+    .cc-page input::placeholder,
+    .cc-page textarea::placeholder {
+      font-size: 0.85rem;
+    }
+
+    /* Stack top/bottom action bars and shrink buttons */
+    .cc-page .svc-actionbar,
+    .cc-page .svc-actionbar-bottom {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .cc-page .svc-actionbar a,
+    .cc-page .svc-actionbar-bottom a {
+      text-align: center;
+    }
+    .cc-page .svc-actionbar-actions,
+    .cc-page .svc-actionbar-actions-bottom {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .cc-page .svc-save-btn,
+    .cc-page #svc-view-btn,
+    .cc-page #svc-view-btn-bottom {
+      width: 100%;
+      margin-left: 0 !important;
+      padding: 9px 12px !important;
+      font-size: 0.85rem !important;
+      justify-content: center;
+    }
+
+    /* Stack 2-col grids vertically on mobile */
+    .cc-page .grid.grid-cols-2 {
+      grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+    }
+
+    /* Service availability: compact typography/controls */
+    #cc-open-calendar-from-service {
+      width: 100%;
+      justify-content: center;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+    }
+    #svcAvailEditor > div > div.flex {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    #svcAvailEditor > div > div.flex > div:first-child {
+      font-size: 0.95rem;
+      width: auto !important;
+    }
+    #svcAvailEditor .svc-day-editor label,
+    #svcAvailEditor .svc-day-editor .text-sm {
+      font-size: 0.85rem;
+    }
+    #svcAvailEditor .svc-day-editor .text-xs,
+    #svcAvailEditor .svc-add-range {
+      font-size: 0.8rem;
+    }
+    #svcAvailEditor .svc-add-range {
+      margin-top: 8px !important;
+    }
+    #svcAvailEditor .svc-range-row {
+      flex-wrap: wrap;
+      gap: 8px !important;
+    }
+    #svcAvailEditor .svc-range-row .time-input-container {
+      flex: 1 1 calc(50% - 6px);
+      min-width: 0;
+    }
+    #svcAvailEditor input.range-start,
+    #svcAvailEditor input.range-end {
+      max-width: none !important;
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 0.9rem;
+    }
+    #svcAvailEditor .svc-range-row button {
+      flex: 1 1 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--gray-300);
+      border-radius: 10px;
+      background: var(--gray-50);
+      font-size: 0.85rem;
+    }
+    #svcAvailEditor .custom-time-picker {
+      min-width: 240px;
+      max-width: 92vw;
+      padding: 12px;
+    }
+    #svcAvailEditor .time-picker-display {
+      font-size: 24px;
+      margin-bottom: 12px;
+    }
+    #svcAvailEditor .time-picker-selectors {
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    #svcAvailEditor .time-scroll-container {
+      height: 140px;
+    }
+    #svcAvailEditor .time-option {
+      padding: 8px;
+      font-size: 13px;
+    }
+    #svcAvailEditor .time-picker-btn {
+      padding: 8px;
+      font-size: 12px;
+    }
+  }
   .section-card { background:#fff; border:1px solid #c0c7d1; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
   /* Make all section cards fill the page content area so they align with other sections */
   .section-card { box-sizing: border-box; width: 100%; max-width: none; margin-left: 0; margin-right: 0; }
@@ -65,6 +185,19 @@
   .availability-disabled { position: relative; opacity: 0.8; }
   .availability-disabled .availability-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center; border-radius:0.75rem; z-index:20; }
   .availability-disabled .availability-overlay .msg { max-width:56rem; padding:1rem 1.5rem; text-align:center; color:#374151; }
+
+  /* Service availability: hard-lock days that are fully blocked by member availability */
+  #svcAvailEditor .cc-svc-day-locked {
+    opacity: 0.6;
+    background: #f9fafb;
+  }
+  #svcAvailEditor .cc-svc-day-locked .svc-day-editor,
+  #svcAvailEditor .cc-svc-day-locked .svc-day-editor * {
+    pointer-events: none;
+  }
+  #svcAvailEditor .cc-svc-day-locked .svc-day-editor {
+    cursor: not-allowed;
+  }
 
   /* Locked advanced settings overlay */
   .cc-adv-lock-wrap { position: relative; }
@@ -261,10 +394,19 @@
       <div class="text-sm mt-1">Your changes were saved successfully.</div>
     </div>
   {% endif %}
+  {% if request.GET.public_show_denied %}
+    <div class="mb-4 p-3 rounded bg-red-50 border-l-4 border-red-400 text-red-900" role="alert" aria-live="polite">
+      <strong>Public visibility not enabled</strong>
+      <div class="text-sm mt-1">
+        {{ request.GET.public_show_reason|default:"This service can't be shown publicly yet." }}
+      </div>
+      <div class="text-sm mt-2 text-red-800">Fix the issue above (availability + settings), then turn on “Show on public booking page” again.</div>
+    </div>
+  {% endif %}
   <!-- Top action buttons: Cancel (left) and Save (right) -->
-  <div class="flex items-center justify-between mb-4">
+  <div class="flex items-center justify-between mb-4 svc-actionbar">
     <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
-    <div class="flex items-center">
+    <div class="flex items-center svc-actionbar-actions">
       <button type="button" class="svc-save-btn inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Save Changes</button>
       <a id="svc-view-btn" data-saved="{{ request.GET.saved|yesno:'1,0' }}" href="{% url 'bookings:public_service_page' org.slug service.slug %}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-3 py-2 ml-3 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50 {% if not request.GET.saved %}opacity-50 cursor-not-allowed{% endif %}">View public page</a>
     </div>
@@ -275,27 +417,26 @@
     Update your service details.
   </p>
 
-    <!-- Prominent active toggle: moved to the top for visibility -->
+    <!-- Public visibility toggle (availability-fit gated) -->
     <div class="section-card mb-4" style="border:1px solid #2563eb;background:#f0f9ff;box-shadow:0 2px 6px rgba(37,99,235,0.06);">
       <div class="flex items-center justify-between">
         <div>
-          <label for="is_active" class="inline-flex items-center">
-            {% if is_only_active_service %}
-              <input type="hidden" name="is_active" value="on">
-            {% endif %}
-            <input type="checkbox" name="is_active" id="is_active" {% if service.is_active %}checked{% endif %}
-                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if is_only_active_service or activation_locked %}opacity-60 cursor-not-allowed{% endif %}"
-                   {% if is_only_active_service or activation_locked %}disabled aria-disabled="true"{% endif %}>
+          <label for="show_on_public_calendar" class="inline-flex items-center">
+            <input type="checkbox" name="show_on_public_calendar" id="show_on_public_calendar"
+                   {% if service.show_on_public_calendar %}checked{% endif %}
+              class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if public_show_locked and not service.show_on_public_calendar or not can_toggle_public %}opacity-60 cursor-not-allowed{% endif %}"
+              {% if public_show_locked and not service.show_on_public_calendar or not can_toggle_public %}disabled aria-disabled="true"{% endif %}>
             <div class="ml-3">
-              <div class="text-lg font-semibold text-gray-800">Service is active</div>
-              <div class="text-sm text-gray-600">Visible on the public booking page</div>
+              <div class="text-lg font-semibold text-gray-800">Show on public booking page</div>
+              <div class="text-sm text-gray-600">Clients can see and book this service</div>
             </div>
           </label>
-          {% if is_only_active_service %}
-            <p class="mt-2 text-sm text-gray-700">You currently have only one active service. To keep your public booking page available to clients, activate another service before disabling this one.</p>
-          {% endif %}
-          {% if activation_locked %}
-            <p class="mt-2 text-sm text-gray-700">{{ activation_lock_reason }}</p>
+          {% if not can_toggle_public %}
+            <p class="mt-2 text-sm text-gray-700">Only owners/admins can change public visibility.</p>
+          {% elif public_show_locked %}
+            <p class="mt-2 text-sm text-gray-700">{{ public_show_reason }}</p>
+          {% elif service.show_on_public_calendar and not can_show_publicly %}
+            <p class="mt-2 text-sm text-gray-700">{{ public_show_reason }}</p>
           {% endif %}
         </div>
         <div class="text-sm text-gray-700">
@@ -303,89 +444,6 @@
         </div>
       </div>
     </div>
-
-    <script>
-    // Enable/disable the Active toggle immediately based on draft service-availability edits.
-    // This must work even before saving changes.
-    (function(){
-      try{
-        const cb = document.getElementById('is_active');
-        if (!cb) return;
-
-        // If the checkbox is locked because this is the only active service, do not change it.
-        const lockedOnlyActive = {{ is_only_active_service|yesno:"true,false" }};
-        if (lockedOnlyActive) return;
-
-        // Only apply draft gating when activation is currently locked.
-        // If activation is already allowed, do not interfere.
-        const activationLocked = {{ activation_locked|yesno:"true,false" }};
-        if (!activationLocked) return;
-
-        const editor = document.getElementById('svcAvailEditor');
-        if (!editor) return;
-
-        function hmToMinutes(v){
-          try{
-            const s = String(v || '').trim();
-            if (s.length < 4) return null;
-            const hh = parseInt(s.slice(0,2), 10);
-            const mm = parseInt(s.slice(3,5), 10);
-            if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-            return (hh * 60) + mm;
-          }catch(e){ return null; }
-        }
-
-        function hasAnyDraftAvailabilitySafe(){
-          try{
-            const days = Array.from(editor.querySelectorAll('.svc-day-editor'));
-            for (const day of days){
-              const unavail = day.querySelector('input.svc-unavail');
-              if (unavail && unavail.checked) continue;
-              const rows = Array.from(day.querySelectorAll('.svc-range-row'));
-              for (const r of rows){
-                const stEl = r.querySelector('input.range-start');
-                const enEl = r.querySelector('input.range-end');
-                const sm = hmToMinutes(stEl && stEl.value);
-                const em = hmToMinutes(enEl && enEl.value);
-                if (sm !== null && em !== null && sm < em) return true;
-              }
-            }
-            return false;
-          }catch(e){ return false; }
-        }
-
-        function updateToggle(){
-          const has = hasAnyDraftAvailabilitySafe();
-          cb.disabled = !has;
-          if (!has) cb.checked = false;
-          try{
-            cb.classList.toggle('opacity-60', cb.disabled);
-            cb.classList.toggle('cursor-not-allowed', cb.disabled);
-          }catch(e){}
-        }
-
-        // Delegate events because the availability editor mutates DOM and may not
-        // dispatch input/change events when syncing hidden fields.
-        let t = null;
-        function schedule(){
-          if (t) clearTimeout(t);
-          t = setTimeout(updateToggle, 0);
-        }
-        editor.addEventListener('click', schedule, true);
-        editor.addEventListener('input', schedule, true);
-        editor.addEventListener('change', schedule, true);
-        editor.addEventListener('keyup', schedule, true);
-
-        // Also observe subtree changes (add/remove range rows).
-        try{
-          const mo = new MutationObserver(schedule);
-          mo.observe(editor, { subtree: true, childList: true });
-        }catch(e){}
-
-        updateToggle();
-      }catch(e){ console.warn('active toggle draft gating failed', e); }
-    })();
-    </script>
 
     <script>
     // Hours / minutes helper for buffer_after: keep hidden `buffer_after` in minutes in-sync
@@ -649,8 +707,17 @@
 
       {% if can_use_facility_resources %}
         <p class="text-sm text-gray-600 mb-3">
-          Choose the space capacity this service can use. If you select none, this service will not enforce facility capacity.
+          Enable capacity enforcement for this service and choose which spaces it can use.
         </p>
+
+        <label class="inline-flex items-center mb-3">
+          <input type="checkbox" name="requires_facility_resources" id="requires_facility_resources" value="1"
+                 {% if service.requires_facility_resources %}checked{% endif %}
+                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if not can_toggle_facility_required %}opacity-60 cursor-not-allowed{% endif %}"
+                 {% if not can_toggle_facility_required %}disabled aria-disabled="true"{% endif %}>
+          <span class="ml-2 text-sm text-gray-700">Requires facility resources/capacity</span>
+        </label>
+
         <div class="mb-3">
           <a href="{% url 'calendar_app:resources_page' org.slug %}" class="text-sm text-blue-600 hover:text-blue-700">Manage resources →</a>
         </div>
@@ -661,36 +728,65 @@
           </div>
         {% endif %}
 
-        {% if facility_resources %}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {% for r in facility_resources %}
-              <label class="flex items-center gap-2 px-3 py-2 rounded border border-gray-200 bg-white {% if r.cc_disabled %}opacity-60 bg-gray-50 cursor-not-allowed{% endif %}">
-                <input type="checkbox" name="resource_ids" value="{{ r.id }}" class="rounded border-gray-300"
-                       {% if r.id in selected_resource_ids %}checked{% endif %}
-                       {% if user_org_role != 'owner' or r.cc_disabled %}disabled{% endif %}>
-                <span class="text-sm text-gray-800">{{ r.name }}</span>
-                {% if r.cc_disabled %}<span class="text-xs text-gray-500">(in use)</span>{% endif %}
-                {% if not r.is_active %}<span class="text-xs text-gray-500">(inactive)</span>{% endif %}
-                {% if r.cc_max_services != None %}
-                  <span class="ml-auto text-xs text-gray-500">
-                    {% if r.cc_max_services == 0 %}
-                      Unlimited
-                    {% else %}
-                      {{ r.cc_used_services|default:0 }}/{{ r.cc_max_services }}
-                    {% endif %}
-                  </span>
-                {% endif %}
-              </label>
-            {% endfor %}
-          </div>
-          <p class="mt-2 text-xs text-gray-500">Tip: link at least 2 resources if you want this service to utilize multiple spaces.</p>
-        {% else %}
-          <div class="text-sm text-gray-600">No resources created yet. Create some space capacity first, then come back here to link them.</div>
-        {% endif %}
+        <p id="ccFacilityResourcesOffHint" class="text-sm text-gray-600 mb-2" {% if service.requires_facility_resources %}style="display:none;"{% endif %}>
+          Capacity is not enforced for this service.
+        </p>
+
+        <div id="ccFacilityResourcesPicker" {% if not service.requires_facility_resources %}style="display:none;"{% endif %}>
+          {% if facility_resources %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {% for r in facility_resources %}
+                <label class="flex items-center gap-2 px-3 py-2 rounded border border-gray-200 bg-white {% if r.cc_disabled %}opacity-60 bg-gray-50 cursor-not-allowed{% endif %}">
+                  <input type="checkbox" name="resource_ids" value="{{ r.id }}" class="rounded border-gray-300"
+                         {% if r.id in selected_resource_ids %}checked{% endif %}
+                         {% if user_org_role != 'owner' or r.cc_disabled %}disabled{% endif %}>
+                  <span class="text-sm text-gray-800">{{ r.name }}</span>
+                  {% if r.cc_disabled %}<span class="text-xs text-gray-500">(in use)</span>{% endif %}
+                  {% if not r.is_active %}<span class="text-xs text-gray-500">(inactive)</span>{% endif %}
+                  {% if r.cc_max_services != None %}
+                    <span class="ml-auto text-xs text-gray-500">
+                      {% if r.cc_max_services == 0 %}
+                        Unlimited
+                      {% else %}
+                        {{ r.cc_used_services|default:0 }}/{{ r.cc_max_services }}
+                      {% endif %}
+                    </span>
+                  {% endif %}
+                </label>
+              {% endfor %}
+            </div>
+            <p class="mt-2 text-xs text-gray-500">When enabled, select at least one resource.</p>
+          {% else %}
+            <div class="text-sm text-gray-600">No resources created yet. Create space capacity first, then enable capacity for this service.</div>
+          {% endif %}
+        </div>
       {% else %}
         <p class="text-sm text-gray-600">Facility resources are available on the Team plan.</p>
       {% endif %}
     </div>
+
+    <script>
+      (function(){
+        try{
+          const toggle = document.getElementById('requires_facility_resources');
+          const picker = document.getElementById('ccFacilityResourcesPicker');
+          const hintOff = document.getElementById('ccFacilityResourcesOffHint');
+          if (!toggle || !picker) return;
+          function update(){
+            const on = !!toggle.checked;
+            if (picker) picker.style.display = on ? 'block' : 'none';
+            if (hintOff) hintOff.style.display = on ? 'none' : 'block';
+            if (!on){
+              for (const cb of picker.querySelectorAll('input[type="checkbox"][name="resource_ids"]')){
+                try{ cb.checked = false; }catch(e){}
+              }
+            }
+          }
+          toggle.addEventListener('change', update);
+          update();
+        }catch(e){ }
+      })();
+    </script>
 
     <script>
       // When Use Fixed Increments is enabled, disable/grey the Allow Squished and the increment input.
@@ -1016,7 +1112,7 @@
       </div>
     </div>
 
-    <!-- removed duplicate is_active toggle (moved to top) -->
+    <!-- active toggle removed (public visibility controlled above) -->
 
     {% if conflict_services %}
       <div class="mb-4 p-3 rounded bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800">
@@ -1066,11 +1162,37 @@
       <!-- Service availability editor -->
       <div class="mt-0">
         <h2 class="text-base font-semibold text-center">Service availability</h2>
-        {% if can_edit_service_availability and service_availability_member_name %}
-          <div class="text-sm text-gray-600 text-center mt-1">Applies to: <span class="font-medium">{{ service_availability_member_name }}</span></div>
-        {% endif %}
-        {% if can_edit_service_availability and service_availability_member_name %}
-          <p class="text-sm text-gray-500 mt-3 text-center">Specify which days/times this service is offered. These must be within the assigned member’s weekly availability shown for each day below.</p>
+        {% if can_edit_service_availability %}
+          {% if assigned_member_ids|length == 1 and service_availability_member_name %}
+            <div class="text-sm text-gray-600 text-center mt-1">Applies to: <span class="font-medium">{{ service_availability_member_name }}</span></div>
+            <p class="text-sm text-gray-500 mt-3 text-center">
+              This is what clients can book for this service.
+              It must fit within the assigned member’s overall weekly availability.
+              Other services and per-date overrides can further reduce or open time.
+            </p>
+          {% elif assigned_member_ids|length > 1 %}
+            <div class="text-sm text-gray-600 text-center mt-1">
+              Applies to: <span class="font-medium">{{ service_availability_assignee_names|join:", "|default:"Multiple members" }}</span>
+            </div>
+            <p class="text-sm text-gray-500 mt-3 text-center">
+              This is what clients can book for this group service.
+              It must fit within <span class="font-medium">all assigned members’</span> overall weekly availability,
+              <span class="font-medium">minus</span> time already reserved by those members’ other services.
+              Per-date overrides can still open/close time (as long as they stay within member availability).
+            </p>
+          {% else %}
+            <p class="text-sm text-gray-500 mt-3 text-center">Specify which days/times this service is offered. These must be within the organization’s weekly availability shown for each day below.</p>
+          {% endif %}
+
+          <div class="mt-3 mx-auto" style="max-width:56rem;">
+            <div class="rounded-lg border" style="border-color:#e5e7eb; background:#f9fafb; padding:10px 12px;">
+              <div class="text-xs" style="color:#374151; line-height:1.35;">
+                <span style="font-weight:700;">How to read this:</span>
+                “Allowed” is the time window you can schedule into for that weekday (based on the rules above).
+                If a day is locked, there’s no remaining time for this service on that day.
+              </div>
+            </div>
+          </div>
         {% else %}
           <p class="text-sm text-gray-500 mt-3 text-center">Specify which days/times this service is offered. These must be within the organization’s weekly availability shown for each day below.</p>
         {% endif %}
@@ -1110,10 +1232,10 @@
         {% endif %}
         <div class="grid grid-cols-1 gap-3 mt-3" id="svcAvailEditor">
           {% for row in weekly_edit_rows %}
-            <div class="border rounded-md p-3 bg-white">
+            <div class="border rounded-md p-3 bg-white {% if row.allowed_empty %}cc-svc-day-locked{% endif %}">
               <div class="flex items-center justify-between gap-3">
                 <div class="font-semibold text-gray-800" style="width:64px">{{ row.label }}</div>
-                <div class="text-xs text-gray-600">Allowed: {{ row.allowed_ranges|default:row.org_ranges|default:'—' }}</div>
+                <div class="text-xs text-gray-600">Allowed (client-facing): {{ row.allowed_ranges|default:row.org_ranges|default:'—' }}</div>
               </div>
 
               <input type="hidden"
@@ -1124,6 +1246,7 @@
                      {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>
 
               <div class="mt-2 svc-day-editor" data-ui="{{ row.ui }}" {% if not can_edit_service_availability %}data-disabled="1"{% endif %}>
+                <div class="cc-svc-day-meta" data-ui="{{ row.ui }}" data-allowed-empty="{{ row.allowed_empty|yesno:'1,0' }}" style="display:none;"></div>
                 <label class="inline-flex items-center text-sm text-gray-700">
                   <input type="checkbox" class="svc-unavail rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                          {% if not row.svc_ranges %}checked{% endif %}
@@ -1371,6 +1494,24 @@
             const addBtn = ed.querySelector('.svc-add-range');
             if (!hidden || !list || !unavail || !addBtn) continue;
 
+            // If the assigned member has no availability on this weekday, lock this day entirely.
+            // This prevents clicking Saturday/Sunday when the member is off.
+            const meta = ed.querySelector('.cc-svc-day-meta[data-ui="' + ui + '"]');
+            const allowedEmpty = !!(meta && meta.getAttribute('data-allowed-empty') === '1');
+            if (allowedEmpty){
+              try { ed.closest('.border')?.classList.add('cc-svc-day-locked'); } catch (e) {}
+              try {
+                // Force unavailable and clear any existing rows (they would be invalid under member constraints)
+                unavail.checked = true;
+                unavail.disabled = true;
+                list.textContent = '';
+                hidden.value = '';
+                addBtn.disabled = true;
+                addBtn.style.display = 'none';
+              } catch (e) {}
+              continue;
+            }
+
             function syncHidden(){
               if (unavail.checked){
                 hidden.value = '';
@@ -1460,9 +1601,9 @@
     </script>
 
     <!-- Bottom action bar: Cancel (left) and Save (right) -->
-    <div class="flex items-center justify-between mt-6">
+    <div class="flex items-center justify-between mt-6 svc-actionbar-bottom">
       <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
-      <div class="flex items-center">
+      <div class="flex items-center svc-actionbar-actions-bottom">
         <button type="button" class="svc-save-btn inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Save Changes</button>
         <a id="svc-view-btn-bottom" data-saved="{{ request.GET.saved|yesno:'1,0' }}" href="{% url 'bookings:public_service_page' org.slug service.slug %}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-3 py-2 ml-3 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50 {% if not request.GET.saved %}opacity-50 cursor-not-allowed{% endif %}">View public page</a>
       </div>
@@ -1480,6 +1621,22 @@
       <style>
         /* Modal list layout */
         #svc-conflict-list { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size:0.95rem; }
+
+        /* Modal actions: default (desktop/tablet) stays right-aligned like before.
+           Mobile only: Cancel left + Confirm right, with compact sizing and wrapping. */
+        .cc-modal-actions { display:flex; justify-content:flex-end; align-items:center; gap:10px; }
+        .cc-modal-actions button { border-radius:6px; font-weight:600; font-size:0.9rem; padding:8px 12px; }
+        #svc-conflict-cancel { border:1px solid #cbd5e1; background:#fff; color:#374151; flex:0 0 auto; }
+        #svc-conflict-confirm { background:#0ea5e9; color:#fff; border:none; flex:0 0 auto; white-space:nowrap; line-height:1.2; text-align:center; }
+
+        @media (max-width:640px){
+          .cc-modal-actions { justify-content:space-between; }
+          #svc-conflict-confirm { flex:1 1 auto; margin-left:auto; max-width:72%; white-space:normal; }
+        }
+        @media (max-width:420px){
+          .cc-modal-actions button { font-size:0.82rem; padding:6px 10px; }
+          #svc-conflict-confirm { max-width:70%; }
+        }
 
         /* Date heading */
         .conflict-group-heading { font-weight:700; margin:12px 0 8px; color:#0f172a; display:flex; align-items:center; justify-content:space-between; background:#f8fafc; padding:8px 10px; border-radius:8px; border:1px solid #e6eef6 }
@@ -1510,9 +1667,9 @@
 
         @media (max-width:720px){ .conflict-line{flex-direction:column;align-items:flex-start} }
       </style>
-      <div style="text-align:right">
-          <button id="svc-conflict-cancel" style="margin-right:8px;padding:8px 12px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;color:#374151">Cancel</button>
-          <button id="svc-conflict-confirm" style="padding:8px 14px;border-radius:6px;background:#0ea5e9;color:#fff;border:none">Confirm and apply changes</button>
+      <div class="cc-modal-actions">
+          <button id="svc-conflict-cancel" type="button">Cancel</button>
+          <button id="svc-conflict-confirm" type="button">Confirm and apply changes</button>
       </div>
     </div>
   </div>
@@ -1538,7 +1695,8 @@
         description: "{{ service.description|escapejs }}",
         min_notice_hours: {{ service.min_notice_hours|default:1 }},
         max_booking_days: {% if can_use_pro_team %}{{ service.max_booking_days|default:30 }}{% elif is_trialing %}31{% else %}30{% endif %},
-        is_active: {{ service.is_active|yesno:"true,false" }}
+        show_on_public_calendar: {{ service.show_on_public_calendar|yesno:"true,false" }},
+        requires_facility_resources: {{ service.requires_facility_resources|yesno:"true,false" }}
       }; }catch(e){}
     const form = document.querySelector('form.cc-form');
     if (!btns.length || !form) return;
@@ -1605,7 +1763,7 @@
         }
       }
 
-      const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'is_active', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
+      const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'show_on_public_calendar', 'requires_facility_resources', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
       for (const name of booleanNames){
         try{
           // Prefer the checkbox input (if present) over any hidden fallback input
@@ -1765,10 +1923,10 @@
         const keys = [
           'name','description','duration','buffer_after','time_increment_minutes','use_fixed_increment',
           'allow_squished_bookings','allow_ends_after_availability','refunds_allowed','refund_cutoff_hours','refund_policy_text',
-          'price','min_notice_hours','max_booking_days','is_active'
+          'price','min_notice_hours','max_booking_days','show_on_public_calendar','requires_facility_resources'
         ];
         function normVal(k,v){
-          if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed' || k === 'is_active'){
+          if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed' || k === 'show_on_public_calendar' || k === 'requires_facility_resources'){
             if (v === true || v === 'true' || v === 1 || v === '1') return true;
             return false;
           }
@@ -1813,7 +1971,7 @@
         const propList = document.createElement('ul'); propList.style.marginTop='6px'; propCol.appendChild(propList);
 
         function renderVal(k,v){
-          if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed' || k === 'is_active'){
+          if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed'){
             return (v === true || v === 'true' || v === 1 || v === '1') ? '✓' : '✕';
           }
           if (k === 'duration') return (v || 0) + ' minutes';
@@ -2004,6 +2162,16 @@
             }
             if (applied && applied.status === 'ok'){
               const base = window.location.pathname;
+              // If the user attempted to enable public visibility but the server denied it,
+              // redirect with a clear banner explaining what needs to be fixed.
+              try{
+                if (applied.public_show_denied){
+                  const reason = String(applied.public_show_reason || 'This service cannot be shown publicly yet.');
+                  window.location.href = base + '?saved=1&public_show_denied=1&public_show_reason=' + encodeURIComponent(reason);
+                  return true;
+                }
+              }catch(e){ /* ignore */ }
+
               window.location.href = base + '?saved=1';
               return true;
             }
@@ -2237,7 +2405,7 @@
         }
       }
       // Ensure known boolean fields are present even if unchecked (not in FormData)
-      const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'is_active', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
+      const booleanNames = ['use_fixed_increment', 'allow_squished_bookings', 'show_on_public_calendar', 'requires_facility_resources', 'refunds_allowed', 'allow_ends_after_availability', 'apply_to_conflicts'];
       for (const name of booleanNames){
         if (!(name in out)){
           const el = form.querySelector(`[name="${name}"]`);

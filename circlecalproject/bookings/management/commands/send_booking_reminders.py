@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
 from bookings.models import Booking
-from bookings.emails import send_booking_reminder
+from bookings.emails import send_booking_reminder, send_internal_booking_reminder_notification
 
 
 class Command(BaseCommand):
@@ -53,16 +53,19 @@ class Command(BaseCommand):
         failed_count = 0
         
         for booking in upcoming_bookings:
-            if send_booking_reminder(booking):
+            ok_client = send_booking_reminder(booking)
+            # Internal recipients are best-effort; do not count failures against client sends.
+            try:
+                send_internal_booking_reminder_notification(booking)
+            except Exception:
+                pass
+
+            if ok_client:
                 sent_count += 1
-                self.stdout.write(
-                    self.style.SUCCESS(f'✓ Sent reminder to {booking.client_email}')
-                )
+                self.stdout.write(self.style.SUCCESS(f'✓ Sent reminder to {booking.client_email}'))
             else:
                 failed_count += 1
-                self.stdout.write(
-                    self.style.ERROR(f'✗ Failed to send reminder to {booking.client_email}')
-                )
+                self.stdout.write(self.style.ERROR(f'✗ Failed to send reminder to {booking.client_email}'))
         
         self.stdout.write(
             self.style.SUCCESS(

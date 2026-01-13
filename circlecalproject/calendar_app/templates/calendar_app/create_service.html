@@ -1,5 +1,8 @@
 {% extends "calendar_app/base.html" %}
 
+{# Mobile-only: break out of base <main> constraints; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-6 md:px-6 md:py-8{% endblock %}
+
 {% block extra_head %}
 <style>
   /* Page-specific enhanced field styling (aligned with edit page) */
@@ -14,8 +17,15 @@
   }
   .cc-field[disabled] { background:#f8fafc; opacity:.9; }
   .cc-field:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 4px rgba(37,99,235,0.08); }
-  .cc-page { max-width:78rem; margin:0 auto; padding:2.5rem 1.5rem; }
+  /* Mobile: use ~95% screen width; restore existing padding on sm+ */
+  .cc-page { width:95vw; max-width:78rem; margin:0 auto; padding:2.5rem 0; }
+  @media (min-width:640px){ .cc-page { width:auto; padding:2.5rem 1.5rem; } }
   @media (min-width:768px){ .cc-page { padding:3rem 2rem; } }
+
+  /* Mobile-only: slightly smaller placeholder/example text */
+  @media (max-width: 640px) {
+    .cc-field::placeholder { font-size: 0.85rem; }
+  }
   .section-card { background:#fff; border:1px solid #e6edf3; border-radius:0.75rem; padding:1rem 1.25rem; margin-bottom:1rem; }
   .section-title { font-size:1rem; font-weight:600; margin-bottom:0.5rem; }
 
@@ -524,6 +534,66 @@
           </script>
         </div>
         {% endif %}
+
+        <!-- Facility resources (capacity) -->
+        <div class="section-card cc-adv-lock-wrap {% if not can_use_facility_resources %}cc-adv-locked{% endif %}">
+          <div class="section-title">Facility resources (capacity)</div>
+          <p class="text-sm text-gray-600 mb-3">When enabled, clients can only book this service if at least one linked facility resource has capacity.</p>
+
+          <label class="inline-flex items-center">
+            <input type="checkbox" name="requires_facility_resources" id="requires_facility_resources" value="1"
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                   {% if not can_use_facility_resources %}disabled{% endif %}>
+            <span class="ml-2 text-sm text-gray-700">Requires facility resources/capacity</span>
+          </label>
+
+          <div id="ccCreateResourcesPanel" class="mt-3" style="display:none;">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-sm font-medium text-gray-700">Select resources</div>
+              <a href="{% url 'calendar_app:resources_page' org.slug %}" class="text-sm text-blue-600 hover:text-blue-700">Manage resources →</a>
+            </div>
+
+            {% if facility_resources %}
+              <div class="space-y-2">
+                {% for r in facility_resources %}
+                  <label class="flex items-center justify-between p-2 rounded border border-gray-200">
+                    <span class="text-sm text-gray-700">
+                      {{ r.name }}
+                      {% if not r.is_active %}<span class="text-xs text-gray-500">(inactive)</span>{% endif %}
+                    </span>
+                    <input type="checkbox" name="resource_ids" value="{{ r.id }}" class="rounded border-gray-300"
+                           {% if not r.is_active %}disabled{% endif %}>
+                  </label>
+                {% endfor %}
+              </div>
+              <p class="mt-2 text-xs text-gray-500">Tip: link multiple resources if this service can run in multiple spaces.</p>
+            {% else %}
+              <div class="text-sm text-gray-700">No resources created yet. Create a space capacity first, then come back and enable this.</div>
+            {% endif %}
+          </div>
+
+          {% if not can_use_facility_resources %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required" style="border-radius:0.75rem;"></div>{% endif %}
+        </div>
+
+        <script>
+          (function(){
+            try{
+              const chk = document.getElementById('requires_facility_resources');
+              const panel = document.getElementById('ccCreateResourcesPanel');
+              if (!chk || !panel) return;
+              function update(){
+                const on = !!chk.checked;
+                panel.style.display = on ? 'block' : 'none';
+                for (const cb of panel.querySelectorAll('input[type="checkbox"][name="resource_ids"]')){
+                  cb.disabled = !on || cb.hasAttribute('data-force-disabled');
+                  if (!on) cb.checked = false;
+                }
+              }
+              update();
+              chk.addEventListener('change', update);
+            }catch(e){ }
+          })();
+        </script>
 
         <!-- Refund Policy -->
         <div class="border-t pt-6 space-y-4">

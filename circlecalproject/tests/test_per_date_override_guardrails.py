@@ -45,6 +45,22 @@ class TestPerDateOverrideGuardrails(TestCase):
             'end_time': '11:00',
             'target': f'svc:{self.svc_b.id}',
         }
+        # Member-first rule: service-scoped per-date overrides require the member
+        # to create a per-date override in their calendar first.
+        member_payload = {
+            'dates': ['2030-01-07'],  # Monday
+            'start_time': '09:00',
+            'end_time': '17:00',
+            'target': self.mem.id,
+        }
+        member_resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(member_resp.status_code, 200)
+
         resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
             data=json.dumps(payload),
@@ -62,6 +78,21 @@ class TestPerDateOverrideGuardrails(TestCase):
             'is_blocking': True,
             'target': f'svc:{self.svc_a.id}',
         }
+        # Member-first rule prerequisite
+        member_payload = {
+            'dates': ['2030-01-07'],
+            'start_time': '09:00',
+            'end_time': '17:00',
+            'target': self.mem.id,
+        }
+        member_resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(member_resp.status_code, 200)
+
         resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
             data=json.dumps(block_payload),
@@ -97,6 +128,21 @@ class TestPerDateOverrideGuardrails(TestCase):
             'end_time': '11:30',
             'target': f'svc:{self.svc_b.id}',
         }
+        # Member-first rule prerequisite
+        member_payload = {
+            'dates': ['2030-01-07'],  # Monday
+            'start_time': '09:00',
+            'end_time': '17:00',
+            'target': self.mem.id,
+        }
+        member_resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(member_resp.status_code, 200)
+
         resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
             data=json.dumps(payload),
@@ -104,3 +150,124 @@ class TestPerDateOverrideGuardrails(TestCase):
             HTTP_HOST='127.0.0.1',
         )
         self.assertEqual(resp.status_code, 400)
+
+    def test_service_override_forbidden_until_member_override_exists(self):
+        # Without a member-scoped per-date override for the day, service-scoped overrides
+        # for multi-solo services should be rejected.
+        payload = {
+            'dates': ['2030-01-07'],  # Monday
+            'start_time': '12:00',
+            'end_time': '12:30',
+            'target': f'svc:{self.svc_b.id}',
+        }
+        resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        # After creating a member-scoped per-date override for that date, the service override is allowed.
+        member_payload = {
+            'dates': ['2030-01-07'],
+            'start_time': '09:00',
+            'end_time': '17:00',
+            'target': self.mem.id,
+        }
+        member_resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(member_resp.status_code, 200)
+
+        resp2 = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp2.status_code, 200)
+
+    def test_service_available_override_forbidden_on_member_off_day_until_member_opens(self):
+        # Member weekly availability is only set for Monday. Sunday is unavailable by default.
+        sunday = '2030-01-06'  # Sunday
+
+        svc_payload = {
+            'dates': [sunday],
+            'start_time': '10:00',
+            'end_time': '11:00',
+            'target': f'svc:{self.svc_a.id}',
+        }
+
+        # If a member override exists but it's blocking (unavailable), service cannot open the day.
+        member_block_payload = {
+            'dates': [sunday],
+            'start_time': '00:00',
+            'end_time': '23:59',
+            'is_blocking': True,
+            'target': self.mem.id,
+        }
+        resp_block = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_block_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp_block.status_code, 200)
+
+        resp1 = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(svc_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp1.status_code, 403)
+
+        # Even if the member created an availability override, it must cover the requested interval.
+        member_partial_payload = {
+            'dates': [sunday],
+            'start_time': '12:00',
+            'end_time': '13:00',
+            'target': self.mem.id,
+        }
+        resp_partial = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_partial_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp_partial.status_code, 200)
+
+        resp2 = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(svc_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp2.status_code, 403)
+
+        # Once the member opens the day for that interval, the service override is allowed.
+        member_open_payload = {
+            'dates': [sunday],
+            'start_time': '09:00',
+            'end_time': '17:00',
+            'target': self.mem.id,
+        }
+        resp_open = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(member_open_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp_open.status_code, 200)
+
+        resp3 = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(svc_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp3.status_code, 200)

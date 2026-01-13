@@ -3,7 +3,7 @@
 {% block title %}Pricing — CircleCal{% endblock %}
 
 {% block content %}
-<div class="container mx-auto py-6 md:py-10 px-4 max-w-6xl">
+<div id="pricing-page" class="container mx-auto py-6 md:py-10 px-4 max-w-6xl">
     <h1 class="text-3xl md:text-4xl font-bold text-center mb-3 md:mb-4">Choose Your Plan</h1>
     <p class="text-center text-gray-600 mb-8 md:mb-12 text-sm md:text-base">Scale with CircleCal as your business grows</p>
 
@@ -67,10 +67,17 @@
             </ul>
 
                         <div>
-                            <a href="{% url 'billing:embedded_checkout_page' org.slug plan.id %}"
-                                 class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
-                                    {% if current_plan and current_plan.slug == plan.slug %}Current Plan{% else %}Stripe Checkout{% endif %}
-                            </a>
+                            {% if current_plan and current_plan.slug == plan.slug %}
+                                <button type="button" disabled aria-disabled="true"
+                                    class="block w-full text-center {% if plan.slug == 'pro' %}bg-blue-600{% elif plan.slug == 'team' %}bg-green-600{% else %}bg-gray-700{% endif %} text-white font-semibold px-6 py-3 rounded-lg opacity-60 cursor-not-allowed">
+                                    Current Plan
+                                </button>
+                            {% else %}
+                                <a href="{% url 'billing:embedded_checkout_page' org.slug plan.id %}"
+                                    class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
+                                    Stripe Checkout
+                                </a>
+                            {% endif %}
                         </div>
                                                   </div>
                                                 </div>
@@ -92,6 +99,15 @@
  
 {% block extra_scripts %}
 <style>
+/* Mobile-only tweaks to match home page pricing section */
+@media (max-width: 640px) {
+    #pricing-page #pricing-carousel .slide-wrapper { width: 92% !important; }
+    #pricing-page #pricing-track { gap: 12px !important; }
+    #pricing-page .card { padding: 1rem !important; }
+    #pricing-page .text-4xl { font-size: 2rem; }
+    #pricing-page .text-3xl { font-size: 1.5rem; }
+}
+
 /* 3D carousel helpers */
 #pricing-carousel { overflow: visible; /* allow borders/shadows to be visible when cards translate/rotate */ }
 #pricing-carousel .slide-wrapper { transform-style: preserve-3d; }

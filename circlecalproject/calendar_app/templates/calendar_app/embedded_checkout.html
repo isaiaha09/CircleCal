@@ -1,9 +1,11 @@
 {% extends "calendar_app/base.html" %}
 {% block title %}Subscribe — {{ plan.name }}{% endblock %}
 
+{% block main_class %}w-full max-w-none px-0 py-0{% endblock %}
+
 {% block content %}
-<div class="max-w-xl mx-auto py-10">
-  <h1 class="text-3xl font-bold mb-2">Subscribe to {{ plan.name }}</h1>
+<div id="cc-embedded-checkout" class="w-[95vw] mx-auto py-6 sm:py-10 sm:max-w-xl">
+  <h1 class="text-3xl font-bold mb-2 text-center sm:text-left">Subscribe to {{ plan.name }}</h1>
 
   {% if is_change_flow and subscription and subscription.plan %}
     <div class="mb-4 p-3 rounded border-l-4 border-blue-300 bg-blue-50 text-sm text-blue-800">
@@ -11,7 +13,7 @@
     </div>
   {% endif %}
 
-  <div class="border rounded-lg p-6 shadow mb-6 bg-white">
+  <div class="border rounded-lg p-4 sm:p-6 shadow mb-6 bg-white">
     <div class="flex items-baseline justify-between gap-4">
       <div>
         <div class="text-sm font-semibold text-gray-900">Plan details</div>
@@ -54,7 +56,7 @@
     </div>
   </div>
 
-  <div id="payment" class="border rounded-lg p-6 shadow">
+  <div id="payment" class="border rounded-lg p-4 sm:p-6 shadow bg-white">
     <div class="text-sm font-semibold text-gray-900 mb-3">Payment</div>
 
     <div id="cc-saved-cards" class="mb-4 hidden">
@@ -605,5 +607,33 @@
   #submit[disabled] { opacity: 0.6; cursor: not-allowed; }
   .animate-spin { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* Mobile-only layout fixes: 95% width + prevent overflow */
+  @media (max-width: 640px) {
+    #cc-embedded-checkout { width: 95vw; }
+
+    /* Saved cards list rows are created in JS; force them to stack on mobile */
+    #cc-embedded-checkout #cc-saved-cards-list > label,
+    #cc-embedded-checkout #cc-saved-cards-list > div {
+      flex-direction: column !important;
+      align-items: stretch !important;
+    }
+
+    #cc-embedded-checkout #cc-saved-cards-list .text-xs,
+    #cc-embedded-checkout #cc-saved-cards-list .text-sm {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    #cc-embedded-checkout #cc-saved-cards-list button {
+      width: 100%;
+    }
+
+    /* Keep Stripe element from causing horizontal scroll */
+    #cc-embedded-checkout #payment-element {
+      max-width: 100%;
+      overflow: hidden;
+    }
+  }
 </style>
 {% endblock %}

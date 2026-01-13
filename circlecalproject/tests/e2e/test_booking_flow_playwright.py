@@ -40,6 +40,14 @@ def start_dev_server():
 
 
 def seed_test_data():
+    # Ensure local dev DB schema is up to date (E2E uses the on-disk sqlite DB).
+    mig = subprocess.run([sys.executable, 'manage.py', 'migrate', '--noinput'], cwd=PROJECT_ROOT, capture_output=True, text=True)
+    if mig.returncode != 0:
+        err = (mig.stderr or '').lower()
+        if 'modulenotfounderror' in err or 'module not found' in err:
+            return None, None
+        raise RuntimeError(f"Migrate failed before seeding:\nSTDOUT: {mig.stdout}\nSTDERR: {mig.stderr}")
+
     # Prefer using the management command we added: `manage.py seed_e2e`
     proc = subprocess.run([sys.executable, 'manage.py', 'seed_e2e'], cwd=PROJECT_ROOT, capture_output=True, text=True)
     if proc.returncode != 0:

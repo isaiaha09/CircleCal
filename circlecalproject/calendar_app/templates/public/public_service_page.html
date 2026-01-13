@@ -3,6 +3,8 @@
 
 {% block title %}Book {{ service.name }} – {{ org.name }}{% endblock %}
 
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-6 md:p-6{% endblock %}
+
 {% block content %}
 <style>
   .calendar-container {
@@ -17,6 +19,15 @@
       0 2px 10px rgba(17, 24, 39, 0.06);
     border: 1px solid rgba(17, 24, 39, 0.06);
     transform: translateZ(0);
+  }
+  /* Mobile: make the calendar ~95% width of the screen */
+  @media (max-width: 767px) {
+    .calendar-container {
+      width: 95vw;
+      max-width: 95vw;
+      margin: 28px auto 16px;
+      padding: 8px;
+    }
   }
   @media (min-width: 768px) {
     .calendar-container { margin: 40px auto; padding: 12px; }
@@ -43,8 +54,10 @@
     pointer-events: none;
   }
   .day-circle {
-    width: 40px;
-    height: 40px;
+    width: 100%;
+    height: auto;
+    max-width: 40px;
+    aspect-ratio: 1 / 1;
     border-radius: 50%;
     display: flex;
     justify-content: center;
@@ -58,6 +71,7 @@
     font-size: 0.9rem;
     z-index: 1;
     position: relative;
+    justify-self: center;
     box-shadow:
       0 10px 18px rgba(17, 24, 39, 0.14),
       inset 0 1px 0 rgba(255,255,255,0.08);
@@ -65,7 +79,7 @@
     will-change: transform;
   }
   @media (min-width: 768px) {
-    .day-circle { width: 52px; height: 52px; font-size: 1rem; }
+    .day-circle { max-width: 52px; font-size: 1rem; }
   }
   .day-circle:hover {
     transform: translateY(-2px) scale(1.07);

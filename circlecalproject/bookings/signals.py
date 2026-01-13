@@ -8,7 +8,7 @@ from datetime import datetime
 from django.conf import settings
 from accounts.models import Business as Organization
 from .models import OrgSettings, Booking, ServiceSettingFreeze, AuditBooking
-from .emails import send_booking_confirmation, send_booking_cancellation
+from .emails import send_booking_confirmation, send_booking_cancellation, send_internal_booking_cancellation_notification
 
 
 @receiver(post_save, sender=Organization)
@@ -34,7 +34,20 @@ def send_cancellation_email(sender, instance, **kwargs):
     org_id = getattr(instance, 'organization_id', None)
     if not org_id or not Organization.objects.filter(id=org_id).exists():
         return
-    if instance.client_email and not instance.is_blocking:
+    if instance.is_blocking:
+        return
+
+    # Always notify internal recipients (owner/managers, and assignees when assigned).
+    try:
+        transaction.on_commit(lambda: send_internal_booking_cancellation_notification(instance))
+    except Exception:
+        try:
+            send_internal_booking_cancellation_notification(instance)
+        except Exception:
+            pass
+
+    # Client-facing cancellation email (only when we have a client email).
+    if instance.client_email:
         try:
             # Schedule sending after transaction commit to ensure deletion persisted
             transaction.on_commit(lambda: send_booking_cancellation(instance))

@@ -3,6 +3,9 @@
 
 {% block title %}Choose Your Business{% endblock %}
 
+{# Mobile-only: break out of base <main> constraints; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-10{% endblock %}
+
 {% block content %}
 <style>
     .org-page { max-width: 900px; margin: 60px auto; text-align: center; padding: 0 20px; }
@@ -29,7 +32,7 @@
 
     /* Mobile: center cards and stack vertically */
     @media (max-width: 600px) {
-        .org-page { margin: 24px auto; padding: 0 12px; }
+        .org-page { width: 95vw; max-width: 95vw; margin: 24px auto; padding: 0; }
         .org-title { font-size: 2rem; }
         .org-subtitle { margin-bottom: 24px; }
 
@@ -42,7 +45,7 @@
 
         .org-card {
             width: 100%;
-            max-width: 360px;
+            max-width: 100%;
             margin: 0 auto;
             padding: 20px;
         }
@@ -51,7 +54,7 @@
         .org-action-btn { padding: 10px 12px; font-size: 0.9rem; }
 
         .create-org { margin-top: 28px; }
-        .create-btn { width: 100%; max-width: 360px; }
+        .create-btn { width: 100%; max-width: 100%; }
     }
 </style>
 
