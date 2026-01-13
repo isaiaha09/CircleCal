@@ -1077,22 +1077,88 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 }
 .cc-constraints-bar {
     position: relative;
-    height: 8px;
+    height: 10px;
     border-radius: 999px;
-    border: 1px solid var(--gray-200);
-    background: rgba(243, 244, 246, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.7); /* slate-400 */
+    background: rgba(241, 245, 249, 0.98);      /* slate-50 */
     overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+}
+.cc-constraints-bar:hover {
+    border-color: rgba(59, 130, 246, 0.55);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12), inset 0 1px 0 rgba(255,255,255,0.85);
 }
 .cc-constraints-seg {
     position: absolute;
     top: 0;
     height: 100%;
 }
+.cc-constraints-seg .cc-constraints-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    pointer-events: none;
+    user-select: none;
+    opacity: 0.95;
+}
+.cc-constraints-seg.member .cc-constraints-label {
+    color: rgba(17, 24, 39, 0.88);
+    text-shadow: 0 1px 0 rgba(255,255,255,0.65);
+}
+.cc-constraints-seg.other .cc-constraints-label {
+    color: rgba(255,255,255,0.98);
+    text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
 .cc-constraints-seg.member {
-    background: rgba(156, 163, 175, 0.6);
+    /* Outside member availability (warm/attention but not "error") */
+    background: rgba(245, 158, 11, 0.62); /* amber-500 */
+    box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.25);
 }
 .cc-constraints-seg.other {
-    background: rgba(107, 114, 128, 0.7);
+    /* Reserved by other services (cool + striped for color-blind clarity) */
+    background: rgba(59, 130, 246, 0.82); /* CircleCal blue (primary-500) */
+    background-image: repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,0.25) 0px,
+        rgba(255,255,255,0.25) 6px,
+        rgba(255,255,255,0.00) 6px,
+        rgba(255,255,255,0.00) 12px
+    );
+    box-shadow: inset 0 0 0 1px rgba(30, 64, 175, 0.28);
+}
+
+.cc-constraints-caption {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.25;
+    color: var(--gray-700);
+}
+
+/* Mobile-only: tighten the explanatory text under Time Ranges (service scope) */
+@media (max-width: 768px) {
+    /* Make all text inside the constraints container smaller on mobile */
+    #defaultAvailabilityContainer .cc-constraints-wrap {
+        font-size: 9px;
+    }
+
+    /* Inline segment labels */
+    #defaultAvailabilityContainer .cc-constraints-wrap .cc-constraints-seg .cc-constraints-label {
+        font-size: 7px;
+        letter-spacing: 0.25px;
+    }
+
+    #defaultAvailabilityContainer .cc-constraints-caption {
+        font-size: 9px;
+        line-height: 1.2;
+        margin-top: 5px;
+    }
 }
 
 /* Service-scope explainer (client-facing mental model) */
@@ -1130,12 +1196,22 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 }
 .cc-scope-legend .swatch {
     width: 18px;
-    height: 8px;
+    height: 10px;
     border-radius: 999px;
-    border: 1px solid var(--gray-200);
+    border: 1px solid rgba(148, 163, 184, 0.7);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
 }
-.cc-scope-legend .swatch.member { background: rgba(156, 163, 175, 0.6); }
-.cc-scope-legend .swatch.other { background: rgba(107, 114, 128, 0.7); }
+.cc-scope-legend .swatch.member { background: rgba(245, 158, 11, 0.62); }
+.cc-scope-legend .swatch.other {
+    background: rgba(59, 130, 246, 0.82);
+    background-image: repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,0.25) 0px,
+        rgba(255,255,255,0.25) 6px,
+        rgba(255,255,255,0.00) 6px,
+        rgba(255,255,255,0.00) 12px
+    );
+}
 
 /* Fully blocked day (service scope): make row non-interactive */
 .cc-weekly-row-locked {
@@ -3840,6 +3916,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 wrap.style.display = 'block';
                 bar.innerHTML = '';
                 const toPct = (min) => (Math.max(0, Math.min(24*60, min)) / (24*60)) * 100;
+                const fmtMin = (mins) => {
+                    const m = Math.max(0, Math.round(Number(mins) || 0));
+                    const h = Math.floor(m / 60);
+                    const r = m % 60;
+                    if (h <= 0) return `${r}m`;
+                    if (r === 0) return `${h}h`;
+                    return `${h}h ${r}m`;
+                };
+                const sumMins = (ranges) => {
+                    try {
+                        return (Array.isArray(ranges) ? ranges : []).reduce((acc, seg) => {
+                            const s = Number(seg && seg.start);
+                            const e = Number(seg && seg.end);
+                            if (!isFinite(s) || !isFinite(e)) return acc;
+                            return acc + Math.max(0, e - s);
+                        }, 0);
+                    } catch (e) { return 0; }
+                };
                 const addSeg = (seg, cls) => {
                     const div = document.createElement('div');
                     div.className = `cc-constraints-seg ${cls}`;
@@ -3847,12 +3941,56 @@ document.addEventListener('DOMContentLoaded', function() {
                     const width = Math.max(0, toPct(seg.end) - left);
                     div.style.left = left + '%';
                     div.style.width = width + '%';
+
+                    // Tooltips: help user understand what the color means.
+                    try {
+                        const mins = Math.max(0, (Number(seg.end) || 0) - (Number(seg.start) || 0));
+                        if (cls === 'member') div.title = `Outside member availability (${fmtMin(mins)})`;
+                        else if (cls === 'other') div.title = `Reserved by other services (${fmtMin(mins)})`;
+                    } catch (e) {}
+
+                    // Inline labels (only when there's enough room to avoid clutter).
+                    try {
+                        if (width >= 18) {
+                            const label = document.createElement('span');
+                            label.className = 'cc-constraints-label';
+                            label.textContent = (cls === 'member') ? 'Member' : (cls === 'other' ? 'Other' : '');
+                            if (label.textContent) div.appendChild(label);
+                        }
+                    } catch (e) {}
+
                     bar.appendChild(div);
                 };
 
                 // Member blocked is the baseline constraint; other-service blocks overlay.
                 for (const seg of (d.memberBlocked || [])) addSeg(seg, 'member');
                 for (const seg of (d.otherBlocked || [])) addSeg(seg, 'other');
+
+                // Add/refresh a short caption that explains what's blocking.
+                try {
+                    let cap = wrap.querySelector('.cc-constraints-caption');
+                    if (!cap) {
+                        cap = document.createElement('div');
+                        cap.className = 'cc-constraints-caption';
+                        wrap.appendChild(cap);
+                    }
+                    const allowedM = sumMins(d.memberAllowed || []);
+                    const otherM = sumMins(d.otherBlocked || []);
+                    const remainingM = sumMins(d.remaining || []);
+
+                    if (!allowedM) {
+                        cap.textContent = 'Blocked: outside member availability (no overlap).';
+                    } else if (!remainingM && otherM) {
+                        cap.textContent = 'Blocked: reserved by other services (no bookable time left).';
+                    } else if (!remainingM) {
+                        cap.textContent = 'Blocked: no bookable time left for this service.';
+                    } else if (otherM) {
+                        cap.textContent = `Bookable: ${fmtMin(remainingM)} (some time reserved by other services).`;
+                    } else {
+                        // If shouldShow but no other blocks, it's usually a fully-blocked day.
+                        cap.textContent = `Bookable: ${fmtMin(remainingM)}.`;
+                    }
+                } catch (e) {}
             } catch (e) { /* ignore */ }
         }
 
@@ -4243,10 +4381,29 @@ document.addEventListener('DOMContentLoaded', function() {
             return '';
         }
 
+        function _ccFormatTime12h(hour24, minute){
+            const h = Number(hour24);
+            const m = String(minute == null ? '' : minute).padStart(2, '0');
+            if (!Number.isFinite(h) || h < 0 || h > 23) return `${hour24}:${m}`;
+
+            const suffix = h >= 12 ? 'PM' : 'AM';
+            const h12 = (h % 12) === 0 ? 12 : (h % 12);
+            return `${h12}:${m} ${suffix}`;
+        }
+
+        function _ccHumanize24hTimesInText(text){
+            const s = String(text == null ? '' : text);
+            // Convert any 24h-like time tokens (e.g. 9:00, 09:00, 17:30) to 12h with AM/PM.
+            return s.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (match, hh, mm) => {
+                return _ccFormatTime12h(hh, mm);
+            });
+        }
+
         function _showAvailabilitySaveBanner(kind, message){
             const el = _ensureAvailabilitySaveBanner();
             const hint = _availabilitySaveHint(message);
             const safeMsg = String(message || '').trim();
+            const friendlyMsg = _ccHumanize24hTimesInText(safeMsg);
 
             // If the banner is shown repeatedly, avoid stacking multiple timers.
             try {
@@ -4261,7 +4418,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 el.style.border = '1px solid #86efac';
                 el.style.background = '#ecfdf5';
                 el.style.color = '#065f46';
-                el.innerHTML = `<div style="font-weight:700">Saved</div><div style="margin-top:2px">${safeMsg || 'Weekly availability saved.'}</div>`;
+                el.innerHTML = `<div style="font-weight:700">Saved</div><div style="margin-top:2px">${friendlyMsg || 'Weekly availability saved.'}</div>`;
 
                 // Auto-dismiss success after 5 seconds.
                 try {
@@ -4273,7 +4430,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 el.style.border = '1px solid #fecaca';
                 el.style.background = '#fef2f2';
                 el.style.color = '#7f1d1d';
-                el.innerHTML = `<div style="font-weight:700">Couldn't save</div><div style="margin-top:2px">${safeMsg || 'The server rejected these changes.'}</div>${hint ? `<div style="margin-top:6px;color:#991b1b"><strong>\u2022</strong> ${hint}</div>` : ''}`;
+                el.innerHTML = `<div style="font-weight:700">Couldn't save</div><div style="margin-top:2px">${friendlyMsg || 'The server rejected these changes.'}</div>${hint ? `<div style="margin-top:6px;color:#991b1b"><strong>\u2022</strong> ${hint}</div>` : ''}`;
             }
             try { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
         }
