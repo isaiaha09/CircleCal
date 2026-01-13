@@ -65,20 +65,21 @@ class TestMemberOverridesAffectGroupServices(TestCase):
             HTTP_HOST='127.0.0.1',
         )
 
-    def test_group_service_stays_available_if_only_one_member_blocked(self):
+    def test_group_service_unavailable_if_any_member_blocked(self):
         # Monday
         date_str = '2030-01-07'
         resp = self._block_member_full_day(self.m1.id, date_str)
         self.assertEqual(resp.status_code, 200)
 
-        # Group service availability should still have slots because m2 is not blocked
+        # Group service availability should be empty because assigned members must overlap
+        # (client expects all coaches/resources to be available).
         avail = self.client.get(
             f'/bus/{self.org.slug}/services/{self.group_svc.slug}/availability/?start={date_str}T00:00:00&end={date_str}T23:59:59',
             HTTP_HOST='127.0.0.1',
         )
         self.assertEqual(avail.status_code, 200)
         data = json.loads(avail.content.decode('utf-8'))
-        self.assertTrue(len(data) > 0)
+        self.assertEqual(data, [])
 
     def test_group_service_unavailable_if_all_members_blocked(self):
         date_str = '2030-01-07'

@@ -1398,7 +1398,11 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 /* Mobile-specific container height to ensure availability card has enough room */
 @media (max-width: 768px) {
     #defaultAvailabilityContainer {
-        min-height: 685px !important;
+        /* Let the card grow with content (ranges + Save button) */
+        min-height: unset !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: hidden !important;
     }
 }
 </style>
@@ -1574,22 +1578,38 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         margin: 0;
     }
     
-    /* Make main content full width */
+    /* Mobile: use a 95% width column (centered) */
     main.max-w-6xl,
     main.max-w-7xl,
     main {
-        max-width: 100vw !important;
+        max-width: 95vw !important;
+        width: 95vw !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Scope dropdown: match the 95vw mobile column even if the header is centered/narrow */
+    #ccScopeMenuRoot {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    #ccScopeMenu,
+    #ccScopeSubmenu {
         width: 100% !important;
-        padding: 12px !important;
-        margin: 0 !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
     }
     
 
     
-    /* Remove extra margins on cards and prevent overflow */
+    /* Cards: fill the 95vw column */
     #overridesContainer,
-    #calendar {
+    #defaultAvailabilityContainer,
+    #calendar,
+    #bookingsInlineSection {
         margin-left: 0 !important;
         margin-right: 0 !important;
         width: 100% !important;
@@ -1972,6 +1992,18 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         padding-left: 0 !important;
         padding-right: 0 !important;
         box-sizing: border-box !important;
+    }
+
+    /* IMPORTANT: when stacked (flex-direction: column), inline flex-basis values become HEIGHT.
+       The desktop inline styles use flex-basis for widths (540px/640px), but on mobile that
+       can effectively pin card heights and clip the weekly table. Force natural sizing. */
+    #defaultAvailabilityContainer {
+        flex: 0 0 auto !important;
+    }
+    #weeklyCalendarRow > div[style*="flex:2 1 640px"] {
+        flex: 0 0 auto !important;
+        height: auto !important;
+        max-height: none !important;
     }
 
     /* Allow both columns to shrink and fit the viewport */
@@ -6268,32 +6300,40 @@ document.addEventListener('DOMContentLoaded', function() {
     try { reapplySelections(); } catch (e) { /* optional */ }
     try { updateClearButton(); } catch (e) { /* optional */ }
 
-    // Minimal runtime fix: on small viewports, make sure the availability
-    // container's min-height is at least as tall as its content so nothing
-    // visually leaks out. This only runs on page load and on resize for
-    // viewports <= 768px.
-    (function ensureAvailabilityContainerFits() {
+    // Mobile safety: don't pin a fixed/min height on the weekly availability card.
+    // The card should grow naturally as ranges are added and the Save button appears.
+    (function ensureAvailabilityContainerFlexible() {
         function apply() {
             try {
                 if (window.innerWidth > 768) return;
                 const el = document.getElementById('defaultAvailabilityContainer');
                 if (!el) return;
-                // Use scrollHeight to measure content; add small padding safety.
-                const wanted = Math.max(el.scrollHeight + 24, 520);
-                el.style.minHeight = wanted + 'px';
-                // Keep overflow hidden so the top-gradient (::before) is clipped
-                // to the container's border-radius and doesn't produce a 'hat' effect.
+                // Ensure no code path leaves a fixed height/max-height that would clip content.
+                el.style.height = 'auto';
+                el.style.maxHeight = 'none';
+                // Keep overflow hidden so the top-gradient (::before) stays clipped to border-radius.
                 el.style.overflow = 'hidden';
             } catch (err) { /* ignore */ }
         }
+
         // Run after next paint to allow layout to settle
         requestAnimationFrame(() => setTimeout(apply, 0));
+
         // Also adjust on viewport resizes (debounced)
         let t = null;
         window.addEventListener('resize', () => {
             clearTimeout(t);
             t = setTimeout(apply, 120);
         });
+
+        // If the card's content changes (adding ranges, Save button becomes visible), re-apply.
+        try {
+            const el = document.getElementById('defaultAvailabilityContainer');
+            if (el && typeof MutationObserver !== 'undefined') {
+                const obs = new MutationObserver(() => apply());
+                obs.observe(el, { childList: true, subtree: true, attributes: true });
+            }
+        } catch (e) { /* ignore */ }
     })();
 
     // Audit modal for inline feed
