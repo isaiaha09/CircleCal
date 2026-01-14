@@ -2618,80 +2618,57 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 <!--==========================-->
 <div id="timeCirclesModal" style="display:none; flex-direction:column; padding:10px; position:fixed; inset:0; 
      background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:10000; animation:fadeIn 0.2s ease-out;">
-  <div style="background:white; padding:40px; border-radius:20px; width:640px; max-height:85vh; overflow-y:auto; position:relative; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); animation:modalSlideUp 0.3s ease-out;">
+    <div id="timeCirclesModalPanel" style="background:white; padding:40px; border-radius:20px; width:640px; max-height:85vh; overflow-y:auto; position:relative; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); animation:modalSlideUp 0.3s ease-out;">
 
-    <!-- Client-Facing Settings -->
-    <div id="clientTimeSettings" style="margin-bottom: 32px; padding:20px; border-radius:12px; background:var(--gray-50);">
-      <h3 style="margin:0 0 16px 0; font-size:16px; font-weight:700; color:var(--gray-900);">Client View Settings</h3>
-      <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
-        <div>
-          <label for="clientBlockSelect">Hour Block:</label><br>
-          <select id="clientBlockSelect">
-            <option value="1">1 Hour</option>
-            <option value="2">2 Hours</option>
-            <option value="3">3 Hours</option>
-          </select>
-        </div>
-        <div>
-          <label for="clientIncrementSelect">Increment:</label><br>
-                    <select id="clientIncrementSelect">
-                        <option value="15">15 min</option>
-                        <option value="30" selected>30 min</option>
-                        <option value="45">45 min</option>
-                        <option value="60">60 min</option>
-                        <option value="custom">Custom</option>
-                    </select>
-                    <span id="clientCustomIncrementContainer" style="display:none; margin-left:8px; gap:6px; align-items:center;">
-                        <input type="number" id="clientCustomIncrementInput" placeholder="Minutes" min="5" style="width:84px;" />
-                    </span>
-        </div>
-        <div>
-          <button id="saveClientSettingsBtn" 
-                  style="padding:10px 20px; background:var(--primary-500); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-            Save for Client View
-          </button>
-        </div>
-      </div>
-    </div>
-        <div style="margin-top:6px; font-size:13px; color:var(--gray-600); font-style:italic;">
-                These client view settings are synchronized with the Edit Service increment settings — changes here will update the Edit Service page and the public booking view, and vice versa.
-        </div>
-
-    <!-- Coach Preview Section -->
-    <div id="coachTimeSettings" style="margin-bottom: 32px; padding:20px; border-radius:12px; background:var(--gray-50); flex-direction: column;">
-        <h3 style="margin:0 0 16px 0; font-size:16px; font-weight:700; color:var(--gray-900);">Coach Preview Settings</h3>
-        <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
-            <div>
-            <label>Hour Block:</label><br>
-            <select id="hourBlockSelect">
-                <option value="1">1 Hour</option>
-                <option value="2">2 Hours</option>
-                <option value="3">3 Hours</option>
-                <option value="custom">Custom</option>
-            </select>
-            </div>
-            <div>
-            <label>Increment:</label><br>
-            <select id="incrementSelect">
-                <option value="15">15 min</option>
-                <option value="30" selected>30 min</option>
-                <option value="45">45 min</option>
-                <option value="60">60 min</option>
-                <option value="custom">Custom</option>
-            </select>
+        <!-- Member-scope entry flow (shown only when a member is selected) -->
+        <div id="ccDayScheduleMemberChooser" style="display:none; margin-bottom:18px; padding:20px; border-radius:12px; background:var(--gray-50);">
+            <h3 style="margin:0 0 10px 0; font-size:16px; font-weight:700; color:var(--gray-900);">View Day Schedule</h3>
+            <div style="font-size:13px; color:var(--gray-700); margin-bottom:14px;">Choose what to view for this member on this day:</div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <button id="ccDayScheduleChooseServicesBtn" type="button" style="padding:10px 14px; border-radius:10px; border:1px solid var(--gray-200); background:white; font-weight:600; cursor:pointer; text-align:left;">
+                    View services assigned to this member
+                </button>
+                <button id="ccDayScheduleChooseAppointmentsBtn" type="button" style="padding:10px 14px; border-radius:10px; border:1px solid var(--gray-200); background:white; font-weight:600; cursor:pointer; text-align:left;">
+                    View all appointments for this day
+                </button>
             </div>
         </div>
 
-        <!-- Add these right below the dropdowns -->
-        <div id="customBlockInputContainer" style="display:none; margin-top:10px; gap:5px; align-items:center;">
-            <input type="number" id="customBlockInput" placeholder="Minutes" min="15"/>
-            <button id="applyCustomBlockBtn">Apply</button>
+        <div id="ccDayScheduleMemberServices" style="display:none; margin-bottom:18px; padding:20px; border-radius:12px; background:var(--gray-50);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                <h3 style="margin:0; font-size:16px; font-weight:700; color:var(--gray-900);">Services</h3>
+                <button id="ccDayScheduleBackToChooserFromServices" type="button" style="padding:8px 10px; border-radius:8px; border:1px solid var(--gray-200); background:white; cursor:pointer;">Back</button>
+            </div>
+            <div id="ccDayScheduleMemberServicesList" style="margin-top:12px; display:flex; flex-direction:column; gap:8px;"></div>
         </div>
 
-        <div id="customIncrementContainer" style="display:none; margin-top:10px; gap:5px; align-items:center;">
-            <input type="number" id="customIncrementInput" placeholder="Minutes" min="5"/>
-            <button id="applyCustomIncrementBtn">Apply</button>
+        <div id="ccDayScheduleMemberAppointments" style="display:none; margin-bottom:18px; padding:20px; border-radius:12px; background:var(--gray-50);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                <h3 style="margin:0; font-size:16px; font-weight:700; color:var(--gray-900);">Appointments</h3>
+                <button id="ccDayScheduleBackToChooserFromAppointments" type="button" style="padding:8px 10px; border-radius:8px; border:1px solid var(--gray-200); background:white; cursor:pointer;">Back</button>
+            </div>
+            <div id="ccDayScheduleMemberAppointmentsList" style="margin-top:12px; display:flex; flex-direction:column; gap:10px;"></div>
         </div>
+
+        <!-- Fixed settings (service scope) -->
+        <div id="clientTimeSettings" style="margin-bottom: 24px; padding:20px; border-radius:12px; background:var(--gray-50);">
+            <h3 style="margin:0 0 12px 0; font-size:16px; font-weight:700; color:var(--gray-900);">Day Schedule Settings</h3>
+            <div style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
+                <div>
+                    <div style="font-size:12px; color:var(--gray-600);">Duration</div>
+                    <div id="ccDayScheduleHourBlockValue" style="font-weight:700; color:var(--gray-900);">—</div>
+                </div>
+                <div>
+                    <div style="font-size:12px; color:var(--gray-600);">Increment</div>
+                    <div id="ccDayScheduleIncrementValue" style="font-weight:700; color:var(--gray-900);">—</div>
+                </div>
+                <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+                    <a id="ccChangeInEditServiceBtn" href="#" style="display:none; padding:10px 14px; border-radius:10px; background:var(--primary-500); color:white; text-decoration:none; font-weight:700;">Change in Edit Service</a>
+                </div>
+            </div>
+            <div id="ccDayScheduleSettingsNote" style="margin-top:10px; font-size:13px; color:var(--gray-600);">
+                Duration and increment are fixed based on the service’s settings.
+            </div>
         </div>
 
     <!-- Circle Title & Container -->
@@ -5361,16 +5338,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 // Member-scoped selection:
-                // Consider bookings that are assigned to this member across any service.
-                // If a booking's assigned_user_id (or assigned membership id if present)
-                // matches the selected membership, treat it as in-scope for validation.
+                // Show bookings that belong to this member.
+                // Primary signals are assigned_user_id / assigned_membership_id, but
+                // if those are missing we fall back to the booking's service assignment.
                 try {
                     const mUserId = getSelectedUserIdForMembership(SELECTED_MEMBER);
                     const assignedUserId = (xp.assigned_user_id || ev.assigned_user_id || null);
                     if (assignedUserId && mUserId && String(assignedUserId) === String(mUserId)) return true;
                     const assignedMembershipId = (xp.assigned_membership_id || ev.assigned_membership_id || null);
                     if (assignedMembershipId && String(assignedMembershipId) === String(SELECTED_MEMBER)) return true;
-                    // Conservative fallback: if booking has no explicit assignee info, skip it
+
+                    // Fallback: match by service assignment (covers older payloads)
+                    const bookingSvc = (
+                        xp.service_id || xp.assigned_scope_service_id || xp.assigned_scope_service ||
+                        xp.assigned_service_id || xp.service || ev.service_id || null
+                    );
+                    if (bookingSvc != null) {
+                        const svc = (typeof svcById === 'function') ? svcById(bookingSvc) : null;
+                        if (svc) {
+                            const assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(svc) || []) : [];
+                            if (assigned.some(x => String(x) === String(SELECTED_MEMBER))) return true;
+                        }
+                    }
+
                     return false;
                 } catch (e) {
                     return true;
@@ -6614,291 +6604,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Save client-facing view settings to localStorage so public profile can read them.
-    // Also allow a custom increment value and sync it immediately so the edit
-    // service page (which listens to storage events) stays in sync.
-    try {
-        const saveClientBtn = document.getElementById('saveClientSettingsBtn');
-        const clientIncrementSelect = document.getElementById('clientIncrementSelect');
-        const clientBlockSelect = document.getElementById('clientBlockSelect');
-        // Reuse the existing custom increment UI used by the coach section
-        const sharedCustomIncrementContainer = document.getElementById('customIncrementContainer');
-        const sharedCustomIncrementInput = document.getElementById('customIncrementInput');
-        const sharedApplyCustomIncrementBtn = document.getElementById('applyCustomIncrementBtn');
-
-        const CLIENT_KEY = 'client_view_settings';
-        const STANDARD_INCREMENTS = ['15','30','45','60'];
-
-        function readClientSettingsFromStorage(){
-            try {
-                const raw = localStorage.getItem(CLIENT_KEY) || '{}';
-                const parsed = JSON.parse(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
-            } catch (e) { return {}; }
-        }
-
-        function writeClientSettingsToStorage(obj){
-            try {
-                localStorage.setItem(CLIENT_KEY, JSON.stringify(obj || {}));
-                // Dispatch a storage event for same-window listeners (some browsers won't).
-                try { window.dispatchEvent(new Event('storage')); } catch(e){}
-            } catch (e) { console.error('write client view storage failed', e); }
-        }
-
-        // Initialize client increment select from storage (or leave default)
-        try {
-            const stored = readClientSettingsFromStorage();
-            if (stored && typeof stored.increment !== 'undefined') {
-                const inc = String(stored.increment);
-                // If it's a standard option, select it. Otherwise switch the select
-                // to the 'custom' choice and prefill the custom inputs (do not add
-                // custom options to the dropdown to avoid clutter).
-                if (STANDARD_INCREMENTS.includes(inc)) {
-                    if (clientIncrementSelect) clientIncrementSelect.value = inc;
-                } else if (clientIncrementSelect) {
-                    // Put the select into the 'custom' position and show custom inputs
-                    try {
-                        clientIncrementSelect.value = 'custom';
-                    } catch (e) { /* ignore */ }
-                    if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
-                        sharedCustomIncrementContainer.style.display = 'flex';
-                        sharedCustomIncrementInput.value = String(inc);
-                    }
-                    const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                    const clientCustomInput = document.getElementById('clientCustomIncrementInput');
-                    if (clientCustomContainer && clientCustomInput) {
-                        clientCustomContainer.style.display = 'inline-flex';
-                        clientCustomInput.value = String(inc);
-                    }
-                }
-            }
-        } catch (e) { /* ignore init errors */ }
-
-        // When the client increment select changes, if it's one of the standard
-        // increments, write to storage immediately. If it's an unfamiliar value
-        // (like 'custom' or something not numeric) show the custom input.
-        if (clientIncrementSelect) {
-            clientIncrementSelect.addEventListener('change', function(){
-                try {
-                    const val = clientIncrementSelect.value;
-                    if (STANDARD_INCREMENTS.includes(val)) {
-                        // hide any custom UI if visible
-                        if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'none';
-                        const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                        if (clientCustomContainer) clientCustomContainer.style.display = 'none';
-                        const payload = Object.assign({}, readClientSettingsFromStorage(), { block: Number(clientBlockSelect?.value || 1), increment: Number(val) });
-                        writeClientSettingsToStorage(payload);
-                    } else if (val === 'custom') {
-                        // Show the client-specific custom input
-                        const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                        if (clientCustomContainer) clientCustomContainer.style.display = 'inline-flex';
-                        // Also show shared custom UI so user can use either
-                        if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'flex';
-                        if (sharedCustomIncrementInput) sharedCustomIncrementInput.value = '';
-                    } else {
-                        // Not standard — show shared custom input
-                        if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'flex';
-                        if (sharedCustomIncrementInput) sharedCustomIncrementInput.value = '';
-                    }
-                } catch (e) { console.warn('client increment change handler failed', e); }
-            });
-        }
-
-        // Client custom input is persisted when the user clicks the
-        // 'Save for Client View' button below. We removed the separate
-        // Apply button to simplify UX.
-
-        // Also keep coach preview controls in sync: initialize coach select/value
-        // from storage when the modal loads (if present). We'll set these up in
-        // the openTimeCirclesModal initializer below as well, but add a small
-        // defensive update here for any code paths that reuse this block.
-        try {
-            const coachIncrementSelect = document.getElementById('incrementSelect');
-            const coachCustomIncrementInput = document.getElementById('customIncrementInput');
-            if (coachIncrementSelect) {
-                const stored = readClientSettingsFromStorage();
-                if (stored && typeof stored.increment !== 'undefined') {
-                    const s = String(stored.increment);
-                    // If standard, select; otherwise set to 'custom' and prefill coach custom input
-                    if (STANDARD_INCREMENTS.includes(s)) {
-                        coachIncrementSelect.value = s;
-                        if (coachCustomIncrementInput) {
-                            const coachCustomContainer = document.getElementById('customIncrementContainer');
-                            if (coachCustomContainer) coachCustomContainer.style.display = 'none';
-                            coachCustomIncrementInput.value = '';
-                        }
-                    } else {
-                        try { coachIncrementSelect.value = 'custom'; } catch(e){}
-                        if (coachCustomIncrementInput) {
-                            coachCustomIncrementInput.value = s;
-                            const coachCustomContainer = document.getElementById('customIncrementContainer');
-                            if (coachCustomContainer) coachCustomContainer.style.display = 'flex';
-                        }
-                    }
-                }
-            }
-        } catch (e) { /* ignore */ }
-
-        // Wire the shared custom increment apply button so it updates the select,
-        // hides the custom UI, and writes to storage.
-        if (sharedApplyCustomIncrementBtn && sharedCustomIncrementInput && clientIncrementSelect) {
-            sharedApplyCustomIncrementBtn.onclick = () => {
-                try {
-                    const v = parseInt(sharedCustomIncrementInput.value, 10);
-                    if (isNaN(v) || v < 5) return alert('Enter a valid increment (5+ minutes).');
-                    // Do not add persistent options to the dropdown. Use the 'custom'
-                    // select value and prefill both client and shared custom inputs.
-                    try { clientIncrementSelect.value = 'custom'; } catch(e){}
-                    const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                    const clientCustomInput = document.getElementById('clientCustomIncrementInput');
-                    if (clientCustomContainer && clientCustomInput) {
-                        clientCustomContainer.style.display = 'inline-flex';
-                        clientCustomInput.value = String(v);
-                    }
-                    const payload = Object.assign({}, readClientSettingsFromStorage(), { block: Number(clientBlockSelect?.value || 1), increment: Number(v) });
-                    writeClientSettingsToStorage(payload);
-                    alert('Custom client increment applied.');
-                } catch (e) { console.error('apply custom increment failed', e); alert('Unable to apply custom increment.'); }
-            };
-        }
-
-        // Save button: persist current selections (including custom increment)
-        if (saveClientBtn) {
-            saveClientBtn.onclick = () => {
-                try {
-                    const block = Number(clientBlockSelect?.value || 1);
-                    let incrementVal = clientIncrementSelect?.value;
-                    if (!incrementVal || isNaN(Number(incrementVal))) {
-                        // If select is non-numeric (e.g., 'custom'), read the shared custom input
-                        incrementVal = Number(sharedCustomIncrementInput?.value || 30);
-                    } else {
-                        incrementVal = Number(incrementVal);
-                    }
-                    const payload = { block: Number(block), increment: Number(incrementVal) };
-                    writeClientSettingsToStorage(payload);
-                    // Also attempt to persist to the service settings when the modal
-                    // was opened for a specific service (e.g., via Edit Service -> Open Day Schedule).
-                    try {
-                        const svcId = Number(AUTO_OPEN_SERVICE) || null;
-                        if (svcId) {
-                            // Preview -> apply flow so server can create per-date freezes for
-                            // any dates with bookings. This prevents changes from affecting
-                            // already-booked days.
-                            (async function(){
-                                try {
-                                    const previewResp = await fetch(`/bus/${orgSlug}/services/${svcId}/preview_update/`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                        body: JSON.stringify({ time_increment_minutes: Number(incrementVal) })
-                                    });
-                                    const previewJson = previewResp && previewResp.ok ? await previewResp.json().catch(()=>null) : null;
-                                    if (!previewJson || previewJson.status !== 'ok' || !previewJson.conflicts || Object.keys(previewJson.conflicts).length === 0) {
-                                        // No conflicts detected: apply immediately
-                                        await fetch(`/bus/${orgSlug}/services/${svcId}/apply_update/`, {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                            body: JSON.stringify({ time_increment_minutes: Number(incrementVal), confirm: true })
-                                        }).then(r => r.json().catch(()=>null)).then(d => { /* no-op */ }).catch(()=>{});
-                                    } else {
-                                        // Conflicts exist (dates with bookings). Ask user to confirm applying
-                                        const days = Object.keys(previewJson.conflicts || {});
-                                        const msg = `This change would affect ${days.length} day(s) that already have bookings. Those days will be preserved (old settings will be frozen) if you continue. Apply changes?`;
-                                        if (confirm(msg)) {
-                                            await fetch(`/bus/${orgSlug}/services/${svcId}/apply_update/`, {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                                                body: JSON.stringify({ time_increment_minutes: Number(incrementVal), confirm: true })
-                                            }).then(r => r.json().catch(()=>null)).then(d => { /* no-op */ }).catch(()=>{});
-                                        } else {
-                                            // User cancelled: do not apply to server; client view persisted only
-                                        }
-                                    }
-                                } catch (err) {
-                                    console.error('preview/apply update failed', err);
-                                }
-                            })();
-                        }
-                    } catch (e) { /* ignore server persist errors */ }
-                    alert('Client view settings saved — public page will use these when viewing a day.');
-                } catch (err) {
-                    console.error('save client settings failed', err);
-                    alert('Unable to save client view settings locally.');
-                }
-            };
-        }
-
-        // Keep storage in sync if other tabs change it
-        window.addEventListener('storage', function(e){
-            if (e.key !== CLIENT_KEY) return;
-            try {
-                const parsed = readClientSettingsFromStorage();
-                if (!parsed) return;
-                const inc = parsed.increment;
-                if (typeof inc !== 'undefined') {
-                    const s = String(inc);
-                    // update client select
-                    if (clientIncrementSelect) {
-                        if (STANDARD_INCREMENTS.includes(s)) {
-                            clientIncrementSelect.value = s;
-                            if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'none';
-                        } else {
-                            // ensure option exists
-                            // If it's a known standard increment, set the select to it.
-                            // Otherwise set select to 'custom' and show the client custom input.
-                            if (STANDARD_INCREMENTS.includes(s)) {
-                                clientIncrementSelect.value = s;
-                                if (sharedCustomIncrementContainer) sharedCustomIncrementContainer.style.display = 'none';
-                            } else {
-                                try { clientIncrementSelect.value = 'custom'; } catch(e){}
-                                if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
-                                    sharedCustomIncrementContainer.style.display = 'flex';
-                                    sharedCustomIncrementInput.value = String(s);
-                                }
-                                const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                                const clientCustomInput = document.getElementById('clientCustomIncrementInput');
-                                if (clientCustomContainer && clientCustomInput) {
-                                    clientCustomContainer.style.display = 'inline-flex';
-                                    clientCustomInput.value = String(s);
-                                }
-                            }
-                            if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
-                                sharedCustomIncrementContainer.style.display = 'flex';
-                                sharedCustomIncrementInput.value = String(s);
-                            }
-                        }
-                    }
-
-                    // update coach select and custom input if present
-                    try {
-                        const coachIncrementSelect = document.getElementById('incrementSelect');
-                        const coachCustomIncrementInput = document.getElementById('customIncrementInput');
-                        const coachCustomIncrementContainer = document.getElementById('customIncrementContainer');
-                        if (coachIncrementSelect) {
-                            if (STANDARD_INCREMENTS.includes(s)) {
-                                coachIncrementSelect.value = s;
-                                if (coachCustomIncrementContainer) coachCustomIncrementContainer.style.display = 'none';
-                            } else {
-                                // Do not append a persistent option for non-standard increments.
-                                // Select the 'custom' bucket and prefill the coach custom input.
-                                try { coachIncrementSelect.value = 'custom'; } catch (e) {}
-                                if (coachCustomIncrementContainer && coachCustomIncrementInput) {
-                                    coachCustomIncrementContainer.style.display = 'flex';
-                                    coachCustomIncrementInput.value = String(s);
-                                }
-                            }
-                        }
-                    } catch (ee) { /* ignore coach update errors */ }
-                    // update client custom input if present
-                    try {
-                        const clientCustomInput = document.getElementById('clientCustomIncrementInput');
-                        const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                        if (clientCustomInput) clientCustomInput.value = String(s);
-                        if (clientCustomContainer) clientCustomContainer.style.display = STANDARD_INCREMENTS.includes(s) ? 'none' : 'inline-flex';
-                    } catch (ee) { /* ignore */ }
-                }
-            } catch (err) { /* ignore */ }
-        });
-    } catch (e) { console.warn('client settings save wiring failed', e); }
+    // Day Schedule is read-only; change client slot settings in Edit Service.
 
     // Ensure every day-number has a click handler that opens the proper modal
     function attachDayNumberClickHandlers() {
@@ -9065,181 +8771,12 @@ document.addEventListener('DOMContentLoaded', function() {
             clientSettings.style.alignItems = "flex-start";
         }
 
-        // This part runs once when the page loads
         function openPastDayModal(dateStr) {
-            const modal = document.getElementById("timeCirclesModal");
-            const container = document.getElementById("timeCirclesContainer");
-            const title = document.getElementById("circleModalTitle");
-
-            // Coach preference elements
-            const coachHourBlockSelect = document.getElementById("hourBlockSelect");
-            const coachIncrementSelect = document.getElementById("incrementSelect");
-            const coachCustomBlockContainer = document.getElementById("customBlockInputContainer");
-            const coachCustomBlockInput = document.getElementById("customBlockInput");
-            const coachApplyCustomBlockBtn = document.getElementById("applyCustomBlockBtn");
-            const coachCustomIncrementContainer = document.getElementById("customIncrementContainer");
-            const coachCustomIncrementInput = document.getElementById("customIncrementInput");
-            const coachApplyCustomIncrementBtn = document.getElementById("applyCustomIncrementBtn");
-
-            // Hide client settings for past days
-            document.getElementById("clientTimeSettings").style.display = "none";
-
-            // Show modal
-            modal.style.display = "flex";
-            title.textContent = `Schedule for ${formatDateLong(dateStr)}`;
-            container.innerHTML = "";
-
-            // Initialize block size & increment
-            let currentBlockSize = parseInt(coachHourBlockSelect.value);
-            let currentIncrement = parseInt(coachIncrementSelect.value);
-
-            // Render grid function
-            function renderGrid(blockSize) {
-                container.innerHTML = "";
-                const startHour = 6;
-                const endHour = 22;
-                const blockMinutes = blockSize * 60;
-
-                for (let blockStartHour = startHour; blockStartHour < endHour; blockStartHour += blockSize) {
-                    const row = document.createElement("div");
-                    row.style.display = "flex";
-                    row.style.alignItems = "center";
-                    row.style.justifyContent = "space-between";
-                    row.style.gap = "8px";
-            
-
-                    // Hour label
-                    const blockLabel = document.createElement("div");
-                    const labelDate = parseYMD(dateStr);
-                    labelDate.setHours(blockStartHour, 0, 0, 0);
-                    blockLabel.textContent = labelDate.toLocaleString(undefined, { hour: 'numeric', hour12: true });
-                    blockLabel.style.width = "70px";
-                    blockLabel.style.fontWeight = "bold";
-                    row.appendChild(blockLabel);
-
-                    // Circles container
-                    const circlesContainer = document.createElement("div");
-                    circlesContainer.style.display = "flex";
-                    circlesContainer.style.flexWrap = "wrap";
-                    circlesContainer.style.gap = "8px";
-                    circlesContainer.style.marginLeft = "auto"; // push only circles to right
-
-                    for (let minutes = 0; minutes < blockMinutes; minutes += currentIncrement) {
-                        const totalMinutes = blockStartHour*60 + minutes;
-                        let hour = Math.floor(totalMinutes / 60);
-                        const min = totalMinutes % 60;
-                        const ampm = hour >= 12 ? "PM" : "AM";
-                        hour = hour % 12;
-                        if (hour === 0) hour = 12;
-                        const timeLabel = `${hour}:${min.toString().padStart(2,'0')} ${ampm}`;
-
-                        const circle = document.createElement("div");
-                        circle.className = "time-circle open";
-                        circle.textContent = timeLabel;
-                        circle.dataset.time = timeLabel;
-
-                        // Grey out past times (read-only)
-                        const now = new Date();
-                        const slotDate = parseYMD(dateStr);
-                        slotDate.setHours(blockStartHour, min, 0, 0);
-                        if (slotDate < now) circle.style.background = "#6c757d";
-
-                        // Read-only click
-                        circle.addEventListener("click", () => {
-                            alert(`This slot (${timeLabel}) is read-only.`);
-                        });
-
-                        circlesContainer.appendChild(circle);
-                    }
-
-                    row.appendChild(circlesContainer);
-                    container.appendChild(row);
+            try {
+                if (typeof openTimeCirclesModal === 'function') {
+                    openTimeCirclesModal(dateStr, 30, 1, null);
                 }
-
-                if (container.lastElementChild) container.lastElementChild.style.borderBottom = "none";
-            }
-
-            renderGrid(currentBlockSize);
-
-            // Coach hour block / increment handlers
-            coachHourBlockSelect.onchange = () => {
-                if (coachHourBlockSelect.value === "custom") coachCustomBlockContainer.style.display = "flex";
-                else {
-                    coachCustomBlockContainer.style.display = "none";
-                    currentBlockSize = parseInt(coachHourBlockSelect.value);
-                    renderGrid(currentBlockSize);
-                }
-            };
-            coachApplyCustomBlockBtn.onclick = () => {
-                const val = parseInt(coachCustomBlockInput.value);
-                if (isNaN(val) || val < 15) return alert("Enter valid minutes 15+");
-                coachCustomBlockContainer.style.display = "none";
-                currentBlockSize = val / 60;
-                renderGrid(currentBlockSize);
-            };
-
-            coachIncrementSelect.onchange = () => {
-                if (coachIncrementSelect.value === "custom") {
-                    coachCustomIncrementContainer.style.display = "flex";
-                } else {
-                    coachCustomIncrementContainer.style.display = "none";
-                    currentIncrement = parseInt(coachIncrementSelect.value);
-                    // Persist coach-chosen increment into client_view_settings so other pages sync
-                    try {
-                        const key = 'client_view_settings';
-                        const raw = localStorage.getItem(key) || '{}';
-                        let parsed = {};
-                        try { parsed = JSON.parse(raw); } catch(_) { parsed = {}; }
-                        parsed.increment = Number(coachIncrementSelect.value);
-                        parsed.block = parsed.block || 1;
-                        localStorage.setItem(key, JSON.stringify(parsed));
-                        try { window.dispatchEvent(new Event('storage')); } catch(e){}
-                    } catch (e) { /* ignore storage errors */ }
-                    renderGrid(currentBlockSize);
-                }
-            };
-            coachApplyCustomIncrementBtn.onclick = () => {
-                const val = parseInt(coachCustomIncrementInput.value);
-                if (isNaN(val) || val < 5) return alert("Enter valid increment 5+");
-                coachCustomIncrementContainer.style.display = "none";
-                currentIncrement = val;
-                // Persist custom value to client_view_settings so other pages sync
-                try {
-                    const key = 'client_view_settings';
-                    const raw = localStorage.getItem(key) || '{}';
-                    let parsed = {};
-                    try { parsed = JSON.parse(raw); } catch(_) { parsed = {}; }
-                    parsed.increment = Number(val);
-                    parsed.block = parsed.block || 1;
-                    localStorage.setItem(key, JSON.stringify(parsed));
-                    try { window.dispatchEvent(new Event('storage')); } catch(e){}
-                } catch (e) { /* ignore */ }
-                renderGrid(currentBlockSize);
-            };
-
-            // Close button works
-            document.getElementById("closeCirclesBtn").onclick = () => {
-                modal.style.display = "none";
-                document.getElementById("clientTimeSettings").style.display = "flex"; // restore client settings
-            };
-
-            // Add circle CSS if not already
-            if (!document.getElementById("timeCirclesStyle")) {
-                const style = document.createElement("style");
-                style.id = "timeCirclesStyle";
-                style.innerHTML = `
-                    .time-circle {
-                        width: 80px; height: 80px; border-radius: 50%;
-                        display: flex; justify-content: center; align-items: center;
-                        cursor: pointer; font-size: 13px; color: white; transition: transform 0.1s ease;
-                    }
-                    .time-circle.open { background: #28a745; }
-                    .time-circle.booked { background: #dc3545; }
-                    .time-circle.blocked { background: #6c757d; }
-                    .time-circle:hover { transform: scale(1.1); }
-                `;
-                document.head.appendChild(style);
-            }
+            } catch (e) { console.warn('openPastDayModal failed', e); }
         }
 
 
@@ -9302,32 +8839,134 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
     function openTimeCirclesModal(date, increment = 30, hourBlockSize = 1, rangesOrStart = null, endTime = null) {
-        const modal = document.getElementById("timeCirclesModal");
-        const container = document.getElementById("timeCirclesContainer");
-        const title = document.getElementById("circleModalTitle");
+        const modal = document.getElementById('timeCirclesModal');
+        const panel = document.getElementById('timeCirclesModalPanel');
+        const container = document.getElementById('timeCirclesContainer');
+        const title = document.getElementById('circleModalTitle');
 
-        const coachHourBlockSelect = document.getElementById("hourBlockSelect");
-        const coachIncrementSelect = document.getElementById("incrementSelect");
-        const coachCustomBlockContainer = document.getElementById("customBlockInputContainer");
-        const coachCustomBlockInput = document.getElementById("customBlockInput");
-        const coachApplyCustomBlockBtn = document.getElementById("applyCustomBlockBtn");
-        const coachCustomIncrementContainer = document.getElementById("customIncrementContainer");
-        const coachCustomIncrementInput = document.getElementById("customIncrementInput");
-        const coachApplyCustomIncrementBtn = document.getElementById("applyCustomIncrementBtn");
+        const chooser = document.getElementById('ccDayScheduleMemberChooser');
+        const chooseServicesBtn = document.getElementById('ccDayScheduleChooseServicesBtn');
+        const chooseAppointmentsBtn = document.getElementById('ccDayScheduleChooseAppointmentsBtn');
 
-        resetClientViewStyles();
+        const servicesPanel = document.getElementById('ccDayScheduleMemberServices');
+        const servicesList = document.getElementById('ccDayScheduleMemberServicesList');
+        const backFromServicesBtn = document.getElementById('ccDayScheduleBackToChooserFromServices');
 
-        modal.style.display = "flex";
+        const apptsPanel = document.getElementById('ccDayScheduleMemberAppointments');
+        const apptsList = document.getElementById('ccDayScheduleMemberAppointmentsList');
+        const backFromApptsBtn = document.getElementById('ccDayScheduleBackToChooserFromAppointments');
+
+        const settingsBox = document.getElementById('clientTimeSettings');
+        const durationEl = document.getElementById('ccDayScheduleHourBlockValue');
+        const incrementEl = document.getElementById('ccDayScheduleIncrementValue');
+        const changeInEditServiceBtn = document.getElementById('ccChangeInEditServiceBtn');
+
+        if (!modal || !container || !title) return;
+
+        // Base open state
+        modal.style.display = 'flex';
         title.textContent = `Schedule for ${formatDateLong(date)}`;
-        
+        container.innerHTML = '';
+        if (servicesList) servicesList.innerHTML = '';
+        if (apptsList) apptsList.innerHTML = '';
 
-        let currentBlockSize = hourBlockSize;
-        let currentIncrement = increment;
+        function hide(el){ if (el) el.style.display = 'none'; }
+        function show(el, display='block'){ if (el) el.style.display = display; }
 
-        const svcScope = (typeof _svcForSelectedScope === 'function') ? _svcForSelectedScope() : null;
-        const isServiceScope = !!(svcScope && svcScope.slug);
-        let __svcEff = null;
-        let __svcSlots = null;
+        function fmtDuration(mins){
+            const m = Math.max(0, Number(mins) || 0);
+            if (!m) return '—';
+            const h = Math.floor(m / 60);
+            const r = m % 60;
+            if (h && r) return `${h} hr ${r} min`;
+            if (h) return `${h} hr`;
+            return `${r} min`;
+        }
+
+        function setSettingsForService(svc, eff){
+            try {
+                if (!settingsBox || !durationEl || !incrementEl || !changeInEditServiceBtn) return;
+                const dur = Number((eff && eff.duration) || svc.duration || svc.duration_minutes || 0);
+                const inc = Number((eff && eff.time_increment_minutes) || svc.time_increment_minutes || 30);
+                durationEl.textContent = fmtDuration(dur);
+                incrementEl.textContent = `${Math.max(1, inc)} min`;
+
+                const svcId = svc && svc.id != null ? String(svc.id) : null;
+                if (svcId) {
+                    const url = String(EDIT_SERVICE_URL_TEMPLATE).replace('/0/edit/', '/' + svcId + '/edit/') + '#ccClientSlotSettings';
+                    changeInEditServiceBtn.href = url;
+                    show(changeInEditServiceBtn, 'inline-flex');
+                } else {
+                    hide(changeInEditServiceBtn);
+                }
+                show(settingsBox);
+            } catch (e) {
+                // keep UI functional even if service fields differ
+                try { if (settingsBox) show(settingsBox); } catch (ee) {}
+            }
+        }
+
+        function clearSettings(){
+            try {
+                if (durationEl) durationEl.textContent = '—';
+                if (incrementEl) incrementEl.textContent = '—';
+                if (changeInEditServiceBtn) hide(changeInEditServiceBtn);
+            } catch (e) {}
+        }
+
+        function getBookingsForService(dateStr, svcId){
+            const out = [];
+            if (!calendar || typeof calendar.getEvents !== 'function') return out;
+            const [dayStart, dayEnd] = _getDayBoundsLocal(dateStr);
+            let events = [];
+            try { events = calendar.getEvents() || []; } catch (e) { events = []; }
+            for (const ev of events) {
+                try {
+                    if (!_isRealBookingEvent(ev)) continue;
+                    const xp = ev.extendedProps || {};
+                    const bookingSvc = xp.service_id || xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service || ev.service_id || null;
+                    if (bookingSvc == null) continue;
+                    if (String(bookingSvc) !== String(svcId)) continue;
+                    const s = ev.start || null;
+                    const e = ev.end || ev.start || null;
+                    if (!s) continue;
+                    if (!(s < dayEnd && e > dayStart)) continue;
+                    out.push(ev);
+                } catch (e) { /* ignore */ }
+            }
+            try { out.sort((a,b) => (a.start?.getTime()||0) - (b.start?.getTime()||0)); } catch (e) {}
+            return out;
+        }
+
+        function showBookingInfoFromEventApi(ev){
+            try {
+                const bookingModal = document.getElementById('bookingModal');
+                if (!bookingModal) return;
+                const xp = ev.extendedProps || {};
+                const startTime = ev.start || null;
+                const endTime = ev.end || ev.start || null;
+
+                const clientName = xp.client_name || xp.client || 'Unknown';
+                document.getElementById('clientName').textContent = clientName;
+                document.getElementById('lessonType').textContent = ev.title || 'Booking';
+
+                if (startTime && endTime) {
+                    document.getElementById('lessonTime').textContent = `${startTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+                } else {
+                    document.getElementById('lessonTime').textContent = 'Invalid time';
+                }
+                document.getElementById('paymentMethod').textContent = xp.payment_method || 'N/A';
+
+                bookingModal.style.display = 'flex';
+                document.getElementById('closeBookingBtn').onclick = () => { bookingModal.style.display = 'none'; };
+                document.getElementById('viewClientBookingsBtn').onclick = () => {
+                    bookingModal.style.display = 'none';
+                    window.location.href = `/bus/${orgSlug}/bookings/`;
+                };
+            } catch (e) {
+                console.warn('show booking info failed', e);
+            }
+        }
 
         function _svcToIsoLocal(dateStr, hh, mm, ss) {
             try {
@@ -9363,28 +9002,26 @@ document.addEventListener('DOMContentLoaded', function() {
             return `${h}:${String(m).padStart(2,'0')} ${ampm}`;
         }
 
-        async function _fetchServiceScopeSlots() {
-            if (!isServiceScope) return [];
+        async function fetchServiceScopeSlots(svc) {
             try {
-                // Server-effective settings (parity with public)
+                if (!svc || !svc.slug) return { eff: null, slots: [] };
+                let eff = null;
                 try {
-                    const effUrl = `/bus/${orgSlug}/services/${svcScope.slug}/effective/?date=${encodeURIComponent(date)}`;
+                    const effUrl = `/bus/${orgSlug}/services/${svc.slug}/effective/?date=${encodeURIComponent(date)}`;
                     const effResp = await fetch(effUrl, { credentials: 'same-origin' });
-                    if (effResp.ok) __svcEff = await effResp.json();
-                } catch (e) { __svcEff = null; }
+                    if (effResp.ok) eff = await effResp.json();
+                } catch (e) { eff = null; }
 
-                const useFixed = (__svcEff && typeof __svcEff.use_fixed_increment === 'boolean') ? !!__svcEff.use_fixed_increment : !!svcScope.use_fixed_increment;
-                const previewIncrement = Math.max(5, Number((__svcEff && __svcEff.time_increment_minutes) || svcScope.time_increment_minutes || currentIncrement || 30));
-                currentIncrement = previewIncrement;
-
+                const useFixed = (eff && typeof eff.use_fixed_increment === 'boolean') ? !!eff.use_fixed_increment : !!svc.use_fixed_increment;
+                const inc = Math.max(5, Number((eff && eff.time_increment_minutes) || svc.time_increment_minutes || 30));
                 let allowEndsForAvail = false;
                 try {
-                    allowEndsForAvail = (__svcEff && typeof __svcEff.allow_ends_after_availability === 'boolean') ? !!__svcEff.allow_ends_after_availability : !!svcScope.allow_ends_after_availability;
+                    allowEndsForAvail = (eff && typeof eff.allow_ends_after_availability === 'boolean') ? !!eff.allow_ends_after_availability : !!svc.allow_ends_after_availability;
                 } catch (e) { allowEndsForAvail = false; }
 
                 const edgeVal = (function(){
                     try {
-                        const raw = localStorage.getItem('edge_buffers_' + svcScope.slug);
+                        const raw = localStorage.getItem('edge_buffers_' + svc.slug);
                         if (raw === '1' || raw === 'true') return 1;
                         if (raw === '0' || raw === 'false') return 0;
                     } catch (e) {}
@@ -9393,256 +9030,188 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const startIso = _svcToIsoLocal(date, 0, 0, 0);
                 const endIso = _svcToIsoLocal(date, 23, 59, 59);
-                const incQuery = useFixed ? '' : `&inc=${previewIncrement}`;
+                const incQuery = useFixed ? '' : `&inc=${inc}`;
                 const cacheBuster = `&_t=${Date.now()}`;
-                const availUrl = `/bus/${orgSlug}/services/${svcScope.slug}/availability/?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}${incQuery}&edge_buffers=${edgeVal}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
+                const availUrl = `/bus/${orgSlug}/services/${svc.slug}/availability/?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}${incQuery}&edge_buffers=${edgeVal}&allow_ends_after_availability=${allowEndsForAvail?1:0}${cacheBuster}`;
                 const resp = await fetch(availUrl, { credentials: 'same-origin' });
-                if (!resp.ok) { __svcSlots = []; return []; }
+                if (!resp.ok) return { eff, slots: [] };
                 const slots = await resp.json();
-                __svcSlots = Array.isArray(slots) ? slots : [];
-                return __svcSlots;
+                return { eff, slots: Array.isArray(slots) ? slots : [] };
             } catch (e) {
                 console.error('service-scope availability fetch failed', e);
-                __svcSlots = [];
-                return [];
+                return { eff: null, slots: [] };
             }
         }
 
-        // When coach changes preview increment or applies a custom increment,
-        // update the visible time circles immediately so the modal reflects
-        // the current preview settings.
-        try {
-            if (coachIncrementSelect) {
-                coachIncrementSelect.addEventListener('change', function(){
-                    try {
-                        const val = coachIncrementSelect.value;
-                        if (STANDARD_INCREMENTS.includes(val)) {
-                            currentIncrement = Number(val);
-                            if (coachCustomIncrementContainer) coachCustomIncrementContainer.style.display = 'none';
-                        } else if (val === 'custom') {
-                            if (coachCustomIncrementContainer) coachCustomIncrementContainer.style.display = 'flex';
-                            const v = parseInt(coachCustomIncrementInput?.value || 0, 10);
-                            if (!isNaN(v) && v > 0) currentIncrement = v;
-                        }
-                        try { renderGrid(currentBlockSize); } catch (e) { /* ignore render errors */ }
-                    } catch (e) { /* ignore */ }
-                });
+        function renderServiceSlots(dateStr, svc, slots){
+            container.innerHTML = '';
+            const svcId = svc && svc.id != null ? String(svc.id) : null;
+            const bookingsForDate = (svcId != null) ? getBookingsForService(dateStr, svcId) : [];
+
+            if (!slots || !slots.length) {
+                const empty = document.createElement('div');
+                empty.style.color = '#6b7280';
+                empty.textContent = 'No available times on this day.';
+                container.appendChild(empty);
+                return;
             }
 
-            if (coachApplyCustomIncrementBtn) {
-                coachApplyCustomIncrementBtn.onclick = () => {
-                    try {
-                        const v = parseInt(coachCustomIncrementInput?.value || '', 10);
-                        if (isNaN(v) || v < 5) return alert('Enter a valid increment (5+ minutes).');
-                        currentIncrement = v;
-                        // Persist coach preview to client view storage so other UI can reflect it
-                        try {
-                            const payload = Object.assign({}, readClientSettingsFromStorage(), { block: Number(coachHourBlockSelect?.value || currentBlockSize), increment: Number(v) });
-                            writeClientSettingsToStorage(payload);
-                        } catch (e) { /* ignore storage write failures */ }
-                        try { renderGrid(currentBlockSize); } catch (e) { /* ignore */ }
-                    } catch (e) { console.error('coach apply custom increment failed', e); alert('Unable to apply custom increment.'); }
-                };
+            const startToEnd = new Map();
+            for (const s of slots) {
+                const sm = _svcIsoToLocalMinutes(s.start);
+                const em = _svcIsoToLocalMinutes(s.end);
+                if (sm != null && em != null && em > sm) startToEnd.set(sm, em);
             }
-        } catch (e) { /* defensive */ }
+            const validStarts = Array.from(startToEnd.keys()).sort((a,b)=>a-b);
+            if (!validStarts.length) {
+                const empty = document.createElement('div');
+                empty.style.color = '#6b7280';
+                empty.textContent = 'No available times on this day.';
+                container.appendChild(empty);
+                return;
+            }
 
-        // Initialize client/coach increment selects from shared storage so the
-        // modal reflects any change made elsewhere (edit_service or another tab).
-        try {
-            const storedRaw = localStorage.getItem('client_view_settings');
-            if (storedRaw) {
-                const parsedStored = JSON.parse(storedRaw);
-                if (parsedStored && typeof parsedStored.increment === 'number') {
-                    currentIncrement = parsedStored.increment;
-                    // Update client select if present. Do not add persistent options;
-                    // instead switch to 'custom' and prefill custom inputs when needed.
-                    const clientSelect = document.getElementById('clientIncrementSelect');
-                    if (clientSelect) {
-                        const s = String(parsedStored.increment);
-                        if (STANDARD_INCREMENTS.includes(s)) {
-                            clientSelect.value = s;
-                        } else {
-                            try { clientSelect.value = 'custom'; } catch (e) {}
-                            const clientCustomContainer = document.getElementById('clientCustomIncrementContainer');
-                            const clientCustomInput = document.getElementById('clientCustomIncrementInput');
-                            if (clientCustomContainer && clientCustomInput) {
-                                clientCustomContainer.style.display = 'inline-flex';
-                                clientCustomInput.value = String(s);
-                            }
-                            if (sharedCustomIncrementContainer && sharedCustomIncrementInput) {
-                                sharedCustomIncrementContainer.style.display = 'flex';
-                                sharedCustomIncrementInput.value = String(s);
-                            }
-                        }
-                    }
-                    // Update coach select if present
-                    const coachSelect = document.getElementById('incrementSelect');
-                    const coachCustomInput = document.getElementById('customIncrementInput');
-                    const coachCustomContainer = document.getElementById('customIncrementContainer');
-                    if (coachSelect) {
-                        const s = String(parsedStored.increment);
-                        if (STANDARD_INCREMENTS.includes(s)) {
-                            coachSelect.value = s;
-                            if (coachCustomContainer) coachCustomContainer.style.display = 'none';
-                        } else {
-                            try { coachSelect.value = 'custom'; } catch (e) {}
-                            if (coachCustomInput) coachCustomInput.value = String(parsedStored.increment);
-                            if (coachCustomContainer) coachCustomContainer.style.display = 'flex';
-                        }
-                    }
+            const hours = [];
+            const hourMap = new Map();
+            for (const sm of validStarts) {
+                const hourStart = Math.floor(sm/60) * 60;
+                if (!hourMap.has(hourStart)) {
+                    hourMap.set(hourStart, []);
+                    hours.push(hourStart);
                 }
+                hourMap.get(hourStart).push(sm);
             }
-        } catch (e) { /* ignore parse errors */ }
 
-        // Fetch bookings for this date
-        let bookingsForDate = [];
-        
-        // Helper: parse ISO with offset directly to browser-local time
-        // Booking "start"/"end" are ISO strings with timezone info
-        const convertOrgTimeToBrowser = (isoStr) => {
-            try { return new Date(isoStr); } catch { return null; }
-        };
-        
-        const fetchBookings = async () => {
-            try {
-                const startStr = `${date}T00:00:00`;
-                const endStr = `${date}T23:59:59`;
-                const response = await fetch(`/bus/${orgSlug}/events/?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}&_t=${Date.now()}`);
-                if (response.ok) {
-                    const allEvents = await response.json();
-                    // Keep only real bookings, scoped to the current selection.
-                    // Important: for member scope, bookings should only apply when the member
-                    // has exactly one solo-hosted service assigned (see _isBookingInSelectedScope).
-                    bookingsForDate = allEvents.filter(e => {
+            for (const hourStart of hours) {
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.justifyContent = 'space-between';
+                row.style.gap = '8px';
+                row.style.borderBottom = '1px solid #ccc';
+
+                const hourLabel = document.createElement('div');
+                hourLabel.style.width = '70px';
+                hourLabel.style.fontWeight = 'bold';
+                const labelDate = parseYMD(dateStr);
+                labelDate.setHours(Math.floor(hourStart/60), hourStart%60, 0, 0);
+                const labelOpts = { hour: 'numeric', minute: (hourStart%60!==0?'2-digit':undefined), hour12: true };
+                hourLabel.textContent = labelDate.toLocaleString(undefined, labelOpts);
+                row.appendChild(hourLabel);
+
+                const circlesContainer = document.createElement('div');
+                circlesContainer.className = 'circles-for-hour';
+                circlesContainer.style.display = 'flex';
+                circlesContainer.style.flexWrap = 'wrap';
+                circlesContainer.style.gap = '8px';
+                circlesContainer.style.marginLeft = 'auto';
+
+                for (const sm of (hourMap.get(hourStart) || [])) {
+                    const endMin = startToEnd.get(sm);
+                    const timeLabel = _svcLabelFromMin(sm);
+                    const circle = document.createElement('div');
+
+                    const slotDate = parseYMD(dateStr);
+                    slotDate.setHours(Math.floor(sm/60), sm%60, 0, 0);
+                    const slotEndDate = new Date(slotDate.getTime() + Math.max(1, (endMin - sm)) * 60000);
+                    const now = new Date();
+
+                    const booking = bookingsForDate.find(b => {
                         try {
-                            if (!_isRealBookingEvent(e)) return false;
-                            return _isBookingInSelectedScope(e);
-                        } catch (err) {
-                            return false;
-                        }
+                            const bs = b.start || null;
+                            const be = b.end || b.start || null;
+                            if (!bs || !be) return false;
+                            return slotDate.getTime() < be.getTime() && slotEndDate.getTime() > bs.getTime();
+                        } catch (e) { return false; }
                     });
+
+                    if (booking) {
+                        circle.className = 'time-circle booked';
+                        circle.textContent = 'Booked';
+                        circle.dataset.time = timeLabel;
+                        circle.addEventListener('click', () => { showBookingInfoFromEventApi(booking); });
+                    } else if (slotDate < now) {
+                        circle.className = 'time-circle blocked';
+                        circle.textContent = timeLabel;
+                        circle.dataset.time = timeLabel;
+                        circle.style.background = '#6c757d';
+                        circle.style.cursor = 'not-allowed';
+                        circle.addEventListener('click', () => { alert(`This slot (${timeLabel}) is in the past.`); });
+                    } else {
+                        circle.className = 'time-circle open';
+                        circle.textContent = timeLabel;
+                        circle.dataset.time = timeLabel;
+                        circle.addEventListener('click', () => { alert(`Slot: ${timeLabel} is available`); });
+                    }
+
+                    circlesContainer.appendChild(circle);
                 }
-            } catch (error) {
-                console.error('Failed to fetch bookings:', error);
-            }
-        };
 
-        // Normalize ranges: rangesOrStart may be an array of ranges or a single start string (backwards-compat)
-        let rangesArr = [];
-        try {
-            if (Array.isArray(rangesOrStart)) {
-                rangesArr = rangesOrStart.slice();
-            } else if (rangesOrStart && typeof rangesOrStart === 'object') {
-                rangesArr = [rangesOrStart];
-            } else if (typeof rangesOrStart === 'string' && endTime) {
-                rangesArr = [{ start: rangesOrStart, end: endTime }];
+                row.appendChild(circlesContainer);
+                container.appendChild(row);
             }
-        } catch (e) { rangesArr = []; }
 
-        // If no ranges provided, derive from default weekly availability
-        if (!rangesArr || rangesArr.length === 0) {
-            try {
-                const d = parseYMD(date);
-                const dow = d.getDay();
-                const info = defaultAvailability[dow] || {};
-                const rs = info.ranges && info.ranges.length ? info.ranges : (info.start && info.end ? [`${info.start}-${info.end}`] : []);
-                rangesArr = (rs || []).map(r => {
-                    const parts = String(r).split('-');
-                    return { start: (parts[0]||'09:00').trim(), end: (parts[1]||'17:00').trim() };
-                });
-            } catch (e) { rangesArr = [{ start: '09:00', end: '17:00' }]; }
+            if (container.lastElementChild) container.lastElementChild.style.borderBottom = 'none';
         }
 
-        // Deduplicate rangesArr by start-end to avoid duplicate rendering
-        try {
-            const seen = new Set();
-            const uniq = [];
-            for (const r of rangesArr) {
+        function normalizeRanges(){
+            let rangesArr = [];
+            try {
+                if (Array.isArray(rangesOrStart)) rangesArr = rangesOrStart.slice();
+                else if (rangesOrStart && typeof rangesOrStart === 'object') rangesArr = [rangesOrStart];
+                else if (typeof rangesOrStart === 'string' && endTime) rangesArr = [{ start: rangesOrStart, end: endTime }];
+            } catch (e) { rangesArr = []; }
+
+            if (!rangesArr || !rangesArr.length) {
                 try {
+                    rangesArr = _weeklyDefaultRangesForDate(date);
+                } catch (e) { rangesArr = []; }
+            }
+
+            try {
+                const seen = new Set();
+                const uniq = [];
+                for (const r of rangesArr) {
                     const s = (r && r.start) ? String(r.start).trim() : '';
                     const e = (r && r.end) ? String(r.end).trim() : '';
                     const key = `${s}-${e}`;
-                    if (!seen.has(key)) { seen.add(key); uniq.push({ start: s || '09:00', end: e || '17:00' }); }
-                } catch (ie) { /* ignore malformed */ }
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        if (s && e) uniq.push({ start: s, end: e });
+                    }
+                }
+                return uniq;
+            } catch (e) {
+                return rangesArr;
             }
-            rangesArr = uniq;
-        } catch (e) { /* ignore dedupe errors */ }
-
-        // Function to show booking details in a modal
-        function showBookingInfo(booking) {
-            const bookingModal = document.getElementById('bookingModal');
-            if (!bookingModal) return;
-
-            // Convert booking times from org timezone to user's browser timezone
-            const startTime = convertOrgTimeToBrowser(booking.start);
-            const endTime = convertOrgTimeToBrowser(booking.end);
-            
-            document.getElementById('clientName').textContent = booking.extendedProps.client_name || 'Unknown';
-            document.getElementById('lessonType').textContent = booking.title || 'Booking';
-            
-            if (startTime && endTime) {
-                document.getElementById('lessonTime').textContent = `${startTime.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
-            } else {
-                document.getElementById('lessonTime').textContent = 'Invalid time';
-            }
-            
-            document.getElementById('paymentMethod').textContent = booking.extendedProps.payment_method || 'N/A';
-
-            bookingModal.style.display = 'flex';
-
-            document.getElementById('closeBookingBtn').onclick = () => {
-                bookingModal.style.display = 'none';
-            };
-
-            document.getElementById('viewClientBookingsBtn').onclick = () => {
-                bookingModal.style.display = 'none';
-                // Could navigate to bookings list filtered by this client
-                window.location.href = `/bus/${orgSlug}/bookings/`;
-            };
         }
 
-        function renderGrid(blockSize) {
-            container.innerHTML = "";
-            const blockMinutes = Math.max(1, blockSize) * 60;
+        function renderGenericRanges(dateStr, rangesArr, incMinutes, blockHours){
+            container.innerHTML = '';
+            const bookingsForDate = _getBookingsForDateInScope(dateStr);
 
-            // Service-scope parity: render ONLY server-provided starts (matches public)
-            if (isServiceScope) {
-                const slots = Array.isArray(__svcSlots) ? __svcSlots : [];
-                if (!slots || slots.length === 0) {
-                    const empty = document.createElement('div');
-                    empty.style.color = '#6b7280';
-                    empty.textContent = 'No available times on this day.';
-                    container.appendChild(empty);
-                    return;
-                }
+            const blockMinutes = Math.max(1, Number(blockHours) || 1) * 60;
+            const currentIncrement = Math.max(1, Number(incMinutes) || 30);
 
-                const startToEnd = new Map();
-                for (const s of slots) {
-                    const sm = _svcIsoToLocalMinutes(s.start);
-                    const em = _svcIsoToLocalMinutes(s.end);
-                    if (sm != null && em != null && em > sm) startToEnd.set(sm, em);
-                }
-                const validStarts = Array.from(startToEnd.keys()).sort((a,b)=>a-b);
-                if (validStarts.length === 0) {
-                    const empty = document.createElement('div');
-                    empty.style.color = '#6b7280';
-                    empty.textContent = 'No available times on this day.';
-                    container.appendChild(empty);
-                    return;
-                }
-
-                const hours = [];
-                const hourMap = new Map();
-                for (const sm of validStarts) {
-                    const hourStart = Math.floor(sm/60) * 60;
-                    if (!hourMap.has(hourStart)) {
-                        hourMap.set(hourStart, []);
-                        hours.push(hourStart);
+            for (const range of (rangesArr || [])) {
+                let startTotalMinutes = 6 * 60;
+                let endTotalMinutes = 22 * 60;
+                try {
+                    if (range.start) {
+                        const parts = String(range.start).split(':');
+                        const sh = parseInt(parts[0], 10);
+                        const sm = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+                        if (!isNaN(sh)) startTotalMinutes = sh * 60 + (isNaN(sm) ? 0 : sm);
                     }
-                    hourMap.get(hourStart).push(sm);
-                }
+                    if (range.end) {
+                        const parts = String(range.end).split(':');
+                        const eh = parseInt(parts[0], 10);
+                        const em = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+                        if (!isNaN(eh)) endTotalMinutes = eh * 60 + (isNaN(em) ? 0 : em);
+                    }
+                } catch (e) { /* ignore */ }
 
-                for (const hourStart of hours) {
+                for (let blockStart = startTotalMinutes; blockStart < endTotalMinutes; blockStart += blockMinutes) {
                     const row = document.createElement('div');
                     row.style.display = 'flex';
                     row.style.alignItems = 'center';
@@ -9650,14 +9219,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     row.style.gap = '8px';
                     row.style.borderBottom = '1px solid #ccc';
 
-                    const hourLabel = document.createElement('div');
-                    hourLabel.style.width = '70px';
-                    hourLabel.style.fontWeight = 'bold';
-                    const labelDate = parseYMD(date);
-                    labelDate.setHours(Math.floor(hourStart/60), hourStart%60, 0, 0);
-                    const labelOpts = { hour: 'numeric', minute: (hourStart%60!==0?'2-digit':undefined), hour12: true };
-                    hourLabel.textContent = labelDate.toLocaleString(undefined, labelOpts);
-                    row.appendChild(hourLabel);
+                    const blockLabel = document.createElement('div');
+                    blockLabel.style.width = '70px';
+                    blockLabel.style.fontWeight = 'bold';
+                    const labelDate = parseYMD(dateStr);
+                    const startHourForLabel = Math.floor(blockStart / 60);
+                    labelDate.setHours(startHourForLabel, 0, 0, 0);
+                    blockLabel.textContent = labelDate.toLocaleString(undefined, { hour: 'numeric', hour12: true });
+                    row.appendChild(blockLabel);
 
                     const circlesContainer = document.createElement('div');
                     circlesContainer.className = 'circles-for-hour';
@@ -9666,24 +9235,28 @@ document.addEventListener('DOMContentLoaded', function() {
                     circlesContainer.style.gap = '8px';
                     circlesContainer.style.marginLeft = 'auto';
 
-                    for (const sm of (hourMap.get(hourStart) || [])) {
-                        const endMin = startToEnd.get(sm);
-                        const timeLabel = _svcLabelFromMin(sm);
-                        const circle = document.createElement('div');
+                    for (let offset = 0; offset < blockMinutes; offset += currentIncrement) {
+                        const totalMinutes = blockStart + offset;
+                        if (totalMinutes >= endTotalMinutes) break;
+                        const hour = Math.floor(totalMinutes / 60);
+                        const min = totalMinutes % 60;
+                        const ampm = hour >= 12 ? 'PM' : 'AM';
+                        let displayHour = hour % 12;
+                        if (displayHour === 0) displayHour = 12;
+                        const timeLabel = `${displayHour}:${String(min).padStart(2, '0')} ${ampm}`;
 
-                        const slotDate = parseYMD(date);
-                        const h = Math.floor(sm / 60);
-                        const m = sm % 60;
-                        slotDate.setHours(h, m, 0, 0);
-                        const slotEndDate = new Date(slotDate.getTime() + Math.max(1, (endMin - sm)) * 60000);
+                        const circle = document.createElement('div');
+                        const slotDate = parseYMD(dateStr);
+                        slotDate.setHours(hour, min, 0, 0);
+                        const slotEndDate = new Date(slotDate.getTime() + (currentIncrement * 60000));
                         const now = new Date();
 
                         const booking = bookingsForDate.find(b => {
                             try {
-                                const bookingStart = convertOrgTimeToBrowser(b.start);
-                                const bookingEnd = convertOrgTimeToBrowser(b.end);
-                                if (!bookingStart || !bookingEnd) return false;
-                                return slotDate.getTime() < bookingEnd.getTime() && slotEndDate.getTime() > bookingStart.getTime();
+                                const bs = b.start || null;
+                                const be = b.end || b.start || null;
+                                if (!bs || !be) return false;
+                                return slotDate.getTime() < be.getTime() && slotEndDate.getTime() > bs.getTime();
                             } catch (e) { return false; }
                         });
 
@@ -9691,8 +9264,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             circle.className = 'time-circle booked';
                             circle.textContent = 'Booked';
                             circle.dataset.time = timeLabel;
-                            circle.dataset.bookingId = booking.id;
-                            circle.addEventListener('click', () => { showBookingInfo(booking); });
+                            circle.addEventListener('click', () => { showBookingInfoFromEventApi(booking); });
                         } else if (slotDate < now) {
                             circle.className = 'time-circle blocked';
                             circle.textContent = timeLabel;
@@ -9713,193 +9285,196 @@ document.addEventListener('DOMContentLoaded', function() {
                     row.appendChild(circlesContainer);
                     container.appendChild(row);
                 }
-
-                if (container.lastElementChild) container.lastElementChild.style.borderBottom = 'none';
-                return;
-            }
-
-            // Render per supplied range so multiple discontiguous ranges are supported
-            for (const range of rangesArr) {
-                // compute start/end minutes for this range
-                let startTotalMinutes = 6 * 60;
-                let endTotalMinutes = 22 * 60;
-                try {
-                    if (range.start) {
-                        const parts = String(range.start).split(':');
-                        const sh = parseInt(parts[0], 10);
-                        const sm = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-                        if (!isNaN(sh)) startTotalMinutes = sh * 60 + (isNaN(sm) ? 0 : sm);
-                    }
-                    if (range.end) {
-                        const parts = String(range.end).split(':');
-                        const eh = parseInt(parts[0], 10);
-                        const em = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-                        if (!isNaN(eh)) endTotalMinutes = eh * 60 + (isNaN(em) ? 0 : em);
-                    }
-                } catch (e) { /* ignore parse errors */ }
-
-                for (let blockStart = startTotalMinutes; blockStart < endTotalMinutes; blockStart += blockMinutes) {
-                    const row = document.createElement('div');
-                    row.style.display = 'flex';
-                    row.style.alignItems = 'center';
-                    row.style.justifyContent = 'space-between';
-                    row.style.gap = '8px';
-                    row.style.borderBottom = '1px solid #ccc';
-
-                    const blockLabel = document.createElement('div');
-                    blockLabel.style.width = '70px';
-                    blockLabel.style.fontWeight = 'bold';
-                    const labelDate = parseYMD(date);
-                    const startHourForLabel = Math.floor(blockStart / 60);
-                    labelDate.setHours(startHourForLabel, 0, 0, 0);
-                    if (blockMinutes > 60) {
-                        const endLabelDate = parseYMD(date);
-                        const endHourForLabel = Math.min(23, Math.floor((blockStart + blockMinutes) / 60));
-                        endLabelDate.setHours(endHourForLabel, 0, 0, 0);
-                        blockLabel.textContent = `${labelDate.toLocaleString(undefined, { hour: 'numeric', hour12: true })} - ${endLabelDate.toLocaleString(undefined, { hour: 'numeric', hour12: true })}`;
-                    } else {
-                        blockLabel.textContent = labelDate.toLocaleString(undefined, { hour: 'numeric', hour12: true });
-                    }
-                    row.appendChild(blockLabel);
-
-                    const circlesContainer = document.createElement('div');
-                    circlesContainer.className = 'circles-for-hour';
-                    circlesContainer.style.display = 'flex';
-                    circlesContainer.style.flexWrap = 'wrap';
-                    circlesContainer.style.gap = '8px';
-                    circlesContainer.style.marginLeft = 'auto';
-
-                    for (let offset = 0; offset < blockMinutes; offset += currentIncrement) {
-                        const totalMinutes = blockStart + offset;
-                        if (totalMinutes >= endTotalMinutes) break;
-                        const hour = Math.floor(totalMinutes / 60);
-                        const min = totalMinutes % 60;
-
-                        const ampm = hour >= 12 ? 'PM' : 'AM';
-                        let displayHour = hour % 12;
-                        if (displayHour === 0) displayHour = 12;
-                        const timeLabel = `${displayHour}:${String(min).padStart(2, '0')} ${ampm}`;
-
-                        const circle = document.createElement('div');
-                        const slotDate = parseYMD(date);
-                        slotDate.setHours(hour, min, 0, 0);
-                        const slotEndDate = new Date(slotDate.getTime() + (currentIncrement * 60000));
-                        const now = new Date();
-
-                        // Check if this slot overlaps with any booking
-                        // A slot overlaps if: slot_start < booking_end AND slot_end > booking_start
-                        const booking = bookingsForDate.find(b => {
-                            try {
-                                // Convert booking times from org timezone to browser timezone
-                                const bookingStart = convertOrgTimeToBrowser(b.start);
-                                const bookingEnd = convertOrgTimeToBrowser(b.end);
-                                
-                                if (!bookingStart || !bookingEnd) return false;
-                                
-                                // Compare timestamps
-                                const overlaps = slotDate.getTime() < bookingEnd.getTime() && slotEndDate.getTime() > bookingStart.getTime();
-                                
-                                return overlaps;
-                            } catch (e) { 
-                                console.error('Error checking booking overlap:', e);
-                                return false; 
-                            }
-                        });
-
-                        if (booking) {
-                            // Slot is booked
-                            circle.className = 'time-circle booked';
-                            circle.textContent = 'Booked';
-                            circle.dataset.time = timeLabel;
-                            circle.dataset.bookingId = booking.id;
-
-                            circle.addEventListener('click', () => {
-                                showBookingInfo(booking);
-                            });
-                        } else if (slotDate < now) {
-                            // Past time slot
-                            circle.className = 'time-circle blocked';
-                            circle.textContent = timeLabel;
-                            circle.dataset.time = timeLabel;
-                            circle.style.background = '#6c757d';
-                            circle.style.cursor = 'not-allowed';
-
-                            circle.addEventListener('click', () => {
-                                alert(`This slot (${timeLabel}) is in the past.`);
-                            });
-                        } else {
-                            // Available slot
-                            circle.className = 'time-circle open';
-                            circle.textContent = timeLabel;
-                            circle.dataset.time = timeLabel;
-
-                            circle.addEventListener('click', () => {
-                                alert(`Slot: ${timeLabel} is available`);
-                            });
-                        }
-
-                        circlesContainer.appendChild(circle);
-                    }
-
-                    row.appendChild(circlesContainer);
-                    container.appendChild(row);
-                }
             }
 
             if (container.lastElementChild) container.lastElementChild.style.borderBottom = 'none';
+            if (!container.childElementCount) {
+                const empty = document.createElement('div');
+                empty.style.color = '#6b7280';
+                empty.textContent = 'No times to display.';
+                container.appendChild(empty);
+            }
         }
 
-        // Fetch bookings first, then render grid
-        fetchBookings().then(async () => {
-            try {
-                if (isServiceScope) {
-                    await _fetchServiceScopeSlots();
-                }
-            } catch (e) { /* ignore */ }
-            renderGrid(currentBlockSize);
-        });
+        function showChooser(){
+            show(chooser);
+            hide(servicesPanel);
+            hide(apptsPanel);
+            hide(container);
+            hide(settingsBox);
+            clearSettings();
+            try { if (panel) chooser.scrollIntoView({ behavior: 'auto', block: 'start' }); } catch (e) {}
+        }
 
-        // Handle coach settings - refetch bookings when re-rendering
-        coachHourBlockSelect.onchange = () => {
-            if (coachHourBlockSelect.value === "custom") coachCustomBlockContainer.style.display = "flex";
-            else {
-                coachCustomBlockContainer.style.display = "none";
-                currentBlockSize = parseInt(coachHourBlockSelect.value);
-                fetchBookings().then(() => renderGrid(currentBlockSize));
+        function showServicesListForMember(mid){
+            hide(chooser);
+            show(servicesPanel);
+            hide(apptsPanel);
+            hide(container);
+            hide(settingsBox);
+            clearSettings();
+
+            if (!servicesList) return;
+            servicesList.innerHTML = '';
+
+            const midStr = String(mid);
+            const allAssigned = (Array.isArray(SERVICES) ? SERVICES : []).filter(s => {
+                try {
+                    const assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(s) || []) : [];
+                    return assigned.some(x => String(x) === midStr);
+                } catch (e) { return false; }
+            });
+            const solo = [];
+            const group = [];
+            for (const s of allAssigned) {
+                const assigned = (typeof getAssignedMembersForService === 'function') ? (getAssignedMembersForService(s) || []) : [];
+                if (assigned.length >= 2) group.push(s);
+                else solo.push(s);
             }
-        };
-        coachApplyCustomBlockBtn.onclick = () => {
-            const val = parseInt(coachCustomBlockInput.value);
-            if (isNaN(val) || val<15) return alert("Enter valid minutes 15+");
-            coachCustomBlockContainer.style.display="none";
-            currentBlockSize = val/60;
-            fetchBookings().then(() => renderGrid(currentBlockSize));
-        };
-        coachIncrementSelect.onchange = () => {
-            if (coachIncrementSelect.value==="custom") coachCustomIncrementContainer.style.display="flex";
-            else {
-                coachCustomIncrementContainer.style.display="none";
-                currentIncrement = parseInt(coachIncrementSelect.value);
-                fetchBookings().then(() => renderGrid(currentBlockSize));
+            solo.sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
+            group.sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
+
+            function addHeader(text){
+                const h = document.createElement('div');
+                h.style.fontSize = '12px';
+                h.style.color = 'var(--gray-700)';
+                h.style.textTransform = 'uppercase';
+                h.style.letterSpacing = '0.5px';
+                h.style.marginTop = servicesList.childElementCount ? '10px' : '0px';
+                h.textContent = text;
+                servicesList.appendChild(h);
             }
-        };
-        coachApplyCustomIncrementBtn.onclick = () => {
-            const val = parseInt(coachCustomIncrementInput.value);
-            if (isNaN(val) || val<5) return alert("Enter valid increment 5+");
-            coachCustomIncrementContainer.style.display="none";
-            currentIncrement = val;
-            fetchBookings().then(() => renderGrid(currentBlockSize));
-        };
+            function addEmpty(text){
+                const empty = document.createElement('div');
+                empty.style.color = 'var(--gray-600)';
+                empty.style.fontSize = '13px';
+                empty.style.padding = '6px 0 2px 0';
+                empty.textContent = text;
+                servicesList.appendChild(empty);
+            }
+            function addServiceButton(svc){
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.style.display = 'block';
+                btn.style.width = '100%';
+                btn.style.textAlign = 'left';
+                btn.style.padding = '10px 12px';
+                btn.style.borderRadius = '10px';
+                btn.style.border = '1px solid var(--gray-200)';
+                btn.style.background = 'white';
+                btn.style.cursor = 'pointer';
+                btn.style.fontWeight = '700';
+                btn.textContent = svc.name || `Service ${svc.id}`;
+                btn.addEventListener('click', async () => {
+                    try {
+                        hide(servicesPanel);
+                        show(container, 'flex');
+                        const { eff, slots } = await fetchServiceScopeSlots(svc);
+                        setSettingsForService(svc, eff);
+                        renderServiceSlots(date, svc, slots);
+                        try { if (panel) container.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+                    } catch (e) {
+                        console.error('failed to render selected service day schedule', e);
+                    }
+                });
+                servicesList.appendChild(btn);
+            }
+
+            if (!solo.length && !group.length) {
+                addEmpty('No services are assigned to this member.');
+                return;
+            }
+
+            addHeader('Solo services');
+            if (!solo.length) addEmpty('No solo services.');
+            else solo.forEach(addServiceButton);
+
+            addHeader('Group services');
+            if (!group.length) addEmpty('No group services.');
+            else group.forEach(addServiceButton);
+
+            try { if (panel) servicesPanel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+        }
+
+        function showAppointmentsForMember(dateStr){
+            hide(chooser);
+            hide(servicesPanel);
+            show(apptsPanel);
+            hide(container);
+            hide(settingsBox);
+            clearSettings();
+
+            if (!apptsList) return;
+            apptsList.innerHTML = '';
+
+            const bookings = _getBookingsForDateInScope(dateStr) || [];
+            if (!bookings.length){
+                const empty = document.createElement('div');
+                empty.style.color = 'var(--gray-600)';
+                empty.style.fontSize = '13px';
+                empty.textContent = 'No appointments on this day.';
+                apptsList.appendChild(empty);
+                return;
+            }
+
+            for (const ev of bookings){
+                const row = document.createElement('button');
+                row.type = 'button';
+                row.style.display = 'block';
+                row.style.width = '100%';
+                row.style.textAlign = 'left';
+                row.style.padding = '12px';
+                row.style.borderRadius = '10px';
+                row.style.border = '1px solid var(--gray-200)';
+                row.style.background = 'white';
+                row.style.cursor = 'pointer';
+
+                const xp = ev.extendedProps || {};
+                const start = ev.start;
+                const end = ev.end || ev.start;
+                const time = (start && end)
+                    ? `${start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
+                    : 'Time unknown';
+                const client = xp.client_name || xp.client || '';
+                const titleText = ev.title || 'Booking';
+
+                const line1 = document.createElement('div');
+                line1.style.fontWeight = '800';
+                line1.style.color = 'var(--gray-900)';
+                line1.textContent = `${time} — ${titleText}`;
+                row.appendChild(line1);
+
+                if (client){
+                    const line2 = document.createElement('div');
+                    line2.style.fontSize = '13px';
+                    line2.style.color = 'var(--gray-600)';
+                    line2.textContent = `Client: ${client}`;
+                    row.appendChild(line2);
+                }
+
+                row.addEventListener('click', () => { showBookingInfoFromEventApi(ev); });
+                apptsList.appendChild(row);
+            }
+
+            try { if (panel) apptsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+        }
+
+        // Wire back buttons
+        try {
+            if (backFromServicesBtn) backFromServicesBtn.onclick = () => showChooser();
+            if (backFromApptsBtn) backFromApptsBtn.onclick = () => showChooser();
+        } catch (e) {}
 
         // Close modal
-        document.getElementById("closeCirclesBtn").onclick = () => {
-            modal.style.display = "none";
-        };
+        try {
+            const closeBtn = document.getElementById('closeCirclesBtn');
+            if (closeBtn) closeBtn.onclick = () => { modal.style.display = 'none'; };
+        } catch (e) {}
 
         // Add circle styles if not present
-        if (!document.getElementById("timeCirclesStyle")) {
-            const style = document.createElement("style");
-            style.id = "timeCirclesStyle";
+        if (!document.getElementById('timeCirclesStyle')) {
+            const style = document.createElement('style');
+            style.id = 'timeCirclesStyle';
             style.innerHTML = `
                 .time-circle {
                     width: 80px; height: 80px; border-radius: 50%;
@@ -9913,6 +9488,43 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             document.head.appendChild(style);
         }
+
+        // Branch by scope
+        const isMemberScope = !!(SELECTED_MEMBER && !String(SELECTED_MEMBER).startsWith('svc:'));
+        const selectedSvc = (typeof _ccSelectedServiceObj === 'function') ? _ccSelectedServiceObj() : null;
+
+        if (isMemberScope) {
+            showChooser();
+            try {
+                if (chooseServicesBtn) chooseServicesBtn.onclick = () => showServicesListForMember(String(SELECTED_MEMBER));
+                if (chooseAppointmentsBtn) chooseAppointmentsBtn.onclick = () => showAppointmentsForMember(date);
+            } catch (e) {}
+            return;
+        }
+
+        if (selectedSvc) {
+            // Service-scope: parity with public availability
+            hide(chooser);
+            hide(servicesPanel);
+            hide(apptsPanel);
+            show(container, 'flex');
+            (async () => {
+                const { eff, slots } = await fetchServiceScopeSlots(selectedSvc);
+                setSettingsForService(selectedSvc, eff);
+                renderServiceSlots(date, selectedSvc, slots);
+            })();
+            return;
+        }
+
+        // Org scope (or non-service selection): render basic schedule based on weekly availability
+        hide(chooser);
+        hide(servicesPanel);
+        hide(apptsPanel);
+        show(container, 'flex');
+        hide(settingsBox);
+        clearSettings();
+        const rangesArr = normalizeRanges();
+        renderGenericRanges(date, rangesArr, increment, hourBlockSize);
     }
 
     calendarEl.addEventListener('mousedown', e => {

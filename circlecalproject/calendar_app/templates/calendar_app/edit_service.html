@@ -958,8 +958,16 @@
       </script>
 
     <!-- Group timing + client slot settings into a clear section -->
-    <div class="section-card">
+    <div class="section-card" id="ccClientSlotSettings">
       <div class="text-base font-semibold text-center" style="color: var(--gray-900); margin-bottom: 14px;">Client Slot Settings and Price of Appointment</div>
+
+      <div class="text-center" style="margin-bottom: 14px;">
+        <a id="cc-open-day-schedule-from-service" href="{% url 'calendar_app:calendar' org.slug %}"
+           class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium border border-blue-600 text-blue-600 bg-white hover:bg-blue-50">
+          Open Day Schedule in Calendar
+        </a>
+        <div class="mt-2 text-xs text-gray-500">Opens the next available day based on this service’s weekly availability.</div>
+      </div>
 
       <div class="grid grid-cols-2 gap-4">
         <div>
@@ -1044,6 +1052,27 @@
           <p class="mt-1 text-xs text-gray-500">Enable to allow the final time slot to finish after your daily availability end.</p>
         </div>
       </div>
+
+      <script>
+        // Jump to Calendar with this service preselected and Day Schedule auto-opened.
+        (function(){
+          try{
+            const btn = document.getElementById('cc-open-day-schedule-from-service');
+            if (!btn) return;
+            btn.addEventListener('click', function(){
+              try { localStorage.setItem('cc_selected_member', 'svc:{{ service.id }}'); } catch (e) {}
+              try { localStorage.setItem('cc_auto_open_service', '{{ service.id }}'); } catch (e) {}
+              try {
+                const d = new Date();
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2,'0');
+                const dd = String(d.getDate()).padStart(2,'0');
+                localStorage.setItem('cc_auto_open_date', `${y}-${m}-${dd}`);
+              } catch (e) {}
+            });
+          } catch(e) {}
+        })();
+      </script>
     </div>
 
     <div class="section-card cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
