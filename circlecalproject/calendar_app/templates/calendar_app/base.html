@@ -107,15 +107,8 @@
                 /* Mobile: make long secrets always fit without leaking */
                 @media (max-width:640px) {
                     .twofactor-page .secret-value {
-                    body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { margin-bottom: 14px; font-size: 26px; }
                         width: 100%;
                     }
-
-                /* Larger phones (e.g. iPhone Pro Max width): make navbar logo bigger */
-                @media (min-width: 430px) and (max-width: 640px) {
-                    .cc-nav-center-logo-img { width: 123px; height: 123px; }
-                    body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { font-size: 30px; }
-                }
                 }
 
                 /* Disable action: make links/buttons reading 'Disable' more prominent */
@@ -272,31 +265,83 @@
                 pointer-events: auto;
             }
             .cc-nav-center-logo-img {
-                width: 123px;
-                height: 123px;
+                width: 90px;
+                height: 90px;
                 object-fit: contain;
                 filter: drop-shadow(0 10px 24px rgba(15,23,42,0.12));
             }
             @media (max-width: 640px) {
                 /* Mobile: make the centered navbar logo noticeably larger */
-                .cc-nav-center-logo-img { width: 84px; height: 84px; }
+                .cc-nav-center-logo-img { width: 92px; height: 92px; }
             }
-            @media (min-width: 430px){
+            @media (min-width: 430px) and (max-width: 640px) {
                 /* Larger phones: bump the logo further */
-                .cc-nav-center-logo-img { width: 123px; height: 123px; }
+                .cc-nav-center-logo-img { width: 102px; height: 102px; }
             }
 
             /* Home splash (logo-only screen) */
             body[data-cc-home="1"] main { padding-top: var(--cc-home-header-h, 156px); }
             body[data-cc-home="1"] #cc-home-splash {
+                position: relative;
                 min-height: calc(100vh - var(--cc-home-header-h, 156px));
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 padding: 24px 16px;
             }
+
+            /* Site-wide: subtle animated background blobs (disabled for embeds/custom-domain embeds) */
+            body[data-cc-embed="0"] {
+                position: relative;
+            }
+            body[data-cc-embed="0"]::before,
+            body[data-cc-embed="0"]::after {
+                content: "";
+                position: fixed;
+                width: 520px;
+                height: 520px;
+                border-radius: 9999px;
+                filter: blur(64px);
+                opacity: 0.55;
+                pointer-events: none;
+                z-index: 0;
+            }
+            body[data-cc-embed="0"]::before {
+                top: -140px;
+                left: -180px;
+                background: radial-gradient(circle at 30% 30%, rgba(37,99,235,0.55), rgba(37,99,235,0) 62%);
+                animation: ccHomeBlobA 18s ease-in-out infinite;
+            }
+            body[data-cc-embed="0"]::after {
+                bottom: -180px;
+                right: -220px;
+                /* Match the same blue as the top-left blob */
+                background: radial-gradient(circle at 70% 70%, rgba(37,99,235,0.55), rgba(37,99,235,0) 62%);
+                animation: ccHomeBlobB 22s ease-in-out infinite;
+            }
+
+            /* Keep page content above the background blobs. Do NOT lower header z-index,
+               otherwise the page content can sit on top of the navbar and block clicks. */
+            body[data-cc-embed="0"] main,
+            body[data-cc-embed="0"] footer {
+                position: relative;
+                z-index: 1;
+            }
+
+            @keyframes ccHomeBlobA {
+                0% { transform: translate3d(0, 0, 0) scale(1); }
+                50% { transform: translate3d(60px, 80px, 0) scale(1.15); }
+                100% { transform: translate3d(0, 0, 0) scale(1); }
+            }
+            @keyframes ccHomeBlobB {
+                0% { transform: translate3d(0, 0, 0) scale(1.05); }
+                50% { transform: translate3d(-70px, -60px, 0) scale(1.18); }
+                100% { transform: translate3d(0, 0, 0) scale(1.05); }
+            }
             body[data-cc-home="1"] #cc-home-hero { scroll-margin-top: calc(var(--cc-home-header-h, 156px) + 12px); }
             body[data-cc-home="1"] #cc-home-hero-logo {
+                position: relative;
+                z-index: 1;
                 transform: translateY(var(--cc-home-hero-logo-y, 0px)) scale(var(--cc-home-hero-logo-scale, 1));
                 transform-origin: 50% 25%;
                 opacity: calc(var(--cc-home-hero-logo-opacity, 1) * var(--cc-home-hero-logo-show, 0));
@@ -338,7 +383,38 @@
 
             @media (min-width: 430px) and (max-width: 640px) {
                 /* Larger phones: extra bump so it reads like a real headline */
-                body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { font-size: 55px; }
+                body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { font-size: 36px; }
+            }
+
+            /* Home: fade/slide-in reveals for hero content (used in index.html) */
+            .cc-reveal {
+                opacity: 0;
+                transform: translateY(14px);
+                filter: blur(3px);
+                transition:
+                    opacity 680ms ease,
+                    transform 720ms cubic-bezier(.2,.9,.2,1),
+                    filter 680ms ease;
+                transition-delay: var(--cc-reveal-delay, 0ms);
+                will-change: opacity, transform, filter;
+            }
+            .cc-reveal.cc-reveal-in {
+                opacity: 1;
+                transform: translateY(0);
+                filter: blur(0);
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                body[data-cc-embed="0"]::before,
+                body[data-cc-embed="0"]::after {
+                    animation: none !important;
+                }
+                .cc-reveal {
+                    opacity: 1 !important;
+                    transform: none !important;
+                    filter: none !important;
+                    transition: none !important;
+                }
             }
 
             /* Allow visual overflow for large desktop carousels, but clamp on smaller screens
@@ -409,9 +485,9 @@
 </head>
 
 {% if request.GET.embed == '1' or request.custom_domain_organization %}
-<body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}">
+<body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="1">
 {% else %}
-<body class="bg-blue-50  text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}">
+<body class="bg-blue-50  text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="0">
 {% endif %}
 
     {% if request.GET.embed != '1' and not request.custom_domain_organization %}
@@ -1160,6 +1236,45 @@
                 window.addEventListener('scroll', onScroll, { passive: true });
                 window.addEventListener('resize', onScroll);
                 updateHomeLogo();
+            } catch (e) {}
+        })();
+    </script>
+
+    <script>
+        // Home page: subtle reveal-on-scroll for hero content.
+        (function(){
+            try {
+                const body = document.body;
+                if (!body || body.getAttribute('data-cc-home') !== '1') return;
+
+                const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+                const els = Array.from(document.querySelectorAll('.cc-reveal'));
+                if (!els.length) return;
+
+                if (reduceMotion || !('IntersectionObserver' in window)) {
+                    els.forEach(el => el.classList.add('cc-reveal-in'));
+                    return;
+                }
+
+                const obs = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (!entry.isIntersecting) return;
+                        try { entry.target.classList.add('cc-reveal-in'); } catch (e) {}
+                        try { obs.unobserve(entry.target); } catch (e) {}
+                    });
+                }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+
+                els.forEach(el => obs.observe(el));
+
+                // Safety: reveal anything already in view shortly after load.
+                setTimeout(() => {
+                    els.forEach(el => {
+                        try {
+                            const r = el.getBoundingClientRect();
+                            if (r.top < window.innerHeight * 0.92) el.classList.add('cc-reveal-in');
+                        } catch (e) {}
+                    });
+                }, 160);
             } catch (e) {}
         })();
     </script>
