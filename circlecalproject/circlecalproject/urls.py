@@ -21,6 +21,7 @@ from django.conf.urls.static import static
 from django.urls import re_path
 from django.views.generic.base import RedirectView
 from django.contrib.auth import views as auth_views
+from calendar_app import pwa_views
 try:
     # Import module to access urlpatterns directly for namespacing
     from two_factor import urls as two_factor_urls
@@ -40,6 +41,10 @@ except Exception:
     TF_PATTERNS = None
 
 urlpatterns = [
+    path('manifest.webmanifest', pwa_views.manifest_webmanifest, name='pwa_manifest'),
+    path('manifest.json', pwa_views.manifest_json, name='pwa_manifest_json'),
+    path('sw.js', pwa_views.service_worker, name='pwa_service_worker'),
+    path('offline/', pwa_views.offline_page, name='pwa_offline'),
     # Top-level aliases for branded password reset (override admin defaults)
     path('password/reset/',
          auth_views.PasswordResetView.as_view(

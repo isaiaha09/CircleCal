@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: circlecal
+    env: python
+    plan: starter
+    autoDeploy: true
+    buildCommand: |
+      python -m pip install --upgrade pip
+      pip install -r requirements.txt
+      DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py collectstatic --noinput
+    startCommand: |
+      DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py migrate --noinput
+      gunicorn circlecalproject.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: circlecalproject.settings_prod
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: ENABLE_WHITENOISE
+        value: "1"
+      - key: USE_X_FORWARDED_PROTO
+        value: "1"
+      # Required: set these in Render dashboard (don’t commit secrets)
+      # - key: SECRET_KEY
+      # - key: DATABASE_URL
+      # Recommended
+      # - key: SITE_URL
+      # - key: ALLOWED_HOSTS
+      # - key: CSRF_TRUSTED_ORIGINS

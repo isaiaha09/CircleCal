@@ -1,13 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    {% load static %}
     <meta charset="UTF-8">
     <title>{% block title %}CircleCal{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    {% load static %}
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="CircleCal">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="{% static 'icons/favicon.ico' %}" sizes="any">
+    <link rel="icon" href="{% static 'icons/favicon-32x32.png' %}" sizes="32x32" type="image/png">
+    <link rel="icon" href="{% static 'icons/favicon-16x16.png' %}" sizes="16x16" type="image/png">
+    <link rel="icon" href="{% static 'icons/icon.svg' %}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
+
+    {# iOS splash screens (startup images). Apple uses these only when added to home screen. #}
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-640x1136.png' %}" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-750x1334.png' %}" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-828x1792.png' %}" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1125x2436.png' %}" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1242x2208.png' %}" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1242x2688.png' %}" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1170x2532.png' %}" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1284x2778.png' %}" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1290x2796.png' %}" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1536x2048.png' %}" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1668x2224.png' %}" media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-1668x2388.png' %}" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+    <link rel="apple-touch-startup-image" href="{% static 'icons/splash/splash-2048x2732.png' %}" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+
     <!-- Tailwind CDN (optional, remove if you prefer custom CSS) -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+        <script>
+            // PWA: register service worker (no-op in unsupported browsers)
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('/sw.js').catch(() => {});
+                });
+            }
+        </script>
 
         <style>
                 /* Two-factor specific styles: make token input visible and increase spacing */
@@ -405,6 +440,34 @@
         {% block content %}{% endblock %}
     </main>
 
+            <!-- iOS Add-to-Home-Screen prompt (iOS has no native install banner) -->
+            <div id="cc-ios-install-overlay" class="hidden" style="position:fixed;inset:0;z-index:99998;background:rgba(2,6,23,0.55);backdrop-filter:saturate(1.2) blur(4px);display:none;opacity:0;transition:opacity 220ms ease;"></div>
+            <div id="cc-ios-install-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="cc-ios-install-title" style="position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;padding:18px;display:none;opacity:0;transition:opacity 220ms ease;">
+                <div style="width:100%;max-width:520px;background:#ffffff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,0.25);border:1px solid rgba(15,23,42,0.10);overflow:hidden;">
+                    <div style="padding:16px 18px;border-bottom:1px solid rgba(15,23,42,0.08);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div id="cc-ios-install-title" style="font-size:16px;font-weight:800;letter-spacing:-0.2px;color:#0f172a;">Install CircleCal</div>
+                            <div style="font-size:12.5px;color:rgba(15,23,42,0.72);margin-top:2px;">Add CircleCal to your Home Screen for quick access.</div>
+                        </div>
+                        <button id="cc-ios-install-close" type="button" aria-label="Close" style="background:transparent;border:0;cursor:pointer;padding:6px;border-radius:10px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6l12 12" stroke="#334155" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                    </div>
+                    <div style="padding:16px 18px;color:#0f172a;">
+                        <ol style="margin:0;padding-left:18px;color:rgba(15,23,42,0.85);line-height:1.55;">
+                            <li>Tap the Share button in your browser.</li>
+                            <li>Select <span style="font-weight:700;">Add to Home Screen</span>.</li>
+                            <li>Confirm to install.</li>
+                        </ol>
+                        <div style="margin-top:12px;font-size:12px;color:rgba(15,23,42,0.65);">Note: iOS does not show an automatic install prompt like Chrome.</div>
+                    </div>
+                    <div style="padding:14px 18px;border-top:1px solid rgba(15,23,42,0.08);display:flex;justify-content:flex-end;gap:10px;">
+                        <button id="cc-ios-install-notnow" type="button" class="btn-ghost" style="padding:8px 12px;">Not now</button>
+                        <button id="cc-ios-install-ok" type="button" class="btn-primary" style="padding:8px 12px;">OK</button>
+                    </div>
+                </div>
+            </div>
+
         <!-- Toast container + helper: used to replace alert() with non-blocking toasts -->
         <div id="toast-container" style="position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none"></div>
         <script>
@@ -515,6 +578,161 @@
 
             // Override window.alert to use non-blocking toasts by default.
             try { window.alert = function(msg){ try { showToast('info', String(msg)); } catch(e){ /* fallback suppressed */ } }; } catch(e){}
+
+            // iOS install prompt: show once on iOS when not already installed.
+            (function() {
+                function isIOS() {
+                    try {
+                        const ua = navigator.userAgent || '';
+                        const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+                        const touchPoints = Number(navigator.maxTouchPoints || 0);
+
+                        // Hard exclude obvious non-iOS platforms.
+                        if (/Windows|Win32|Win64/i.test(platform) || /Windows NT/i.test(ua)) return false;
+
+                        // iOS devices always have touch.
+                        if (!Number.isFinite(touchPoints) || touchPoints < 1) return false;
+
+                        // iPhone/iPod classic detection.
+                        if (/iPad|iPhone|iPod/i.test(ua)) return true;
+
+                        // iPadOS 13+: UA often contains "Macintosh" but also "Mobile".
+                        if (/Macintosh/i.test(ua) && /Mobile/i.test(ua)) return true;
+
+                        return false;
+                    } catch (e) { return false; }
+                }
+
+                function isStandalone() {
+                    try {
+                        if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+                    } catch (e) {}
+                    try { if (window.navigator && window.navigator.standalone) return true; } catch (e) {}
+                    return false;
+                }
+
+                function showIOSInstallModal() {
+                    const overlay = document.getElementById('cc-ios-install-overlay');
+                    const modal = document.getElementById('cc-ios-install-modal');
+                    if (!(overlay && modal)) return;
+                    try { overlay.classList.remove('hidden'); } catch (e) {}
+                    try { modal.classList.remove('hidden'); } catch (e) {}
+                    try { overlay.style.display = 'block'; } catch (e) {}
+                    try { modal.style.display = 'flex'; } catch (e) {}
+
+                    // Fade in (force a reflow so the transition always triggers)
+                    try { overlay.style.opacity = '0'; } catch (e) {}
+                    try { modal.style.opacity = '0'; } catch (e) {}
+                    let card = null;
+                    try {
+                        // First child is the dialog card.
+                        card = modal.firstElementChild;
+                        if (card) {
+                            const card = modal.firstElementChild;
+                            card.style.transform = 'translateY(10px) scale(0.985)';
+                            card.style.opacity = '0';
+                        }
+                    } catch (e) { card = null; }
+
+                    try { void overlay.offsetHeight; } catch (e) {}
+                    try { void modal.offsetHeight; } catch (e) {}
+                    try { if (card) void card.offsetHeight; } catch (e) {}
+
+                    setTimeout(() => {
+                        try { overlay.style.opacity = '1'; } catch (e) {}
+                        try { modal.style.opacity = '1'; } catch (e) {}
+                        try {
+                            if (card) {
+                                card.style.transform = 'translateY(0) scale(1)';
+                                card.style.opacity = '1';
+                            }
+                        } catch (e) {}
+                    }, 0);
+                }
+
+                function hideIOSInstallModal() {
+                    const overlay = document.getElementById('cc-ios-install-overlay');
+                    const modal = document.getElementById('cc-ios-install-modal');
+
+                    // Fade out then fully hide
+                    try { if (overlay) overlay.style.opacity = '0'; } catch (e) {}
+                    try { if (modal) modal.style.opacity = '0'; } catch (e) {}
+                    try {
+                        if (modal) {
+                            const card = modal.querySelector('div[style]');
+                            if (card) {
+                                card.style.transform = 'translateY(6px) scale(0.985)';
+                                card.style.opacity = '0';
+                            }
+                        }
+                    } catch (e) {}
+
+                    setTimeout(() => {
+                        try { if (overlay) overlay.classList.add('hidden'); } catch (e) {}
+                        try { if (modal) modal.classList.add('hidden'); } catch (e) {}
+                        try { if (overlay) overlay.style.display = 'none'; } catch (e) {}
+                        try { if (modal) modal.style.display = 'none'; } catch (e) {}
+                    }, 240);
+                }
+
+                try {
+                    let force = false;
+                    try {
+                        const qs = new URLSearchParams(location.search || '');
+                        force = qs.get('cc_force_a2hs') === '1';
+                    } catch (e) { force = false; }
+
+                    if (!force) {
+                        if (!isIOS()) return;
+                        if (isStandalone()) return;
+                        // Only prompt on the homepage.
+                        try { if ((location && location.pathname) !== '/') return; } catch (e) {}
+                    }
+
+                    const key = 'cc_ios_a2hs_prompt_dismissed_v1';
+                    if (!force) {
+                        if (localStorage.getItem(key) === '1') return;
+                    }
+
+                    const dismiss = () => {
+                        try { if (!force) localStorage.setItem(key, '1'); } catch (e) {}
+                        hideIOSInstallModal();
+                    };
+
+                    function initIOSInstallPrompt() {
+                        try {
+                            const closeBtn = document.getElementById('cc-ios-install-close');
+                            const notNowBtn = document.getElementById('cc-ios-install-notnow');
+                            const okBtn = document.getElementById('cc-ios-install-ok');
+                            const overlay = document.getElementById('cc-ios-install-overlay');
+                            if (closeBtn) closeBtn.addEventListener('click', dismiss);
+                            if (notNowBtn) notNowBtn.addEventListener('click', dismiss);
+                            if (okBtn) okBtn.addEventListener('click', dismiss);
+                            if (overlay) overlay.addEventListener('click', dismiss);
+                        } catch (e) {}
+
+                        // Slight delay so it doesn't feel like a hard-blocking gate.
+                        setTimeout(() => {
+                            try { showIOSInstallModal(); } catch (e) {}
+                        }, 650);
+                    }
+
+                    // Initialize even if the page is already loaded (DevTools emulation can be quirky).
+                    try {
+                        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                            setTimeout(initIOSInstallPrompt, 0);
+                        } else {
+                            document.addEventListener('DOMContentLoaded', initIOSInstallPrompt);
+                        }
+                        // Also handle bfcache restores.
+                        window.addEventListener('pageshow', (evt) => {
+                            try { if (evt && evt.persisted) initIOSInstallPrompt(); } catch (e) {}
+                        });
+                    } catch (e) {
+                        try { window.addEventListener('load', initIOSInstallPrompt); } catch (e2) {}
+                    }
+                } catch (e) {}
+            })();
 
         </script>
 
