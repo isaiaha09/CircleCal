@@ -107,9 +107,15 @@
                 /* Mobile: make long secrets always fit without leaking */
                 @media (max-width:640px) {
                     .twofactor-page .secret-value {
-                        display: block;
+                    body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { margin-bottom: 14px; font-size: 26px; }
                         width: 100%;
                     }
+
+                /* Larger phones (e.g. iPhone Pro Max width): make navbar logo bigger */
+                @media (min-width: 430px) and (max-width: 640px) {
+                    .cc-nav-center-logo-img { width: 123px; height: 123px; }
+                    body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { font-size: 30px; }
+                }
                 }
 
                 /* Disable action: make links/buttons reading 'Disable' more prominent */
@@ -237,6 +243,104 @@
             /* Prevent horizontal page scroll and guard against wide carousel overflow */
             html, body { max-width: 100%; overflow-x: hidden; }
 
+            /* Navbar: fixed only on home page */
+            .cc-site-header { position: relative; }
+            body[data-cc-home="1"] .cc-site-header {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+            }
+
+            /* Navbar centered logo (always present; home crossfades it in via JS) */
+            .cc-nav-center-logo {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%) translateY(var(--cc-nav-center-logo-y, 0px));
+                opacity: var(--cc-nav-center-logo-opacity, 1);
+                transition: opacity 260ms ease, transform 280ms ease;
+            }
+            body[data-cc-home="1"] .cc-nav-center-logo {
+                --cc-nav-center-logo-opacity: 0;
+                --cc-nav-center-logo-y: -8px;
+                pointer-events: none; /* JS enables once visible */
+            }
+            body[data-cc-home="0"] .cc-nav-center-logo {
+                --cc-nav-center-logo-opacity: 1;
+                --cc-nav-center-logo-y: 0px;
+                pointer-events: auto;
+            }
+            .cc-nav-center-logo-img {
+                width: 123px;
+                height: 123px;
+                object-fit: contain;
+                filter: drop-shadow(0 10px 24px rgba(15,23,42,0.12));
+            }
+            @media (max-width: 640px) {
+                /* Mobile: make the centered navbar logo noticeably larger */
+                .cc-nav-center-logo-img { width: 84px; height: 84px; }
+            }
+            @media (min-width: 430px){
+                /* Larger phones: bump the logo further */
+                .cc-nav-center-logo-img { width: 123px; height: 123px; }
+            }
+
+            /* Home splash (logo-only screen) */
+            body[data-cc-home="1"] main { padding-top: var(--cc-home-header-h, 156px); }
+            body[data-cc-home="1"] #cc-home-splash {
+                min-height: calc(100vh - var(--cc-home-header-h, 156px));
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px 16px;
+            }
+            body[data-cc-home="1"] #cc-home-hero { scroll-margin-top: calc(var(--cc-home-header-h, 156px) + 12px); }
+            body[data-cc-home="1"] #cc-home-hero-logo {
+                transform: translateY(var(--cc-home-hero-logo-y, 0px)) scale(var(--cc-home-hero-logo-scale, 1));
+                transform-origin: 50% 25%;
+                opacity: calc(var(--cc-home-hero-logo-opacity, 1) * var(--cc-home-hero-logo-show, 0));
+                z-index: 40; /* below header (z-50) so it can slide under */
+                will-change: transform, opacity;
+                transition: opacity 900ms ease;
+                text-decoration: none;
+                display: inline-flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+            }
+            body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title {
+                font-weight: 900;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                text-align: center;
+                margin-bottom: 18px;
+                /* Gradient: blue on the left fading to black on the right */
+                background: linear-gradient(90deg, #2563EB 0%, #0B1220 68%, #000000 100%);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+                font-size: clamp(26px, 3.2vw, 54px);
+                line-height: 1.05;
+                filter: drop-shadow(0 10px 26px rgba(15, 23, 42, 0.14));
+            }
+            body[data-cc-home="1"] #cc-home-hero-logo img {
+                width: clamp(260px, 42vw, 560px);
+                height: auto;
+                object-fit: contain;
+                filter: drop-shadow(0 18px 48px rgba(15,23,42,0.18));
+            }
+            @media (max-width: 640px) {
+                body[data-cc-home="1"] #cc-home-hero-logo img { width: min(88vw, 430px); }
+                /* Mobile: make the splash header much bigger */
+                body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { margin-bottom: 14px; font-size: 32px; }
+            }
+
+            @media (min-width: 430px) and (max-width: 640px) {
+                /* Larger phones: extra bump so it reads like a real headline */
+                body[data-cc-home="1"] #cc-home-hero-logo .cc-home-splash-title { font-size: 55px; }
+            }
+
             /* Allow visual overflow for large desktop carousels, but clamp on smaller screens
                to avoid creating a horizontal scrollbar when transforms/absolute positioning
                push children outside the viewport. */
@@ -305,27 +409,32 @@
 </head>
 
 {% if request.GET.embed == '1' or request.custom_domain_organization %}
-<body class="bg-transparent text-gray-900">
+<body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}">
 {% else %}
-<body class="bg-blue-50  text-gray-900">
+<body class="bg-blue-50  text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}">
 {% endif %}
 
     {% if request.GET.embed != '1' and not request.custom_domain_organization %}
-    <header class="bg-white border-b shadow-sm relative z-50">
-        <div class="max-w-7xl mx-auto px-4 py-4">
-            <div class="flex items-center justify-between">
+    <header class="bg-white border-b shadow-sm relative z-50 cc-site-header">
+        <div class="max-w-7xl mx-auto px-4 py-10 md:py-9">
+            <div class="flex items-center justify-between relative">
                 <!-- Left: Logo -->
-                <a href="{% url 'calendar_app:home' %}" class="font-bold text-xl text-blue-600">
+                <a id="cc-nav-left-brand" href="{% url 'calendar_app:home' %}" class="font-bold text-2xl md:text-3xl text-blue-600">
                     CircleCal
+                </a>
+
+                <!-- Center: Home logo (appears after scroll on the home page) -->
+                <a id="cc-nav-center-logo" href="{% url 'calendar_app:home' %}" aria-label="CircleCal home" class="cc-nav-center-logo">
+                    <img src="{% static 'icons/circlecalicon-transparent-v4.png' %}" alt="CircleCal" class="cc-nav-center-logo-img" />
                 </a>
 
                 <!-- Mobile Menu Button -->
                 <button id="mobileMenuBtn" class="md:hidden text-gray-700 focus:outline-none" aria-label="Toggle menu" aria-expanded="false" aria-controls="mobileMenu">
-                    <span class="relative block w-6 h-6">
-                        <svg id="mobileMenuIconHamburger" class="absolute inset-0 w-6 h-6 transition-all duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <span class="relative block w-8 h-8">
+                        <svg id="mobileMenuIconHamburger" class="absolute inset-0 w-8 h-8 transition-all duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
                         </svg>
-                        <svg id="mobileMenuIconClose" class="absolute inset-0 w-6 h-6 transition-all duration-200 ease-in-out opacity-0 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg id="mobileMenuIconClose" class="absolute inset-0 w-8 h-8 transition-all duration-200 ease-in-out opacity-0 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
                     </span>
@@ -336,15 +445,15 @@
                     {% if request.organization %}
                         {# If the current user's role for this org is staff/manager, show a restricted navbar #}
                         {% if user_org_role == 'staff' or user_org_role == 'manager' %}
-                            <nav class="hidden md:flex items-center space-x-6">
+                            <nav class="hidden md:flex items-center space-x-10 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                     {% csrf_token %}
-                                    <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
+                                    <button type="submit" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-base lg:text-lg">Logout</button>
                                 </form>
                             </nav>
                         {% else %}
-                            <nav class="hidden md:flex items-center space-x-6">
+                            <nav class="hidden md:flex items-center space-x-10 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
@@ -352,21 +461,21 @@
                                 <a href="{% url 'calendar_app:choose_business' %}" class="text-gray-700 hover:text-blue-600">Switch</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                     {% csrf_token %}
-                                    <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
+                                    <button type="submit" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-base lg:text-lg">Logout</button>
                                 </form>
                             </nav>
                         {% endif %}
                     {% else %}
-                        <nav class="hidden md:flex items-center space-x-4">
+                        <nav class="hidden md:flex items-center space-x-8 text-lg lg:text-xl">
                             <a href="{% url 'calendar_app:choose_business' %}" class="text-blue-600 font-medium">Create Business</a>
                             <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                 {% csrf_token %}
-                                <button type="submit" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm">Logout</button>
+                                <button type="submit" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-base lg:text-lg">Logout</button>
                             </form>
                         </nav>
                     {% endif %}
                 {% else %}
-                    <nav class="hidden md:flex items-center space-x-4">
+                    <nav class="hidden md:flex items-center space-x-6 text-lg lg:text-xl">
                         <a href="{% url 'calendar_app:about' %}" class="text-gray-700 hover:text-blue-600">About</a>
                         <a href="{% url 'accounts:login' %}" class="text-gray-700 hover:text-blue-600">Login</a>
                         <a href="{% url 'accounts:reactivate' %}" class="text-gray-700 hover:text-blue-600">Reactivate</a>
@@ -659,7 +768,7 @@
                     try { if (modal) modal.style.opacity = '0'; } catch (e) {}
                     try {
                         if (modal) {
-                            const card = modal.querySelector('div[style]');
+                            const card = modal.firstElementChild;
                             if (card) {
                                 card.style.transform = 'translateY(6px) scale(0.985)';
                                 card.style.opacity = '0';
@@ -672,6 +781,9 @@
                         try { if (modal) modal.classList.add('hidden'); } catch (e) {}
                         try { if (overlay) overlay.style.display = 'none'; } catch (e) {}
                         try { if (modal) modal.style.display = 'none'; } catch (e) {}
+                        try {
+                            document.dispatchEvent(new CustomEvent('cc:iosInstallModalDismissed'));
+                        } catch (e) {}
                     }, 240);
                 }
 
@@ -869,6 +981,187 @@
             if (!mobileMenu || mobileMenu.classList.contains('hidden')) return;
             closeMobileMenu();
         });
+    </script>
+
+    <script>
+        // Home page: animate big hero logo upward, then swap to centered nav logo.
+        (function(){
+            try {
+                const body = document.body;
+                if (!body || body.getAttribute('data-cc-home') !== '1') return;
+
+                const splash = document.getElementById('cc-home-splash');
+                const hero = document.getElementById('cc-home-hero');
+                const heroLogo = document.getElementById('cc-home-hero-logo');
+                const navLogo = document.getElementById('cc-nav-center-logo');
+                const navLeftBrand = document.getElementById('cc-nav-left-brand');
+
+                const header = document.querySelector('header.cc-site-header');
+                if (!(splash && hero && heroLogo && navLogo && navLeftBrand && header)) return;
+
+                // Ensure the logo is hidden until we explicitly reveal it (fade-in).
+                try { heroLogo.style.setProperty('--cc-home-hero-logo-show', '0'); } catch (e) {}
+
+                function easeInOutCubic(t) {
+                    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                }
+
+                let _scrollAnimId = 0;
+                function animateScrollTo(targetY, durationMs) {
+                    const startY = window.scrollY || 0;
+                    const delta = targetY - startY;
+                    const start = performance.now();
+                    const id = ++_scrollAnimId;
+
+                    function step(now) {
+                        if (id !== _scrollAnimId) return;
+                        const t = Math.max(0, Math.min(1, (now - start) / durationMs));
+                        const eased = easeInOutCubic(t);
+                        try { window.scrollTo(0, Math.round(startY + delta * eased)); } catch (e) {}
+                        if (t < 1) requestAnimationFrame(step);
+                    }
+
+                    requestAnimationFrame(step);
+                }
+
+                function isIOSLike() {
+                    try {
+                        const ua = navigator.userAgent || '';
+                        const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+                        const touchPoints = Number(navigator.maxTouchPoints || 0);
+                        if (/Windows|Win32|Win64/i.test(platform) || /Windows NT/i.test(ua)) return false;
+                        if (!Number.isFinite(touchPoints) || touchPoints < 1) return false;
+                        if (/iPad|iPhone|iPod/i.test(ua)) return true;
+                        if (/Macintosh/i.test(ua) && /Mobile/i.test(ua)) return true;
+                        return false;
+                    } catch (e) { return false; }
+                }
+
+                function shouldWaitForIOSModal() {
+                    try {
+                        if (!isIOSLike()) return false;
+                        // If already installed, don't wait.
+                        try {
+                            if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return false;
+                        } catch (e) {}
+                        try { if (window.navigator && window.navigator.standalone) return false; } catch (e) {}
+
+                        // If user already dismissed in the past, don't wait.
+                        try {
+                            const key = 'cc_ios_a2hs_prompt_dismissed_v1';
+                            if (localStorage.getItem(key) === '1') return false;
+                        } catch (e) {}
+
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                }
+
+                function revealHeroLogo() {
+                    try { heroLogo.style.setProperty('--cc-home-hero-logo-show', '1'); } catch (e) {}
+                }
+
+                function getHeaderH() {
+                    try { return header.offsetHeight || 156; } catch (e) { return 156; }
+                }
+
+                function setHeaderVar() {
+                    const h = getHeaderH();
+                    try { document.documentElement.style.setProperty('--cc-home-header-h', h + 'px'); } catch (e) {}
+                }
+
+                function getHeroTargetY() {
+                    const h = getHeaderH();
+                    try {
+                        const r = hero.getBoundingClientRect();
+                        return Math.max(0, Math.round((window.scrollY || 0) + r.top - h - 10));
+                    } catch (e) {
+                        return 220;
+                    }
+                }
+
+                // Fade-in behavior: on iOS, wait until the A2HS modal is dismissed.
+                if (shouldWaitForIOSModal()) {
+                    try {
+                        document.addEventListener('cc:iosInstallModalDismissed', () => {
+                            // let the modal fade out first
+                            setTimeout(() => { try { revealHeroLogo(); } catch (e) {} }, 80);
+                        }, { once: true });
+                    } catch (e) {}
+                } else {
+                    setTimeout(revealHeroLogo, 120);
+                }
+
+                // Click: scroll down to the hero header (stop when header is near top). Slow + smooth.
+                try {
+                    heroLogo.addEventListener('click', (ev) => {
+                        try { ev.preventDefault(); } catch (e) {}
+                        setHeaderVar();
+                        const y = getHeroTargetY();
+                        animateScrollTo(y, 2400);
+                    });
+                } catch (e) {}
+
+                // Nav logo: scroll back to the top (splash). Slow + smooth.
+                try {
+                    navLogo.addEventListener('click', (ev) => {
+                        try { ev.preventDefault(); } catch (e) {}
+                        animateScrollTo(0, 1600);
+                    });
+                } catch (e) {}
+
+                let ticking = false;
+
+                function updateHomeLogo() {
+                    ticking = false;
+                    const y = window.scrollY || 0;
+
+                    setHeaderVar();
+                    const targetY = Math.max(180, getHeroTargetY());
+                    const p = Math.max(0, Math.min(1, y / targetY));
+
+                    // Crossfade: big logo fades out as we approach the hero header;
+                    // nav logo fades in smoothly at the same time.
+                    // Start the nav logo earlier and make the big logo fade faster.
+                    const crossStart = 0.18;
+                    const crossEnd = 0.78;
+                    const t = Math.max(0, Math.min(1, (p - crossStart) / (crossEnd - crossStart)));
+                    const smooth = t * t * (3 - 2 * t); // smoothstep
+                    const fade = Math.pow(smooth, 0.6); // faster fade-in/out (vs linear)
+
+                    const risePx = Math.round(180 * p);
+                    const scale = (1 - 0.22 * p);
+                    const opacity = (1 - fade);
+
+                    const navOpacity = fade;
+                    // Move UP from below (positive -> 0), not down from above.
+                    const navY = Math.round((14) * (1 - fade));
+
+                    try {
+                        heroLogo.style.setProperty('--cc-home-hero-logo-y', (-risePx) + 'px');
+                        heroLogo.style.setProperty('--cc-home-hero-logo-scale', String(scale));
+                        heroLogo.style.setProperty('--cc-home-hero-logo-opacity', String(Math.max(0, Math.min(1, opacity))));
+                    } catch (e) {}
+
+                    try {
+                        navLogo.style.setProperty('--cc-nav-center-logo-opacity', String(Math.max(0, Math.min(1, navOpacity))));
+                        navLogo.style.setProperty('--cc-nav-center-logo-y', navY + 'px');
+                        navLogo.style.pointerEvents = navOpacity > 0.2 ? 'auto' : 'none';
+                    } catch (e) {}
+                }
+
+                function onScroll() {
+                    if (ticking) return;
+                    ticking = true;
+                    window.requestAnimationFrame(updateHomeLogo);
+                }
+
+                window.addEventListener('scroll', onScroll, { passive: true });
+                window.addEventListener('resize', onScroll);
+                updateHomeLogo();
+            } catch (e) {}
+        })();
     </script>
 
     <script>
