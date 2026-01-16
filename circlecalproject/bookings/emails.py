@@ -42,8 +42,22 @@ def _booking_internal_recipients(booking):
 
     For unassigned services, only owner+managers receive internal notifications.
     """
-    org = getattr(booking, 'organization', None)
-    service = getattr(booking, 'service', None)
+    # During cascaded deletes (e.g., org deletion), the related Business row may
+    # already be gone by the time on_commit hooks run. Accessing the FK relation
+    # can then raise Business.DoesNotExist; treat that as "no org" and just
+    # return an empty/partial recipient list instead of crashing.
+    try:
+        org = getattr(booking, 'organization', None)
+    except Exception:
+        org = None
+    # Important: don't dereference booking.service here.
+    # During cascaded deletes/cleanup, the Service row can be missing while the
+    # Booking instance still has a service_id value; accessing the FK relation
+    # raises Service.DoesNotExist and can crash on_commit hooks.
+    try:
+        service_id = getattr(booking, 'service_id', None)
+    except Exception:
+        service_id = None
 
     base = []
     try:
@@ -77,11 +91,11 @@ def _booking_internal_recipients(booking):
     # Service assignments (team members assigned to the service)
     has_assignments = False
     try:
-        if service is not None:
+        if service_id is not None:
             from bookings.models import ServiceAssignment
             rows = (
                 ServiceAssignment.objects
-                .filter(service=service)
+                .filter(service_id=service_id)
                 .select_related('membership__user')
                 .values_list('membership__user__email', flat=True)
             )

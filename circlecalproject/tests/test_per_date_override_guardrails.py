@@ -45,22 +45,6 @@ class TestPerDateOverrideGuardrails(TestCase):
             'end_time': '11:00',
             'target': f'svc:{self.svc_b.id}',
         }
-        # Member-first rule: service-scoped per-date overrides require the member
-        # to create a per-date override in their calendar first.
-        member_payload = {
-            'dates': ['2030-01-07'],  # Monday
-            'start_time': '09:00',
-            'end_time': '17:00',
-            'target': self.mem.id,
-        }
-        member_resp = self.client.post(
-            f'/bus/{self.org.slug}/bookings/batch_create/',
-            data=json.dumps(member_payload),
-            content_type='application/json',
-            HTTP_HOST='127.0.0.1',
-        )
-        self.assertEqual(member_resp.status_code, 200)
-
         resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
             data=json.dumps(payload),
@@ -78,21 +62,6 @@ class TestPerDateOverrideGuardrails(TestCase):
             'is_blocking': True,
             'target': f'svc:{self.svc_a.id}',
         }
-        # Member-first rule prerequisite
-        member_payload = {
-            'dates': ['2030-01-07'],
-            'start_time': '09:00',
-            'end_time': '17:00',
-            'target': self.mem.id,
-        }
-        member_resp = self.client.post(
-            f'/bus/{self.org.slug}/bookings/batch_create/',
-            data=json.dumps(member_payload),
-            content_type='application/json',
-            HTTP_HOST='127.0.0.1',
-        )
-        self.assertEqual(member_resp.status_code, 200)
-
         resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
             data=json.dumps(block_payload),
@@ -100,11 +69,6 @@ class TestPerDateOverrideGuardrails(TestCase):
             HTTP_HOST='127.0.0.1',
         )
         self.assertEqual(resp.status_code, 200)
-
-        # Now B can add availability during A's former window, but it must still be within B's weekly.
-        # To test the "freed" behavior, temporarily add B's weekly to include 10:00-11:00.
-        ServiceWeeklyAvailability.objects.filter(service=self.svc_b).delete()
-        ServiceWeeklyAvailability.objects.create(service=self.svc_b, weekday=0, start_time=time(9, 0), end_time=time(17, 0), is_active=True)
 
         avail_payload = {
             'dates': ['2030-01-07'],
@@ -121,28 +85,13 @@ class TestPerDateOverrideGuardrails(TestCase):
         self.assertEqual(resp2.status_code, 200)
 
     def test_service_cannot_expand_beyond_its_weekly_partition(self):
-        # B weekly starts at 12:00; per-date availability at 11:00 should be rejected even if not overlapping
+        # B weekly starts at 12:00; per-date availability at 11:00 overlaps A's partition and should be rejected.
         payload = {
             'dates': ['2030-01-07'],
             'start_time': '11:00',
             'end_time': '11:30',
             'target': f'svc:{self.svc_b.id}',
         }
-        # Member-first rule prerequisite
-        member_payload = {
-            'dates': ['2030-01-07'],  # Monday
-            'start_time': '09:00',
-            'end_time': '17:00',
-            'target': self.mem.id,
-        }
-        member_resp = self.client.post(
-            f'/bus/{self.org.slug}/bookings/batch_create/',
-            data=json.dumps(member_payload),
-            content_type='application/json',
-            HTTP_HOST='127.0.0.1',
-        )
-        self.assertEqual(member_resp.status_code, 200)
-
         resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
             data=json.dumps(payload),
@@ -151,9 +100,8 @@ class TestPerDateOverrideGuardrails(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
-    def test_service_override_forbidden_until_member_override_exists(self):
-        # Without a member-scoped per-date override for the day, service-scoped overrides
-        # for multi-solo services should be rejected.
+    def test_service_override_allowed_without_member_override(self):
+        # Service-scoped overrides no longer require a member-scoped override first.
         payload = {
             'dates': ['2030-01-07'],  # Monday
             'start_time': '12:00',
@@ -166,30 +114,48 @@ class TestPerDateOverrideGuardrails(TestCase):
             content_type='application/json',
             HTTP_HOST='127.0.0.1',
         )
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
 
-        # After creating a member-scoped per-date override for that date, the service override is allowed.
-        member_payload = {
+    def test_service_override_can_reopen_member_blocked_time_within_weekly(self):
+        # Member weekly availability includes Monday 09:00-17:00. Create a member-scoped
+        # blocking override that marks 12:00-12:30 unavailable, then reopen that exact
+        # window for service B with a service-scoped availability override.
+        member_block_payload = {
             'dates': ['2030-01-07'],
-            'start_time': '09:00',
-            'end_time': '17:00',
+            'start_time': '12:00',
+            'end_time': '12:30',
+            'is_blocking': True,
             'target': self.mem.id,
         }
-        member_resp = self.client.post(
+        resp_block = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
-            data=json.dumps(member_payload),
+            data=json.dumps(member_block_payload),
             content_type='application/json',
             HTTP_HOST='127.0.0.1',
         )
-        self.assertEqual(member_resp.status_code, 200)
+        self.assertEqual(resp_block.status_code, 200)
 
-        resp2 = self.client.post(
+        svc_payload = {
+            'dates': ['2030-01-07'],
+            'start_time': '12:00',
+            'end_time': '12:30',
+            'target': f'svc:{self.svc_b.id}',
+        }
+        resp = self.client.post(
             f'/bus/{self.org.slug}/bookings/batch_create/',
-            data=json.dumps(payload),
+            data=json.dumps(svc_payload),
             content_type='application/json',
             HTTP_HOST='127.0.0.1',
         )
-        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp.status_code, 200)
+
+        from django.utils import timezone
+        from datetime import datetime
+        from bookings.views import is_within_availability
+        org_tz = timezone.get_current_timezone()
+        s = timezone.make_aware(datetime(2030, 1, 7, 12, 0, 0), org_tz)
+        e = timezone.make_aware(datetime(2030, 1, 7, 12, 30, 0), org_tz)
+        self.assertTrue(is_within_availability(self.org, s, e, service=self.svc_b))
 
     def test_service_available_override_forbidden_on_member_off_day_until_member_opens(self):
         # Member weekly availability is only set for Monday. Sunday is unavailable by default.

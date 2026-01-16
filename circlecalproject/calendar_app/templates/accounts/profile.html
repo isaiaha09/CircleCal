@@ -1,4 +1,5 @@
 {% extends "calendar_app/base.html" %}
+{% load static %}
 {% block title %}Profile{% endblock %}
 {% block main_class %}w-full max-w-none px-0 py-0{% endblock %}
 {% block content %}
@@ -257,7 +258,7 @@
   <form id="profile-form" method="post" enctype="multipart/form-data" class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg">
     {% csrf_token %}
     {% if form.non_field_errors %}
-      <div class="mb-4 text-sm text-red-700 bg-red-100 px-3 py-2 rounded">
+      <div class="mb-4 text-sm text-red-700 bg-red-100 px-3 py-2 rounded text-center">
         {{ form.non_field_errors }}
       </div>
     {% endif %}
@@ -755,7 +756,7 @@
 {% endblock %}
 
 {% block extra_head %}
-  <link rel="stylesheet" href="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.css" />
+  <link rel="stylesheet" href="{% static 'vendor/cropperjs/1.5.13/cropper.min.css' %}" />
   <style>
     /* Ensure the clear anchor inherits muted color if we don't override via JS */
     .clearable-file-input a { color: inherit; }
@@ -923,7 +924,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-  <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
+  <script src="{% static 'vendor/cropperjs/1.5.13/cropper.min.js' %}"></script>
   <script>
     (function () {
       var venmo = document.querySelector('input[name="offline_venmo"]');

@@ -178,12 +178,6 @@ class OrganizationMiddleware:
                             settings.MEDIA_URL,
                         ]
                         if not any(path.startswith(ap) for ap in allow_paths):
-                            try:
-                                if not request.session.get('cc_name_required_notice_shown'):
-                                    messages.warning(request, 'Please complete your First and Last Name before leaving your Profile.')
-                                    request.session['cc_name_required_notice_shown'] = True
-                            except Exception:
-                                pass
                             from django.urls import reverse
                             return redirect(reverse('accounts:profile'))
         except Exception:

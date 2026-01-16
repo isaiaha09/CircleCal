@@ -267,14 +267,38 @@ def create_checkout_session(request, org_slug, plan_id):
         reverse("calendar_app:pricing_page", kwargs={"org_slug": org.slug})
     ) + "?checkout=cancel"
 
-    session = stripe.checkout.Session.create(
-        customer=org.stripe_customer_id,
-        mode="subscription",
-        line_items=[{"price": plan.stripe_price_id, "quantity": 1}],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata={"organization_id": str(org.id), "plan_id": str(plan.id)},
-    )
+    discounts = None
+    try:
+        from billing.models import DiscountCode
+
+        dc = (
+            DiscountCode.objects.filter(users=request.user, active=True)
+            .order_by('-created_at')
+            .first()
+        )
+        if dc and dc.is_valid():
+            # Stripe Checkout supports applying either a promotion code or a coupon.
+            promo_id = getattr(dc, 'stripe_promotion_code_id', None)
+            coupon_id = getattr(dc, 'stripe_coupon_id', None)
+            if promo_id:
+                discounts = [{"promotion_code": str(promo_id)}]
+            elif coupon_id:
+                discounts = [{"coupon": str(coupon_id)}]
+    except Exception:
+        discounts = None
+
+    session_kwargs = {
+        'customer': org.stripe_customer_id,
+        'mode': 'subscription',
+        'line_items': [{"price": plan.stripe_price_id, "quantity": 1}],
+        'success_url': success_url,
+        'cancel_url': cancel_url,
+        'metadata': {"organization_id": str(org.id), "plan_id": str(plan.id)},
+    }
+    if discounts:
+        session_kwargs['discounts'] = discounts
+
+    session = stripe.checkout.Session.create(**session_kwargs)
 
     return redirect(session.url)
 
@@ -2796,6 +2820,24 @@ def change_subscription_plan(request, org_slug, plan_id):
             sub.scheduled_change_at = None
             sub.save()
 
+            # If the org is now on Team, auto-assign any legacy unassigned services
+            # to the owner membership. This makes Pro->Team upgrades behave as expected.
+            try:
+                from billing.utils import TEAM_SLUG
+                if getattr(new_plan, 'slug', None) == TEAM_SLUG:
+                    from accounts.models import Membership
+                    from bookings.models import ServiceAssignment
+                    from bookings.models import Service
+                    owner_mem = Membership.objects.filter(organization=org, role='owner', is_active=True).first()
+                    if owner_mem is None:
+                        owner_mem = Membership.objects.filter(organization=org, user=getattr(org, 'owner', None), is_active=True).first()
+                    if owner_mem is not None:
+                        for svc in Service.objects.filter(organization=org):
+                            if not ServiceAssignment.objects.filter(service=svc).exists():
+                                ServiceAssignment.objects.get_or_create(service=svc, membership=owner_mem)
+            except Exception:
+                pass
+
             # Record the immediate change so users see it in the UI
             try:
                 from billing.models import SubscriptionChange
@@ -3021,6 +3063,24 @@ def change_subscription_plan(request, org_slug, plan_id):
         sub.scheduled_plan = None
         sub.scheduled_change_at = None
         sub.save()
+
+        # If the org is now on Team, auto-assign any legacy unassigned services
+        # to the owner membership. This runs once at upgrade time.
+        try:
+            from billing.utils import TEAM_SLUG
+            if getattr(new_plan, 'slug', None) == TEAM_SLUG:
+                from accounts.models import Membership
+                from bookings.models import ServiceAssignment
+                from bookings.models import Service
+                owner_mem = Membership.objects.filter(organization=org, role='owner', is_active=True).first()
+                if owner_mem is None:
+                    owner_mem = Membership.objects.filter(organization=org, user=getattr(org, 'owner', None), is_active=True).first()
+                if owner_mem is not None:
+                    for svc in Service.objects.filter(organization=org):
+                        if not ServiceAssignment.objects.filter(service=svc).exists():
+                            ServiceAssignment.objects.get_or_create(service=svc, membership=owner_mem)
+        except Exception:
+            pass
         # Create a SubscriptionChange record reflecting this processed upgrade
         try:
             from billing.models import SubscriptionChange

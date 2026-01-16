@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from accounts.models import Business, Membership
 from billing.models import Plan
+from billing.models import DiscountCode
 from unittest.mock import patch, MagicMock
 from django.utils import timezone
 
@@ -52,3 +53,36 @@ class BillingIntegrationTests(TestCase):
         # organization should have stripe_customer_id saved
         self.org.refresh_from_db()
         self.assertEqual(self.org.stripe_customer_id, mock_customer.id)
+
+    @patch('billing.views.stripe.checkout.Session.create')
+    @patch('billing.views.stripe.Customer.create')
+    def test_create_checkout_session_applies_user_discount_code_to_stripe(self, mock_customer_create, mock_session_create):
+        mock_customer = MagicMock()
+        mock_customer.id = 'cus_test_123'
+        mock_customer_create.return_value = mock_customer
+
+        mock_session = MagicMock()
+        mock_session.url = 'https://checkout.test/session/with-discount'
+        mock_session_create.return_value = mock_session
+
+        dc = DiscountCode.objects.create(
+            code='ADMIN-ASSIGNED',
+            description='Test discount',
+            percent_off=10,
+            active=True,
+            start_date=timezone.now() - timezone.timedelta(days=1),
+            expires_at=timezone.now() + timezone.timedelta(days=30),
+            stripe_coupon_id='coupon_test_10off',
+        )
+        dc.users.add(self.user)
+
+        url = reverse('billing:create_checkout_session', kwargs={'org_slug': self.org.slug, 'plan_id': self.plan.id})
+        resp = self.client.get(url, HTTP_HOST='127.0.0.1')
+
+        self.assertIn(resp.status_code, (302, 301))
+        self.assertEqual(resp['Location'], mock_session.url)
+
+        # Stripe checkout session should include the discount.
+        _, kwargs = mock_session_create.call_args
+        self.assertIn('discounts', kwargs)
+        self.assertEqual(kwargs['discounts'], [{'coupon': 'coupon_test_10off'}])

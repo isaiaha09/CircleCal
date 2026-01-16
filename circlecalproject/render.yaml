@@ -7,6 +7,8 @@ services:
     buildCommand: |
       python -m pip install --upgrade pip
       pip install -r requirements.txt
+      npm ci
+      npm run build:css
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py collectstatic --noinput
     startCommand: |
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py migrate --noinput

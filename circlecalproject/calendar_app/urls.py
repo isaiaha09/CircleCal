@@ -45,6 +45,7 @@ urlpatterns = [
     # Services
     path('bus/<slug:org_slug>/services/', views.services_page, name="services_page"),
     path('bus/<slug:org_slug>/services/create/', views.create_service, name="create_service"),
+    path('bus/<slug:org_slug>/services/availability-constraints/', views.service_availability_constraints, name='service_availability_constraints'),
     path('bus/<slug:org_slug>/services/<int:service_id>/edit/', views.edit_service, name="edit_service"),
     path('bus/<slug:org_slug>/services/<int:service_id>/delete/', views.delete_service, name="delete_service"),
     path('bus/<slug:org_slug>/services/<int:service_id>/update_settings/', views.update_service_settings, name='update_service_settings'),

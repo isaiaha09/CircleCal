@@ -1,4 +1,4 @@
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_save, post_delete, pre_save
 from django.dispatch import receiver
 from django.db import transaction
 from django.utils import timezone
@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from datetime import datetime
 from django.conf import settings
 from accounts.models import Business as Organization
-from .models import OrgSettings, Booking, ServiceSettingFreeze, AuditBooking
+from .models import OrgSettings, Booking, ServiceSettingFreeze, AuditBooking, Service
 from .emails import send_booking_confirmation, send_booking_cancellation, send_internal_booking_cancellation_notification
 
 
@@ -15,6 +15,51 @@ from .emails import send_booking_confirmation, send_booking_cancellation, send_i
 def create_org_settings(sender, instance, created, **kwargs):
     if created:
         OrgSettings.objects.create(organization=instance)
+
+
+def _service_signature_tuple(svc) -> tuple:
+    """Mirror calendar_app.views._service_schedule_signature without importing it."""
+    try:
+        return (
+            int(getattr(svc, 'duration', 0) or 0),
+            int(getattr(svc, 'buffer_before', 0) or 0),
+            int(getattr(svc, 'buffer_after', 0) or 0),
+        )
+    except Exception:
+        return (0, 0, 0)
+
+
+@receiver(pre_save, sender=Service)
+def service_signature_updated_at(sender, instance, **kwargs):
+    """Update Service.signature_updated_at when signature-affecting fields change."""
+    try:
+        if not hasattr(instance, 'signature_updated_at'):
+            return
+    except Exception:
+        return
+
+    # New service: ensure it has a timestamp.
+    try:
+        if not getattr(instance, 'pk', None):
+            if getattr(instance, 'signature_updated_at', None) is None:
+                instance.signature_updated_at = timezone.now()
+            return
+    except Exception:
+        return
+
+    try:
+        prev = Service.objects.filter(pk=instance.pk).first()
+    except Exception:
+        prev = None
+    if not prev:
+        return
+
+    try:
+        if _service_signature_tuple(prev) != _service_signature_tuple(instance):
+            instance.signature_updated_at = timezone.now()
+    except Exception:
+        # Fail-open: if we can't compare, don't mutate.
+        return
 
 
 # Confirmation emails are sent explicitly from views to avoid duplicates.

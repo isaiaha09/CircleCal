@@ -58,6 +58,12 @@ class Service(models.Model):
     # the public booking page until it is fully configured.
     show_on_public_calendar = models.BooleanField(default=True)
 
+    # When any scheduling-affecting fields (duration/buffers/increment rules/etc)
+    # change, this timestamp is updated. Used to determine which service should
+    # "yield" in weekly partitioning when mixed-signature services would
+    # otherwise overlap.
+    signature_updated_at = models.DateTimeField(default=timezone.now)
+
     # If true, this service requires facility resources/capacity and must be
     # linked to at least one FacilityResource via ServiceResource.
     requires_facility_resources = models.BooleanField(default=False)

@@ -1,6 +1,9 @@
 {% extends "calendar_app/base.html" %}
 {% load static %}
 
+{# Use a full-width main container for the demo so mobile centering works correctly. #}
+{% block main_class %}w-full max-w-none p-0{% endblock %}
+
 {% block content %}
 <div class="cc-page" style="max-width: 1180px; margin: 0 auto; padding: 24px 16px;">
     <div style="display:flex; justify-content:center; align-items:center; margin-bottom:12px; flex-direction:column;">
@@ -90,8 +93,8 @@
     </div>
 </div>
 
-<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/main.min.css" rel="stylesheet" />
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<link href="{% static 'vendor/fullcalendar/5.11.3/css/main.min.css' %}" rel="stylesheet" />
+<script src="{% static 'vendor/fullcalendar/5.11.3/js/main.min.js' %}"></script>
 
 <style>
 /* Mirror calendar.html styling (trimmed to demo needs) */
@@ -197,6 +200,158 @@ select, input[type="time"], input[type="number"] {
 select:focus, input[type="time"]:focus, input[type="number"]:focus {
     border-color: var(--primary-500);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Time input wrapper (used by custom time picker) */
+.time-input-container {
+    position: relative;
+    display: inline-block;
+}
+
+/* Custom Time Picker (ported from calendar.html, demo-safe) */
+.custom-time-picker {
+    position: fixed;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1);
+    z-index: 20000;
+    padding: 16px;
+    min-width: 280px;
+    display: none;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.custom-time-picker.active {
+    display: block;
+}
+
+/* Center the custom time picker on very small screens */
+@media (max-width: 480px) {
+    .custom-time-picker {
+        left: 50% !important;
+        top: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: calc(100% - 32px) !important;
+        max-width: 420px !important;
+        min-width: auto !important;
+        padding: 12px !important;
+        z-index: 20000 !important;
+        box-shadow: 0 16px 35px rgba(0,0,0,0.25) !important;
+    }
+}
+
+.time-picker-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.time-picker-display {
+    font-size: 32px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--primary-600);
+    margin-bottom: 16px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+}
+
+.time-picker-selectors {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.time-selector {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.time-selector-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--gray-600);
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+.time-scroll-container {
+    height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: var(--gray-50);
+    padding: 4px;
+}
+
+.time-option {
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    color: var(--gray-700);
+}
+
+.time-option:hover {
+    background: white;
+    color: var(--primary-600);
+}
+
+.time-option.selected {
+    background: var(--primary-500);
+    color: white;
+    font-weight: 600;
+}
+
+.time-picker-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.time-picker-btn {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.time-picker-btn.confirm {
+    background: var(--primary-500);
+    color: white;
+}
+
+.time-picker-btn.confirm:hover {
+    background: var(--primary-600);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+}
+
+.time-picker-btn.cancel {
+    background: var(--gray-200);
+    color: var(--gray-700);
+}
+
+.time-picker-btn.cancel:hover {
+    background: var(--gray-300);
 }
 
 .range-row {
@@ -401,14 +556,19 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
         align-items: center !important;
         justify-content: flex-start !important;
         gap: 16px !important;
+        width: 100% !important;
     }
     #defaultAvailabilityContainer,
     .cc-demo-calendar-col {
         min-width: 0 !important;
         /* Match calendar.html look: centered card that nearly fills the screen */
+        width: 95vw !important;
         max-width: 95vw !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
+        flex: 0 0 auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+        align-self: center !important;
+        box-sizing: border-box !important;
     }
     #defaultAvailabilityContainer { padding: 16px !important; }
     #calendar { padding: 12px !important; }
@@ -500,15 +660,15 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
         padding: 3px 6px !important;
         font-size: 10px !important;
         border-radius: 6px !important;
-        min-height: 26px !important;
-        line-height: 1 !important;
+        min-height: 19px !important;
+       
     }
     #defaultAvailabilityContainer .remove-range-btn {
         font-size: 10px !important;
         border-radius: 4px !important;
         height: 24px !important;
         line-height: 24px !important;
-        min-width: 32px !important;
+      
     }
     #defaultAvailabilityContainer .unavailable-checkbox {
         top: 3px !important;
@@ -633,28 +793,217 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
         return h * 60 + m;
     }
 
+    function removeAnyCustomTimePickers() {
+        try { document.querySelectorAll('.custom-time-picker').forEach(p => p.remove()); } catch (e) {}
+    }
+
+    // Demo: custom time picker (ported from calendar.html; no service-scope constraints in demo)
+    function createCustomTimePickerGlobal(inputElement) {
+        const picker = document.createElement('div');
+        picker.className = 'custom-time-picker';
+
+        const [initialHour, initialMinute] = (inputElement.value || '09:00').split(':');
+        let selectedHour = String(initialHour || '09').padStart(2, '0');
+        let selectedMinute = String(initialMinute || '00').padStart(2, '0');
+
+        const isStart = inputElement.classList.contains('range-start');
+        const headerText = isStart ? 'Start Time' : 'End Time';
+
+        picker.innerHTML = `
+            <div class="time-picker-header">${headerText}</div>
+            <div class="time-picker-display">${formatDisplayTime(selectedHour, selectedMinute)}</div>
+            <div class="time-picker-selectors">
+                <div class="time-selector">
+                    <div class="time-selector-label">Hour</div>
+                    <div class="time-scroll-container" data-type="hour"></div>
+                </div>
+                <div class="time-selector">
+                    <div class="time-selector-label">Minute</div>
+                    <div class="time-scroll-container" data-type="minute"></div>
+                </div>
+            </div>
+            <div class="time-picker-actions">
+                <button class="time-picker-btn cancel" type="button">Cancel</button>
+                <button class="time-picker-btn confirm" type="button">Confirm</button>
+            </div>
+        `;
+
+        const hourContainer = picker.querySelector('[data-type="hour"]');
+        const minuteContainer = picker.querySelector('[data-type="minute"]');
+
+        function updateDisplay() {
+            const el = picker.querySelector('.time-picker-display');
+            if (el) el.textContent = formatDisplayTime(selectedHour, selectedMinute);
+        }
+
+        function formatHour(h) {
+            if (h === 0) return '12 AM';
+            if (h < 12) return `${h} AM`;
+            if (h === 12) return '12 PM';
+            return `${h - 12} PM`;
+        }
+
+        function formatDisplayTime(h, m) {
+            const hour = parseInt(h, 10);
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const h12 = hour === 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+            return `${h12}:${m} ${ampm}`;
+        }
+
+        for (let h = 0; h < 24; h++) {
+            const hourStr = String(h).padStart(2, '0');
+            const opt = document.createElement('div');
+            opt.className = 'time-option';
+            if (hourStr === selectedHour) opt.classList.add('selected');
+            opt.textContent = formatHour(h);
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                selectedHour = hourStr;
+                updateDisplay();
+                try { opt.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (err) {}
+            });
+            hourContainer.appendChild(opt);
+        }
+
+        for (let m = 0; m < 60; m++) {
+            const minStr = String(m).padStart(2, '0');
+            const opt = document.createElement('div');
+            opt.className = 'time-option';
+            if (minStr === selectedMinute) opt.classList.add('selected');
+            opt.textContent = minStr;
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
+                minuteContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                selectedMinute = minStr;
+                updateDisplay();
+                try { opt.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (err) {}
+            });
+            minuteContainer.appendChild(opt);
+        }
+
+        const close = () => {
+            try { picker.remove(); } catch (e) {}
+            try { document.removeEventListener('click', onDocClick, true); } catch (e) {}
+        };
+
+        function onDocClick(e) {
+            try {
+                if (!picker.contains(e.target) && e.target !== inputElement) close();
+            } catch (err) {
+                close();
+            }
+        }
+
+        picker.addEventListener('click', (e) => e.stopPropagation());
+
+        picker.querySelector('.confirm')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            inputElement.value = `${selectedHour}:${selectedMinute}`;
+            try { inputElement.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) {}
+            try { inputElement.dispatchEvent(new Event('change', { bubbles: true })); } catch (err) {}
+            close();
+        });
+
+        picker.querySelector('.cancel')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            close();
+        });
+
+        setTimeout(() => {
+            try { document.addEventListener('click', onDocClick, true); } catch (e) {}
+        }, 0);
+
+        setTimeout(() => {
+            try { hourContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' }); } catch (e) {}
+            try { minuteContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' }); } catch (e) {}
+        }, 50);
+
+        return picker;
+    }
+
+    function openCustomTimePickerForInput(inputEl) {
+        removeAnyCustomTimePickers();
+        const picker = createCustomTimePickerGlobal(inputEl);
+        picker.classList.add('active');
+
+        // Attach to body so it won't be clipped by container overflow.
+        picker.style.visibility = 'hidden';
+        document.body.appendChild(picker);
+
+        const isTiny = window.matchMedia && window.matchMedia('(max-width: 480px)').matches;
+        if (!isTiny) {
+            requestAnimationFrame(() => {
+                try {
+                    const r = inputEl.getBoundingClientRect();
+                    const pw = picker.offsetWidth || 280;
+                    const ph = picker.offsetHeight || 320;
+                    const pad = 8;
+
+                    let left = r.left;
+                    left = Math.max(pad, Math.min(left, window.innerWidth - pw - pad));
+
+                    let top = r.bottom + 8;
+                    if (top + ph + pad > window.innerHeight) top = r.top - ph - 8;
+                    top = Math.max(pad, Math.min(top, window.innerHeight - ph - pad));
+
+                    picker.style.left = `${left}px`;
+                    picker.style.top = `${top}px`;
+                } catch (e) {}
+                picker.style.visibility = '';
+            });
+        } else {
+            picker.style.visibility = '';
+        }
+    }
+
     function addDefaultRangeRow(rangesWrap, startVal, endVal) {
         const row = document.createElement('div');
         row.className = 'range-row';
 
+        const startContainer = document.createElement('div');
+        startContainer.className = 'time-input-container';
         const start = document.createElement('input');
         start.type = 'time';
         start.value = startVal || '09:00';
         start.className = 'range-start';
+        start.readOnly = true;
+        start.style.cursor = 'pointer';
+        start.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openCustomTimePickerForInput(start);
+        });
+        startContainer.appendChild(start);
 
+        const endContainer = document.createElement('div');
+        endContainer.className = 'time-input-container';
         const end = document.createElement('input');
         end.type = 'time';
         end.value = endVal || '17:00';
         end.className = 'range-end';
+        end.readOnly = true;
+        end.style.cursor = 'pointer';
+        end.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openCustomTimePickerForInput(end);
+        });
+        endContainer.appendChild(end);
 
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'remove-range-btn';
         remove.innerHTML = '<span class="remove-icon">✖</span><span class="remove-text">Remove</span>';
-        remove.addEventListener('click', () => row.remove());
+        remove.addEventListener('click', () => {
+            try { removeAnyCustomTimePickers(); } catch (e) {}
+            row.remove();
+        });
 
-        row.appendChild(start);
-        row.appendChild(end);
+        row.appendChild(startContainer);
+        row.appendChild(endContainer);
         row.appendChild(remove);
 
         const addBtn = rangesWrap.querySelector('.add-range-btn');

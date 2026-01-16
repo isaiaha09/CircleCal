@@ -2,8 +2,11 @@
 
 {% block title %}Create Business — CircleCal{% endblock %}
 
+{# Mobile-only: let content use viewport width; keep normal base layout on sm+ #}
+{% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-6 md:px-6 md:py-8{% endblock %}
+
 {% block content %}
-<div class="max-w-3xl mx-auto">
+<div class="w-[95vw] mx-auto sm:w-full sm:max-w-3xl">
     <div class="mb-10 text-center">
         <h1 class="text-4xl font-bold mb-2">Create Your Business</h1>
         <p class="text-gray-600">We'll set up a workspace and start your free 31‑day trial — no card required.</p>
@@ -26,8 +29,8 @@
                 {% csrf_token %}
                 <div>
                     <label for="name" class="block text-sm font-medium text-gray-700">Business Name</label>
-                    <input type="text" id="name" name="name" placeholder="Ex: JP Training Co." required
-                                     class="mt-1 w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 shadow-sm"/>
+                    <input type="text" id="name" name="name" required
+                                     class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"/>
                     {% if form.errors.name %}
                         <p class="mt-2 text-sm text-red-600">{{ form.errors.name.0 }}</p>
                     {% else %}
@@ -37,7 +40,7 @@
 
                 <div>
                     <label for="timezone" class="block text-sm font-medium text-gray-700">Timezone</label>
-                    <select id="timezone" name="timezone" class="mt-1 w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 shadow-sm" required>
+                    <select id="timezone" name="timezone" class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm" required>
                         {% for val,label in form.timezone.field.choices %}
                             <option value="{{ val }}" {% if form.timezone.value == val %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}

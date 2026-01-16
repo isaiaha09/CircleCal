@@ -6,6 +6,7 @@ from django.contrib import messages
 from calendar_app.forms import OrganizationCreateForm
 import json
 from django.utils.text import slugify
+from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from accounts.models import Business as Organization, Membership, Invite
 from bookings.models import Booking, Service, ServiceSettingFreeze, AuditBooking, FacilityResource, ServiceResource
@@ -1290,21 +1291,26 @@ def _seed_service_weekly_from_org_defaults(org, service):
 
 
 def _service_schedule_signature(service):
-    """Fields that affect slot generation/scheduling compatibility."""
+    """Fields that affect *partitioning* compatibility between services.
+
+    Business rule: services can share the same underlying overall availability
+    windows when they have the same duration + buffer settings. When a service
+    changes duration/buffers, it becomes "incompatible" with the others and is
+    subject to partitioning / no-remaining-availability locking.
+    """
     try:
         return (
             int(getattr(service, 'duration', 0) or 0),
+            int(getattr(service, 'buffer_before', 0) or 0),
             int(getattr(service, 'buffer_after', 0) or 0),
-            int(getattr(service, 'time_increment_minutes', 30) or 30),
+            int(getattr(service, 'time_increment_minutes', 0) or 0),
             bool(getattr(service, 'use_fixed_increment', False)),
             bool(getattr(service, 'allow_squished_bookings', False)),
             bool(getattr(service, 'allow_ends_after_availability', False)),
-            int(getattr(service, 'min_notice_hours', 0) or 0),
-            int(getattr(service, 'max_booking_days', 0) or 0),
         )
     except Exception:
         # Defensive fallback
-        return (0, 0, 30, False, False, False, 0, 0)
+        return (0, 0, 0, 0, False, False, False)
 
 
 def _effective_member_weekly_map(org, membership_id):
@@ -1340,6 +1346,14 @@ def _ui_ranges_to_min_intervals(ranges):
             out.append((int(sm), int(em)))
     out.sort(key=lambda x: (x[0], x[1]))
     return out
+
+def _full_weekly_ui_map():
+    """Unconstrained weekly UI map (used when a Team service has no assignees yet).
+
+    We intentionally keep this independent of org/member availability so the
+    create/edit Service Availability UI can be configured before assignment.
+    """
+    return [["00:00-23:59"] for _ in range(7)]
 
 
 def _min_intervals_to_ui_ranges(intervals):
@@ -1401,7 +1415,7 @@ def _merge_min_intervals(intervals):
 
 
 def _subtract_min_intervals(allowed, blocked):
-    """Return allowed \ blocked for minute intervals (expects unsorted ok)."""
+    """Return allowed minus blocked for minute intervals (expects unsorted ok)."""
     A = _merge_min_intervals(allowed)
     B = _merge_min_intervals(blocked)
     if not A:
@@ -1488,6 +1502,22 @@ def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, ex
     except Exception:
         ex_id = None
 
+    my_sig = None
+    my_ts = None
+    if ex_id is not None:
+        try:
+            my_svc = Service.objects.filter(organization=org, id=ex_id).first()
+            if my_svc is not None:
+                my_sig = _service_schedule_signature(my_svc)
+                my_ts = getattr(my_svc, 'signature_updated_at', None)
+        except Exception:
+            my_sig, my_ts = None, None
+
+    # This helper is used for shared/group services (2+ assignees). In that context,
+    # members' other services always reserve time regardless of signature compatibility
+    # or priority ordering.
+    is_group_context = len(mids) >= 2
+
     # membership_id -> set(service_id)
     mem_to_service_ids = {mid: set() for mid in mids}
     try:
@@ -1519,6 +1549,11 @@ def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, ex
             other_services = {}
 
     # Compute per-member remaining weekly map: overall - other services.
+    #
+    # IMPORTANT: This is a weekly *partitioning* rule. For Team plans we want
+    # partitioning to be symmetric per member: other services reserve time
+    # regardless of update ordering, so service A cannot claim time already
+    # reserved by service B (and vice versa).
     per_member_remaining = []
     for mid in mids:
         overall_ui = _effective_member_weekly_map(org, mid)
@@ -1527,6 +1562,14 @@ def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, ex
             osvc = other_services.get(int(sid))
             if not osvc:
                 continue
+
+            if not is_group_context:
+                # Same-signature services are scheduling-compatible and can share windows.
+                try:
+                    if my_sig is not None and _service_schedule_signature(osvc) == my_sig:
+                        continue
+                except Exception:
+                    pass
             try:
                 os_map = _build_service_weekly_map(osvc)  # includes inheritance when applicable
             except Exception:
@@ -1557,6 +1600,103 @@ def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, ex
                 break
         common[ui] = _min_intervals_to_ui_ranges(cur)
     return common
+
+
+def _effective_org_weekly_map_minus_other_services(org, *, exclude_service_id=None, only_active=True):
+    """Return UI weekly map for Pro/solo org scope: org weekly availability minus other services.
+
+    This is a weekly partitioning constraint for solo (non-team) plans.
+    """
+    overall_ui = _build_org_weekly_map(org)
+
+    ex_id = None
+    try:
+        ex_id = int(exclude_service_id) if exclude_service_id is not None else None
+    except Exception:
+        ex_id = None
+
+    my_sig = None
+    my_ts = None
+    if ex_id is not None:
+        try:
+            my_svc = Service.objects.filter(organization=org, id=ex_id).first()
+            if my_svc is not None:
+                my_sig = _service_schedule_signature(my_svc)
+                my_ts = getattr(my_svc, 'signature_updated_at', None)
+        except Exception:
+            my_sig, my_ts = None, None
+
+    # Reserve time for other *active* services, regardless of whether they are
+    # currently shown publicly. Hidden-but-active services still consume capacity.
+    #
+    # Priority: only services whose signature was updated earlier reserve time
+    # against this service. This avoids a symmetric "both services have no
+    # remaining availability" situation, and makes the most recently changed
+    # service yield when signatures diverge.
+    qs = Service.objects.filter(organization=org)
+    if only_active:
+        try:
+            qs = qs.filter(is_active=True)
+        except Exception:
+            pass
+    if ex_id is not None:
+        qs = qs.exclude(id=ex_id)
+
+    blocked_by_day = [[] for _ in range(7)]
+    try:
+        other_services = list(qs)
+    except Exception:
+        other_services = []
+
+    for osvc in other_services:
+        try:
+            # Same-signature services are scheduling-compatible and can share the
+            # same underlying availability windows (no partitioning needed).
+            if my_sig is not None:
+                try:
+                    if _service_schedule_signature(osvc) == my_sig:
+                        continue
+                except Exception:
+                    pass
+
+            # Priority: only earlier signature-changes reserve time against this service.
+            try:
+                os_ts = getattr(osvc, 'signature_updated_at', None)
+                if my_ts is not None and os_ts is not None:
+                    if os_ts > my_ts:
+                        continue
+                    if os_ts == my_ts and ex_id is not None:
+                        try:
+                            if int(getattr(osvc, 'id', 0) or 0) > int(ex_id):
+                                continue
+                        except Exception:
+                            pass
+                elif ex_id is not None:
+                    # Fallback tie-breaker: id
+                    try:
+                        if int(getattr(osvc, 'id', 0) or 0) > int(ex_id):
+                            continue
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            os_map = _build_service_weekly_map(osvc)
+        except Exception:
+            os_map = [[] for _ in range(7)]
+        for ui in range(7):
+            try:
+                blocked_by_day[ui].extend(os_map[ui] or [])
+            except Exception:
+                continue
+
+    remaining_ui = [[] for _ in range(7)]
+    for ui in range(7):
+        allowed_iv = _ui_ranges_to_min_intervals((overall_ui or [[] for _ in range(7)])[ui] if overall_ui else [])
+        blocked_iv = _ui_ranges_to_min_intervals(blocked_by_day[ui] or [])
+        rem_iv = _subtract_min_intervals(allowed_iv, blocked_iv)
+        remaining_ui[ui] = _min_intervals_to_ui_ranges(rem_iv)
+    return remaining_ui
 
 
 def _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, proposed_cleaned_rows, *, err_prefix=None):
@@ -1757,7 +1897,21 @@ def _build_service_weekly_map(service):
     if has_rows:
         return svc_map
 
-    # No explicit service windows; for single-assignee services we may inherit.
+    # Pro/Team requirement: if a service has no explicit service-weekly rows,
+    # it should remain unavailable until the owner explicitly configures it.
+    # This prevents a previously-empty service from "taking" newly freed
+    # overall availability automatically.
+    try:
+        from billing.utils import get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        sub = get_subscription(service.organization)
+        if not (sub and getattr(sub, 'status', '') == 'trialing'):
+            if (get_plan_slug(service.organization) or '').lower() in {PRO_SLUG, TEAM_SLUG}:
+                return svc_map
+    except Exception:
+        pass
+
+    # No explicit service windows; for single-assignee services we may inherit
+    # (legacy behavior for non-Pro/Team).
     try:
         from bookings.models import ServiceAssignment
     except Exception:
@@ -1799,20 +1953,18 @@ def _service_availability_applicability(org, service):
         - The service has exactly one assigned team member AND that member has multiple
             solo services (so per-service partitioning is required).
     """
-    # Trial onboarding rule: when only one active service exists, per-service
-    # availability is disabled and availability follows the Calendar (org weekly).
+    # Plan rule: per-service availability is only available on paid Pro/Team.
+    # Trial (any plan slug) and Basic are blocked until upgrade.
     try:
-        from billing.utils import get_subscription
-        subscription = get_subscription(org)
-        if subscription and getattr(subscription, 'status', '') == 'trialing':
-            try:
-                active_ct = Service.objects.filter(organization=org, is_active=True).count()
-            except Exception:
-                active_ct = 0
-            if active_ct <= 1:
-                return False, "With only one active service, availability follows your Calendar availability. Create a second active service to enable per-service availability."
+        from billing.utils import get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        plan_slug = (get_plan_slug(org) or '').lower()
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        if is_trialing or plan_slug not in {PRO_SLUG, TEAM_SLUG}:
+            return False, "Service availability requires a Pro or Team subscription. Upgrade to unlock per-service availability."
     except Exception:
-        pass
+        # If billing utils are unavailable, default to disabled.
+        return False, "Service availability requires a Pro or Team subscription. Upgrade to unlock per-service availability."
 
     try:
         from bookings.models import ServiceAssignment
@@ -2010,6 +2162,21 @@ def _service_can_be_shown_publicly(org, service):
     if not service:
         return False, 'Service not found.'
 
+    # Pro/Team: do not allow a service to be shown publicly if it has no
+    # effective weekly availability (i.e., there is no "room" for it).
+    # This prevents creating a service that appears on the public booking page
+    # but has zero available times.
+    try:
+        if not _service_has_effective_weekly_availability_for_activation(org, service):
+            return False, (
+                'This service has no available weekly time to book. '
+                'Free up space in overall/team member availability or add service availability first, '
+                'then enable public visibility.'
+            )
+    except Exception:
+        # If we cannot evaluate, fail closed.
+        return False, 'Could not validate service availability for public visibility.'
+
     # NOTE: The product no longer uses a separate Service "active" toggle.
     # Public visibility is controlled by `show_on_public_calendar` and is only
     # locked when service availability does not fit within assigned members'
@@ -2025,6 +2192,45 @@ def _service_can_be_shown_publicly(org, service):
         )
     except Exception:
         assigned_ids = []
+
+    # Pro plan overall-scope partitioning: unassigned services must fit within the
+    # remaining overall availability after subtracting other active services.
+    try:
+        from billing.utils import get_plan_slug, PRO_SLUG
+        plan_slug = get_plan_slug(org)
+    except Exception:
+        plan_slug = None
+
+    if not assigned_ids and plan_slug == PRO_SLUG:
+        try:
+            allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=getattr(service, 'id', None), only_active=True)
+            svc_ui_map = _build_service_weekly_map(service)
+            proposed = []
+            for ui in range(7):
+                model_wd = ((ui - 1) % 7)
+                for r in (svc_ui_map[ui] or []):
+                    try:
+                        start_s, end_s = [x.strip() for x in str(r).split('-', 1)]
+                    except Exception:
+                        continue
+                    if start_s and end_s and start_s < end_s:
+                        proposed.append((model_wd, start_s, end_s))
+
+            if not proposed:
+                return False, 'Add service weekly availability first, then enable public visibility.'
+
+            _enforce_service_windows_within_ui_allowed_map(
+                allowed_ui_map,
+                proposed,
+                err_prefix=(
+                    'Service availability must be within your remaining overall availability '
+                    '(after accounting for your other services).'
+                ),
+            )
+        except ValueError as ve:
+            return False, str(ve)
+        except Exception:
+            return False, 'Could not validate this service against overall availability.'
 
     if assigned_ids:
         try:
@@ -2216,8 +2422,8 @@ def _enforce_no_overlap_between_mixed_signature_solo_services(org, membership_id
 
     proposed_by_wd = {}
     for (wd, start, end) in proposed_cleaned_rows:
-        sm = _hm_to_minutes(start)
-        em = _hm_to_minutes(end)
+        sm = _time_to_minutes(start)
+        em = _time_to_minutes(end)
         if sm is None or em is None:
             continue
         proposed_by_wd.setdefault(int(wd), []).append((sm, em))
@@ -2441,8 +2647,62 @@ def plan_detail(request, plan_slug):
 
 
 def contact(request):
+    # Bot protection (public form): Turnstile + lightweight per-IP rate limit.
+    try:
+        from circlecalproject.bot_protection import (
+            get_turnstile_site_key,
+            rate_limit,
+            turnstile_is_enabled,
+            verify_turnstile,
+        )
+    except Exception:
+        get_turnstile_site_key = None
+        rate_limit = None
+        turnstile_is_enabled = None
+        verify_turnstile = None
+
+    turnstile_enabled = bool(turnstile_is_enabled() if turnstile_is_enabled else False)
+    turnstile_site_key = (get_turnstile_site_key() if get_turnstile_site_key else '')
+
     if request.method == 'POST':
         form = ContactForm(request.POST)
+
+        # Rate-limit contact submissions per IP.
+        try:
+            if rate_limit:
+                allowed, _remaining = rate_limit(request, action='contact', limit=20, window_seconds=60 * 60)
+                if not allowed:
+                    try:
+                        form.add_error(None, 'Too many messages from your network. Please wait and try again.')
+                    except Exception:
+                        pass
+                    return render(
+                        request,
+                        'calendar_app/contact.html',
+                        {'form': form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key},
+                        status=429,
+                    )
+        except Exception:
+            pass
+
+        # Turnstile verification (if configured)
+        try:
+            if verify_turnstile and turnstile_enabled:
+                ok, err = verify_turnstile(request)
+                if not ok:
+                    try:
+                        form.add_error(None, err or 'Security check failed. Please try again.')
+                    except Exception:
+                        pass
+                    return render(
+                        request,
+                        'calendar_app/contact.html',
+                        {'form': form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key},
+                        status=400,
+                    )
+        except Exception:
+            pass
+
         if form.is_valid():
             business_name = (form.cleaned_data.get('business_name') or '').strip()
             name = form.cleaned_data['name']
@@ -2471,12 +2731,12 @@ def contact(request):
                             'business_name',
                             'No organization found with that exact name. Make sure the name is spelled exactly (including capitalization), or leave this field empty if you have not created a business in CircleCal.'
                         )
-                        return render(request, 'calendar_app/contact.html', {'form': form})
+                        return render(request, 'calendar_app/contact.html', {'form': form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key})
                 except Exception:
                     # If anything goes wrong checking the DB, treat as a validation
                     # failure to avoid sending potentially mis-attributed messages.
                     form.add_error('business_name', 'Could not verify the business name. Please try again later or leave this field empty.')
-                    return render(request, 'calendar_app/contact.html', {'form': form})
+                    return render(request, 'calendar_app/contact.html', {'form': form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key})
 
             body = (
                 f"New contact form submission\n\n"
@@ -2549,7 +2809,7 @@ def contact(request):
     else:
         form = ContactForm()
 
-    return render(request, 'calendar_app/contact.html', {'form': form})
+    return render(request, 'calendar_app/contact.html', {'form': form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key})
 
 
 def about(request):
@@ -2651,6 +2911,17 @@ def calendar_view(request, org_slug):
     except Exception:
         # Fail closed if billing is unavailable
         can_use_overrides = False
+
+    # Pro-only: enable scope dropdown (overall + services) on non-Team Pro (not trialing).
+    is_pro_plan = False
+    try:
+        from billing.utils import get_plan_slug, get_subscription, PRO_SLUG
+        plan_slug = (get_plan_slug(org) or '').lower()
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        is_pro_plan = bool((not is_team) and (plan_slug == PRO_SLUG) and (not is_trialing) and (sub is not None))
+    except Exception:
+        is_pro_plan = False
     # Serialize weekly availability so the front-end can pre-populate defaultAvailability.
     # Structure: array of objects: [{"day_of_week": 0, "ranges": ["09:00-12:00","13:00-17:00"], "unavailable": false}, ...]
     weekly_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).order_by('weekday', 'start_time')
@@ -2703,7 +2974,9 @@ def calendar_view(request, org_slug):
             'name': s.name,
             'slug': s.slug,
             'is_active': bool(getattr(s, 'is_active', True)),
+            'show_on_public_calendar': bool(getattr(s, 'show_on_public_calendar', False)),
             'duration': s.duration,
+            'buffer_before': int(getattr(s, 'buffer_before', 0) or 0),
             'buffer_after': int(getattr(s, 'buffer_after', 0) or 0),
             'time_increment_minutes': getattr(s, 'time_increment_minutes', 30),
             'use_fixed_increment': bool(getattr(s, 'use_fixed_increment', False)),
@@ -2712,6 +2985,7 @@ def calendar_view(request, org_slug):
             'min_notice_hours': int(getattr(s, 'min_notice_hours', 0) or 0),
             'max_booking_days': int(getattr(s, 'max_booking_days', 0) or 0),
             'schedule_signature': list(_service_schedule_signature(s)),
+            'signature_updated_at': (getattr(s, 'signature_updated_at', None).isoformat() if getattr(s, 'signature_updated_at', None) else None),
             # Provide a simple weekly availability map for the client to compute next-available dates
             'weekly_map': _build_service_weekly_map(s),
             'has_service_weekly_windows': (False if trial_single_service_mode else bool(s.weekly_availability.filter(is_active=True).exists())),
@@ -2722,6 +2996,50 @@ def calendar_view(request, org_slug):
     # Guard against raw closing script tags in service names/descriptions
     if isinstance(services_json, str):
         services_json = services_json.replace('</script>', '<\\/script>')
+
+    # Build groups of services that share the same scheduling signature
+    # (duration + buffers). These groups can overlap each other's schedules.
+    try:
+        from collections import defaultdict
+
+        sig_to_svcs = defaultdict(list)
+        for s in services_qs:
+            try:
+                sig = _service_schedule_signature(s)
+                if sig is None:
+                    continue
+                sig_to_svcs[tuple(sig)].append(s)
+            except Exception:
+                continue
+
+        shared_signature_groups = []
+        for sig, group in sig_to_svcs.items():
+            try:
+                if not group or len(group) < 2:
+                    continue
+                # Keep UI-friendly payload only
+                shared_signature_groups.append([
+                    {
+                        'id': ss.id,
+                        'name': ss.name,
+                        'slug': ss.slug,
+                        'is_active': bool(getattr(ss, 'is_active', True)),
+                    }
+                    for ss in group
+                ])
+            except Exception:
+                continue
+
+        # Prefer larger groups first, then stable by name
+        try:
+            shared_signature_groups.sort(key=lambda g: (-len(g), str(g[0].get('name', '')).lower()))
+        except Exception:
+            pass
+
+        # Cap for safety: page is already large
+        shared_signature_groups = shared_signature_groups[:8]
+    except Exception:
+        shared_signature_groups = []
     get_token(request)
     # Support auto-opening the Day Schedule modal via query params
     auto_open_service = request.GET.get('open_day_schedule_for', '')
@@ -2739,8 +3057,10 @@ def calendar_view(request, org_slug):
         'org_timezone': org.timezone,  # Pass organization's timezone to template
         'services': services_qs,
         'services_json': services_json,
+        'shared_signature_groups': shared_signature_groups,
         'members_list': list(Membership.objects.filter(organization=org, is_active=True).values('id','user__first_name','user__last_name','user__email')),
         'is_team_plan': is_team,
+        'is_pro_plan': is_pro_plan,
         'can_use_overrides': can_use_overrides,
         # Default member id for selector: prefer membership row for organization owner, otherwise first active membership id
         'default_member_id': (lambda org_obj: (lambda owner_mem: owner_mem if owner_mem is not None else (Membership.objects.filter(organization=org_obj, is_active=True).values_list('id', flat=True).first()))(Membership.objects.filter(organization=org_obj, is_active=True, user=getattr(org_obj, 'owner', None)).values_list('id', flat=True).first()))(org),
@@ -2944,6 +3264,36 @@ def save_availability(request, slug):
         'thursday': 4, 'friday': 5, 'saturday': 6
     }
 
+    def _time_to_minutes(t: str) -> int:
+        parts = str(t or '').split(':')
+        hh = int(parts[0]) if parts and parts[0].isdigit() else 0
+        mm = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        return hh * 60 + mm
+
+    def _validate_cleaned_no_overlap(cleaned_rows):
+        """Reject duplicate/overlapping windows within the same weekday.
+
+        cleaned_rows: iterable of (weekday, start_str, end_str) where weekday is model index (0=Mon..6=Sun).
+        """
+        by_day = {}
+        for wd, start, end in (cleaned_rows or []):
+            by_day.setdefault(int(wd), []).append((str(start), str(end)))
+
+        for wd, items in by_day.items():
+            windows = []
+            for s, e in items:
+                sm = _time_to_minutes(s)
+                em = _time_to_minutes(e)
+                windows.append((sm, em, s, e))
+            windows.sort(key=lambda x: (x[0], x[1]))
+            prev_end = None
+            prev_s = prev_e = None
+            for sm, em, s, e in windows:
+                if prev_end is not None and sm < prev_end:
+                    raise ValueError(f"Time ranges cannot overlap or duplicate ({prev_s}-{prev_e} conflicts with {s}-{e}).")
+                prev_end = em
+                prev_s, prev_e = s, e
+
     cleaned = []  # list of (weekday, start, end)
 
     windows = payload.get("windows")
@@ -3008,6 +3358,12 @@ def save_availability(request, slug):
     else:
         return HttpResponseBadRequest("Missing windows or availability array")
 
+    # Enforce: no duplicate or overlapping windows within a weekday
+    try:
+        _validate_cleaned_no_overlap(cleaned)
+    except ValueError as ve:
+        return HttpResponseBadRequest(str(ve))
+
     # ----- New: support bulk maps for members and services -----
     member_map = payload.get('member_map')
     service_map = payload.get('service_map')
@@ -3048,6 +3404,9 @@ def save_availability(request, slug):
                     raise ValueError('Start must be before end')
                 model_wd = ((wd - 1) % 7)
                 out.append((model_wd, start, end))
+
+            # Enforce: no duplicate or overlapping windows within a weekday
+            _validate_cleaned_no_overlap(out)
         return out
 
     # Determine current membership early (used for permission checks below)
@@ -3364,6 +3723,32 @@ def save_availability_general(request):
         'thursday': 4, 'friday': 5, 'saturday': 6
     }
 
+    def _time_to_minutes(t: str) -> int:
+        parts = str(t or '').split(':')
+        hh = int(parts[0]) if parts and parts[0].isdigit() else 0
+        mm = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        return hh * 60 + mm
+
+    def _validate_cleaned_no_overlap(cleaned_rows):
+        by_day = {}
+        for wd, start, end in (cleaned_rows or []):
+            by_day.setdefault(int(wd), []).append((str(start), str(end)))
+
+        for wd, items in by_day.items():
+            windows = []
+            for s, e in items:
+                sm = _time_to_minutes(s)
+                em = _time_to_minutes(e)
+                windows.append((sm, em, s, e))
+            windows.sort(key=lambda x: (x[0], x[1]))
+            prev_end = None
+            prev_s = prev_e = None
+            for sm, em, s, e in windows:
+                if prev_end is not None and sm < prev_end:
+                    raise ValueError(f"Time ranges cannot overlap or duplicate ({prev_s}-{prev_e} conflicts with {s}-{e}).")
+                prev_end = em
+                prev_s, prev_e = s, e
+
     cleaned = []
     windows = payload.get("windows")
     availability = payload.get("availability")
@@ -3422,6 +3807,11 @@ def save_availability_general(request):
                 cleaned.append((model_wd, start, end))
     else:
         return HttpResponseBadRequest("Missing windows or availability array")
+
+    try:
+        _validate_cleaned_no_overlap(cleaned)
+    except ValueError as ve:
+        return HttpResponseBadRequest(str(ve))
 
     with transaction.atomic():
         WeeklyAvailability.objects.filter(organization=org).delete()
@@ -3848,36 +4238,41 @@ def delete_business(request, org_slug):
         messages.error(request, "Only owners can delete businesses.")
         return redirect('calendar_app:choose_business')
     
-    if request.method == "POST":
+    # The UI currently triggers delete via a link + confirm().
+    # Allow GET here so the delete action actually executes after confirmation.
+    if request.method in {"GET", "POST"}:
         org_name = org.name
-        org.delete()
-        messages.success(request, f"Business '{org_name}' has been deleted.")
+        try:
+            org.delete()
+            messages.success(request, f"Business '{org_name}' has been deleted.")
+        except Exception:
+            messages.error(request, "Unable to delete business. Please try again.")
         return redirect('calendar_app:choose_business')
-    
-    return render(request, "calendar_app/delete_business.html", {
-        "org": org,
-    })
+
+    return redirect('calendar_app:choose_business')
+
 
 @login_required
-@login_required
+@require_roles(['owner', 'admin', 'manager', 'staff'])
 def dashboard(request, org_slug):
-    org = get_object_or_404(Organization, slug=org_slug)
-    
-    # Check if user has access to this organization
-    membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
-    if not membership:
-        messages.error(request, "You don't have access to this organization.")
-        return redirect('calendar_app:choose_business')
-    
+    org = request.organization
     memberships = request.user.memberships.select_related("organization")
 
     # Provide subscription/trial info for conditional portal link
-    from billing.utils import get_subscription, get_plan_slug
-    subscription = get_subscription(org)
-    plan_slug = get_plan_slug(org)
+    subscription = None
+    plan_slug = None
     trialing_active = False
-    if subscription and subscription.status == "trialing" and subscription.trial_end and subscription.trial_end > timezone.now():
-        trialing_active = True
+    try:
+        from billing.utils import get_subscription, get_plan_slug
+        subscription = get_subscription(org)
+        plan_slug = get_plan_slug(org)
+        if subscription and subscription.status == "trialing" and subscription.trial_end and subscription.trial_end > timezone.now():
+            trialing_active = True
+    except Exception:
+        subscription = None
+        plan_slug = None
+        trialing_active = False
+
     # Determine whether the org has weekly availability configured so we can
     # disable access to Services until the calendar schedule is set up.
     try:
@@ -4213,6 +4608,111 @@ def create_service(request, org_slug):
         return redirect("calendar_app:dashboard", org_slug=org.slug)
 
     return render(request, "calendar_app/create_service.html", { "org": org, "is_team_plan": is_team_plan })
+
+
+@login_required
+@require_http_methods(['GET'])
+@require_roles(['owner', 'admin', 'manager'])
+def service_availability_constraints(request, org_slug):
+    """Return allowed weekly availability constraints for the given assignees.
+
+    Used by create/edit-service pages to dynamically update (lock/unlock) the
+    Service availability UI when team member selections change.
+
+    Query params:
+      - member_ids: repeated, membership IDs
+      - exclude_service_id: optional service id to exclude from partitioning
+    """
+    org = request.organization
+
+    # Determine Team vs Pro/solo behavior.
+    is_team_plan = False
+    can_use_pro_team = False
+    try:
+        from billing.utils import can_add_staff, get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        is_team_plan = bool(can_add_staff(org))
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        plan_slug = get_plan_slug(org)
+        can_use_pro_team = (plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
+    except Exception:
+        is_team_plan = False
+        can_use_pro_team = False
+
+    # Parse and validate assignee IDs within this org.
+    desired_assignee_ids = []
+    try:
+        from accounts.models import Membership
+        raw = request.GET.getlist('member_ids') or []
+        mids = []
+        for v in raw:
+            try:
+                mids.append(int(v))
+            except Exception:
+                continue
+        if mids:
+            desired_assignee_ids = list(
+                Membership.objects.filter(id__in=mids, organization=org, is_active=True)
+                .values_list('id', flat=True)
+            )
+    except Exception:
+        desired_assignee_ids = []
+
+    exclude_service_id = None
+    try:
+        v = request.GET.get('exclude_service_id', None)
+        if v not in (None, ''):
+            exclude_service_id = int(v)
+    except Exception:
+        exclude_service_id = None
+
+    # Compute allowed UI map.
+    org_map = _build_org_weekly_map(org)
+    allowed_map = org_map
+    try:
+        if is_team_plan:
+            if desired_assignee_ids:
+                allowed_map = _effective_common_weekly_map_minus_other_services(
+                    org,
+                    desired_assignee_ids,
+                    exclude_service_id=exclude_service_id,
+                )
+            else:
+                allowed_map = _full_weekly_ui_map()
+        else:
+            if can_use_pro_team:
+                allowed_map = _effective_org_weekly_map_minus_other_services(
+                    org,
+                    exclude_service_id=exclude_service_id,
+                )
+            else:
+                allowed_map = org_map
+    except Exception:
+        allowed_map = org_map
+
+    # Build response payload.
+    days = []
+    for ui in range(7):
+        try:
+            ui_ranges = (allowed_map or [[] for _ in range(7)])[ui] if allowed_map else []
+        except Exception:
+            ui_ranges = []
+        try:
+            iv = _ui_ranges_to_min_intervals(ui_ranges)
+        except Exception:
+            iv = []
+        try:
+            allowed_ranges_text = _format_ranges_12h(ui_ranges) if ui_ranges else ''
+        except Exception:
+            allowed_ranges_text = ''
+
+        days.append({
+            'remaining': [{'start': int(a), 'end': int(b)} for (a, b) in (iv or [])],
+            'allowed_ranges_text': allowed_ranges_text,
+            'allowed_empty': (not bool(ui_ranges)),
+        })
+
+    return JsonResponse({'days': days})
 
 
 @require_http_methods(["GET", "POST"])
@@ -4698,8 +5198,52 @@ def pricing_page(request, org_slug):
 
 
 def signup(request):
+    # Bot protection (public form): Turnstile + lightweight per-IP rate limit.
+    try:
+        from circlecalproject.bot_protection import (
+            get_turnstile_site_key,
+            rate_limit,
+            turnstile_is_enabled,
+            verify_turnstile,
+        )
+    except Exception:
+        get_turnstile_site_key = None
+        rate_limit = None
+        turnstile_is_enabled = None
+        verify_turnstile = None
+
+    turnstile_enabled = bool(turnstile_is_enabled() if turnstile_is_enabled else False)
+    turnstile_site_key = (get_turnstile_site_key() if get_turnstile_site_key else '')
+
     if request.method == "POST":
         form = SignupForm(request.POST)
+
+        # Rate-limit signups per IP.
+        try:
+            if rate_limit:
+                allowed, _remaining = rate_limit(request, action='signup', limit=10, window_seconds=60 * 60)
+                if not allowed:
+                    try:
+                        form.add_error(None, 'Too many signup attempts from your network. Please wait and try again.')
+                    except Exception:
+                        pass
+                    return render(request, "registration/signup.html", {"form": form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key}, status=429)
+        except Exception:
+            pass
+
+        # Turnstile verification (if configured)
+        try:
+            if verify_turnstile and turnstile_enabled:
+                ok, err = verify_turnstile(request)
+                if not ok:
+                    try:
+                        form.add_error(None, err or 'Security check failed. Please try again.')
+                    except Exception:
+                        pass
+                    return render(request, "registration/signup.html", {"form": form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key}, status=400)
+        except Exception:
+            pass
+
         if form.is_valid():
             user = form.save()
             # When multiple authentication backends are configured Django
@@ -4738,7 +5282,7 @@ def signup(request):
     else:
         form = SignupForm()
 
-    return render(request, "registration/signup.html", {"form": form})
+    return render(request, "registration/signup.html", {"form": form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key})
 
 def logout(request):
     from django.contrib.auth import logout as auth_logout
@@ -4759,6 +5303,12 @@ def services_page(request, org_slug):
     """
     org = request.organization
     services = list(Service.objects.filter(organization=org).order_by('name'))
+
+    has_active_services = False
+    try:
+        has_active_services = Service.objects.filter(organization=org, is_active=True).exists()
+    except Exception:
+        has_active_services = False
 
     can_add_more_services = True
     try:
@@ -4854,6 +5404,7 @@ def services_page(request, org_slug):
     return render(request, "calendar_app/services.html", {
         "org": org,
         "services": services,
+        "has_active_services": has_active_services,
         "can_add_more_services": can_add_more_services,
         "show_upgrade_modal": bool(upgrade_prompt == 'service_limit'),
         "upgrade_prompt_reason": upgrade_prompt,
@@ -4930,6 +5481,179 @@ def create_service(request, org_slug):
     except Exception:
         facility_resources = []
 
+    # Owners/Admins can toggle public visibility.
+    try:
+        can_toggle_public = bool(user_has_role(request.user, org, 'owner')) or bool(user_has_role(request.user, org, 'admin'))
+    except Exception:
+        can_toggle_public = False
+
+    # Create-page service availability UI is available in most cases.
+    # Match trial onboarding behavior: with only one active service, availability follows Calendar.
+    can_edit_service_availability = True
+    service_availability_disabled_reason = ''
+    try:
+        if is_trialing:
+            active_ct = Service.objects.filter(organization=org, is_active=True).count()
+            # After create, the new service will be active by default.
+            if (active_ct + 1) <= 1:
+                can_edit_service_availability = False
+                service_availability_disabled_reason = (
+                    "With only one active service, availability follows your Calendar availability. "
+                    "Create a second active service to enable per-service availability."
+                )
+    except Exception:
+        pass
+
+    def _render_create_service_form():
+        # Build availability editor rows.
+        org_map = _build_org_weekly_map(org)
+        weekday_labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+        # For create: show remaining availability as guidance/constraints, but do NOT
+        # auto-populate the service's weekly availability. New services should start
+        # with no service availability unless the user explicitly sets it here.
+        allowed_map = org_map
+        desired_assignee_ids = set()
+        try:
+            try:
+                from accounts.models import Membership
+                posted = request.POST.getlist('assigned_members') or []
+                for v in posted:
+                    try:
+                        iv = int(v)
+                    except Exception:
+                        continue
+                    try:
+                        if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
+                            desired_assignee_ids.add(iv)
+                    except Exception:
+                        continue
+            except Exception:
+                desired_assignee_ids = set()
+
+            if is_team_plan:
+                # Team: only apply member-based constraints once assignees exist.
+                if desired_assignee_ids:
+                    allowed_map = _effective_common_weekly_map_minus_other_services(
+                        org,
+                        list(desired_assignee_ids),
+                        exclude_service_id=None,
+                    )
+                else:
+                    # No assignees yet: allow configuring service availability freely (24/7).
+                    allowed_map = _full_weekly_ui_map()
+            else:
+                # Pro/solo: constrain to org remaining availability when the plan supports it;
+                # otherwise fall back to org defaults.
+                if can_use_pro_team:
+                    allowed_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=None)
+                else:
+                    allowed_map = org_map
+        except Exception:
+            allowed_map = org_map
+
+        weekly_edit_rows = []
+        for ui in range(7):
+            try:
+                org_ranges = _format_ranges_12h(org_map[ui]) if org_map and org_map[ui] else ''
+            except Exception:
+                org_ranges = ''
+
+            # If form was posted, preserve the user's inputs; otherwise start blank.
+            if request.method == 'POST':
+                svc_ranges = (request.POST.get(f'svc_avail_{ui}', '') or '').strip()
+            else:
+                svc_ranges = ''
+
+            weekly_edit_rows.append({
+                'ui': ui,
+                'label': weekday_labels[ui],
+                'org_ranges': org_ranges,
+                'svc_ranges': svc_ranges,
+            })
+
+        # Expose allowed minutes ("remaining" after team/member constraints) for
+        # the custom time picker so it matches calendar.html behavior.
+        svc_constraints_json = 'null'
+        try:
+            import json
+            days = []
+            for ui in range(7):
+                try:
+                    iv = _ui_ranges_to_min_intervals((allowed_map or [[] for _ in range(7)])[ui] if allowed_map else [])
+                except Exception:
+                    iv = []
+                days.append({'remaining': [{'start': int(a), 'end': int(b)} for (a, b) in (iv or [])]})
+            svc_constraints_json = json.dumps({'days': days})
+        except Exception:
+            svc_constraints_json = 'null'
+
+        for r in weekly_edit_rows:
+            try:
+                ui = int(r.get('ui'))
+            except Exception:
+                ui = None
+            if ui is None or ui < 0 or ui > 6:
+                r['allowed_ranges'] = ''
+                r['allowed_empty'] = True
+                r['hard_lock'] = True
+                r['no_remaining'] = False
+            else:
+                try:
+                    r['allowed_ranges'] = _format_ranges_12h(allowed_map[ui]) if allowed_map and allowed_map[ui] else ''
+                except Exception:
+                    r['allowed_ranges'] = ''
+                try:
+                    r['allowed_empty'] = not bool(allowed_map and allowed_map[ui])
+                except Exception:
+                    r['allowed_empty'] = True
+
+                try:
+                    has_svc = bool((r.get('svc_ranges') or '').strip())
+                except Exception:
+                    has_svc = False
+                r['hard_lock'] = bool(r.get('allowed_empty') and (not has_svc))
+                r['no_remaining'] = bool(r.get('allowed_empty') and has_svc)
+
+        # If there is no remaining availability to offer for this service, lock the UI.
+        try:
+            svc_has_room = any(bool((allowed_map or [])[ui]) for ui in range(7))
+        except Exception:
+            svc_has_room = True
+        service_availability_fully_blocked = False
+        service_availability_fully_blocked_reason = ''
+        try:
+            # Hard-lock only when not member-based (unassigned) and Pro/Team partitioning is active.
+            if can_use_pro_team and (not svc_has_room) and (not bool(desired_assignee_ids)):
+                service_availability_fully_blocked = True
+                service_availability_fully_blocked_reason = (
+                    "No remaining availability within your overall availability (after accounting for your other services). "
+                    "Free up time first, then set this service's availability."
+                )
+        except Exception:
+            pass
+
+        return render(request, "calendar_app/create_service.html", {
+            "org": org,
+            "is_team_plan": is_team_plan,
+            "can_use_pro_team": can_use_pro_team,
+            "is_trialing": is_trialing,
+            "trial_end": trial_end,
+            "offline_methods_allowed": offline_methods_allowed,
+            "org_offline_methods": org_offline_methods,
+            "org_has_venmo": org_has_venmo,
+            "org_has_zelle": org_has_zelle,
+            "can_use_facility_resources": can_use_facility_resources,
+            "facility_resources": facility_resources,
+            "can_toggle_public": can_toggle_public,
+            "weekly_edit_rows": weekly_edit_rows,
+            "svc_constraints_json": svc_constraints_json,
+            "can_edit_service_availability": can_edit_service_availability,
+            "service_availability_disabled_reason": service_availability_disabled_reason,
+            "service_availability_fully_blocked": service_availability_fully_blocked,
+            "service_availability_fully_blocked_reason": service_availability_fully_blocked_reason,
+        })
+
     if request.method == "POST":
         # Plan enforcement: Basic only allows 1 active service
         try:
@@ -4954,6 +5678,15 @@ def create_service(request, org_slug):
         buffer_after_raw = request.POST.get("buffer_after") or "0"
         min_notice_hours_raw = request.POST.get("min_notice_hours")
         max_booking_days_raw = request.POST.get("max_booking_days")
+
+        # Public visibility requested (validated after create, using saved state).
+        requested_show_public = None
+        try:
+            field_names = [f.name for f in Service._meta.get_fields()]
+        except Exception:
+            field_names = []
+        if ('show_on_public_calendar' in field_names) and can_toggle_public:
+            requested_show_public = (request.POST.get('show_on_public_calendar') is not None)
 
         has_errors = False
         if not name:
@@ -5011,6 +5744,112 @@ def create_service(request, org_slug):
             except ValueError:
                 messages.error(request, "Numeric fields must be valid numbers.")
             else:
+                # Normalize desired assignees (used for both assignments and availability validation)
+                desired_assignee_ids = set()
+                try:
+                    from accounts.models import Membership
+                    posted = request.POST.getlist('assigned_members') or []
+                    for v in posted:
+                        try:
+                            iv = int(v)
+                        except Exception:
+                            continue
+                        try:
+                            if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
+                                desired_assignee_ids.add(iv)
+                        except Exception:
+                            continue
+                except Exception:
+                    desired_assignee_ids = set()
+
+                # Parse + validate service availability windows from POST before creating the Service.
+                # We only enforce this when the create-page availability UI is enabled.
+                svc_avail_had_error = False
+                parsed_weekly_objs = []
+                if can_edit_service_availability:
+                    svc_windows = []
+                    for ui_day in range(7):
+                        key = f"svc_avail_{ui_day}"
+                        raw = (request.POST.get(key, "") or "").strip()
+                        if not raw:
+                            continue
+
+                        # UI weekday 0=Sunday..6=Saturday -> model weekday 0=Monday..6=Sunday
+                        model_wd = ((ui_day - 1) % 7)
+                        parts = [p.strip() for p in raw.split(',') if p.strip()]
+                        for part in parts:
+                            try:
+                                start_s, end_s = [x.strip() for x in part.split('-', 1)]
+                            except Exception:
+                                messages.error(request, f"Invalid range format for {key}: {part}")
+                                svc_avail_had_error = True
+                                continue
+                            if len(start_s) != 5 or len(end_s) != 5 or start_s[2] != ':' or end_s[2] != ':':
+                                messages.error(request, f"Invalid time format for {key}: {part}")
+                                svc_avail_had_error = True
+                                continue
+                            svc_windows.append((model_wd, start_s, end_s))
+
+                    # Validate + enforce allowed map constraints.
+                    if svc_windows:
+                        from datetime import datetime
+                        for (wd, start_s, end_s) in svc_windows:
+                            try:
+                                st = datetime.strptime(start_s, '%H:%M').time()
+                                et = datetime.strptime(end_s, '%H:%M').time()
+                            except Exception:
+                                messages.error(request, f"Invalid time values: {start_s}-{end_s}")
+                                svc_avail_had_error = True
+                                continue
+                            obj = ServiceWeeklyAvailability(
+                                # Service isn't created yet; validate times without requiring FK.
+                                service=None,
+                                weekday=wd,
+                                start_time=st,
+                                end_time=et,
+                                is_active=True,
+                            )
+                            try:
+                                obj.full_clean(exclude=['service'], validate_unique=False, validate_constraints=False)
+                            except Exception as e:
+                                messages.error(request, f"Service availability error: {e}")
+                                svc_avail_had_error = True
+                            else:
+                                parsed_weekly_objs.append(obj)
+
+                        if parsed_weekly_objs:
+                            try:
+                                cleaned_rows = [(o.weekday, o.start_time, o.end_time) for o in parsed_weekly_objs]
+                                # Pro/Team partitioning guardrail:
+                                # - 1+ assignees: service must fit within remaining common availability
+                                # - 0 assignees: on Pro/Team, service must fit within remaining org availability
+                                if desired_assignee_ids:
+                                    allowed_ui_map = _effective_common_weekly_map_minus_other_services(org, list(desired_assignee_ids), exclude_service_id=None)
+                                    _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, cleaned_rows)
+                                else:
+                                    if can_use_pro_team:
+                                        allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=None)
+                                        _enforce_service_windows_within_ui_allowed_map(
+                                            allowed_ui_map,
+                                            cleaned_rows,
+                                            err_prefix=(
+                                                'Service availability must be within your remaining overall availability '
+                                                '(after accounting for your other services).'
+                                            ),
+                                        )
+                                    else:
+                                        _enforce_service_windows_within_ui_allowed_map(_build_org_weekly_map(org), cleaned_rows)
+                            except ValueError as ve:
+                                messages.error(request, str(ve))
+                                svc_avail_had_error = True
+                            except Exception:
+                                messages.error(request, "Could not validate service availability.")
+                                svc_avail_had_error = True
+
+                # If there were any availability errors, do not create the service.
+                if svc_avail_had_error:
+                    return _render_create_service_form()
+
                 # Trial/Basic: lock min notice + max advance.
                 if not can_use_pro_team:
                     min_notice_hours = 24
@@ -5186,16 +6025,7 @@ def create_service(request, org_slug):
                 try:
                     from bookings.models import ServiceAssignment
                     from accounts.models import Membership
-                    posted = request.POST.getlist('assigned_members') or []
-                    desired = set()
-                    for v in posted:
-                        try:
-                            iv = int(v)
-                            if Membership.objects.filter(id=iv, organization=org, is_active=True).exists():
-                                desired.add(iv)
-                        except Exception:
-                            continue
-                    for mid in desired:
+                    for mid in sorted(desired_assignee_ids):
                         try:
                             mem = Membership.objects.get(id=mid, organization=org)
                             ServiceAssignment.objects.create(service=svc, membership=mem)
@@ -5205,23 +6035,64 @@ def create_service(request, org_slug):
                     # Fail open if model/migration missing
                     pass
 
+                # Persist per-service weekly availability (svc_avail_* fields).
+                if can_edit_service_availability:
+                    try:
+                        # Replace existing windows
+                        ServiceWeeklyAvailability.objects.filter(service=svc).delete()
+                    except Exception:
+                        pass
+                    if parsed_weekly_objs:
+                        try:
+                            # Attach real service FK and bulk create
+                            new_objs = []
+                            for o in parsed_weekly_objs:
+                                new_objs.append(ServiceWeeklyAvailability(
+                                    service=svc,
+                                    weekday=o.weekday,
+                                    start_time=o.start_time,
+                                    end_time=o.end_time,
+                                    is_active=True,
+                                ))
+                            ServiceWeeklyAvailability.objects.bulk_create(new_objs)
+                        except Exception:
+                            # Keep service created even if weekly availability save fails
+                            pass
+
+                # Apply public visibility after all other create steps.
+                try:
+                    if ('show_on_public_calendar' in field_names) and (requested_show_public is not None):
+                        if bool(requested_show_public):
+                            ok, reason = _service_can_be_shown_publicly(org, svc)
+                            if ok:
+                                # Facility resources: if required, at least one active resource must be linked.
+                                try:
+                                    if bool(getattr(svc, 'requires_facility_resources', False)):
+                                        if not ServiceResource.objects.filter(service=svc, resource__is_active=True).exists():
+                                            ok = False
+                                            reason = 'Select at least one active facility resource (capacity) before showing this service publicly.'
+                                except Exception:
+                                    if bool(getattr(svc, 'requires_facility_resources', False)):
+                                        ok = False
+                                        reason = 'Facility resources are required for this service but could not be validated.'
+
+                            if ok:
+                                svc.show_on_public_calendar = True
+                            else:
+                                svc.show_on_public_calendar = False
+                                if reason:
+                                    messages.error(request, reason)
+                        else:
+                            svc.show_on_public_calendar = False
+                        svc.save(update_fields=['show_on_public_calendar'])
+                except Exception:
+                    pass
+
                 messages.success(request, "Service created.")
                 return redirect("calendar_app:services_page", org_slug=org.slug)
 
-    # GET or form error → show empty/default form
-    return render(request, "calendar_app/create_service.html", {
-        "org": org,
-        "is_team_plan": is_team_plan,
-        "can_use_pro_team": can_use_pro_team,
-        "is_trialing": is_trialing,
-        "trial_end": trial_end,
-        "offline_methods_allowed": offline_methods_allowed,
-        "org_offline_methods": org_offline_methods,
-        "org_has_venmo": org_has_venmo,
-        "org_has_zelle": org_has_zelle,
-        "can_use_facility_resources": can_use_facility_resources,
-        "facility_resources": facility_resources,
-    })
+    # GET or form error
+    return _render_create_service_form()
 
 
 @login_required
@@ -5233,6 +6104,34 @@ def edit_service(request, org_slug, service_id):
     """
     org = request.organization
     service = get_object_or_404(Service, id=service_id, organization=org)
+
+    # Services with the same schedule signature (duration + buffers) share the same
+    # partitioning/availability group and can overlap schedules. Surface this in the UI.
+    schedule_compat_services = []
+    schedule_compat_services_preview = []
+    schedule_compat_services_more = 0
+    try:
+        dur, bb, ba = _service_schedule_signature(service)
+        compat_qs = (
+            Service.objects
+            .filter(organization=org, duration=int(dur), buffer_before=int(bb), buffer_after=int(ba))
+            .exclude(id=service.id)
+            .order_by('-is_active', 'name', 'id')
+        )
+        schedule_compat_services = [
+            {
+                'id': int(s.id),
+                'name': str(s.name),
+                'is_active': bool(getattr(s, 'is_active', True)),
+            }
+            for s in compat_qs
+        ]
+        schedule_compat_services_preview = schedule_compat_services[:4]
+        schedule_compat_services_more = max(0, len(schedule_compat_services) - len(schedule_compat_services_preview))
+    except Exception:
+        schedule_compat_services = []
+        schedule_compat_services_preview = []
+        schedule_compat_services_more = 0
 
     # Pro/Team feature gate: advanced service settings + editable refund policy fields.
     is_team_plan = False
@@ -5284,11 +6183,25 @@ def edit_service(request, org_slug, service_id):
 
     # Trial/Basic often runs in "single-service mode" where a service effectively inherits
     # org default WeeklyAvailability without persisting explicit ServiceWeeklyAvailability rows.
-    # After upgrading to Pro/Team, the service editor and activation checks expect explicit
-    # per-service weekly windows. Seed them from org defaults (idempotent) so the Edit Service
-    # page matches the Calendar defaults and doesn't incorrectly force the service inactive.
+    # After upgrading to Pro/Team, the editor expects explicit per-service weekly windows.
+    #
+    # IMPORTANT (product rule): services that have no explicitly configured weekly availability
+    # must remain unavailable until the owner manually enables days/ranges and saves.
+    # Therefore, only seed *legacy* services that were already in use (public/with bookings).
+    # Never seed brand-new/unconfigured (typically hidden) services.
     if can_use_pro_team:
-        _seed_service_weekly_from_org_defaults(org, service)
+        try:
+            should_seed = bool(getattr(service, 'show_on_public_calendar', False))
+            if not should_seed:
+                try:
+                    should_seed = bool(service.bookings.exists())
+                except Exception:
+                    should_seed = False
+            if should_seed:
+                _seed_service_weekly_from_org_defaults(org, service)
+        except Exception:
+            # If seeding eligibility cannot be evaluated, fail closed (don't seed).
+            pass
 
     # Keep Basic/Trial behavior consistent with UI: refunds always on (locked).
     if not can_use_pro_team:
@@ -5662,9 +6575,10 @@ def edit_service(request, org_slug, service_id):
                     can_edit_service_availability, service_availability_disabled_reason = _service_availability_applicability(org, service)
 
                     allowed_map = org_map
-                    # Constrain service windows to assigned members:
-                    # - 1 member: that member's effective availability
-                    # - 2+ members: intersection across ALL assigned members
+                    # Constrain service windows to assigned members (and partition by other services).
+                    # For Pro/Team plans, service availability must fit within remaining availability:
+                    # - 1+ members: common member availability minus those members' other services
+                    # - 0 members (unassigned / solo org): org availability minus other services
                     if can_edit_service_availability:
                         try:
                             from bookings.models import ServiceAssignment
@@ -5677,10 +6591,15 @@ def edit_service(request, org_slug, service_id):
                             assigned_ids_local = []
 
                         try:
-                            if len(assigned_ids_local) == 1:
-                                allowed_map = _effective_member_weekly_map(org, assigned_ids_local[0])
-                            elif len(assigned_ids_local) >= 2:
-                                allowed_map = _effective_common_weekly_map(org, assigned_ids_local)
+                            if assigned_ids_local:
+                                allowed_map = _effective_common_weekly_map_minus_other_services(org, assigned_ids_local, exclude_service_id=getattr(service, 'id', None))
+                            else:
+                                # Solo org scope (Pro) / unassigned (Team). Only apply the partitioning
+                                # constraint on Pro/Team (not Basic/Trial).
+                                if can_use_pro_team:
+                                    allowed_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=getattr(service, 'id', None))
+                                else:
+                                    allowed_map = org_map
                         except Exception:
                             allowed_map = org_map
 
@@ -5716,6 +6635,24 @@ def edit_service(request, org_slug, service_id):
                     except Exception:
                         can_show_publicly, public_show_reason = True, ''
                     public_show_locked = (not can_show_publicly) and (not bool(getattr(service, 'show_on_public_calendar', False)))
+
+                    # If there is no remaining availability to offer for this service, lock
+                    # service availability UI and also prevent enabling public visibility.
+                    try:
+                        svc_has_room = any(bool((allowed_map or [])[ui]) for ui in range(7))
+                    except Exception:
+                        svc_has_room = True
+                    svc_no_room_reason = ''
+                    # Only hard-lock when the service is NOT member-based (i.e., Pro/solo or
+                    # Team unassigned). Member-based services should remain editable.
+                    svc_no_room_lock = bool(can_use_pro_team and (not svc_has_room) and (not (is_team_plan and assigned_member_ids)))
+                    if svc_no_room_lock:
+                        svc_no_room_reason = "No remaining availability within your overall availability (after accounting for your other services). Free up time first, then set this service's availability."
+                        # lock public visibility if currently off
+                        if not bool(getattr(service, 'show_on_public_calendar', False)):
+                            can_show_publicly = False
+                            public_show_locked = True
+                            public_show_reason = svc_no_room_reason
 
                     try:
                         can_toggle_public = bool(user_has_role(request.user, org, 'owner')) or bool(user_has_role(request.user, org, 'admin'))
@@ -5795,6 +6732,8 @@ def edit_service(request, org_slug, service_id):
                         'assigned_member_ids': assigned_member_ids,
                         'can_edit_service_availability': can_edit_service_availability,
                         'service_availability_disabled_reason': service_availability_disabled_reason,
+                        'service_availability_fully_blocked': svc_no_room_lock,
+                        'service_availability_fully_blocked_reason': svc_no_room_reason,
                         'service_availability_member_name': service_availability_member_name,
                         'facility_resources': facility_resources,
                         'selected_resource_ids': selected_resource_ids,
@@ -5813,6 +6752,9 @@ def edit_service(request, org_slug, service_id):
                         'svc_offline_methods': pm_offline_methods,
                         'org_has_venmo': org_has_venmo,
                         'org_has_zelle': org_has_zelle,
+                        'schedule_compat_services': schedule_compat_services,
+                        'schedule_compat_services_preview': schedule_compat_services_preview,
+                        'schedule_compat_services_more': schedule_compat_services_more,
                     })
 
                 # Persist changes (and optionally apply to conflicts)
@@ -6087,13 +7029,26 @@ def edit_service(request, org_slug, service_id):
                                 except Exception:
                                     assigned_ids_local = []
 
-                                if len(assigned_ids_local) == 1:
-                                    mid = assigned_ids_local[0]
-                                    _enforce_service_windows_within_member_availability(org, mid, cleaned_rows)
-                                    _enforce_no_overlap_between_mixed_signature_solo_services(org, mid, service, cleaned_rows)
-                                elif len(assigned_ids_local) >= 2:
+                                # Pro/Team partitioning guardrail:
+                                # - 1+ assignees: service must fit within remaining common availability
+                                # - 0 assignees: on Pro/Team, service must fit within remaining org availability
+                                if assigned_ids_local:
                                     allowed_ui_map = _effective_common_weekly_map_minus_other_services(org, assigned_ids_local, exclude_service_id=service.id)
                                     _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, cleaned_rows)
+                                else:
+                                    if can_use_pro_team:
+                                        allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=service.id)
+                                        _enforce_service_windows_within_ui_allowed_map(
+                                            allowed_ui_map,
+                                            cleaned_rows,
+                                            err_prefix=(
+                                                'Service availability must be within your remaining overall availability '
+                                                '(after accounting for your other services).'
+                                            ),
+                                        )
+                                    else:
+                                        # Legacy/Trial/Basic: keep existing behavior (subset of org).
+                                        _enforce_service_windows_within_ui_allowed_map(_build_org_weekly_map(org), cleaned_rows)
                             except ValueError as ve:
                                 messages.error(request, str(ve))
                                 svc_avail_had_error = True
@@ -6224,9 +7179,8 @@ def edit_service(request, org_slug, service_id):
         can_toggle_facility_required = False
 
     allowed_map = org_map
-    # Constrain service windows to assigned members:
-    # - 1 member: that member's effective availability
-    # - 2+ members: intersection across ALL assigned members
+    # Constrain service windows to assigned members (and partition by other services).
+    # For Pro/Team plans, service availability must fit within remaining availability.
     if can_edit_service_availability:
         try:
             from bookings.models import ServiceAssignment
@@ -6239,10 +7193,23 @@ def edit_service(request, org_slug, service_id):
             assigned_ids_local = []
 
         try:
-            if len(assigned_ids_local) == 1:
-                allowed_map = _effective_member_weekly_map(org, assigned_ids_local[0])
-            elif len(assigned_ids_local) >= 2:
-                allowed_map = _effective_common_weekly_map_minus_other_services(org, assigned_ids_local, exclude_service_id=service.id)
+            if assigned_ids_local:
+                allowed_map = _effective_common_weekly_map_minus_other_services(
+                    org,
+                    assigned_ids_local,
+                    exclude_service_id=service.id,
+                )
+            else:
+                if is_team_plan:
+                    # Team: only apply member-based constraints once assignees exist.
+                    allowed_map = _full_weekly_ui_map()
+                else:
+                    # Pro/solo: constrain to org remaining availability when the plan supports it;
+                    # otherwise fall back to org defaults.
+                    if can_use_pro_team:
+                        allowed_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=service.id)
+                    else:
+                        allowed_map = org_map
         except Exception:
             allowed_map = org_map
 
@@ -6254,6 +7221,8 @@ def edit_service(request, org_slug, service_id):
         if ui is None or ui < 0 or ui > 6:
             r['allowed_ranges'] = ''
             r['allowed_empty'] = True
+            r['hard_lock'] = True
+            r['no_remaining'] = False
         else:
             try:
                 r['allowed_ranges'] = _format_ranges_12h(allowed_map[ui]) if allowed_map and allowed_map[ui] else ''
@@ -6264,6 +7233,29 @@ def edit_service(request, org_slug, service_id):
             except Exception:
                 r['allowed_empty'] = True
 
+            try:
+                has_svc = bool(svc_map and svc_map[ui])
+            except Exception:
+                has_svc = False
+            r['hard_lock'] = bool(r.get('allowed_empty') and (not has_svc))
+            r['no_remaining'] = bool(r.get('allowed_empty') and has_svc)
+
+    # Expose allowed minutes ("remaining" after team/member constraints) for
+    # the custom time picker so it matches calendar.html behavior.
+    svc_constraints_json = 'null'
+    try:
+        import json
+        days = []
+        for ui in range(7):
+            try:
+                iv = _ui_ranges_to_min_intervals((allowed_map or [[] for _ in range(7)])[ui] if allowed_map else [])
+            except Exception:
+                iv = []
+            days.append({'remaining': [{'start': int(a), 'end': int(b)} for (a, b) in (iv or [])]})
+        svc_constraints_json = json.dumps({'days': days})
+    except Exception:
+        svc_constraints_json = 'null'
+
     service_availability_member_name = ""
     try:
         mid = _get_single_assignee_membership_id(org, service)
@@ -6271,6 +7263,22 @@ def edit_service(request, org_slug, service_id):
         mid = None
     if mid is not None and can_edit_service_availability:
         service_availability_member_name = _get_single_assignee_display_name(org, service)
+
+    # If there is no remaining availability to offer for this service, lock
+    # service availability UI and also prevent enabling public visibility.
+    try:
+        svc_has_room = any(bool((allowed_map or [])[ui]) for ui in range(7))
+    except Exception:
+        svc_has_room = True
+    svc_no_room_reason = ''
+    # Only hard-lock when the service is NOT member-based (i.e., Pro/solo or Team unassigned).
+    svc_no_room_lock = bool(can_use_pro_team and (not svc_has_room) and (not (is_team_plan and assigned_member_ids)))
+    if svc_no_room_lock:
+        svc_no_room_reason = "No remaining availability within your overall availability (after accounting for your other services). Free up time first, then set this service's availability."
+        if not bool(getattr(service, 'show_on_public_calendar', False)):
+            can_show_publicly = False
+            public_show_locked = True
+            public_show_reason = svc_no_room_reason
 
     # Facility resources selection context (Team-only)
     if can_use_facility_resources:
@@ -6317,6 +7325,7 @@ def edit_service(request, org_slug, service_id):
         "org": org,
         "service": service,
         "weekly_edit_rows": weekly_edit_rows,
+        "svc_constraints_json": svc_constraints_json,
         "can_edit_slug": can_edit_slug,
         "can_show_publicly": can_show_publicly,
         "public_show_locked": public_show_locked,
@@ -6327,6 +7336,8 @@ def edit_service(request, org_slug, service_id):
         'service_availability_assignee_names': service_availability_assignee_names,
         'can_edit_service_availability': can_edit_service_availability,
         'service_availability_disabled_reason': service_availability_disabled_reason,
+        'service_availability_fully_blocked': svc_no_room_lock,
+        'service_availability_fully_blocked_reason': svc_no_room_reason,
         'service_availability_member_name': service_availability_member_name,
         'facility_resources': facility_resources,
         'selected_resource_ids': selected_resource_ids,
@@ -6342,6 +7353,9 @@ def edit_service(request, org_slug, service_id):
         'svc_offline_methods': svc_offline_methods,
         'org_has_venmo': org_has_venmo,
         'org_has_zelle': org_has_zelle,
+        'schedule_compat_services': schedule_compat_services,
+        'schedule_compat_services_preview': schedule_compat_services_preview,
+        'schedule_compat_services_more': schedule_compat_services_more,
     })
 
 

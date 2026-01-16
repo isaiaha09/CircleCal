@@ -55,6 +55,10 @@
         }
     </style>
     {% load static %}
+
+    {% if turnstile_enabled and turnstile_site_key %}
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    {% endif %}
 </head>
 <body>
     <div class="container">
@@ -108,7 +112,11 @@
                         {% endif %}
                     </div>
 
-                    
+                    {% if turnstile_enabled and turnstile_site_key %}
+                        <div class="form-row">
+                            <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}"></div>
+                        </div>
+                    {% endif %}
 
                     <div class="actions">
                         <button type="submit" class="btn btn-primary">Create account</button>

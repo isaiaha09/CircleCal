@@ -2,13 +2,7 @@
   {{ wizard.management_form }}
   {% if wizard.form.non_field_errors %}
     <ul class="errorlist">
-      {% for err in wizard.form.non_field_errors %}
-        {% if err == "Please enter a correct username and password. Note that both fields may be case-sensitive." %}
-          <li>Please enter a correct email and password. Note that both fields may be case-sensitive.</li>
-        {% else %}
-          <li>{{ err }}</li>
-        {% endif %}
-      {% endfor %}
+      <li>We couldn’t log you in. Please try again.</li>
     </ul>
   {% endif %}
   {% for field in wizard.form.visible_fields %}

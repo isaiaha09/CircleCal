@@ -327,25 +327,108 @@
   }
   #svcAvailEditor .time-option:hover { background: white; color: var(--primary-600); }
   #svcAvailEditor .time-option.selected { background: var(--primary-500); color: white; font-weight: 600; }
-  #svcAvailEditor .time-picker-actions { display: flex; gap: 8px; margin-top: 12px; }
+  #svcAvailEditor .time-option.disabled {
+    opacity: 0.35;
+    filter: grayscale(1);
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  #svcAvailEditor .time-picker-actions { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }
   #svcAvailEditor .time-picker-btn {
     flex: 1;
     padding: 10px;
-    border: none;
+    border: 1px solid var(--gray-300);
     border-radius: 8px;
     font-weight: 600;
     font-size: 13px;
     cursor: pointer;
     transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.1;
   }
-  #svcAvailEditor .time-picker-btn.confirm { background: var(--primary-500); color: white; }
+  #svcAvailEditor .time-picker-btn.confirm { background: var(--primary-500); border-color: var(--primary-700); color: white; }
   #svcAvailEditor .time-picker-btn.confirm:hover {
     background: var(--primary-600);
     transform: translateY(-1px);
     box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
   }
-  #svcAvailEditor .time-picker-btn.cancel { background: var(--gray-200); color: var(--gray-700); }
+  #svcAvailEditor .time-picker-btn.cancel { background: var(--gray-50); border-color: var(--gray-300); color: var(--gray-900); }
   #svcAvailEditor .time-picker-btn.cancel:hover { background: var(--gray-300); }
+
+  /* Mobile: keep time range rows + picker fully within container */
+  @media (max-width: 640px) {
+    #svcAvailEditor .svc-range-row {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    #svcAvailEditor .svc-range-row .time-input-container {
+      flex: 1 1 calc(50% - 10px);
+      min-width: 0;
+    }
+    #svcAvailEditor input.range-start,
+    #svcAvailEditor input.range-end {
+      width: 100%;
+      max-width: none;
+    }
+    #svcAvailEditor .svc-range-row button {
+      flex: 1 1 100%;
+      text-align: left;
+      padding: 6px 0;
+    }
+
+    #svcAvailEditor .custom-time-picker {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation: none;
+      min-width: 0;
+      width: min(360px, 92vw);
+      max-width: 92vw;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-sizing: border-box;
+      margin: 0;
+      z-index: 2600;
+    }
+    #svcAvailEditor .time-scroll-container {
+      height: 160px;
+    }
+    #svcAvailEditor .time-picker-btn {
+      min-width: 0;
+    }
+  }
+
+  /* Extra-small mobile: 320px wide devices */
+  @media (max-width: 360px) {
+    #svcAvailEditor .svc-range-row {
+      gap: 8px;
+    }
+    #svcAvailEditor .range-start,
+    #svcAvailEditor .range-end {
+      font-size: 10px;
+      padding: 6px 4px;
+      line-height: 1.2;
+    }
+    #svcAvailEditor .custom-time-picker {
+      width: min(320px, 94vw);
+      padding: 14px;
+    }
+    #svcAvailEditor .time-picker-display {
+      font-size: 28px;
+    }
+    #svcAvailEditor .time-option {
+      padding: 8px;
+      font-size: 14px;
+    }
+    #svcAvailEditor .time-picker-btn {
+      font-size: 13px;
+      padding: 10px 8px;
+    }
+  }
 
   /* Saving overlay (shown while AJAX save runs) */
   #svc-saving-overlay {
@@ -403,13 +486,13 @@
   <form class="cc-form" method="post">
     {% csrf_token %}
   {% if request.GET.saved %}
-    <div id="svc-saved-banner" class="mb-4 p-3 rounded bg-green-50 border-l-4 border-green-400 text-green-800" role="status" aria-live="polite">
+    <div id="svc-saved-banner" class="mb-4 p-3 rounded bg-green-50 border-l-4 border-green-400 text-green-800 text-center" role="status" aria-live="polite">
       <strong>Changes saved</strong>
       <div class="text-sm mt-1">Your changes were saved successfully.</div>
     </div>
   {% endif %}
   {% if request.GET.public_show_denied %}
-    <div class="mb-4 p-3 rounded bg-red-50 border-l-4 border-red-400 text-red-900" role="alert" aria-live="polite">
+    <div class="mb-4 p-3 rounded bg-red-50 border-l-4 border-red-400 text-red-900 text-center" role="alert" aria-live="polite">
       <strong>Public visibility not enabled</strong>
       <div class="text-sm mt-1">
         {{ request.GET.public_show_reason|default:"This service can't be shown publicly yet." }}
@@ -438,8 +521,8 @@
           <label for="show_on_public_calendar" class="inline-flex items-center">
             <input type="checkbox" name="show_on_public_calendar" id="show_on_public_calendar"
                    {% if service.show_on_public_calendar %}checked{% endif %}
-              class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if public_show_locked and not service.show_on_public_calendar or not can_toggle_public %}opacity-60 cursor-not-allowed{% endif %}"
-              {% if public_show_locked and not service.show_on_public_calendar or not can_toggle_public %}disabled aria-disabled="true"{% endif %}>
+              class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 {% if public_show_locked and not service.show_on_public_calendar or service_availability_fully_blocked and not service.show_on_public_calendar or not can_toggle_public %}opacity-60 cursor-not-allowed{% endif %}"
+              {% if public_show_locked and not service.show_on_public_calendar or service_availability_fully_blocked and not service.show_on_public_calendar or not can_toggle_public %}disabled aria-disabled="true"{% endif %}>
             <div class="ml-3">
               <div class="text-lg font-semibold text-gray-800">Show on public booking page</div>
               <div class="text-sm text-gray-600">Clients can see and book this service</div>
@@ -447,6 +530,8 @@
           </label>
           {% if not can_toggle_public %}
             <p class="mt-2 text-sm text-gray-700">Only owners/admins can change public visibility.</p>
+          {% elif service_availability_fully_blocked and not service.show_on_public_calendar %}
+            <p class="mt-2 text-sm text-gray-700">{{ service_availability_fully_blocked_reason|default:"This service cannot be shown publicly yet." }}</p>
           {% elif public_show_locked %}
             <p class="mt-2 text-sm text-gray-700">{{ public_show_reason }}</p>
           {% elif service.show_on_public_calendar and not can_show_publicly %}
@@ -614,6 +699,72 @@
               }
             }
 
+            async function refreshServiceAvailabilityConstraints(){
+              try{
+                const editor = document.getElementById('svcAvailEditor');
+
+                const url = new URL("{% url 'calendar_app:service_availability_constraints' org.slug %}", window.location.origin);
+                url.searchParams.set('exclude_service_id', String({{ service.id }}));
+                for (const id of selected){ url.searchParams.append('member_ids', String(id)); }
+
+                const resp = await fetch(url.toString(), { credentials: 'same-origin' });
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                try{
+                  window.__ccWeeklyServiceConstraints = { days: (data.days || []).map(function(d){ return { remaining: (d && d.remaining) ? d.remaining : [] }; }) };
+                } catch(e){ /* ignore */ }
+
+                if (!editor) return;
+                for (let ui = 0; ui < 7; ui++){
+                  const day = (data.days || [])[ui] || {};
+                  const allowedEmpty = !!day.allowed_empty;
+                  const allowedText = (day.allowed_ranges_text || '').trim();
+
+                  const labelEl = editor.querySelector('.cc-allowed-label[data-ui="' + ui + '"]');
+                  if (labelEl){
+                    const shown = allowedText ? allowedText : '—';
+                    labelEl.textContent = 'Allowed (client-facing): ' + shown;
+                  }
+
+                  const hidden = editor.querySelector('input.svc-avail-hidden[data-ui="' + ui + '"]');
+                  const hasSvc = !!(hidden && (hidden.value || '').trim());
+
+                  const card = hidden ? (hidden.closest('.border') || hidden.closest('div')) : null;
+                  // If there is *no allowed time at all* for the selected assignees on this day,
+                  // force the day to Unavailable (prevents keeping stale ranges).
+                  const hardLock = allowedEmpty;
+                  if (card){
+                    card.classList.toggle('cc-svc-day-locked', hardLock);
+                  }
+
+                  if (allowedEmpty){
+                    try{
+                      if (hidden && hasSvc){
+                        hidden.value = '';
+                        try{ hidden.dispatchEvent(new Event('input', { bubbles: true })); }catch(e){}
+                        try{ hidden.dispatchEvent(new Event('change', { bubbles: true })); }catch(e){}
+                      }
+                      const dayEditor = editor.querySelector('.svc-day-editor[data-ui="' + ui + '"]');
+                      if (dayEditor){
+                        const cb = dayEditor.querySelector('input.svc-unavail');
+                        if (cb) cb.checked = true;
+                        const ranges = dayEditor.querySelector('.svc-ranges');
+                        if (ranges) ranges.innerHTML = '';
+                      }
+                    }catch(e){ /* ignore */ }
+                  }
+
+                  const meta = editor.querySelector('.cc-svc-day-meta[data-ui="' + ui + '"]');
+                  if (meta){
+                    meta.setAttribute('data-allowed-empty', allowedEmpty ? '1' : '0');
+                    meta.setAttribute('data-hard-lock', hardLock ? '1' : '0');
+                    meta.setAttribute('data-no-remaining', (allowedEmpty && hasSvc) ? '1' : '0');
+                  }
+                }
+              }catch(e){ /* ignore */ }
+            }
+
             for (const it of list.querySelectorAll('.member-item')){
               const id = it.getAttribute('data-id');
               const indicator = it.querySelector('.select-indicator');
@@ -624,6 +775,7 @@
                   } else { selected.add(id); indicator.textContent = '✓'; it.classList.add('bg-blue-50'); }
                 updateLabel();
                 syncHiddenInputs();
+                refreshServiceAvailabilityConstraints();
               });
             }
 
@@ -666,6 +818,7 @@
                   }
                   updateLabel();
                   syncHiddenInputs();
+                  refreshServiceAvailabilityConstraints();
                   e.stopPropagation();
                   e.preventDefault();
                 }
@@ -674,6 +827,12 @@
 
             updateLabel();
             syncHiddenInputs();
+            // Ensure the time picker constraints sync after the availability editor exists.
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', function(){ refreshServiceAvailabilityConstraints(); }, { once: true });
+            } else {
+              refreshServiceAvailabilityConstraints();
+            }
           }catch(e){ console.warn('member dropdown failed', e); }
         })();
       </script>
@@ -1002,6 +1161,21 @@
           </div>
           <input type="hidden" name="buffer_after" id="buffer_hidden" value="{% if can_use_pro_team %}{{ service.buffer_after }}{% else %}0{% endif %}">
           <p class="mt-1 text-xs text-gray-500">Enter buffer time after appointment; saved as total minutes.</p>
+
+          {% if schedule_compat_services_preview %}
+            <div class="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+              <div class="text-sm font-semibold" style="color:#1e3a8a;">Shares duration/buffer settings</div>
+              <div class="mt-1 text-xs" style="color:rgba(30, 58, 138, 0.9); line-height:1.35;">
+                These services share the same availability group, so their schedules can overlap:
+                {% for s in schedule_compat_services_preview %}
+                  <a href="{% url 'calendar_app:edit_service' org.slug s.id %}" class="underline" style="color:#1d4ed8;">
+                    {{ s.name }}{% if not s.is_active %} (inactive){% endif %}
+                  </a>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+                {% if schedule_compat_services_more %} + {{ schedule_compat_services_more }} more{% endif %}.
+              </div>
+            </div>
+          {% endif %}
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
@@ -1203,7 +1377,7 @@
         </div>
     </div>
 
-    <div class="section-card {% if not can_edit_service_availability %}availability-disabled{% endif %}">
+    <div class="section-card {% if not can_edit_service_availability or service_availability_fully_blocked %}availability-disabled{% endif %}">
       <!-- Service availability editor -->
       <div class="mt-0">
         <h2 class="text-base font-semibold text-center">Service availability</h2>
@@ -1244,7 +1418,7 @@
 
         <div class="mt-2 text-center">
           {% if not can_edit_service_availability %}
-            <div class="text-xs text-gray-500">With one active service during trial, availability is managed by your Calendar availability.</div>
+            <div class="text-xs text-gray-500">Service availability is available on Pro/Team plans. Upgrade to unlock per-service availability.</div>
           {% else %}
             <div class="text-xs text-gray-500">These weekly service availability settings are interchangeable with the Calendar page (when viewing this service). You can update them in either place.</div>
           {% endif %}
@@ -1271,16 +1445,23 @@
           <div class="availability-overlay" role="status" aria-live="polite">
             <div class="msg">
               <strong class="block mb-1">Service availability disabled</strong>
-              <div class="text-sm">{{ service_availability_disabled_reason|default:"Service availability is only available for services assigned to exactly one team member when that team member offers multiple solo services." }}</div>
+              <div class="text-sm">{{ service_availability_disabled_reason|default:"Service availability requires a Pro or Team subscription. Upgrade to unlock per-service availability." }}</div>
+            </div>
+          </div>
+        {% elif service_availability_fully_blocked %}
+          <div class="availability-overlay" role="status" aria-live="polite">
+            <div class="msg">
+              <strong class="block mb-1">No remaining availability for this service</strong>
+              <div class="text-sm">{{ service_availability_fully_blocked_reason|default:"There’s no remaining time to schedule this service within your overall availability." }}</div>
             </div>
           </div>
         {% endif %}
         <div class="grid grid-cols-1 gap-3 mt-3" id="svcAvailEditor">
           {% for row in weekly_edit_rows %}
-            <div class="border rounded-md p-3 bg-white {% if row.allowed_empty %}cc-svc-day-locked{% endif %}">
+            <div class="border rounded-md p-3 bg-white {% if row.hard_lock %}cc-svc-day-locked{% endif %}">
               <div class="flex items-center justify-between gap-3">
                 <div class="font-semibold text-gray-800" style="width:64px">{{ row.label }}</div>
-                <div class="text-xs text-gray-600">Allowed (client-facing): {{ row.allowed_ranges|default:row.org_ranges|default:'—' }}</div>
+                <div class="text-xs text-gray-600 cc-allowed-label" data-ui="{{ row.ui }}">Allowed (client-facing): {{ row.allowed_ranges|default:row.org_ranges|default:'—' }}</div>
               </div>
 
               <input type="hidden"
@@ -1288,25 +1469,38 @@
                      value="{{ row.svc_ranges }}"
                      class="svc-avail-hidden"
                      data-ui="{{ row.ui }}"
-                     {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>
+                     {% if not can_edit_service_availability or service_availability_fully_blocked %}disabled aria-disabled="true"{% endif %}>
 
-              <div class="mt-2 svc-day-editor" data-ui="{{ row.ui }}" {% if not can_edit_service_availability %}data-disabled="1"{% endif %}>
-                <div class="cc-svc-day-meta" data-ui="{{ row.ui }}" data-allowed-empty="{{ row.allowed_empty|yesno:'1,0' }}" style="display:none;"></div>
+              <div class="mt-2 svc-day-editor" data-ui="{{ row.ui }}" {% if not can_edit_service_availability or service_availability_fully_blocked %}data-disabled="1"{% endif %}>
+                <div class="cc-svc-day-meta"
+                     data-ui="{{ row.ui }}"
+                     data-allowed-empty="{{ row.allowed_empty|yesno:'1,0' }}"
+                     data-hard-lock="{{ row.hard_lock|yesno:'1,0' }}"
+                     data-no-remaining="{{ row.no_remaining|yesno:'1,0' }}"
+                     style="display:none;"></div>
                 <label class="inline-flex items-center text-sm text-gray-700">
                   <input type="checkbox" class="svc-unavail rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                          {% if not row.svc_ranges %}checked{% endif %}
-                         {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>
+                         {% if not can_edit_service_availability or service_availability_fully_blocked %}disabled aria-disabled="true"{% endif %}>
                   <span class="ml-2">Unavailable</span>
                 </label>
                 <div class="svc-ranges mt-2" style="display:flex; flex-direction:column; gap:8px;"></div>
                 <button type="button" class="svc-add-range mt-2 text-sm text-blue-600 hover:text-blue-700"
-                        {% if not can_edit_service_availability %}disabled aria-disabled="true"{% endif %}>+ Add time range</button>
+                        {% if not can_edit_service_availability or service_availability_fully_blocked %}disabled aria-disabled="true"{% endif %}>+ Add time range</button>
               </div>
             </div>
           {% endfor %}
         </div>
       </div>
     </div>
+
+    <script>
+      // Per-day remaining allowed minutes for the service availability editor.
+      // Matches calendar.html custom time picker constraint semantics.
+      (function(){
+        try { window.__ccWeeklyServiceConstraints = {{ svc_constraints_json|default:'null'|safe }}; } catch (e) { window.__ccWeeklyServiceConstraints = null; }
+      })();
+    </script>
 
     <script>
       // Service availability editor: time inputs -> hidden svc_avail_* fields
@@ -1323,6 +1517,99 @@
 
             const isStart = inputElement.classList.contains('range-start') || inputElement.classList.contains('modal-range-start');
             const headerText = isStart ? 'Start Time' : 'End Time';
+
+            function _minutesFromTimeStr(s){
+              try{
+                const v = String(s || '').trim();
+                const parts = v.split(':');
+                if (parts.length !== 2) return null;
+                const h = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                if (isNaN(h) || isNaN(m)) return null;
+                return (h * 60) + m;
+              }catch(e){ return null; }
+            }
+
+            function _ccGetAllowedIntervalsForInput(el){
+              try {
+                const dayIdx = parseInt(String(el?.dataset?.day ?? ''), 10);
+                if (isNaN(dayIdx)) return null;
+                const c = window.__ccWeeklyServiceConstraints || null;
+                if (!c || !c.days || !c.days[dayIdx]) return null;
+                const d = c.days[dayIdx];
+                if (!d || !Array.isArray(d.remaining)) return null;
+                return d.remaining.slice();
+              } catch (e) {
+                return null;
+              }
+            }
+
+            function _ccIsMinuteAllowed(min){
+              try {
+                if (min === null || min === undefined || isNaN(min)) return false;
+                const allowed = _ccGetAllowedIntervalsForInput(inputElement);
+                if (allowed === null) return true; // unconstrained
+                if (!allowed.length) return false;
+
+                const row = inputElement.closest('.svc-range-row');
+                const startEl = row ? row.querySelector('.range-start') : null;
+                const endEl = row ? row.querySelector('.range-end') : null;
+                const startMin = startEl ? _minutesFromTimeStr(startEl.value) : null;
+                const endMin = endEl ? _minutesFromTimeStr(endEl.value) : null;
+
+                const inAllowed = allowed.some(r => {
+                  try {
+                    const s = parseInt(r.start, 10);
+                    const e = parseInt(r.end, 10);
+                    if (isNaN(s) || isNaN(e)) return false;
+                    if (isStart) return (s <= min) && (min < e);
+                    return (s < min) && (min <= e);
+                  } catch (e) {
+                    return false;
+                  }
+                });
+                if (!inAllowed) return false;
+
+                if (isStart && endMin !== null && !isNaN(endMin)) {
+                  if (!(min < endMin)) return false;
+                }
+                if (!isStart && startMin !== null && !isNaN(startMin)) {
+                  if (!(min > startMin)) return false;
+                }
+                return true;
+              } catch (e) {
+                return true;
+              }
+            }
+
+            function _ccFirstAllowedMinuteForHour(hour){
+              try {
+                const h = parseInt(hour, 10);
+                if (isNaN(h)) return null;
+                const base = h * 60;
+                for (let m = 0; m < 60; m++){
+                  const min = base + m;
+                  if (_ccIsMinuteAllowed(min)) return min;
+                }
+              } catch (e) {}
+              return null;
+            }
+
+            function _ccSnapToAllowed(hh, mm){
+              try {
+                const h = parseInt(hh, 10);
+                const m = parseInt(mm, 10);
+                if (isNaN(h) || isNaN(m)) return null;
+                const cur = h*60 + m;
+                if (_ccIsMinuteAllowed(cur)) return cur;
+                const firstInHour = _ccFirstAllowedMinuteForHour(h);
+                if (firstInHour !== null) return firstInHour;
+                for (let t = 0; t < 24*60; t++){
+                  if (_ccIsMinuteAllowed(t)) return t;
+                }
+              } catch (e) {}
+              return null;
+            }
 
             picker.innerHTML = `
               <div class="time-picker-header">${headerText}</div>
@@ -1348,13 +1635,22 @@
               const hourStr = String(h).padStart(2, '0');
               const opt = document.createElement('div');
               opt.className = 'time-option';
+              try { if (_ccFirstAllowedMinuteForHour(h) === null) opt.classList.add('disabled'); } catch (e) {}
               if (hourStr === selectedHour) opt.classList.add('selected');
               opt.textContent = formatHour(h);
               opt.addEventListener('click', () => {
                 hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
                 opt.classList.add('selected');
                 selectedHour = hourStr;
+                try {
+                  const snapped = _ccSnapToAllowed(selectedHour, selectedMinute);
+                  if (snapped !== null) {
+                    selectedHour = String(Math.floor(snapped / 60)).padStart(2, '0');
+                    selectedMinute = String(snapped % 60).padStart(2, '0');
+                  }
+                } catch (e) {}
                 updateDisplay();
+                try { syncMinuteOptions(); } catch (e) {}
                 opt.scrollIntoView({ behavior: 'smooth', block: 'center' });
               });
               hourContainer.appendChild(opt);
@@ -1377,6 +1673,42 @@
               minuteContainer.appendChild(opt);
             }
 
+            function syncMinuteOptions(){
+              try {
+                const h = parseInt(selectedHour, 10);
+                const opts = Array.from(minuteContainer.querySelectorAll('.time-option'));
+                let hasSelected = false;
+                for (const o of opts){
+                  const mm = parseInt(o.textContent, 10);
+                  const min = (isNaN(h) || isNaN(mm)) ? null : (h*60 + mm);
+                  const ok = _ccIsMinuteAllowed(min);
+                  o.classList.toggle('disabled', !ok);
+                  if (ok && o.classList.contains('selected')) hasSelected = true;
+                }
+                if (!hasSelected){
+                  const snap = _ccFirstAllowedMinuteForHour(h);
+                  if (snap !== null) {
+                    selectedHour = String(Math.floor(snap / 60)).padStart(2, '0');
+                    selectedMinute = String(snap % 60).padStart(2, '0');
+                    hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                    const hourIdx = parseInt(selectedHour, 10);
+                    const hourOpt = hourContainer.querySelectorAll('.time-option')[hourIdx];
+                    if (hourOpt) hourOpt.classList.add('selected');
+                    minuteContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                    const minuteOpt = minuteContainer.querySelectorAll('.time-option')[parseInt(selectedMinute,10)];
+                    if (minuteOpt) minuteOpt.classList.add('selected');
+                    updateDisplay();
+                    for (const o of opts){
+                      const mm = parseInt(o.textContent, 10);
+                      const min = (isNaN(hourIdx) || isNaN(mm)) ? null : (hourIdx*60 + mm);
+                      const ok = _ccIsMinuteAllowed(min);
+                      o.classList.toggle('disabled', !ok);
+                    }
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
+
             function updateDisplay(){
               picker.querySelector('.time-picker-display').textContent = formatDisplayTime(selectedHour, selectedMinute);
             }
@@ -1397,6 +1729,24 @@
               try{ hourContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' }); }catch(e){}
               try{ minuteContainer.querySelector('.selected')?.scrollIntoView({ block: 'center' }); }catch(e){}
             }, 50);
+
+            // Apply constraints immediately (snap initial selection + disable invalid options)
+            try {
+              const snapped = _ccSnapToAllowed(selectedHour, selectedMinute);
+              if (snapped !== null) {
+                selectedHour = String(Math.floor(snapped / 60)).padStart(2, '0');
+                selectedMinute = String(snapped % 60).padStart(2, '0');
+                hourContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                const hourIdx = parseInt(selectedHour, 10);
+                const hourOpt = hourContainer.querySelectorAll('.time-option')[hourIdx];
+                if (hourOpt) hourOpt.classList.add('selected');
+                minuteContainer.querySelectorAll('.time-option').forEach(o => o.classList.remove('selected'));
+                const minuteOpt = minuteContainer.querySelectorAll('.time-option')[parseInt(selectedMinute,10)];
+                if (minuteOpt) minuteOpt.classList.add('selected');
+                updateDisplay();
+              }
+              syncMinuteOptions();
+            } catch (e) {}
 
             picker.querySelector('.confirm').addEventListener('click', (e) => {
               e.stopPropagation();
@@ -1447,7 +1797,7 @@
             return out;
           }
 
-          function buildRangeRow(startVal, endVal, onChange, onRemove, disabled){
+          function buildRangeRow(startVal, endVal, onChange, onRemove, disabled, dayIdx){
             const row = document.createElement('div');
             row.className = 'svc-range-row';
             row.style.display = 'flex';
@@ -1460,6 +1810,7 @@
             start.type = 'time';
             start.value = startVal || '';
             start.className = 'cc-field range-start';
+            try{ start.dataset.day = String(dayIdx); }catch(e){}
             start.style.maxWidth = '140px';
             start.readOnly = true;
             start.style.cursor = 'pointer';
@@ -1471,6 +1822,7 @@
             end.type = 'time';
             end.value = endVal || '';
             end.className = 'cc-field range-end';
+            try{ end.dataset.day = String(dayIdx); }catch(e){}
             end.style.maxWidth = '140px';
             end.readOnly = true;
             end.style.cursor = 'pointer';
@@ -1539,11 +1891,14 @@
             const addBtn = ed.querySelector('.svc-add-range');
             if (!hidden || !list || !unavail || !addBtn) continue;
 
-            // If the assigned member has no availability on this weekday, lock this day entirely.
-            // This prevents clicking Saturday/Sunday when the member is off.
+            // Lock behavior:
+            // - hard-lock: there is no allowed time AND there are no existing ranges for this service on this day.
+            // - no-remaining: there is no allowed time BUT the service already has ranges (legacy/conflict); allow editing/removal,
+            //   but don't allow adding new ranges.
             const meta = ed.querySelector('.cc-svc-day-meta[data-ui="' + ui + '"]');
-            const allowedEmpty = !!(meta && meta.getAttribute('data-allowed-empty') === '1');
-            if (allowedEmpty){
+            const hardLock = !!(meta && meta.getAttribute('data-hard-lock') === '1');
+            const noRemaining = !!(meta && meta.getAttribute('data-no-remaining') === '1');
+            if (hardLock){
               try { ed.closest('.border')?.classList.add('cc-svc-day-locked'); } catch (e) {}
               try {
                 // Force unavailable and clear any existing rows (they would be invalid under member constraints)
@@ -1555,6 +1910,11 @@
                 addBtn.style.display = 'none';
               } catch (e) {}
               continue;
+            }
+
+            if (noRemaining){
+              try { addBtn.disabled = true; } catch (e) {}
+              try { addBtn.style.display = 'none'; } catch (e) {}
             }
 
             function syncHidden(){
@@ -1575,8 +1935,8 @@
             function setAvailabilityEnabled(){
               const isUnavail = !!unavail.checked;
               list.style.opacity = isUnavail ? '0.6' : '1';
-              addBtn.style.opacity = (isUnavail || disabled) ? '0.5' : '1';
-              try{ addBtn.disabled = isUnavail || disabled; }catch(e){}
+              addBtn.style.opacity = (isUnavail || disabled || noRemaining) ? '0.5' : '1';
+              try{ addBtn.disabled = isUnavail || disabled || noRemaining; }catch(e){}
               for (const child of Array.from(list.children)){
                 try{
                   const inputs = child.querySelectorAll('input, button');
@@ -1600,6 +1960,10 @@
                 if (!hasAny){
                   unavail.checked = true;
                   list.textContent = '';
+                  if (noRemaining){
+                    try { addBtn.disabled = true; } catch (e) {}
+                    try { addBtn.style.display = 'none'; } catch (e) {}
+                  }
                   setAvailabilityEnabled();
                   syncHidden();
                 }
@@ -1607,7 +1971,7 @@
             }
 
             function addRow(startVal, endVal){
-              const row = buildRangeRow(startVal, endVal, syncHidden, removeRow, disabled);
+              const row = buildRangeRow(startVal, endVal, syncHidden, removeRow, disabled, ui);
               list.appendChild(row);
             }
 
@@ -1625,14 +1989,21 @@
                 // clear rows when marking unavailable
                 list.textContent = '';
               } else {
-                if (!list.children.length) addRow('09:00','17:00');
+                if (noRemaining){
+                  // No remaining allowed time; keep day unavailable unless it already has ranges.
+                  if (!list.children.length){
+                    unavail.checked = true;
+                  }
+                } else {
+                  if (!list.children.length) addRow('09:00','17:00');
+                }
               }
               setAvailabilityEnabled();
               syncHidden();
             });
 
             addBtn.addEventListener('click', function(){
-              if (disabled || unavail.checked) return;
+              if (disabled || unavail.checked || noRemaining) return;
               addRow('09:00','17:00');
               setAvailabilityEnabled();
               syncHidden();

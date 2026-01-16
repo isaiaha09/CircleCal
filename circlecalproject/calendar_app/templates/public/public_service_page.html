@@ -117,9 +117,40 @@
     .weekday-cell { font-size: 0.9rem; }
   }
 
-  #timeModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); justify-content: center; align-items: center; padding: 8px; z-index: 50; }
+  /* Prevent the page behind modals from scrolling */
+  html.cc-modal-open,
+  body.cc-modal-open {
+    overflow: hidden !important;
+    height: 100%;
+  }
+
+  body.cc-modal-open header,
+  body.cc-modal-open footer {
+    filter: grayscale(1) brightness(0.9) opacity(0.55);
+    pointer-events: none;
+  }
+
+  /*
+    IMPORTANT: This modal must overlay the global navbar/footer.
+    `base.html` places `main` at z-index: 1 and the navbar at z-index: 50, so a fixed modal
+    *inside main* will sit underneath the navbar no matter how large its own z-index is.
+    We also move the modal node to be a direct child of <body> in JS.
+  */
+  #timeModal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    justify-content: center;
+    align-items: flex-start;
+    padding: calc(var(--cc-header-h, 72px) + 12px) 8px 24px 8px;
+    z-index: 2147483647;
+    overscroll-behavior: contain;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   @media (min-width: 768px) {
-    #timeModal { padding: 16px; }
+    #timeModal { padding: calc(var(--cc-header-h, 72px) + 16px) 16px 28px 16px; }
   }
   .modal-box { 
     background: #ffffff; 
@@ -627,7 +658,53 @@ document.addEventListener("DOMContentLoaded", async function () {
   const offlineQrImg = document.getElementById('offlineQrImg');
   const offlineQrFallback = document.getElementById('offlineQrFallback');
 
+  function _ccSetModalOpen(isOpen) {
+    try {
+      const root = document.documentElement;
+      if (isOpen) {
+        root.classList.add('cc-modal-open');
+        document.body.classList.add('cc-modal-open');
+      } else {
+        root.classList.remove('cc-modal-open');
+        document.body.classList.remove('cc-modal-open');
+      }
+    } catch (e) {}
+  }
+
+  function _ccShowTimeModal() {
+    try { timeModal.style.display = 'flex'; } catch (e) {}
+    _ccSetModalOpen(true);
+  }
+
+  function _ccHideTimeModal() {
+    try { timeModal.style.display = 'none'; } catch (e) {}
+    _ccSetModalOpen(false);
+  }
+
+  // Prevent scrolling the page when the user scrolls on the modal backdrop.
+  try {
+    if (timeModal) {
+      const preventIfBackdrop = function (e) {
+        try {
+          if (!e.target.closest('.modal-box')) {
+            e.preventDefault();
+          }
+        } catch (_) {}
+      };
+      timeModal.addEventListener('wheel', preventIfBackdrop, { passive: false });
+      timeModal.addEventListener('touchmove', preventIfBackdrop, { passive: false });
+    }
+  } catch (e) {}
+
   const OFFLINE_INSTRUCTIONS_RAW = "{{ offline_instructions|default:''|escapejs }}";
+
+  // Escape `main` stacking context so the modal can truly overlay the navbar/footer.
+  // (In base.html, `main` has z-index:1 and the navbar is z-index:50.)
+  try {
+    if (timeModal && timeModal.parentElement && timeModal.parentElement !== document.body) {
+      document.body.appendChild(timeModal);
+    }
+  } catch (e) {}
 
   function _isMethodLine(line){
     try{
@@ -1376,7 +1453,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         empty.className = 'text-gray-600';
         empty.innerText = 'No available times on this day.';
         timeSlots.appendChild(empty);
-        timeModal.style.display = 'flex';
+        _ccShowTimeModal();
         return;
       }
 
@@ -1522,7 +1599,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       if (timeSlots.lastElementChild) {
         timeSlots.lastElementChild.style.borderBottom = 'none';
       }
-      timeModal.style.display = 'flex';
+      _ccShowTimeModal();
     } catch (e) {
       console.error(e);
       try { showToast('error', "Could not load availability. Please try another day."); } catch(err){ console.error('toast failed', err); }
@@ -1530,7 +1607,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
   function closeTimeModal() { 
-    timeModal.style.display = "none"; 
+    _ccHideTimeModal();
     // Reset to slots view when closing
     timeModalViewDetails.style.display = 'none';
     if (timeModalViewCheckout) timeModalViewCheckout.style.display = 'none';
@@ -1609,7 +1686,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       timeModalViewSlots.style.display = 'none';
       timeModalViewDetails.style.display = 'none';
       timeModalViewCheckout.style.display = 'block';
-      timeModal.style.display = 'flex';
+      _ccShowTimeModal();
     } catch (e) {}
 
     (async function () {
