@@ -587,8 +587,8 @@
     </header>
 
     <!-- Mobile Navigation (slides in below header; header stays clickable) -->
-    <div id="mobileMenu" class="hidden md:hidden fixed left-0 right-0 bottom-0 z-40 pointer-events-none" style="top: var(--cc-header-h, 72px);">
-        <div id="mobileMenuPanel" class="absolute inset-0 bg-white transform translate-x-full transition-transform duration-200 ease-in-out overflow-y-auto pointer-events-none">
+    <div id="mobileMenu" class="hidden md:hidden fixed left-0 right-0 bottom-0 z-40 pointer-events-none" style="top: var(--cc-header-h, 72px); display: none; pointer-events: none;">
+        <div id="mobileMenuPanel" class="absolute inset-0 bg-white transform translate-x-full transition-transform duration-200 ease-in-out overflow-y-auto pointer-events-none" style="pointer-events: none;">
             <div class="max-w-7xl mx-auto px-6 py-6 h-full">
                 
 
@@ -1161,6 +1161,11 @@
                 document.documentElement.style.setProperty('--cc-header-h', (h || 72) + 'px');
             } catch (e) {}
             mobileMenu.classList.remove('hidden');
+            // Do not rely solely on Tailwind utilities here; ensure behavior even if
+            // a prebuilt CSS bundle is missing classes in some environments.
+            try { mobileMenu.style.display = 'block'; } catch (e) {}
+            try { mobileMenu.style.pointerEvents = 'auto'; } catch (e) {}
+            try { mobileMenuPanel.style.pointerEvents = 'auto'; } catch (e) {}
             try { mobileMenu.classList.remove('pointer-events-none'); } catch (e) {}
             try { mobileMenuPanel.classList.remove('pointer-events-none'); } catch (e) {}
             _setMobileMenuBtnOpen(true);
@@ -1186,11 +1191,14 @@
             // Immediately stop the panel from intercepting clicks while it animates out.
             try { mobileMenuPanel.classList.add('pointer-events-none'); } catch (e) {}
             try { mobileMenu.classList.add('pointer-events-none'); } catch (e) {}
+            try { mobileMenuPanel.style.pointerEvents = 'none'; } catch (e) {}
+            try { mobileMenu.style.pointerEvents = 'none'; } catch (e) {}
             try { mobileMenuPanel.classList.add('translate-x-full'); } catch (e) {}
             try { mobileMenuBtn.setAttribute('aria-expanded', 'false'); } catch (e) {}
             _setMobileMenuIcon(false);
             setTimeout(() => {
                 try { mobileMenu.classList.add('hidden'); } catch (e) {}
+                try { mobileMenu.style.display = 'none'; } catch (e) {}
                 try {
                     document.body.style.overflow = '';
                     document.documentElement.style.overflow = '';
