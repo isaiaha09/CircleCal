@@ -263,7 +263,7 @@
       </div>
     {% endif %}
     <div class="flex flex-col items-center mb-6">
-       <div class="w-32 h-32 rounded-full bg-gray-50 border-4 border-blue-300 mb-2 flex items-center justify-center overflow-hidden" style="box-sizing:border-box;padding:6px;">
+      <div class="w-32 h-32 rounded-full bg-gray-50 border-4 border-blue-300 mb-2 flex items-center justify-center overflow-hidden" style="box-sizing:border-box;padding:0;">
         {% if user.profile.avatar %}
           <img id="avatar-preview" src="{{ user.profile.avatar.url }}{% if user.profile.avatar_updated_at %}?v={{ user.profile.avatar_updated_at|date:'U' }}{% endif %}" alt="Profile Picture" class="w-full h-full object-cover" />
         {% else %}
@@ -1184,14 +1184,17 @@
         setTimeout(() => {
           cropper = new Cropper(imgEl, {
             aspectRatio: 1,
-            viewMode: 1,
-            // Allow resizing the crop box (circle) and moving it
-            dragMode: 'crop',
-            cropBoxMovable: true,
-            cropBoxResizable: true,
-            guides: true,
+            // Keep the crop strictly within the image canvas (prevents empty areas)
+            viewMode: 2,
+            // Fixed crop circle that fills the modal; user moves/zooms the image behind it.
+            dragMode: 'move',
+            cropBoxMovable: false,
+            cropBoxResizable: false,
+            toggleDragModeOnDblclick: false,
+            guides: false,
+            center: true,
             background: false,
-            autoCropArea: 0.8,
+            autoCropArea: 1,
             movable: true,
             zoomable: true,
             scalable: false,
@@ -1203,6 +1206,17 @@
               const viewBox = modal.querySelector('.cropper-view-box');
               if (face) face.style.borderRadius = '9999px';
               if (viewBox) viewBox.style.borderRadius = '9999px';
+
+              // Ensure the crop box starts as large as possible (full-bleed)
+              try {
+                const container = cropper.getContainerData();
+                cropper.setCropBoxData({
+                  left: 0,
+                  top: 0,
+                  width: container.width,
+                  height: container.height,
+                });
+              } catch (e) {}
             }
           });
         }, 50);

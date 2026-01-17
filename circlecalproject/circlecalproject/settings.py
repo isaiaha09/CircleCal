@@ -39,6 +39,8 @@ TURNSTILE_SITE_KEY = os.getenv('TURNSTILE_SITE_KEY', '').strip()
 TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY', '').strip()
 TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', '1').strip().lower() in ('1', 'true', 'yes', 'on')
 
+# Cloudinary is configured via environment variables (e.g. CLOUDINARY_URL).
+# No Django setting is required; our storage adapter reads env vars directly.
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 

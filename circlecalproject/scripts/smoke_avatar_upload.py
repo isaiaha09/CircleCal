@@ -70,6 +70,17 @@ def _safe_cloudinary_cloud_name() -> str | None:
         return None
 
 
+def _warn_if_cloudinary_url_looks_wrong() -> None:
+    url = os.getenv("CLOUDINARY_URL")
+    if not url:
+        return
+    # Common copy/paste mistake: including the <...> brackets from docs/UI.
+    if "<" in url or ">" in url:
+        print("WARN: CLOUDINARY_URL contains '<' or '>' characters. Remove those brackets.")
+    if any(ch.isspace() for ch in url):
+        print("WARN: CLOUDINARY_URL contains whitespace. Remove spaces/newlines.")
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -105,6 +116,7 @@ def main() -> int:
     storage = profile.avatar.storage
 
     # Print config/backends (no secrets)
+    _warn_if_cloudinary_url_looks_wrong()
     cloud_name = _safe_cloudinary_cloud_name()
     gs_bucket = (os.getenv("GS_BUCKET_NAME") or os.getenv("FIREBASE_STORAGE_BUCKET") or "").strip() or None
     using_cloudinary = bool(cloud_name)
