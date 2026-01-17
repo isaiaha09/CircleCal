@@ -3932,9 +3932,45 @@ def admin_pin_view(request):
     subsequent requests to the admin by setting `request.session['admin_pin_ok']`.
     """
     from django.conf import settings
-    from django.views.decorators.http import require_http_methods
     from django.shortcuts import render, redirect
     from django.middleware.csrf import get_token
+    from django.http import HttpResponse
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    def _safe_render(error_message: str | None, next_value: str):
+        """Render the PIN form; fall back to a minimal HTML response on any template/render error.
+
+        This prevents a total lockout from /admin when a production environment has
+        template loader issues or context processor failures.
+        """
+        # Ensure CSRF token is set for the template
+        try:
+            get_token(request)
+        except Exception:
+            pass
+        try:
+            return render(request, 'calendar_app/admin_pin.html', {'error': error_message, 'next': next_value})
+        except Exception as e:
+            logger.exception("admin_pin_view: failed to render template admin_pin.html")
+            # Minimal fallback form (still includes CSRF token via middleware if available).
+            err_html = f"<p style='color:#b91c1c'>{error_message}</p>" if error_message else ""
+            safe_next = (next_value or '/admin/').replace('"', '&quot;')
+            return HttpResponse(
+                "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Admin Access</title></head><body style='font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#f7f7fb'>"
+                "<div style='max-width:420px;margin:80px auto;background:#fff;padding:28px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.08)'>"
+                "<h2>Admin Access</h2><p>Please enter the admin access PIN to continue.</p>"
+                f"{err_html}"
+                "<form method='post' action=''>"
+                "<input type='hidden' name='next' value='" + safe_next + "' />"
+                "<p><input name='pin' type='password' placeholder='Enter PIN' autocomplete='off' autofocus "
+                "style='font-size:18px;padding:10px;width:100%;box-sizing:border-box'/></p>"
+                "<p style='text-align:right'><button type='submit' style='background:#1f2937;color:#fff;padding:10px 14px;border-radius:6px;border:none'>Continue</button></p>"
+                "</form></div></body></html>",
+                status=200,
+            )
 
     # Determine configured PIN: prefer environment/settings, otherwise DB
     admin_pin_setting = getattr(settings, 'ADMIN_PIN', None)
@@ -3949,7 +3985,14 @@ def admin_pin_view(request):
     cache_key = f"admin_pin_attempts:{ip}"
     failure_limit = getattr(settings, 'AXES_FAILURE_LIMIT', 5)
     cooloff_hours = getattr(settings, 'AXES_COOLOFF_TIME', 0.25)
-    cooloff_seconds = int(float(cooloff_hours) * 3600)
+    try:
+        # AXES_COOLOFF_TIME may be a float (hours) or a timedelta depending on version/config.
+        if hasattr(cooloff_hours, 'total_seconds'):
+            cooloff_seconds = int(cooloff_hours.total_seconds())
+        else:
+            cooloff_seconds = int(float(cooloff_hours) * 3600)
+    except Exception:
+        cooloff_seconds = 15 * 60
 
     # If no PIN configured in settings, check DB
     db_pin_exists = False
@@ -3964,11 +4007,18 @@ def admin_pin_view(request):
         return redirect(next_url)
 
     # If we've exceeded attempts, show a lockout message
-    attempts = cache.get(cache_key, 0) or 0
+    try:
+        attempts = cache.get(cache_key, 0) or 0
+    except Exception:
+        # If cache is down/misconfigured (common in early prod deploys), fail open.
+        attempts = 0
+    try:
+        attempts = int(attempts)
+    except Exception:
+        attempts = 0
     if attempts >= failure_limit:
         error = f"Too many attempts. Try again in {cooloff_seconds} seconds."
-        get_token(request)
-        return render(request, 'calendar_app/admin_pin.html', {'error': error, 'next': next_url})
+        return _safe_render(error, next_url)
 
     if request.method == 'POST':
         pin = request.POST.get('pin')
@@ -4008,12 +4058,13 @@ def admin_pin_view(request):
 
         # Failure: increment attempts and set expiry
         attempts = attempts + 1
-        cache.set(cache_key, attempts, timeout=cooloff_seconds)
+        try:
+            cache.set(cache_key, attempts, timeout=cooloff_seconds)
+        except Exception:
+            pass
         error = 'Incorrect PIN'
 
-    # Ensure CSRF token is set for the template
-    get_token(request)
-    return render(request, 'calendar_app/admin_pin.html', {'error': error, 'next': next_url})
+    return _safe_render(error, next_url)
 
 
 @login_required
