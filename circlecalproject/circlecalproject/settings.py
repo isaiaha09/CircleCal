@@ -70,9 +70,18 @@ try:
 except Exception:
     _adminlte_apps = []
 
+_storages_apps = []
+try:
+    if importlib.util.find_spec('storages') is not None:
+        _storages_apps = ['storages']
+except Exception:
+    _storages_apps = []
+
 INSTALLED_APPS = [
     # Admin LTE theme (only if installed)
     *_adminlte_apps,
+    # Optional storage backends (e.g., Google Cloud Storage via django-storages)
+    *_storages_apps,
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

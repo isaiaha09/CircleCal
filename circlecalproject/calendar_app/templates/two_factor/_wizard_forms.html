@@ -18,21 +18,3 @@
     {{ field }}
   {% endfor %}
 </div>
-<div>
-  {{ wizard.management_form }}
-  {% if wizard.form.non_field_errors %}
-    <ul class="errorlist">{% for err in wizard.form.non_field_errors %}<li>{{ err }}</li>{% endfor %}</ul>
-  {% endif %}
-  {% for field in wizard.form.visible_fields %}
-    <div class="form-row">
-      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.errors %}
-        <ul class="errorlist">{% for err in field.errors %}<li>{{ err }}</li>{% endfor %}</ul>
-      {% endif %}
-    </div>
-  {% endfor %}
-  {% for field in wizard.form.hidden_fields %}
-    {{ field }}
-  {% endfor %}
-</div>

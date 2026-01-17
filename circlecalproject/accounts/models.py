@@ -9,14 +9,17 @@ User = settings.AUTH_USER_MODEL
 class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
     def _profile_upload_to(instance, filename):
-        # Store all profile pictures at MEDIA_ROOT/profile_pictures/profile_pic.jpg
+        # Store per-user profile pictures under a stable path so uploads overwrite
+        # the previous avatar for that user (works well for filesystem and GCS/Firebase).
         # Preserve extension if present
         _, ext = os.path.splitext(filename)
         if not ext:
             ext = '.jpg'
-        return f'profile_pictures/profile_pic{ext}'
+        user_id = getattr(instance, 'user_id', None) or 'unknown'
+        return f'profile_pictures/user_{user_id}/avatar{ext}'
 
     avatar = models.ImageField(upload_to=_profile_upload_to, storage=OverwriteStorage(), blank=True, null=True)
+    avatar_updated_at = models.DateTimeField(null=True, blank=True)
     timezone = models.CharField(max_length=63, default='UTC', help_text="User's timezone (e.g., America/Los_Angeles)")
     display_name = models.CharField(max_length=255, blank=True, null=True, help_text='Optional display name used for client-facing messages')
     email_alerts = models.BooleanField(default=True)

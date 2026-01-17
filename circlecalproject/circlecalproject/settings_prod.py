@@ -171,6 +171,49 @@ if _enable_whitenoise:
     except Exception:
         pass
 
+
+# --- Media uploads (Firebase Storage / GCS) ---
+# Firebase Storage uses a Google Cloud Storage bucket (usually: <project-id>.appspot.com).
+# Configure via env vars on Render:
+#   - GS_BUCKET_NAME=<your-bucket>   (or FIREBASE_STORAGE_BUCKET)
+#   - GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json  (recommended)
+#     OR GOOGLE_CREDENTIALS_JSON='{"type": ... }' (optional; JSON string)
+# Optional:
+#   - GS_QUERYSTRING_AUTH=0/1 (default: 0 for public URLs)
+
+_use_cloudinary_media = bool((os.getenv("CLOUDINARY_URL") or "").strip() or (os.getenv("CLOUDINARY_CLOUD_NAME") or "").strip())
+
+GS_BUCKET_NAME = (os.getenv("GS_BUCKET_NAME") or os.getenv("FIREBASE_STORAGE_BUCKET") or "").strip()
+_use_gcs_media = bool(GS_BUCKET_NAME) and not _use_cloudinary_media
+
+if _use_gcs_media:
+    # If the google libs aren't installed, importing the backend will fail at runtime;
+    # that's fine for local dev, but in production make sure requirements include:
+    # `django-storages` + `google-cloud-storage`.
+    try:
+        # Optionally construct credentials from a JSON env var (Render-friendly).
+        _cred_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+        if _cred_json:
+            import json
+            from google.oauth2 import service_account
+
+            GS_CREDENTIALS = service_account.Credentials.from_service_account_info(json.loads(_cred_json))
+    except Exception:
+        # Fall back to Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS).
+        pass
+
+    # Default to public URLs. Your bucket/objects must be publicly readable for this to work.
+    GS_QUERYSTRING_AUTH = _env_bool("GS_QUERYSTRING_AUTH", False)
+
+    # Ensure Django uses GCS for user-uploaded media.
+    try:
+        if "STORAGES" not in globals() or not isinstance(STORAGES, dict):
+            STORAGES = {}
+        STORAGES = dict(STORAGES)
+        STORAGES["default"] = {"BACKEND": "storages.backends.gcloud.GoogleCloudStorage"}
+    except Exception:
+        pass
+
 # Use robust password validators from base settings
 # Logging
 LOGGING = {

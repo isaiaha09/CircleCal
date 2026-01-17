@@ -265,7 +265,7 @@
     <div class="flex flex-col items-center mb-6">
        <div class="w-32 h-32 rounded-full bg-gray-50 border-4 border-blue-300 mb-2 flex items-center justify-center overflow-hidden" style="box-sizing:border-box;padding:6px;">
         {% if user.profile.avatar %}
-          <img id="avatar-preview" src="{{ user.profile.avatar.url }}?v={{ user.profile.avatar.name|urlencode }}" alt="Profile Picture" class="w-full h-full object-cover" />
+          <img id="avatar-preview" src="{{ user.profile.avatar.url }}{% if user.profile.avatar_updated_at %}?v={{ user.profile.avatar_updated_at|date:'U' }}{% endif %}" alt="Profile Picture" class="w-full h-full object-cover" />
         {% else %}
            <svg class="w-16 h-16 text-blue-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" stroke="currentColor" aria-hidden="true" style="display:block;margin:auto;">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4" d="M16 11c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM4 20c0-3.314 2.686-6 6-6h4c3.314 0 6 2.686 6 6" />

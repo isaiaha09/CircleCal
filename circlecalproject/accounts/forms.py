@@ -6,6 +6,7 @@ from django import forms
 from django.contrib.auth.models import User
 from django.conf import settings
 from .models import Profile
+from django.utils import timezone
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     # Satisfy static type checkers / linters in environments without Pillow
@@ -222,6 +223,26 @@ class ProfileForm(forms.ModelForm):
                     else:
                         raise forms.ValidationError("Image moderation failed. Please try again later.")
         return avatar
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        try:
+            avatar_changed = "avatar" in getattr(self, "changed_data", [])
+            # ClearableFileInput uses '<fieldname>-clear'
+            avatar_cleared = str(self.data.get("avatar-clear", "")).lower() in ("1", "true", "on", "yes")
+            avatar_uploaded = bool(self.files.get("avatar"))
+            if avatar_changed or avatar_cleared or avatar_uploaded:
+                instance.avatar_updated_at = timezone.now()
+        except Exception:
+            pass
+
+        if commit:
+            instance.save()
+            try:
+                self.save_m2m()
+            except Exception:
+                pass
+        return instance
 
 from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.auth import get_user_model
