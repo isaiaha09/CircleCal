@@ -17,10 +17,15 @@
 
     <h3 class="text-lg font-semibold text-gray-800 mb-2">What will be preserved</h3>
     <ul class="list-disc list-inside text-gray-700 mb-3">
-      <li>Your account record, profile and profile picture</li>
+      <li>Your account record and profile (excluding your profile picture)</li>
       <li>Your businesses, services, bookings and billing metadata will remain in the system</li>
       <li>Audit logs and historical records are preserved for compliance and support</li>
     </ul>
+
+    <div class="mb-4 text-sm text-yellow-900 bg-yellow-50 border border-yellow-200 px-4 py-3 rounded-lg">
+      Note: Deactivating your account will delete your profile picture from storage to avoid retaining unused media.
+      If you reactivate later, you can upload a new profile picture.
+    </div>
 
     <p class="mb-4">If you change your mind, you can reactivate your account yourself from the <a href="{% url 'accounts:reactivate' %}" class="text-blue-600 underline">Reactivate account</a> page by signing in again. No support ticket is required.</p>
     <form method="post" action="{% url 'accounts:deactivate_account' %}">

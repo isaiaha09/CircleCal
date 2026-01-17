@@ -31,6 +31,16 @@ def delete_due_trial_accounts(*, limit: int = 200, dry_run: bool = False):
         if not user:
             continue
 
+        # Remove profile picture on deactivation to avoid retaining storage.
+        try:
+            if getattr(profile, 'avatar', None):
+                try:
+                    profile.avatar.delete(save=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         owned_orgs = list(Business.objects.filter(owner=user))
 
         # If user has reactivated/resubscribed (active + not canceling), clear schedule.

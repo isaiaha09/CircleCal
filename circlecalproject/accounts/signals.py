@@ -1,4 +1,4 @@
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_logged_in
@@ -35,6 +35,24 @@ def log_user_login(sender, request, user, **kwargs):
         LoginActivity.objects.create(user=user, ip_address=ip, user_agent=ua)
     except Exception:
         # Never block login on logging issues
+        pass
+
+
+@receiver(post_delete, sender=Profile)
+def delete_profile_avatar_file(sender, instance, **kwargs):
+    """Delete avatar blob/object when a Profile is deleted.
+
+    Django does not automatically delete FileField storage objects when model rows
+    are deleted. We clean up explicitly so user account deletion doesn't leave
+    orphaned avatar files in Cloudinary/GCS/local MEDIA.
+    """
+    try:
+        f = getattr(instance, 'avatar', None)
+        # FieldFile is truthy only if it has a name
+        if f:
+            f.delete(save=False)
+    except Exception:
+        # Never block deletion on storage errors
         pass
 
 

@@ -528,6 +528,19 @@ def deactivate_account_view(request):
 
 	# Soft-deactivate: set is_active to False and logout
 	try:
+		# Delete profile picture on deactivation to avoid retaining storage.
+		try:
+			from .models import Profile
+			p = Profile.objects.filter(user=u).first()
+			if p and getattr(p, 'avatar', None):
+				try:
+					# Deletes from storage (Cloudinary/GCS/local) and clears DB field.
+					p.avatar.delete(save=True)
+				except Exception:
+					pass
+		except Exception:
+			pass
+
 		# Disconnect Stripe in CircleCal for businesses owned by this user
 		try:
 			from .models import Business
