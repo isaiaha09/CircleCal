@@ -14,10 +14,13 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # Load environment variables from .env file
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from the project's .env file (if present).
+# Using an explicit path avoids surprises when `manage.py` is launched from
+# a different working directory.
+load_dotenv(dotenv_path=BASE_DIR / '.env', override=False)
 
 
 # Quick-start development settings - unsuitable for production
