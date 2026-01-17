@@ -69,30 +69,55 @@ CANONICAL_HOST_REDIRECT = _env_bool("CANONICAL_HOST_REDIRECT", False)
 #
 # If DATABASE_URL is provided (Render Postgres does this), switch to Postgres.
 # Otherwise fall back to whatever base settings configured (SQLite for local).
-_database_url = os.getenv("DATABASE_URL")
-if _database_url:
-    parsed = urlparse(_database_url)
-    if parsed.scheme not in ("postgres", "postgresql"):
-        raise RuntimeError(f"Unsupported DATABASE_URL scheme: {parsed.scheme!r}")
-
-    # urlparse yields path like "/dbname"
-    db_name = (parsed.path or "").lstrip("/")
-    query = parse_qs(parsed.query or "")
-    sslmode = (query.get("sslmode") or [None])[0]
-
+#
+# Temporary escape hatch: FORCE_SQLITE=1 (or USE_SQLITE=1) will ignore DATABASE_URL
+# and run on SQLite even in production settings.
+_force_sqlite = _env_bool("FORCE_SQLITE", False) or _env_bool("USE_SQLITE", False)
+if _force_sqlite:
+    _sqlite_name = (os.getenv("SQLITE_PATH") or str(BASE_DIR / "db.sqlite3")).strip()
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.postgresql",
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": _sqlite_name,
+        }
+    }
+else:
+    _database_url = (os.getenv("DATABASE_URL") or "").strip()
+    if _database_url:
+        # Render provides a full URL like: postgres://user:pass@host:port/dbname
+        # If this is mis-set (e.g., just a hostname like 'dpg-...'), fail with a clear message.
+        if "://" not in _database_url:
+            raise RuntimeError(
+                "DATABASE_URL must be a full postgres URL like 'postgres://user:pass@host:port/dbname'. "
+                "In Render, use the database's 'Internal Database URL' connection string or attach the Postgres service to your web service. "
+                f"Got DATABASE_URL={_database_url!r}"
+            )
+
+        parsed = urlparse(_database_url)
+        if parsed.scheme not in ("postgres", "postgresql"):
+            raise RuntimeError(
+                "Unsupported DATABASE_URL scheme. Expected 'postgres' or 'postgresql'. "
+                f"Got scheme={parsed.scheme!r} DATABASE_URL={_database_url!r}"
+            )
+
+        # urlparse yields path like "/dbname"
+        db_name = (parsed.path or "").lstrip("/")
+        query = parse_qs(parsed.query or "")
+        sslmode = (query.get("sslmode") or [None])[0]
+
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
             "NAME": db_name,
             "USER": parsed.username or "",
             "PASSWORD": parsed.password or "",
             "HOST": parsed.hostname or "",
             "PORT": str(parsed.port or ""),
             "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+            }
         }
-    }
-    if sslmode:
-        DATABASES["default"]["OPTIONS"] = {"sslmode": sslmode}
+        if sslmode:
+            DATABASES["default"]["OPTIONS"] = {"sslmode": sslmode}
 
 # Secure cookies (effective when served over HTTPS)
 SESSION_COOKIE_SECURE = True

@@ -25,8 +25,12 @@ env/
 # Media and uploads (don't commit user uploads)
 media/
 media/avatars/
+
+# Django collectstatic output
+collected_static/
+
+# (Optional) local-only static cache/output folders
 staticfiles/
-static/
 
 # Logs and local settings
 *.log

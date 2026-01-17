@@ -204,10 +204,7 @@ STATICFILES_DIRS = [
 # Also include the project's `staticfiles/` directory (often used as
 # collectstatic output or local assets). This ensures AdminLTE and other
 # pre-built assets placed in `staticfiles/` are served in development.
-try:
-    STATICFILES_DIRS.append(BASE_DIR / 'staticfiles')
-except Exception:
-    pass
+
 
 # Directory where `collectstatic` will gather files for production/static serving.
 # Use a distinct folder name to avoid colliding with a project-local `staticfiles/`
