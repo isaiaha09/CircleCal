@@ -16,6 +16,8 @@ services:
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: circlecalproject.settings_prod
+      - key: PYTHON_VERSION
+        value: "3.12"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: ENABLE_WHITENOISE
