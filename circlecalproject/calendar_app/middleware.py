@@ -93,6 +93,69 @@ class CustomDomainMiddleware:
                 pass
 
         return self.get_response(request)
+
+
+class CanonicalHostRedirectMiddleware:
+    """Redirect requests to the canonical host (e.g. force circlecal.app).
+
+    This is optional and controlled via env vars (in production settings):
+      - CANONICAL_HOST (e.g. circlecal.app or www.circlecal.app)
+      - CANONICAL_HOST_REDIRECT=1
+
+    It intentionally runs AFTER CustomDomainMiddleware so verified custom domains
+    are not redirected away.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @staticmethod
+    def _raw_host_without_port(request):
+        try:
+            raw = (request.META.get('HTTP_HOST') or request.META.get('SERVER_NAME') or '').strip()
+        except Exception:
+            raw = ''
+        if not raw:
+            return ''
+        return raw.split(':', 1)[0].lower()
+
+    def __call__(self, request):
+        canonical_host = (getattr(settings, 'CANONICAL_HOST', '') or '').strip().lower()
+        enabled = bool(getattr(settings, 'CANONICAL_HOST_REDIRECT', False))
+
+        if not enabled or not canonical_host:
+            return self.get_response(request)
+
+        # Do not interfere with verified custom domains.
+        if getattr(request, 'custom_domain_organization', None) is not None:
+            return self.get_response(request)
+
+        host = self._raw_host_without_port(request)
+        if not host or host in {'testserver', 'localhost', '127.0.0.1', '[::1]'}:
+            return self.get_response(request)
+
+        # Avoid redirecting unsafe methods (prevents losing POST bodies).
+        if request.method not in ('GET', 'HEAD'):
+            return self.get_response(request)
+
+        if host == canonical_host:
+            return self.get_response(request)
+
+        # Only redirect when the current host is one of our canonical/allowed hosts;
+        # this avoids unexpected behavior on arbitrary Host headers.
+        try:
+            allowed = getattr(settings, 'ALLOWED_HOSTS', []) or []
+            allowed_lc = {str(h).lower() for h in allowed}
+        except Exception:
+            allowed_lc = set()
+
+        if allowed_lc and host not in allowed_lc:
+            return self.get_response(request)
+
+        scheme = 'https'
+        path = request.get_full_path()
+        return HttpResponsePermanentRedirect(f'{scheme}://{canonical_host}{path}')
+
 class OrganizationMiddleware:
     """
     Resolve the organization for the current request.

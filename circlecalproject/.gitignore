@@ -5,6 +5,7 @@ env/
 .env*
 .env/*
 env*
+.env_prod
 
 
 # django local database

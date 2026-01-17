@@ -1,0 +1,12 @@
+-r requirements-prod.txt
+
+# Local/dev/test tooling
+pytest==9.0.2
+pytest-django==4.11.1
+pytest-base-url==2.1.0
+playwright==1.56.0
+pytest-playwright==0.7.2
+ngrok==1.4.0
+
+# For occasional tooling/scripts
+uncompyle6==3.9.3

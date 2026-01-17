@@ -110,6 +110,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'calendar_app.middleware.AdminPinMiddleware',
     'calendar_app.middleware.CustomDomainMiddleware',
+    'calendar_app.middleware.CanonicalHostRedirectMiddleware',
     'calendar_app.middleware.BusinessSlugRedirectMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

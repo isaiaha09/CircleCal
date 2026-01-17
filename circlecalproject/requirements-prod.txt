@@ -1,0 +1,41 @@
+Django==5.2.8
+cloudinary==1.44.1
+
+# Auth / security
+# (axes + 2FA)
+django-axes==8.0.0
+django-formtools==2.5.1
+django-otp==1.6.3
+django-two-factor-auth==1.18.1
+django-phonenumber-field==8.4.0
+
+# API (used by render endpoints)
+djangorestframework==3.15.0
+
+# Server + static
+Gunicorn==21.2.0
+whitenoise==6.5.0
+
+# Database
+psycopg==3.1.19
+
+# Env + HTTP
+python-dotenv==1.0.0
+requests==2.32.5
+stripe==14.0.1
+python-slugify==8.0.4
+
+# Avatars (image processing + moderation)
+Pillow==10.0.0
+nudenet==3.4.2
+numpy==2.2.6
+onnxruntime==1.23.2
+opencv-python-headless==4.12.0.88
+
+# PDF / QR
+qrcode==8.2
+reportlab==4.4.6
+
+# Shared cache (Render Redis)
+django-redis==5.4.0
+redis==5.0.8

@@ -57,6 +57,13 @@ CSRF_TRUSTED_ORIGINS = _env_csv(
     ],
 )
 
+# Canonical host redirect (optional)
+# Example:
+#   CANONICAL_HOST=circlecal.app
+#   CANONICAL_HOST_REDIRECT=1
+CANONICAL_HOST = (os.getenv("CANONICAL_HOST") or "").strip() or ""
+CANONICAL_HOST_REDIRECT = _env_bool("CANONICAL_HOST_REDIRECT", False)
+
 
 # --- Database (Render-friendly) ---
 #
@@ -172,6 +179,40 @@ if _enable_whitenoise:
         pass
 
 
+# --- Shared cache (Redis) ---
+# A shared cache makes rate limiting and other cache-backed protections consistent
+# across multiple Gunicorn workers/instances.
+_redis_url = (os.getenv("REDIS_URL") or "").strip()
+if _redis_url:
+    try:
+        _cache_prefix = (os.getenv("CACHE_KEY_PREFIX") or "circlecal").strip() or "circlecal"
+    except Exception:
+        _cache_prefix = "circlecal"
+
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": _redis_url,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+            "KEY_PREFIX": _cache_prefix,
+            # Reasonable default; rate limiter uses per-key TTLs anyway.
+            "TIMEOUT": int(os.getenv("CACHE_DEFAULT_TIMEOUT", "300")),
+        }
+    }
+
+    # Sessions: keep DB as fallback, but use cache for speed.
+    SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
+
+    # Axes: prefer cache handler when Redis is available.
+    try:
+        AXES_HANDLER = "axes.handlers.cache.AxesCacheHandler"
+        AXES_CACHE = "default"
+    except Exception:
+        pass
+
+
 # --- Media uploads (Firebase Storage / GCS) ---
 # Firebase Storage uses a Google Cloud Storage bucket (usually: <project-id>.appspot.com).
 # Configure via env vars on Render:
@@ -244,7 +285,8 @@ LOGGING = {
 # BREVO_SMTP_PASSWORD=your_smtp_password
 # Allow fallback to a safe local default when env vars are not present so
 # running with `settings_prod` doesn't silently drop emails during testing.
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+# Email: default to SMTP in production (configure provider via env vars)
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
 # Prefer port 587 for TLS-enabled SMTP by default
 try:

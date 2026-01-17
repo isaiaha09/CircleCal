@@ -6,7 +6,7 @@ services:
     autoDeploy: true
     buildCommand: |
       python -m pip install --upgrade pip
-      pip install -r requirements.txt
+      pip install -r requirements-prod.txt
       npm ci
       npm run build:css
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py collectstatic --noinput
@@ -22,6 +22,19 @@ services:
         value: "1"
       - key: USE_X_FORWARDED_PROTO
         value: "1"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: circlecal-redis
+          property: connectionString
+
+      # Email defaults (set provider secrets in dashboard)
+      - key: EMAIL_BACKEND
+        value: django.core.mail.backends.smtp.EmailBackend
+      - key: EMAIL_USE_TLS
+        value: "1"
+      - key: EMAIL_PORT
+        value: "587"
       # Required: set these in Render dashboard (don’t commit secrets)
       # - key: SECRET_KEY
       # - key: DATABASE_URL
@@ -29,3 +42,7 @@ services:
       # - key: SITE_URL
       # - key: ALLOWED_HOSTS
       # - key: CSRF_TRUSTED_ORIGINS
+
+  - type: redis
+    name: circlecal-redis
+    plan: starter
