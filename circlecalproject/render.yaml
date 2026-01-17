@@ -2,7 +2,7 @@ services:
   - type: web
     name: circlecal
     env: python
-    plan: starter
+    plan: free
     autoDeploy: true
     buildCommand: |
       python -m pip install --upgrade pip
@@ -12,7 +12,7 @@ services:
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py collectstatic --noinput
     startCommand: |
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py migrate --noinput
-      gunicorn circlecalproject.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+      gunicorn circlecalproject.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: circlecalproject.settings_prod
@@ -22,11 +22,6 @@ services:
         value: "1"
       - key: USE_X_FORWARDED_PROTO
         value: "1"
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: circlecal-redis
-          property: connectionString
 
       # Email defaults (set provider secrets in dashboard)
       - key: EMAIL_BACKEND
@@ -42,7 +37,3 @@ services:
       # - key: SITE_URL
       # - key: ALLOWED_HOSTS
       # - key: CSRF_TRUSTED_ORIGINS
-
-  - type: redis
-    name: circlecal-redis
-    plan: starter
