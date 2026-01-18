@@ -4,6 +4,7 @@ import os
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
+from django.db import connections
 
 
 class Command(BaseCommand):
@@ -25,9 +26,19 @@ class Command(BaseCommand):
             self.stdout.write("ensure_superuser: disabled (set DJANGO_BOOTSTRAP_SUPERUSER=1)")
             return
 
+        try:
+            conn = connections["default"]
+            self.stdout.write(
+                f"ensure_superuser: db_vendor={conn.vendor} db_name={getattr(conn.settings_dict, 'get', lambda k, d=None: d)('NAME')}"
+            )
+        except Exception:
+            pass
+
         username = (os.getenv("DJANGO_SUPERUSER_USERNAME") or "").strip()
         email = (os.getenv("DJANGO_SUPERUSER_EMAIL") or "").strip()
         password = os.getenv("DJANGO_SUPERUSER_PASSWORD") or ""
+
+        self.stdout.write(f"ensure_superuser: target username={username!r} email={email!r}")
 
         if not username:
             raise SystemExit("ensure_superuser: missing DJANGO_SUPERUSER_USERNAME")

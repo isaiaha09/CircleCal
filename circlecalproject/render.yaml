@@ -12,6 +12,7 @@ services:
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py collectstatic --noinput
     startCommand: |
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py migrate --noinput
+      DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py clear_axes_lockouts
       DJANGO_SETTINGS_MODULE=circlecalproject.settings_prod python manage.py ensure_superuser
       gunicorn circlecalproject.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
     envVars:
