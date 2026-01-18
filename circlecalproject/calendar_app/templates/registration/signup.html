@@ -8,7 +8,6 @@
         :root {
             --primary: #007bff;
             --primary-600: #0056b3;
-            --bg: #f7f9fc;
             --card: #ffffff;
             --text: #1f2937;
             --muted: #6b7280;
@@ -16,9 +15,27 @@
             --danger: #ef4444;
         }
         * { box-sizing: border-box; }
-        body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
-        .container { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-        .card { width: 100%; max-width: 520px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+        body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: transparent; color: var(--text); }
+        .container {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            width: 100%;
+            padding: 24px;
+            padding-left: calc(24px + env(safe-area-inset-left));
+            padding-right: calc(24px + env(safe-area-inset-right));
+        }
+        .card {
+            width: 100%;
+            max-width: 520px;
+            margin: 0 auto;
+            justify-self: center;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
         .header { padding: 24px 24px 0 24px; text-align: center; }
         .title { margin: 0; font-size: 24px; font-weight: 700; }
         .subtitle { margin: 6px 0 0 0; color: var(--muted); font-size: 14px; }
@@ -42,16 +59,13 @@
             /* Stack the two-column form fields on small screens for better readability */
             .grid { grid-template-columns: 1fr; gap: 0px; }
         }
-        /* Mobile: make signup card use 95% of viewport and stay centered */
         @media (max-width:640px) {
-            .card {
-                width: 95vw !important;
-                max-width: 95vw !important;
-                margin-left: calc(50% - 47.5vw) !important;
-                margin-right: calc(50% - 47.5vw) !important;
-                border-radius: 8px !important;
-                box-sizing: border-box !important;
+            .container {
+                padding: 16px;
+                padding-left: calc(16px + env(safe-area-inset-left));
+                padding-right: calc(16px + env(safe-area-inset-right));
             }
+            .card { border-radius: 10px; }
         }
 
         /* Cloudflare Turnstile widget has a fixed-ish width; keep it from overflowing on very small screens. */

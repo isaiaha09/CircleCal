@@ -1,6 +1,8 @@
 {% extends "calendar_app/base.html" %}
 {% load static %}
 
+{% block main_class %}w-full max-w-none mx-0 px-0 py-0{% endblock %}
+
 {% block title %}Staff | Manager{% endblock %}
 
 {% block content %}
@@ -8,20 +10,30 @@
 	.cc-auth {
 		--primary: #007bff;
 		--primary-600: #0056b3;
-		--bg: #f7f9fc;
 		--card: #ffffff;
 		--text: #1f2937;
 		--muted: #6b7280;
 		--border: #d1d5db;
 		--success: #10b981;
 		--danger: #ef4444;
-		background: var(--bg);
+		background: transparent;
 		color: var(--text);
-		min-height: 100vh;
+		width: 100%;
+		padding: 24px;
+		padding-left: calc(24px + env(safe-area-inset-left));
+		padding-right: calc(24px + env(safe-area-inset-right));
 	}
 	.cc-auth * { box-sizing: border-box; }
-	.cc-auth .container { min-height: 100vh; display: grid; place-items: center; padding: 24px; padding-top: 80px; }
-	.cc-auth .card { width: 100%; max-width: 420px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+	.cc-auth .card {
+		width: 100%;
+		max-width: 420px;
+		margin: 24px auto;
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 16px;
+		box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+		overflow: hidden;
+	}
 	.cc-auth .header { padding: 24px 24px 0 24px; text-align: center; }
 	.cc-auth .title { margin: 0; font-size: 24px; font-weight: 700; }
 	.cc-auth .subtitle { margin: 6px 0 0 0; color: var(--muted); font-size: 14px; }
@@ -48,30 +60,32 @@
 	.cc-auth .errorlist { list-style: none; padding: 0; margin: 8px 0 0 0; color: var(--danger); font-size: 13px; }
 	/* Mobile: keep centered without viewport-unit hacks */
 	@media (max-width:640px) {
-		.cc-auth .container { padding: 16px; padding-top: 72px; }
+		.cc-auth {
+			padding: 16px;
+			padding-left: calc(16px + env(safe-area-inset-left));
+			padding-right: calc(16px + env(safe-area-inset-right));
+		}
 		.cc-auth .card { border-radius: 10px; }
 	}
 </style>
 
 <div class="cc-auth">
-	<div class="container">
-		<div class="card">
-			<div class="header">
-				<h1 class="title">Staff | Manager</h1>
-				<p class="subtitle">Log in to continue</p>
-			</div>
-			<div class="content">
-				<form method="post" novalidate>
-					{% csrf_token %}
-					{% include "two_factor/_wizard_forms_email.html" %}
+	<div class="card">
+		<div class="header">
+			<h1 class="title">Staff | Manager</h1>
+			<p class="subtitle">Log in to continue</p>
+		</div>
+		<div class="content">
+			<form method="post" novalidate>
+				{% csrf_token %}
+				{% include "two_factor/_wizard_forms_email.html" %}
 
-					<div class="actions">
-						<button type="submit" class="btn btn-primary">Login</button>
-						<p class="alt">New here? <a href="{% url 'calendar_app:signup' %}">Create an account</a></p>
-						<p class="alt" style="margin-top:6px;"><a href="{% url 'accounts:password_reset' %}">Forgot Password</a></p>
-					</div>
-				</form>
-			</div>
+				<div class="actions">
+					<button type="submit" class="btn btn-primary">Login</button>
+					<p class="alt">New here? <a href="{% url 'calendar_app:signup' %}">Create an account</a></p>
+					<p class="alt" style="margin-top:6px;"><a href="{% url 'accounts:password_reset' %}">Forgot Password</a></p>
+				</div>
+			</form>
 		</div>
 	</div>
 </div>
