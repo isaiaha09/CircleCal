@@ -457,12 +457,18 @@
             #mobileMenuBtn {
                 padding: 8px;
                 border-radius: 12px;
-                border: 1px solid transparent;
+                /* Keep the soft "box" background visible even when not hovered/focused. */
+                background-color: rgba(37, 99, 235, 0.06);
+                border: 1px solid rgba(37, 99, 235, 0.10);
+                /* Subtle inner shadow so the border feels "set in". */
+                box-shadow:
+                    inset 0px 0px 4px 3px rgba(34, 53, 97, 0.23);
                 transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease, border-color 160ms ease;
                 -webkit-tap-highlight-color: transparent;
             }
             #mobileMenuBtn:hover {
-                background-color: rgba(37, 99, 235, 0.06);
+                background-color: rgba(37, 99, 235, 0.08);
+                border-color: rgba(37, 99, 235, 0.14);
             }
             #mobileMenuBtn:active {
                 transform: translateY(0px) scale(0.98);
@@ -470,7 +476,11 @@
             #mobileMenuBtn.cc-mobile-menu-btn-open {
                 background-color: #eff6ff; /* blue-50 */
                 border-color: #bfdbfe; /* blue-200 */
-                box-shadow: 0 10px 25px rgba(37, 99, 235, 0.18);
+                box-shadow:
+                    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.50),
+                    inset 0 -2px 10px rgba(15, 23, 42, 0.08),
+                    0 10px 25px rgba(37, 99, 235, 0.18);
                 transform: translateY(-2px);
             }
 
