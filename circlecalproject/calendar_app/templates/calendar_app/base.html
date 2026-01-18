@@ -1183,6 +1183,9 @@
             } catch (e) {
                 _mobileMenuScrollY = 0;
             }
+            // Preserve the scroll position so other UI (like the home logo crossfade)
+            // doesn't think we're back at the top while body is position:fixed.
+            try { document.body.dataset.ccLockedScrollY = String(Math.max(0, _mobileMenuScrollY || 0)); } catch (e) {}
             try {
                 // iOS Safari ignores overflow:hidden in many cases; position:fixed is more reliable.
                 document.body.style.position = 'fixed';
@@ -1201,6 +1204,7 @@
                 document.body.style.right = '';
                 document.body.style.width = '';
             } catch (e) {}
+            try { delete document.body.dataset.ccLockedScrollY; } catch (e) {}
             try {
                 window.scrollTo(0, Math.max(0, _mobileMenuScrollY || 0));
             } catch (e) {}
@@ -1492,7 +1496,16 @@
 
                 function updateHomeLogo() {
                     ticking = false;
-                    const y = window.scrollY || 0;
+                    let y = window.scrollY || 0;
+                    // When the mobile menu opens we lock the body with position:fixed.
+                    // Many mobile browsers report window.scrollY as 0 in that state,
+                    // which would incorrectly fade the nav logo out on the home screen.
+                    try {
+                        if (isTouchDevice && isTouchDevice() && document.body.classList.contains('mobile-menu-open')) {
+                            const locked = Number(document.body.dataset.ccLockedScrollY);
+                            if (Number.isFinite(locked) && locked >= 0) y = locked;
+                        }
+                    } catch (e) {}
 
                     // Hide the header divider line on the splash (top), restore once scrolled.
                     try { header.classList.toggle('cc-home-header-scrolled', y > 6); } catch (e) {}
