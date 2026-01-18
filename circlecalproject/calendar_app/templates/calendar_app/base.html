@@ -251,6 +251,16 @@
                 top: 0;
                 left: 0;
                 right: 0;
+                /* On the splash screen, the header border/shadow reads like a stray line above the logo.
+                   Keep the header itself, but hide the divider until the user scrolls. */
+                border-bottom-width: 0;
+                box-shadow: none;
+            }
+            body[data-cc-home="1"] .cc-site-header.cc-home-header-scrolled {
+                border-bottom-width: 1px;
+                border-bottom-style: solid;
+                border-bottom-color: rgba(229, 231, 235, 1); /* Tailwind gray-200 */
+                box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* Tailwind shadow-sm */
             }
 
             /* Navbar centered logo (always present; home crossfades it in via JS) */
@@ -1378,6 +1388,9 @@
                 function updateHomeLogo() {
                     ticking = false;
                     const y = window.scrollY || 0;
+
+                    // Hide the header divider line on the splash (top), restore once scrolled.
+                    try { header.classList.toggle('cc-home-header-scrolled', y > 6); } catch (e) {}
 
                     setHeaderVar();
                     const targetY = Math.max(180, getHeroTargetY());

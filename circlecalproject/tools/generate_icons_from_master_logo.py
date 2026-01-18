@@ -14,10 +14,7 @@ Outputs to:
   static/icons/
 
 Notes:
-- Icons are square; if the master image is not square, this centers it on a
   white square canvas (no cutoff).
-- A "maskable" Android icon is also produced with extra safe-area padding.
-- Also generates an SVG wrapper that embeds the exact PNG bytes (data URI).
 """
 
 from __future__ import annotations
@@ -38,7 +35,7 @@ def _square_letterbox(
   size: int,
   *,
   safe_pad_ratio: float = 0.0,
-  background: tuple[int, int, int, int] = (0, 0, 0, 0),
+  background: tuple[int, int, int, int] = (255, 255, 255, 255),
 ) -> Image.Image:
     """Fit src into a size x size canvas with optional extra safe padding.
 
@@ -59,8 +56,10 @@ def _square_letterbox(
 
 
 def _save_png(img: Image.Image, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(path, format="PNG", optimize=True)
+  path.parent.mkdir(parents=True, exist_ok=True)
+  # PNG optimize can be surprisingly slow (especially for larger sizes) and isn't
+  # worth the latency during development/deploy asset regen.
+  img.save(path, format="PNG", optimize=False, compress_level=6)
 
 
 def _save_jpg(img: Image.Image, path: Path, *, quality: int = 92) -> None:
@@ -104,14 +103,13 @@ def main() -> None:
         _save_png(img, OUT_DIR / f"icon-{s}x{s}.png")
 
     # Platform-named outputs
-    # Use transparent padding so the logo doesn't flash with a white box/border on mobile.
     _save_png(_square_letterbox(src, 180), OUT_DIR / "apple-touch-icon.png")
     _save_png(_square_letterbox(src, 192), OUT_DIR / "android-chrome-192x192.png")
     _save_png(_square_letterbox(src, 512), OUT_DIR / "android-chrome-512x512.png")
 
     # Maskable: extra safe-area padding to prevent device masks cutting content.
     # Maskable icons should be fully opaque so the OS can safely apply a mask.
-    maskable_bg = (239, 246, 255, 255)  # match site blue-50
+    maskable_bg = (255, 255, 255, 255)
     maskable_192 = _square_letterbox(src, 192, safe_pad_ratio=0.22, background=maskable_bg)
     maskable_512 = _square_letterbox(src, 512, safe_pad_ratio=0.22, background=maskable_bg)
     _save_png(maskable_192, OUT_DIR / "android-chrome-192x192-maskable.png")
