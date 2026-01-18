@@ -4,6 +4,28 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def ensure_booking_organization_field(apps, schema_editor):
+    Booking = apps.get_model('bookings', 'Booking')
+    table = Booking._meta.db_table
+
+    with schema_editor.connection.cursor() as cursor:
+        existing_cols = {
+            col.name
+            for col in schema_editor.connection.introspection.get_table_description(cursor, table)
+        }
+
+    if 'organization_id' in existing_cols:
+        return
+
+    field = models.ForeignKey(
+        to='accounts.Business',
+        on_delete=django.db.models.deletion.CASCADE,
+        related_name='bookings',
+    )
+    field.set_attributes_from_name('organization')
+    schema_editor.add_field(Booking, field)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -12,10 +34,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='booking',
-            name='organization',
-            field=models.ForeignKey(default=None, on_delete=django.db.models.deletion.CASCADE, related_name='bookings', to='accounts.Business'),
-            preserve_default=False,
-        ),
+        migrations.RunPython(ensure_booking_organization_field, migrations.RunPython.noop),
     ]
