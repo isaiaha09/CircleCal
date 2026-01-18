@@ -1238,6 +1238,23 @@
                 }
 
                 let _scrollAnimId = 0;
+                let _isAutoScrolling = false;
+
+                function cancelAutoScroll() {
+                    if (!_isAutoScrolling) return;
+                    _isAutoScrolling = false;
+                    _scrollAnimId++;
+                }
+
+                // On mobile, momentum scrolling + JS-driven scroll can feel rough.
+                // If the user starts interacting, cancel the auto-scroll immediately.
+                try {
+                    const cancelEvents = ['touchstart', 'touchmove', 'pointerdown', 'wheel', 'keydown'];
+                    cancelEvents.forEach((evt) => {
+                        window.addEventListener(evt, cancelAutoScroll, { passive: true });
+                    });
+                } catch (e) {}
+
                 function animateScrollTo(targetY, durationMs) {
                     const startY = window.scrollY || 0;
                     const delta = targetY - startY;
@@ -1255,6 +1272,7 @@
 
                     const start = performance.now();
                     const id = ++_scrollAnimId;
+                    _isAutoScrolling = true;
 
                     function step(now) {
                         if (id !== _scrollAnimId) return;
@@ -1262,6 +1280,7 @@
                         const eased = easeInOutCubic(t);
                         try { window.scrollTo(0, startY + delta * eased); } catch (e) {}
                         if (t < 1) requestAnimationFrame(step);
+                        else if (id === _scrollAnimId) _isAutoScrolling = false;
                     }
 
                     requestAnimationFrame(step);
