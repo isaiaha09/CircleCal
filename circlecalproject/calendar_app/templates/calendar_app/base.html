@@ -270,7 +270,8 @@
                 top: 50%;
                 transform: translate(-50%, -50%) translateY(var(--cc-nav-center-logo-y, 0px));
                 opacity: var(--cc-nav-center-logo-opacity, 1);
-                transition: opacity 260ms ease, transform 280ms ease;
+                transition: opacity 520ms cubic-bezier(.2,.9,.2,1), transform 560ms cubic-bezier(.2,.9,.2,1);
+                will-change: opacity, transform;
             }
             body[data-cc-home="1"] .cc-nav-center-logo {
                 --cc-nav-center-logo-opacity: 0;
@@ -472,6 +473,14 @@
                 box-shadow: 0 10px 25px rgba(37, 99, 235, 0.18);
                 transform: translateY(-2px);
             }
+
+            /* Smoother icon morph (avoid transition-all on mobile). */
+            #mobileMenuIconHamburger,
+            #mobileMenuIconClose {
+                transition: transform 220ms cubic-bezier(.22,.61,.36,1), opacity 180ms ease;
+                will-change: transform, opacity;
+                transform-origin: 50% 50%;
+            }
             /* Make the panel a fixed stacking context so it always overlays
                the page (and its pseudo-elements), avoiding hide/show toggles. */
             #mobileMenuPanel {
@@ -483,6 +492,24 @@
                 z-index: 10000;
                 /* preserve existing visuals */
                 background: white;
+                /* Smooth on mobile: compositor-friendly transform + momentum scrolling */
+                -webkit-overflow-scrolling: touch;
+                backface-visibility: hidden;
+                will-change: transform;
+                transform: translate3d(100%, 0, 0);
+                transition: transform 280ms cubic-bezier(.22,.61,.36,1);
+            }
+            #mobileMenuPanel.cc-mobile-menu-panel-open {
+                transform: translate3d(0, 0, 0);
+            }
+
+            /* Prevent background scroll on iOS while menu open (JS sets fixed positioning). */
+            body.mobile-menu-open {
+                overflow: hidden;
+                touch-action: none;
+            }
+            body.mobile-menu-open #mobileMenuPanel {
+                touch-action: pan-y;
             }
             /* Prevent decorative gradient bars appearing on menu items inside
                the mobile menu panel (we want gradients site-wide, but not on
@@ -1147,7 +1174,38 @@
             }
         }
 
-        let _mobileMenuTouchHandler = null;
+        const _MOBILE_MENU_TRANSITION_MS = 280;
+        let _mobileMenuScrollY = 0;
+
+        function _lockBodyScroll() {
+            try {
+                _mobileMenuScrollY = window.scrollY || 0;
+            } catch (e) {
+                _mobileMenuScrollY = 0;
+            }
+            try {
+                // iOS Safari ignores overflow:hidden in many cases; position:fixed is more reliable.
+                document.body.style.position = 'fixed';
+                document.body.style.top = (-_mobileMenuScrollY) + 'px';
+                document.body.style.left = '0';
+                document.body.style.right = '0';
+                document.body.style.width = '100%';
+            } catch (e) {}
+        }
+
+        function _unlockBodyScroll() {
+            try {
+                document.body.style.position = '';
+                document.body.style.top = '';
+                document.body.style.left = '';
+                document.body.style.right = '';
+                document.body.style.width = '';
+            } catch (e) {}
+            try {
+                window.scrollTo(0, Math.max(0, _mobileMenuScrollY || 0));
+            } catch (e) {}
+        }
+
         function openMobileMenu() {
             if (!(mobileMenu && mobileMenuPanel)) return;
             try {
@@ -1166,15 +1224,13 @@
             _setMobileMenuBtnOpen(true);
             try { if (mobileMenuPanel) mobileMenuPanel.style.zIndex = '200'; } catch(e) {}
             try { document.body.classList.add('mobile-menu-open'); } catch(e) {}
-            try {
-                document.body.style.overflow = 'hidden';
-                document.documentElement.style.overflow = 'hidden';
-                // Prevent touchmove (scroll) on mobile when menu is open
-                _mobileMenuTouchHandler = function(ev){ ev.preventDefault(); };
-                document.addEventListener('touchmove', _mobileMenuTouchHandler, { passive: false });
-            } catch (e) {}
+            try { _lockBodyScroll(); } catch (e) {}
+
+            // Ensure the initial transform is applied, then animate in.
             requestAnimationFrame(() => {
-                try { mobileMenuPanel.classList.remove('translate-x-full'); } catch (e) {}
+                requestAnimationFrame(() => {
+                    try { mobileMenuPanel.classList.add('cc-mobile-menu-panel-open'); } catch (e) {}
+                });
             });
             try { mobileMenuBtn.setAttribute('aria-expanded', 'true'); } catch (e) {}
             _setMobileMenuIcon(true);
@@ -1188,23 +1244,38 @@
             try { mobileMenu.classList.add('pointer-events-none'); } catch (e) {}
             try { mobileMenuPanel.style.pointerEvents = 'none'; } catch (e) {}
             try { mobileMenu.style.pointerEvents = 'none'; } catch (e) {}
-            try { mobileMenuPanel.classList.add('translate-x-full'); } catch (e) {}
+            try { mobileMenuPanel.classList.remove('cc-mobile-menu-panel-open'); } catch (e) {}
             try { mobileMenuBtn.setAttribute('aria-expanded', 'false'); } catch (e) {}
             _setMobileMenuIcon(false);
-            setTimeout(() => {
+
+            const finish = () => {
                 try { mobileMenu.classList.add('hidden'); } catch (e) {}
                 try { mobileMenu.style.display = 'none'; } catch (e) {}
-                try {
-                    document.body.style.overflow = '';
-                    document.documentElement.style.overflow = '';
-                    if (_mobileMenuTouchHandler) {
-                        document.removeEventListener('touchmove', _mobileMenuTouchHandler, { passive: false });
-                        _mobileMenuTouchHandler = null;
-                    }
-                    try { if (mobileMenuPanel) mobileMenuPanel.style.zIndex = ''; } catch(e) {}
-                    try { document.body.classList.remove('mobile-menu-open'); } catch(e) {}
-                } catch (e) {}
-            }, 220);
+                try { if (mobileMenuPanel) mobileMenuPanel.style.zIndex = ''; } catch(e) {}
+                try { document.body.classList.remove('mobile-menu-open'); } catch(e) {}
+                try { _unlockBodyScroll(); } catch (e) {}
+            };
+
+            // Prefer transitionend for accuracy; fall back to a timeout.
+            try {
+                let done = false;
+                const onEnd = (evt) => {
+                    if (done) return;
+                    if (evt && evt.target !== mobileMenuPanel) return;
+                    done = true;
+                    try { mobileMenuPanel.removeEventListener('transitionend', onEnd); } catch (e) {}
+                    finish();
+                };
+                mobileMenuPanel.addEventListener('transitionend', onEnd);
+                setTimeout(() => {
+                    if (done) return;
+                    done = true;
+                    try { mobileMenuPanel.removeEventListener('transitionend', onEnd); } catch (e) {}
+                    finish();
+                }, _MOBILE_MENU_TRANSITION_MS + 80);
+            } catch (e) {
+                setTimeout(finish, _MOBILE_MENU_TRANSITION_MS + 80);
+            }
         }
 
         if (mobileMenuBtn && mobileMenu && mobileMenuPanel) {
@@ -1265,9 +1336,31 @@
                     });
                 } catch (e) {}
 
+                function isTouchDevice() {
+                    try {
+                        const touchPoints = Number(navigator.maxTouchPoints || 0);
+                        if (Number.isFinite(touchPoints) && touchPoints > 0) return true;
+                        // Fallback for older browsers.
+                        return ('ontouchstart' in window);
+                    } catch (e) {
+                        return false;
+                    }
+                }
+
+                function nativeSmoothScrollTo(targetY) {
+                    try {
+                        window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                }
+
                 function animateScrollTo(targetY, durationMs) {
                     const startY = window.scrollY || 0;
                     const delta = targetY - startY;
+
+                    const effectiveDuration = Math.max(120, Number(durationMs) || 800);
 
                     // Respect reduced-motion preferences.
                     try {
@@ -1277,12 +1370,24 @@
                         }
                     } catch (e) {}
 
-                    // Keep existing timing behavior (call sites pass tuned durations).
-                    const effectiveDuration = Math.max(120, Number(durationMs) || 800);
-
-                    const start = performance.now();
                     const id = ++_scrollAnimId;
                     _isAutoScrolling = true;
+
+                    // Mobile browsers (especially iOS) tend to scroll more smoothly using the
+                    // native smooth-scrolling implementation than a JS rAF loop.
+                    // However, native smooth-scroll duration is browser-controlled and can feel
+                    // way too fast. Only use native smooth-scroll for shorter durations.
+                    if (isTouchDevice() && effectiveDuration <= 900) {
+                        if (nativeSmoothScrollTo(targetY)) {
+                            // Best-effort: mark complete after the intended duration.
+                            setTimeout(() => {
+                                if (id === _scrollAnimId) _isAutoScrolling = false;
+                            }, effectiveDuration);
+                            return;
+                        }
+                    }
+
+                    const start = performance.now();
 
                     function step(now) {
                         if (id !== _scrollAnimId) return;
@@ -1398,12 +1503,12 @@
 
                     // Crossfade: big logo fades out as we approach the hero header;
                     // nav logo fades in smoothly at the same time.
-                    // Start the nav logo earlier and make the big logo fade faster.
-                    const crossStart = 0.18;
-                    const crossEnd = 0.78;
+                    // Keep the big logo around longer; fade more gradually (jptvt.com-like pacing).
+                    const crossStart = 0.26;
+                    const crossEnd = 0.92;
                     const t = Math.max(0, Math.min(1, (p - crossStart) / (crossEnd - crossStart)));
                     const smooth = t * t * (3 - 2 * t); // smoothstep
-                    const fade = Math.pow(smooth, 0.6); // faster fade-in/out (vs linear)
+                    const fade = Math.pow(smooth, 1.35); // slower fade-in/out (vs linear)
 
                     const risePx = Math.round(180 * p);
                     const scale = (1 - 0.22 * p);
