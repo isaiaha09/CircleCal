@@ -3,68 +3,88 @@
 {% block title %}Choose Login{% endblock %}
 
 {% block content %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in</title>
-  <style>
-    :root {
-      --primary: #007bff;
-      --primary-600: #0056b3;
-      --bg: #f7f9fc;
-      --card: #ffffff;
-      --text: #1f2937;
-      --muted: #6b7280;
-      --border: #d1d5db;
-      --success: #10b981;
-      --danger: #ef4444;
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
-    .container { min-height: auto; display: grid; place-items: center; padding: 24px; padding-top: 80px; }
-    .card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
-    .header { padding: 24px 24px 0 24px; text-align: center; }
-    .title { margin: 0; font-size: 24px; font-weight: 700; }
-    .subtitle { margin: 6px 0 0 0; color: var(--muted); font-size: 14px; }
-    .content { padding: 24px; }
-    .form-row { margin-bottom: 16px; }
-    label { display: inline-block; margin-bottom: 8px; font-weight: 600; }
-    .helper { color: var(--muted); font-size: 12px; margin-top: 6px; }
-    .actions { display: flex; flex-direction: row; gap: 12px; margin-top: 10px; }
-    /* Make buttons share available space and remain accessible on small screens */
-    .actions .btn { flex: 1 1 0; min-width: 120px; appearance: none; cursor: pointer; border: none; border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 15px; transition: background-color .15s ease, transform .05s ease; text-decoration: none; display: inline-block; text-align: center; }
-    .btn-primary { background: var(--primary); color: #fff; }
-    .btn-primary:hover { background: var(--primary-600); }
-    .btn-primary:active { transform: translateY(1px); }
-    .btn-secondary { background: #eef2ff; color: var(--text); border: 1px solid #d6ddff; }
-    .btn-secondary:hover { background: #e6ebff; }
-    .alt { text-align: center; font-size: 13px; color: var(--muted); }
-    .alt a { color: var(--muted); text-decoration: none; transition: color .12s ease; }
-    .alt a:hover { color: var(--primary); text-decoration: underline; }
-    /* Ensure buttons are usable on narrow screens: stack and full width */
-    @media (max-width:480px) {
-      .actions { flex-direction: column; gap: 10px; }
-      .actions .btn { display: block; width: 100%; min-width: 0; }
-    }
-    /* Simple: make the card full-bleed on small screens */
-    @media (max-width:640px) {
-      .card {
-        /* Use 95% of the viewport width and center it */
-        width: 95vw !important;
-        max-width: 95vw !important;
-        margin-left: calc(50% - 47.5vw) !important;
-        margin-right: calc(50% - 47.5vw) !important;
-        border-radius: 8px !important;
-        box-sizing: border-box !important;
-      }
-      /* Keep page padding as-is; we offset the card instead of changing global padding. */
-    }
-  </style>
-  {% load static %}
-</head>
-<body>
+<style>
+  .cc-auth {
+    --primary: #007bff;
+    --primary-600: #0056b3;
+    --bg: #f7f9fc;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #d1d5db;
+    --success: #10b981;
+    --danger: #ef4444;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .cc-auth * { box-sizing: border-box; }
+
+  .cc-auth .container {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    padding-top: 80px;
+  }
+
+  .cc-auth .card {
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+
+  .cc-auth .header { padding: 24px 24px 0 24px; text-align: center; }
+  .cc-auth .title { margin: 0; font-size: 24px; font-weight: 700; }
+  .cc-auth .subtitle { margin: 6px 0 0 0; color: var(--muted); font-size: 14px; }
+  .cc-auth .content { padding: 24px; }
+  .cc-auth .form-row { margin-bottom: 16px; }
+  .cc-auth label { display: inline-block; margin-bottom: 8px; font-weight: 600; }
+  .cc-auth .helper { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+  .cc-auth .actions { display: flex; flex-direction: row; gap: 12px; margin-top: 10px; }
+  .cc-auth .actions .btn {
+    flex: 1 1 0;
+    min-width: 120px;
+    appearance: none;
+    cursor: pointer;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-weight: 700;
+    font-size: 15px;
+    transition: background-color .15s ease, transform .05s ease;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+  }
+  .cc-auth .btn-primary { background: var(--primary); color: #fff; }
+  .cc-auth .btn-primary:hover { background: var(--primary-600); }
+  .cc-auth .btn-primary:active { transform: translateY(1px); }
+  .cc-auth .btn-secondary { background: #eef2ff; color: var(--text); border: 1px solid #d6ddff; }
+  .cc-auth .btn-secondary:hover { background: #e6ebff; }
+
+  .cc-auth .alt { text-align: center; font-size: 13px; color: var(--muted); }
+  .cc-auth .alt a { color: var(--muted); text-decoration: none; transition: color .12s ease; }
+  .cc-auth .alt a:hover { color: var(--primary); text-decoration: underline; }
+
+  @media (max-width:480px) {
+    .cc-auth .actions { flex-direction: column; gap: 10px; }
+    .cc-auth .actions .btn { display: block; width: 100%; min-width: 0; }
+  }
+  @media (max-width:640px) {
+    .cc-auth .container { padding: 16px; padding-top: 72px; }
+    .cc-auth .card { border-radius: 10px; }
+  }
+</style>
+
+<div class="cc-auth">
   <div class="container">
     <div class="card">
       <div class="header">
@@ -73,13 +93,12 @@
       </div>
       <div class="content">
         <div class="actions">
-              <a class="btn btn-primary" href="{% url 'accounts:login_owner' %}">Business Owner Login</a>
-              <a class="btn btn-secondary" href="{% url 'accounts:login_staff' %}">Staff | Manager Login</a>
+          <a class="btn btn-primary" href="{% url 'accounts:login_owner' %}">Business Owner Login</a>
+          <a class="btn btn-secondary" href="{% url 'accounts:login_staff' %}">Staff | Manager Login</a>
         </div>
         <p class="alt" style="margin-top:12px; text-align:center;">New here? <a href="{% url 'calendar_app:signup' %}">Create an account</a></p>
       </div>
     </div>
   </div>
-</body>
-</html>
+</div>
 {% endblock %}
