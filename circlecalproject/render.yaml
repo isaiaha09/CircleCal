@@ -18,8 +18,6 @@ services:
         value: circlecalproject.settings_prod
       - key: PYTHON_VERSION
         value: "3.12"
-      - key: FORCE_SQLITE
-        value: "1"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: ENABLE_WHITENOISE
@@ -36,7 +34,7 @@ services:
         value: "587"
       # Required: set these in Render dashboard (don’t commit secrets)
       # - key: SECRET_KEY
-      # - key: DATABASE_URL
+      # - key: DATABASE_URL   (attach a Render Postgres DB; use its Internal Database URL)
       # Recommended
       # - key: SITE_URL
       # - key: ALLOWED_HOSTS

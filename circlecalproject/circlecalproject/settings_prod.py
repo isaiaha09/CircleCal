@@ -18,6 +18,10 @@ def _env_csv(name: str, default_list: list[str]) -> list[str]:
     raw = os.getenv(name)
     if raw is None:
         return default_list
+    # Render (and other platforms) may define an env var with an empty value.
+    # Treat blank strings as "unset" so we keep safe defaults.
+    if str(raw).strip() == "":
+        return default_list
     items = [p.strip() for p in str(raw).split(",")]
     return [p for p in items if p]
 

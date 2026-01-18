@@ -3945,9 +3945,10 @@ def admin_pin_view(request):
         This prevents a total lockout from /admin when a production environment has
         template loader issues or context processor failures.
         """
-        # Ensure CSRF token is set for the template
+        # Ensure CSRF token is set for the template / fallback form
+        csrf_token_value = ""
         try:
-            get_token(request)
+            csrf_token_value = get_token(request) or ""
         except Exception:
             pass
         try:
@@ -3957,18 +3958,27 @@ def admin_pin_view(request):
             # Minimal fallback form (still includes CSRF token via middleware if available).
             err_html = f"<p style='color:#b91c1c'>{error_message}</p>" if error_message else ""
             safe_next = (next_value or '/admin/').replace('"', '&quot;')
-            return HttpResponse(
+            csrf_input = (
+                "<input type='hidden' name='csrfmiddlewaretoken' value='"
+                + csrf_token_value.replace("'", "&#x27;")
+                + "' />"
+            ) if csrf_token_value else ""
+            html = (
                 "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
                 "<title>Admin Access</title></head><body style='font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#f7f7fb'>"
                 "<div style='max-width:420px;margin:80px auto;background:#fff;padding:28px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.08)'>"
                 "<h2>Admin Access</h2><p>Please enter the admin access PIN to continue.</p>"
-                f"{err_html}"
-                "<form method='post' action=''>"
-                "<input type='hidden' name='next' value='" + safe_next + "' />"
-                "<p><input name='pin' type='password' placeholder='Enter PIN' autocomplete='off' autofocus "
-                "style='font-size:18px;padding:10px;width:100%;box-sizing:border-box'/></p>"
-                "<p style='text-align:right'><button type='submit' style='background:#1f2937;color:#fff;padding:10px 14px;border-radius:6px;border:none'>Continue</button></p>"
-                "</form></div></body></html>",
+                + err_html
+                + "<form method='post' action=''>"
+                + csrf_input
+                + "<input type='hidden' name='next' value='" + safe_next + "' />"
+                + "<p><input name='pin' type='password' placeholder='Enter PIN' autocomplete='off' autofocus "
+                  "style='font-size:18px;padding:10px;width:100%;box-sizing:border-box'/></p>"
+                + "<p style='text-align:right'><button type='submit' style='background:#1f2937;color:#fff;padding:10px 14px;border-radius:6px;border:none'>Continue</button></p>"
+                + "</form></div></body></html>"
+            )
+            return HttpResponse(
+                html,
                 status=200,
             )
 
