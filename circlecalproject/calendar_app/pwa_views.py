@@ -19,7 +19,7 @@ def manifest_webmanifest(request):
         "start_url": "/",
         "scope": "/",
         "display": "standalone",
-        "background_color": "#ffffff",
+        "background_color": "#eff6ff",
         "theme_color": "#3b82f6",
         "screenshots": [
             {
