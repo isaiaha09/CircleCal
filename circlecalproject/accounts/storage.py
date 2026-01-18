@@ -2,6 +2,7 @@ import os
 from pathlib import PurePosixPath
 
 from django.core.files.storage import FileSystemStorage, Storage
+from django.utils.deconstruct import deconstructible
 
 
 def _env_truthy(name: str) -> bool:
@@ -21,6 +22,7 @@ if _use_cloudinary:
         cloudinary = None  # type: ignore
 
 
+    @deconstructible
     class OverwriteStorage(Storage):
         """Cloudinary-backed storage for avatars with stable keys + overwrite.
 
@@ -91,12 +93,14 @@ else:
         GoogleCloudStorage = None
 
     if GoogleCloudStorage is not None:
+        @deconstructible
         class OverwriteStorage(GoogleCloudStorage):
             """GoogleCloudStorage that overwrites existing files with the same name."""
 
             file_overwrite = True
 
     else:
+        @deconstructible
         class OverwriteStorage(FileSystemStorage):
             """FileSystemStorage that overwrites existing files with same name."""
 
