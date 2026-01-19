@@ -74,12 +74,18 @@
           if (a.closest && a.closest('#profile-name-required-modal')) return;
           if (a.closest && a.closest('#stripe-connect-leave-modal')) return;
 
-          // Only enforce this modal for navigation links in the global navbar/footer.
+          // Only enforce this modal for navigation links in the global navbar/footer
+          // (and the mobile menu, which lives outside <header>/<footer>).
           // Do not block clicks inside the Profile page content.
           try {
             if (a.closest) {
-              var inNavOrFooter = !!(a.closest('header') || a.closest('footer'));
-              if (!inNavOrFooter) return;
+              var inGlobalNav = !!(
+                a.closest('header') ||
+                a.closest('footer') ||
+                a.closest('#mobileMenu') ||
+                a.closest('#mobileMenuPanel')
+              );
+              if (!inGlobalNav) return;
             }
           } catch (err) {}
 
@@ -201,12 +207,18 @@
         if (!a) return;
         if (a.closest && a.closest('#stripe-connect-leave-modal')) return;
 
-        // Only enforce this modal for navigation links in the global navbar/footer.
+        // Only enforce this modal for navigation links in the global navbar/footer
+        // (and the mobile menu, which lives outside <header>/<footer>).
         // Do not block clicks inside the Profile page content.
         try {
           if (a.closest) {
-            var inNavOrFooter = !!(a.closest('header') || a.closest('footer'));
-            if (!inNavOrFooter) return;
+            var inGlobalNav = !!(
+              a.closest('header') ||
+              a.closest('footer') ||
+              a.closest('#mobileMenu') ||
+              a.closest('#mobileMenuPanel')
+            );
+            if (!inGlobalNav) return;
           }
         } catch (err) {}
 
