@@ -397,7 +397,8 @@ class StaffLoginView(CustomLoginView):
 				is_pwa = False
 			if getattr(user, 'is_superuser', False):
 				if is_pwa:
-					return redirect('/admin/')
+					admin_prefix = '/' + (getattr(settings, 'ADMIN_PATH', 'admin') or 'admin').strip('/') + '/'
+					return redirect(admin_prefix)
 				try:
 					from django.contrib.auth import logout
 					logout(self.request)

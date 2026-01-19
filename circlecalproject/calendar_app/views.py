@@ -3939,6 +3939,8 @@ def admin_pin_view(request):
 
     logger = logging.getLogger(__name__)
 
+    admin_prefix = '/' + (getattr(settings, 'ADMIN_PATH', 'admin') or 'admin').strip('/') + '/'
+
     def _safe_render(error_message: str | None, next_value: str):
         """Render the PIN form; fall back to a minimal HTML response on any template/render error.
 
@@ -3957,7 +3959,7 @@ def admin_pin_view(request):
             logger.exception("admin_pin_view: failed to render template admin_pin.html")
             # Minimal fallback form (still includes CSRF token via middleware if available).
             err_html = f"<p style='color:#b91c1c'>{error_message}</p>" if error_message else ""
-            safe_next = (next_value or '/admin/').replace('"', '&quot;')
+            safe_next = (next_value or admin_prefix).replace('"', '&quot;')
             csrf_input = (
                 "<input type='hidden' name='csrfmiddlewaretoken' value='"
                 + csrf_token_value.replace("'", "&#x27;")
@@ -3984,7 +3986,7 @@ def admin_pin_view(request):
 
     # Determine configured PIN: prefer environment/settings, otherwise DB
     admin_pin_setting = getattr(settings, 'ADMIN_PIN', None)
-    next_url = request.GET.get('next') or request.POST.get('next') or '/admin/'
+    next_url = request.GET.get('next') or request.POST.get('next') or admin_prefix
     error = None
 
     # Rate-limiting using Django cache; use AXES settings for thresholds
@@ -4057,8 +4059,9 @@ def admin_pin_view(request):
             try:
                 from django.urls import reverse
                 from urllib.parse import quote
-                # Treat any admin-prefixed path as admin area (e.g. /admin/)
-                if next_url and (next_url == '/admin/' or next_url.startswith('/admin')):
+                # Treat any admin-prefixed path as admin area
+                admin_root = admin_prefix.rstrip('/')
+                if next_url and (next_url == admin_prefix or next_url.startswith(admin_root)):
                     owner_login = reverse('accounts:login_owner')
                     return redirect(f"{owner_login}?next={quote(next_url)}")
             except Exception:

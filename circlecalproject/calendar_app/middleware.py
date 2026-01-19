@@ -212,7 +212,8 @@ class OrganizationMiddleware:
         try:
             if (not is_test_run) and request.user.is_authenticated:
                 path = request.path or ''
-                is_admin_path = path.startswith('/admin')
+                admin_prefix = '/' + (getattr(settings, 'ADMIN_PATH', 'admin') or 'admin').strip('/')
+                is_admin_path = path.startswith(admin_prefix)
                 is_admin_user = bool(getattr(request.user, 'is_staff', False)) or bool(getattr(request.user, 'is_superuser', False))
 
                 # Do not block Django admin users/pages.
@@ -443,18 +444,21 @@ class AdminPinMiddleware:
             return self.get_response(request)
 
         path = request.path or ''
+        admin_prefix = '/' + (getattr(settings, 'ADMIN_PATH', 'admin') or 'admin').strip('/')
+        pin_prefix = admin_prefix + '/pin'
+
         # Allow access to the PIN entry page itself and any static/media paths
-        if path.startswith('/admin/pin') or path.startswith('/static/') or path.startswith(settings.MEDIA_URL):
+        if path.startswith(pin_prefix) or path.startswith('/static/') or path.startswith(settings.MEDIA_URL):
             return self.get_response(request)
 
         # Intercept requests to the admin area
-        if path.startswith('/admin'):
+        if path.startswith(admin_prefix):
             if request.session.get('admin_pin_ok'):
                 return self.get_response(request)
             # Redirect to the PIN entry page, preserving the intended destination
             from urllib.parse import urlencode
             qs = urlencode({'next': path})
-            return redirect(f'/admin/pin/?{qs}')
+            return redirect(f'{pin_prefix}/?{qs}')
 
         return self.get_response(request)
 

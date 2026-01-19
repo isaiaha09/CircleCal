@@ -250,6 +250,10 @@ SITE_URL = os.getenv("SITE_URL") or ("http://127.0.0.1:8000" if DEBUG else "http
 # Optional admin PIN protection. Set via environment variable `ADMIN_PIN`.
 ADMIN_PIN = os.getenv('ADMIN_PIN')
 
+# Admin URL path (security-by-obscurity convenience). Defaults to /admin/.
+# Set in production via env var ADMIN_PATH (example: "ops-7f3c9a").
+ADMIN_PATH = (os.getenv('ADMIN_PATH') or 'admin').strip().strip('/')
+
 # Django Axes (Rate Limiting)
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 0.25  # 15 minutes (in hours)

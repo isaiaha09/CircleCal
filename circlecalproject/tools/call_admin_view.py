@@ -1,4 +1,6 @@
 import os, sys
+from django.conf import settings
+
 proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if proj_root not in sys.path:
     sys.path.insert(0, proj_root)
@@ -19,7 +21,8 @@ if not user:
     sys.exit(1)
 
 factory = RequestFactory()
-req = factory.get('/admin/billing/applieddiscount/subscriptions-for-code/?code_id=1')
+admin_path = '/' + (getattr(settings, 'ADMIN_PATH', 'admin') or 'admin').strip('/')
+req = factory.get(f"{admin_path}/billing/applieddiscount/subscriptions-for-code/?code_id=1")
 req.user = user
 # instantiate admin
 adm = AppliedDiscountAdmin(AppliedDiscount, admin.site)

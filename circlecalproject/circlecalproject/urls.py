@@ -78,8 +78,9 @@ urlpatterns = [
          ),
          name='password_reset_complete_root'),
 
-    path('admin/pin/', include('calendar_app.urls_admin_pin')),
-    path('admin/', admin.site.urls),
+    # Admin (optionally obscured via settings.ADMIN_PATH)
+    path(f"{getattr(settings, 'ADMIN_PATH', 'admin')}/pin/", include('calendar_app.urls_admin_pin')),
+    path(f"{getattr(settings, 'ADMIN_PATH', 'admin')}/", admin.site.urls),
     # Organization-scoped booking endpoints (API first so they take precedence)
     path('', include('bookings.urls')),
     path('', include('calendar_app.urls')),
