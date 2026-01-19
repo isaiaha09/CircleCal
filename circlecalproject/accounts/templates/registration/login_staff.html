@@ -76,8 +76,12 @@
 			<p class="subtitle">Log in to continue</p>
 		</div>
 		<div class="content">
+			{% if request.GET.pwa_only %}
+				<ul class="errorlist"><li>Admin login from this page is only available inside the installed CircleCal PWA app.</li></ul>
+			{% endif %}
 			<form method="post" novalidate>
 				{% csrf_token %}
+				<input type="hidden" name="cc_pwa_standalone" id="cc_pwa_standalone" value="0" />
 				{% include "two_factor/_wizard_forms_email.html" %}
 
 				<div class="actions">
@@ -107,9 +111,13 @@
 		var secure = (typeof location !== 'undefined' && location.protocol === 'https:') ? '; Secure' : '';
 		if (isStandalone) {
 			document.cookie = 'cc_pwa_standalone=1; Path=/; SameSite=Lax' + secure;
+			var el = document.getElementById('cc_pwa_standalone');
+			if (el) el.value = '1';
 		} else {
 			// Clear the cookie in normal browser mode to avoid accidental carryover.
 			document.cookie = 'cc_pwa_standalone=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax' + secure;
+			var el2 = document.getElementById('cc_pwa_standalone');
+			if (el2) el2.value = '0';
 		}
 	})();
 </script>

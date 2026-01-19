@@ -374,13 +374,26 @@ class StaffLoginView(CustomLoginView):
 		if user and user.is_authenticated:
 			# Special-case: allow the CircleCal platform superuser to reach /admin from the
 			# Staff/Manager login *only* when running inside the installed PWA (no URL bar).
-			# This is a convenience gate; real security remains admin PIN + 2FA + staff/superuser checks.
+			# This is a convenience gate; real security remains admin PIN + 2FA.
 			try:
-				is_pwa = (self.request.COOKIES.get('cc_pwa_standalone') == '1')
+				is_pwa = (
+					(self.request.COOKIES.get('cc_pwa_standalone') == '1')
+					or (self.request.POST.get('cc_pwa_standalone') == '1')
+				)
 			except Exception:
 				is_pwa = False
-			if getattr(user, 'is_superuser', False) and is_pwa:
-				return redirect('/admin/')
+			if getattr(user, 'is_superuser', False):
+				if is_pwa:
+					return redirect('/admin/')
+				# Not in PWA: do not allow admin credentials to work from the web browser
+				# through the staff login page.
+				try:
+					from django.contrib.auth import logout
+					logout(self.request)
+				except Exception:
+					pass
+				from django.urls import reverse
+				return redirect(f"{reverse('accounts:login_staff')}?pwa_only=1")
 
 			try:
 				# Import here to avoid circular imports at module load
