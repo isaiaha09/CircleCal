@@ -354,6 +354,21 @@ class CustomLoginView(TwoFactorLoginView):
 			return resp
 		return response
 
+	def done(self, form_list, **kwargs):
+		"""Finalize two-factor login and allow post-login hooks.
+
+		two_factor's LoginView uses `done()` as the successful authentication hook
+		(not FormView's `form_valid()`), so overrides that need to change the final
+		redirect must be implemented here.
+		"""
+		response = super().done(form_list, **kwargs)
+		# Mirror the session flag from form_valid so middleware can run post-login checks.
+		try:
+			self.request.session['cc_post_login_check_trial'] = True
+		except Exception:
+			pass
+		return response
+
 
 def login_choice_view(request):
 	"""Render a simple page allowing the user to choose Owner vs Staff/Manager login."""
@@ -366,15 +381,13 @@ class StaffLoginView(CustomLoginView):
 	log them out and show an error message.
 	"""
 
-	def form_valid(self, form):
-		# First run the normal two-factor flow which may authenticate the user
-		response = super().form_valid(form)
-		# If the user is authenticated at this point, ensure they have an appropriate role
+	def done(self, form_list, **kwargs):
+		# First complete the normal two-factor flow (logs the user in and returns a redirect)
+		response = super().done(form_list, **kwargs)
 		user = getattr(self.request, 'user', None)
 		if user and user.is_authenticated:
 			# Special-case: allow the CircleCal platform superuser to reach /admin from the
 			# Staff/Manager login *only* when running inside the installed PWA (no URL bar).
-			# This is a convenience gate; real security remains admin PIN + 2FA.
 			try:
 				is_pwa = (
 					(self.request.COOKIES.get('cc_pwa_standalone') == '1')
@@ -385,8 +398,6 @@ class StaffLoginView(CustomLoginView):
 			if getattr(user, 'is_superuser', False):
 				if is_pwa:
 					return redirect('/admin/')
-				# Not in PWA: do not allow admin credentials to work from the web browser
-				# through the staff login page.
 				try:
 					from django.contrib.auth import logout
 					logout(self.request)
@@ -395,20 +406,18 @@ class StaffLoginView(CustomLoginView):
 				from django.urls import reverse
 				return redirect(f"{reverse('accounts:login_staff')}?pwa_only=1")
 
+			# Normal staff/manager enforcement
 			try:
-				# Import here to avoid circular imports at module load
 				from .models import Membership
 				has_role = Membership.objects.filter(user=user, role__in=['manager', 'staff']).exists()
 			except Exception:
 				has_role = False
 			if not has_role:
-				# Not authorized for staff login — log out and show error
 				try:
 					from django.contrib.auth import logout
 					logout(self.request)
 				except Exception:
 					pass
-				# Render the standard login template with an error message
 				return TemplateResponse(self.request, 'registration/login.html', {
 					'form': getattr(self, 'get_form_class', lambda: None)(),
 					'error': 'This login path is for staff and managers only. Use the Owner login if you are an owner.'
