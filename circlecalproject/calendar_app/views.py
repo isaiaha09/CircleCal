@@ -5222,6 +5222,7 @@ def accept_invite(request, token):
 def pricing_page(request, org_slug):
     from billing.models import Plan
     from billing.utils import get_subscription
+    from django.db.models import Q
     
     org = request.organization
     if not org:
@@ -5229,6 +5230,10 @@ def pricing_page(request, org_slug):
     
     # Only show active plans and order by price (low -> high)
     plans = Plan.objects.filter(is_active=True).order_by('price')
+
+    # If plans exist but any are missing stripe_price_id, surface a clear UI message.
+    plans_missing_stripe = plans.filter(Q(stripe_price_id__isnull=True) | Q(stripe_price_id=""))
+    stripe_checkout_configured = not plans_missing_stripe.exists()
 
     # Provide subscription context to template so it can show trial status
     subscription = get_subscription(org)
@@ -5253,6 +5258,7 @@ def pricing_page(request, org_slug):
     return render(request, "calendar_app/pricing.html", {
         "org": org,
         "plans": plans,
+        "stripe_checkout_configured": stripe_checkout_configured,
         "current_plan": current_plan,
         "display_plan": display_plan,
         "subscription": subscription,

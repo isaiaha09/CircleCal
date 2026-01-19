@@ -7,6 +7,17 @@
     <h1 class="text-3xl md:text-4xl font-bold text-center mb-3 md:mb-4">Choose Your Plan</h1>
     <p class="text-center text-gray-600 mb-8 md:mb-12 text-sm md:text-base">Scale with CircleCal as your business grows</p>
 
+    {% if not plans %}
+        <div class="max-w-3xl mx-auto mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+            Pricing plans haven’t been configured in this environment yet.
+        </div>
+    {% elif not stripe_checkout_configured %}
+        <div class="max-w-3xl mx-auto mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+            Plans are available, but Stripe Checkout isn’t configured yet for this environment.
+            Please finish setting the Stripe Price IDs (or contact support).
+        </div>
+    {% endif %}
+
     <div class="relative">
         <!-- Carousel arrows -->
         <button id="pricing-prev" aria-label="Previous" class="absolute left-2 top-1/2 -translate-y-1/2 z-20 bg-white/90 hover:bg-white p-2 rounded-full shadow-md">
@@ -73,10 +84,18 @@
                                     Current Plan
                                 </button>
                             {% else %}
-                                <a href="{% url 'billing:embedded_checkout_page' org.slug plan.id %}"
-                                    class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
-                                    Stripe Checkout
-                                </a>
+                                {% if plan.stripe_price_id %}
+                                    <a href="{% url 'billing:embedded_checkout_page' org.slug plan.id %}"
+                                        class="block text-center {% if plan.slug == 'pro' %}bg-blue-600 hover:bg-blue-700{% elif plan.slug == 'team' %}bg-green-600 hover:bg-green-700{% else %}bg-gray-700 hover:bg-gray-900{% endif %} text-white font-semibold px-6 py-3 rounded-lg transition">
+                                        Stripe Checkout
+                                    </a>
+                                {% else %}
+                                    <button type="button" disabled aria-disabled="true"
+                                        class="block w-full text-center bg-gray-300 text-gray-700 font-semibold px-6 py-3 rounded-lg opacity-80 cursor-not-allowed">
+                                        Checkout unavailable
+                                    </button>
+                                    <p class="mt-2 text-xs text-gray-500 text-center">Stripe price not set for this plan.</p>
+                                {% endif %}
                             {% endif %}
                         </div>
                                                   </div>
