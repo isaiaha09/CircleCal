@@ -372,6 +372,16 @@ class StaffLoginView(CustomLoginView):
 		# If the user is authenticated at this point, ensure they have an appropriate role
 		user = getattr(self.request, 'user', None)
 		if user and user.is_authenticated:
+			# Special-case: allow the CircleCal platform superuser to reach /admin from the
+			# Staff/Manager login *only* when running inside the installed PWA (no URL bar).
+			# This is a convenience gate; real security remains admin PIN + 2FA + staff/superuser checks.
+			try:
+				is_pwa = (self.request.COOKIES.get('cc_pwa_standalone') == '1')
+			except Exception:
+				is_pwa = False
+			if getattr(user, 'is_superuser', False) and is_pwa:
+				return redirect('/admin/')
+
 			try:
 				# Import here to avoid circular imports at module load
 				from .models import Membership

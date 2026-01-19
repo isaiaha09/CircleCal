@@ -89,4 +89,28 @@
 		</div>
 	</div>
 </div>
+
+<script>
+	(function () {
+		// Best-effort signal that this session is in "standalone" PWA display mode.
+		// This is not a security boundary; it only gates the convenience redirect to /admin
+		// when a superuser logs in via this Staff/Manager login page.
+		var isStandalone = false;
+		try {
+			isStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+		} catch (e) {}
+		try {
+			// iOS Safari
+			isStandalone = isStandalone || (typeof navigator !== 'undefined' && navigator.standalone === true);
+		} catch (e) {}
+
+		var secure = (typeof location !== 'undefined' && location.protocol === 'https:') ? '; Secure' : '';
+		if (isStandalone) {
+			document.cookie = 'cc_pwa_standalone=1; Path=/; SameSite=Lax' + secure;
+		} else {
+			// Clear the cookie in normal browser mode to avoid accidental carryover.
+			document.cookie = 'cc_pwa_standalone=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax' + secure;
+		}
+	})();
+</script>
 {% endblock %}
