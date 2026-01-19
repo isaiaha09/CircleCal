@@ -698,6 +698,51 @@
         {% block content %}{% endblock %}
     </main>
 
+    {% if request.GET.embed != '1' and not request.custom_domain_organization %}
+    <div id="cc-cookie-banner" class="hidden" style="position:fixed;left:0;right:0;bottom:0;z-index:10001;">
+        <div class="bg-white border-t shadow-sm" style="padding-bottom: env(safe-area-inset-bottom);">
+            <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div class="text-sm text-gray-700">
+                    <div class="font-semibold text-gray-900">Cookies</div>
+                    <p>
+                         CircleCal only uses essential cookies to help the app work properly for certain functionalities such as to keep you signed in. They are required for core features like security and session authentication. 
+                        <a href="{% url 'calendar_app:privacy' %}" class="text-blue-600 hover:underline">Learn more</a>.
+                    </p>
+                </div>
+                <button id="cc-cookie-banner-dismiss" type="button" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+                    Ok
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            // Cookie banner: keep it outside <main> so it doesn't get covered by the footer's stacking context.
+            const STORAGE_KEY = 'cc_cookie_banner_dismissed';
+
+            let dismissed = false;
+            try {
+                dismissed = localStorage.getItem(STORAGE_KEY) === '1';
+            } catch (e) {
+                dismissed = false;
+            }
+
+            const banner = document.getElementById('cc-cookie-banner');
+            const dismissBtn = document.getElementById('cc-cookie-banner-dismiss');
+            if (banner && dismissBtn && !dismissed) {
+                banner.classList.remove('hidden');
+                dismissBtn.addEventListener('click', function () {
+                    banner.classList.add('hidden');
+                    try {
+                        localStorage.setItem(STORAGE_KEY, '1');
+                    } catch (e) {}
+                });
+            }
+        })();
+    </script>
+    {% endif %}
+
     <script>
         (function () {
             // Exclusions: fixed overlays that are not "page modals".
