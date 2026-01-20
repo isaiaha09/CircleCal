@@ -17,7 +17,7 @@ print('booking', b.id if b else None)
 
 signer = TimestampSigner()
 token = signer.sign(str(b.id))
-base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
 cancel_url = f"{base_url}/cancel/{b.id}/?token={token}"
 
 org_tz = ZoneInfo(getattr(b.organization, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
@@ -27,7 +27,7 @@ start_display = start_local.strftime('%A, %B %d, %Y at %I:%M %p')
 context = {
     'booking': b,
     'public_ref': getattr(b, 'public_ref', None),
-    'site_url': getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000'),
+    'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
     'old_booking_id': None,
     'old_booking_display': None,
     'start_display': start_display,

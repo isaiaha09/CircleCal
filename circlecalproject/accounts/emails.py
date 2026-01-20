@@ -27,7 +27,7 @@ def send_account_deactivated_email(user, *, business_names=None) -> bool:
     business_names = list(business_names or [])
     context = {
         'user': user,
-        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
         'business_names': business_names,
     }
     return _send_account_email(
@@ -42,7 +42,7 @@ def send_account_deleted_email(user, *, business_names=None) -> bool:
     business_names = list(business_names or [])
     context = {
         'user': user,
-        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
         'business_names': business_names,
     }
     return _send_account_email(
@@ -57,7 +57,7 @@ def send_trial_deletion_scheduled_email(user, *, scheduled_for, business_names=N
     business_names = list(business_names or [])
     context = {
         'user': user,
-        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
         'business_names': business_names,
         'scheduled_for': scheduled_for,
     }
@@ -74,7 +74,7 @@ def send_subscription_cancellation_scheduled_email(user, *, business_name: str, 
         'user': user,
         'business_name': business_name,
         'scheduled_for': scheduled_for,
-        'site_url': getattr(settings, 'SITE_URL', 'http://localhost:8000'),
+        'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
     }
     return _send_account_email(
         subject='Your CircleCal subscription will cancel at period end',

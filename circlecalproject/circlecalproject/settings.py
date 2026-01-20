@@ -245,7 +245,7 @@ CONTACT_RECIPIENT = os.getenv('CONTACT_RECIPIENT')
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
-SITE_URL = os.getenv("SITE_URL") or ("http://127.0.0.1:8000" if DEBUG else "http://localhost:8000")
+SITE_URL = os.getenv("SITE_URL") or ("http://127.0.0.1:8000" if DEBUG else "https://circlecal.app")
 
 # Optional admin PIN protection. Set via environment variable `ADMIN_PIN`.
 ADMIN_PIN = os.getenv('ADMIN_PIN')

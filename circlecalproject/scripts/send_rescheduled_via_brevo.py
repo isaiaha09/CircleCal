@@ -29,7 +29,7 @@ try:
     token = signer.sign(str(b.id))
     cancel_path = f"/cancel/{b.id}/"
     reschedule_path = f"/reschedule/{b.id}/"
-    base_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+    base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
     cancel_url = f"{base_url}{cancel_path}?token={token}"
     reschedule_url = cancel_url
 except Exception:
@@ -62,7 +62,7 @@ except Exception:
 context = {
     'booking': b,
     'public_ref': getattr(b, 'public_ref', None),
-    'site_url': getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000'),
+    'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
     'old_booking_id': OLD_BOOKING_ID,
     'old_booking_display': old_booking_display,
     'start_display': start_display,
