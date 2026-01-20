@@ -4,13 +4,24 @@
 {% block main_class %}w-full max-w-none px-0 py-0{% endblock %}
 {% block content %}
 <div class="w-[95vw] sm:w-full sm:max-w-5xl mx-auto px-0 sm:px-4 py-8 box-border overflow-x-hidden">
+  <style>
+    body.cc-profile-gate-open { overflow: hidden; }
+    @media (max-width: 767px) {
+      body.cc-profile-gate-open header { display: none !important; }
+      body.cc-profile-gate-open #mobileMenu,
+      body.cc-profile-gate-open #mobileMenuPanel {
+        display: none !important;
+      }
+    }
+  </style>
+
   <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
     <h1 class="text-2xl font-bold text-blue-700 w-full text-center sm:w-auto sm:text-left">Your Profile</h1>
     <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm w-full sm:w-auto">Save Changes</button>
   </div>
 
   {# Require First/Last Name before leaving Profile (until saved). #}
-  <div id="profile-name-required-modal" class="hidden fixed inset-0 z-50">
+  <div id="profile-name-required-modal" class="hidden fixed inset-0 z-50" style="z-index: 20001;">
     <div class="absolute inset-0 bg-black/50"></div>
     <div class="relative min-h-full flex items-center justify-center p-4">
       <div class="w-full max-w-lg bg-white rounded-xl shadow-lg border border-blue-100">
@@ -39,6 +50,23 @@
         var saveBtn = document.getElementById('profile-name-required-save');
         if (!modal || !stayBtn || !saveBtn) return;
 
+        function closeMobileMenuIfOpen(done) {
+          try {
+            var mobileMenu = document.getElementById('mobileMenu');
+            var mobileMenuBtn = document.getElementById('mobileMenuBtn');
+            if (mobileMenu && mobileMenuBtn && !mobileMenu.classList.contains('hidden')) {
+              mobileMenuBtn.click();
+              setTimeout(done, 380);
+              return;
+            }
+          } catch (err) {}
+          done();
+        }
+
+        function setGateOpen(isOpen) {
+          try { document.body.classList.toggle('cc-profile-gate-open', !!isOpen); } catch (err) {}
+        }
+
         var firstNameEl = document.querySelector('input[name="first_name"]');
         var lastNameEl = document.querySelector('input[name="last_name"]');
         // If fields aren't present for some reason, don't block navigation.
@@ -56,8 +84,18 @@
           window.__ccProfileLeaveGuard.nameGateActive = true;
         } catch (err) {}
 
-        function openModal() { modal.classList.remove('hidden'); }
-        function closeModal() { modal.classList.add('hidden'); }
+        function openModal() {
+          closeMobileMenuIfOpen(function () {
+            setGateOpen(true);
+            setTimeout(function () {
+              modal.classList.remove('hidden');
+            }, 50);
+          });
+        }
+        function closeModal() {
+          modal.classList.add('hidden');
+          setGateOpen(false);
+        }
 
         function isLogoutHref(href) {
           if (!href) return false;
@@ -153,7 +191,7 @@
   </script>
 
   {% if stripe_connect_modal_enabled and stripe_connect_start_url %}
-  <div id="stripe-connect-leave-modal" class="hidden fixed inset-0 z-50">
+  <div id="stripe-connect-leave-modal" class="hidden fixed inset-0 z-50" style="z-index: 20002;">
     <div class="absolute inset-0 bg-black/50"></div>
     <div class="relative min-h-full flex items-center justify-center p-4">
       <div class="w-full max-w-lg bg-white rounded-xl shadow-lg border border-blue-100">
@@ -184,11 +222,34 @@
       var goBtn = document.getElementById('stripe-connect-go');
       if (!modal || !stayBtn || !goBtn) return;
 
+      function closeMobileMenuIfOpen(done) {
+        try {
+          var mobileMenu = document.getElementById('mobileMenu');
+          var mobileMenuBtn = document.getElementById('mobileMenuBtn');
+          if (mobileMenu && mobileMenuBtn && !mobileMenu.classList.contains('hidden')) {
+            mobileMenuBtn.click();
+            setTimeout(done, 380);
+            return;
+          }
+        } catch (err) {}
+        done();
+      }
+
+      function setGateOpen(isOpen) {
+        try { document.body.classList.toggle('cc-profile-gate-open', !!isOpen); } catch (err) {}
+      }
+
       function openModal() {
-        modal.classList.remove('hidden');
+        closeMobileMenuIfOpen(function () {
+          setGateOpen(true);
+          setTimeout(function () {
+            modal.classList.remove('hidden');
+          }, 50);
+        });
       }
       function closeModal() {
         modal.classList.add('hidden');
+        setGateOpen(false);
       }
 
       // Intercept navigation away from this page (links). Form submissions (Save) are unaffected.
