@@ -97,7 +97,8 @@
                     @media (max-width: 480px) {
                         /* Shrink the modal card to fit narrow viewports while keeping proportions */
                         #timeModal > div {
-                            width: min(92vw, 380px) !important;
+                            width: 95vw !important;
+                            max-width: 95vw !important;
                             padding: 14px !important;
                             border-radius: 12px !important;
                             box-shadow: 0 14px 20px rgba(0,0,0,0.12) !important;
@@ -2702,8 +2703,8 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 @media (max-width: 480px) {
     /* Expand modal to most of viewport so inputs can grow horizontally */
     #timeModal > div {
-        width: calc(100% - 28px) !important;
-        max-width: 420px !important;
+        width: 95vw !important;
+        max-width: 95vw !important;
         padding: 16px !important;
         box-sizing: border-box !important;
     }
@@ -2763,8 +2764,8 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 @media (max-width: 360px) {
     /* Keep rows inline (no stacking) but tighten label and input sizing on very narrow screens */
     #timeModal > div {
-        width: calc(100% - 20px) !important;
-        max-width: 400px !important;
+        width: 95vw !important;
+        max-width: 95vw !important;
         padding: 12px !important;
     }
     #modalRangesContainer .range-label {
