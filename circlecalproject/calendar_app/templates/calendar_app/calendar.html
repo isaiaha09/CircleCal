@@ -672,6 +672,9 @@ th[role='presentation'] { border-right-color: transparent !important; }
     border-radius: 50% !important;
     font-weight: 600;
     transition: transform 0.2s ease, background-color 0.2s ease;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
 }
 
 /* Ensure time-circle elements remain circular */
@@ -5030,16 +5033,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 try { _ccWeeklyValidateDay(dayIndex, start); } catch (e) {}
             });
             
+            function _ccOpenWeeklyPicker(inputEl, containerEl) {
+                // Remove any existing pickers
+                document.querySelectorAll('.custom-time-picker').forEach(p => p.remove());
+                const picker = (typeof createCustomTimePickerGlobal === 'function' ? createCustomTimePickerGlobal : createCustomTimePicker)(inputEl);
+                picker.classList.add('active');
+                containerEl.appendChild(picker);
+            }
+
             start.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
-                // Remove any existing pickers
-                document.querySelectorAll('.custom-time-picker').forEach(p => p.remove());
-                
-                const picker = (typeof createCustomTimePickerGlobal === 'function' ? createCustomTimePickerGlobal : createCustomTimePicker)(start);
-                picker.classList.add('active');
-                startContainer.appendChild(picker);
+                _ccOpenWeeklyPicker(start, startContainer);
+            });
+            // Mobile Safari: prevent the native time picker from opening.
+            start.addEventListener('touchstart', function(e) {
+                try { e.preventDefault(); } catch (_) {}
+                e.stopPropagation();
+                _ccOpenWeeklyPicker(start, startContainer);
+            }, { passive: false });
+            start.addEventListener('focus', function() {
+                try {
+                    const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                    if (isTouch) start.blur();
+                } catch (_) {}
             });
             
             startContainer.appendChild(start);
@@ -5063,13 +5080,19 @@ document.addEventListener('DOMContentLoaded', function() {
             end.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
-                // Remove any existing pickers
-                document.querySelectorAll('.custom-time-picker').forEach(p => p.remove());
-                
-                const picker = (typeof createCustomTimePickerGlobal === 'function' ? createCustomTimePickerGlobal : createCustomTimePicker)(end);
-                picker.classList.add('active');
-                endContainer.appendChild(picker);
+                _ccOpenWeeklyPicker(end, endContainer);
+            });
+            // Mobile Safari: prevent the native time picker from opening.
+            end.addEventListener('touchstart', function(e) {
+                try { e.preventDefault(); } catch (_) {}
+                e.stopPropagation();
+                _ccOpenWeeklyPicker(end, endContainer);
+            }, { passive: false });
+            end.addEventListener('focus', function() {
+                try {
+                    const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                    if (isTouch) end.blur();
+                } catch (_) {}
             });
             
             endContainer.appendChild(end);
@@ -8221,7 +8244,11 @@ document.addEventListener('DOMContentLoaded', function() {
             // If a drag is in progress, skip (drag logic will handle selection on mouseup)
             if (isDragging) return;
 
-            const num = ev.target.closest('.fc-daygrid-day-number');
+            // iOS Safari can report a Text node as the event target.
+            const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
+            if (!target || typeof target.closest !== 'function') return;
+
+            const num = target.closest('.fc-daygrid-day-number');
             if (!num) return;
             const dayCell = num.closest('.fc-daygrid-day');
             if (!dayCell) return;
@@ -8626,17 +8653,32 @@ document.addEventListener('DOMContentLoaded', function() {
         start.readOnly = true; // use custom time picker for consistency
         try { _ccSetPrevValue(start); } catch (e) {}
         startContainer.appendChild(start);
-        // Open custom picker on click
+        function _ccOpenModalRangePicker(inputEl, containerEl) {
+            try {
+                document.querySelectorAll('.custom-time-picker').forEach(p => p.remove());
+                const picker = (typeof createCustomTimePickerGlobal === 'function' ? createCustomTimePickerGlobal : createCustomTimePicker)(inputEl);
+                picker.classList.add('active');
+                containerEl.appendChild(picker);
+            } catch (err) { /* ignore */ }
+        }
+
+        // Open custom picker (and block native mobile time picker)
         start.style.cursor = 'pointer';
         start.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            _ccOpenModalRangePicker(start, startContainer);
+        });
+        start.addEventListener('touchstart', (e) => {
+            try { e.preventDefault(); } catch (_) {}
+            e.stopPropagation();
+            _ccOpenModalRangePicker(start, startContainer);
+        }, { passive: false });
+        start.addEventListener('focus', () => {
             try {
-                document.querySelectorAll('.custom-time-picker').forEach(p => p.remove());
-                const picker = (typeof createCustomTimePickerGlobal === 'function' ? createCustomTimePickerGlobal : createCustomTimePicker)(start);
-                picker.classList.add('active');
-                startContainer.appendChild(picker);
-            } catch (err) { /* ignore */ }
+                const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (isTouch) start.blur();
+            } catch (_) {}
         });
 
         start.addEventListener('change', () => _ccValidateModalRangesAndMaybeRevert(start));
@@ -8656,17 +8698,23 @@ document.addEventListener('DOMContentLoaded', function() {
         end.readOnly = true; // use custom time picker for consistency
         try { _ccSetPrevValue(end); } catch (e) {}
         endContainer.appendChild(end);
-        // Open custom picker on click
+        // Open custom picker (and block native mobile time picker)
         end.style.cursor = 'pointer';
         end.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            _ccOpenModalRangePicker(end, endContainer);
+        });
+        end.addEventListener('touchstart', (e) => {
+            try { e.preventDefault(); } catch (_) {}
+            e.stopPropagation();
+            _ccOpenModalRangePicker(end, endContainer);
+        }, { passive: false });
+        end.addEventListener('focus', () => {
             try {
-                document.querySelectorAll('.custom-time-picker').forEach(p => p.remove());
-                const picker = (typeof createCustomTimePickerGlobal === 'function' ? createCustomTimePickerGlobal : createCustomTimePicker)(end);
-                picker.classList.add('active');
-                endContainer.appendChild(picker);
-            } catch (err) { /* ignore */ }
+                const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (isTouch) end.blur();
+            } catch (_) {}
         });
 
         end.addEventListener('change', () => _ccValidateModalRangesAndMaybeRevert(end));

@@ -77,6 +77,9 @@
       inset 0 1px 0 rgba(255,255,255,0.08);
     transform: translateZ(0);
     will-change: transform;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
   }
   @media (min-width: 768px) {
     .day-circle { max-width: 52px; font-size: 1rem; }
@@ -823,6 +826,30 @@ document.addEventListener("DOMContentLoaded", async function () {
   // Render synchronization guards
   let renderToken = 0;
   let isRendering = false;
+  // Used to suppress the synthetic click that often follows a pointerup on mobile.
+  let _ccSuppressClickUntil = 0;
+
+  function _ccBindTap(el, handler) {
+    if (!el) return;
+    el.addEventListener('pointerup', (ev) => {
+      try { ev.preventDefault(); } catch (_) {}
+      try { ev.stopPropagation(); } catch (_) {}
+      _ccSuppressClickUntil = Date.now() + 700;
+      handler();
+    });
+    // Fallback for environments without Pointer Events
+    el.addEventListener('click', (ev) => {
+      if (Date.now() < _ccSuppressClickUntil) return;
+      try { ev.preventDefault(); } catch (_) {}
+      handler();
+    });
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        handler();
+      }
+    });
+  }
 
   function updatePaymentSectionForServiceSlug(slug) {
     if (!paymentSection) return;
@@ -1174,7 +1201,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       if (enabled) {
         circle.style.cursor = 'pointer';
         circle.tabIndex = 0;
-        circle.addEventListener("click", () => openTimeModal(year, month, day, dateKey));
+        _ccBindTap(circle, () => openTimeModal(year, month, day, dateKey));
       } else {
         circle.classList.add("disabled");
         circle.style.pointerEvents = 'none';
@@ -1284,6 +1311,15 @@ document.addEventListener("DOMContentLoaded", async function () {
         return; // prevent opening modal for fully booked day
       }
     }
+
+    // Show the modal immediately on mobile (fetching availability can take a beat).
+    try {
+      timeModalViewDetails.style.display = 'none';
+      if (timeModalViewCheckout) timeModalViewCheckout.style.display = 'none';
+      timeModalViewSlots.style.display = 'block';
+      timeSlots.innerHTML = '<div class="text-gray-600" style="padding:8px 0;">Loading times…</div>';
+      _ccShowTimeModal();
+    } catch (e) {}
 
     // Build local ISO (avoid timezone drift like 1am)
     const rangeStartDate = new Date(year, month, day, 0, 0, 0);

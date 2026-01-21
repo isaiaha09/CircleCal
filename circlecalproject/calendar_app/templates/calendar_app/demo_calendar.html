@@ -425,6 +425,9 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
     border-radius: 50% !important;
     font-weight: 600;
     transition: transform 0.2s ease, background-color 0.2s ease;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
 }
 
 /* FullCalendar header buttons: keep arrow icons centered (demo-only) */
@@ -976,6 +979,17 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
             e.stopPropagation();
             openCustomTimePickerForInput(start);
         });
+        start.addEventListener('touchstart', (e) => {
+            try { e.preventDefault(); } catch (_) {}
+            e.stopPropagation();
+            openCustomTimePickerForInput(start);
+        }, { passive: false });
+        start.addEventListener('focus', () => {
+            try {
+                const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (isTouch) start.blur();
+            } catch (_) {}
+        });
         startContainer.appendChild(start);
 
         const endContainer = document.createElement('div');
@@ -990,6 +1004,17 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
             e.preventDefault();
             e.stopPropagation();
             openCustomTimePickerForInput(end);
+        });
+        end.addEventListener('touchstart', (e) => {
+            try { e.preventDefault(); } catch (_) {}
+            e.stopPropagation();
+            openCustomTimePickerForInput(end);
+        }, { passive: false });
+        end.addEventListener('focus', () => {
+            try {
+                const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (isTouch) end.blur();
+            } catch (_) {}
         });
         endContainer.appendChild(end);
 
@@ -1445,7 +1470,9 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
         calEl.addEventListener('pointerup', function(ev) {
             try {
                 if (isDragging) return;
-                const num = ev.target.closest('.fc-daygrid-day-number');
+                const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
+                if (!target || typeof target.closest !== 'function') return;
+                const num = target.closest('.fc-daygrid-day-number');
                 if (!num) return;
                 const dayCell = num.closest('.fc-daygrid-day');
                 if (!dayCell) return;
