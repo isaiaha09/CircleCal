@@ -8238,34 +8238,185 @@ document.addEventListener('DOMContentLoaded', function() {
 
     try { attachDayNumberClickHandlers(); } catch (e) { console.warn('attachDayNumberClickHandlers failed', e); }
 
-    // Mobile: select on pointerdown (touch) so the user doesn't have to "tap near" the circle.
-    // Pointerup can miss when the finger drifts a couple pixels before release.
+    // Mobile drag-selection (touch): mirror the existing desktop mousedown/mousemove/mouseup logic.
+    // We start the selection on pointerdown and extend it on pointermove across day cells.
+    let _ccTouchDragPointerId = null;
+    let _ccSuppressMouseDownUntil = 0;
+
+    function _ccCellFromPointer(ev) {
+        try {
+            const el = document.elementFromPoint(ev.clientX, ev.clientY);
+            return el ? el.closest('.fc-daygrid-day') : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     calendarEl.addEventListener('pointerdown', function(ev) {
         try {
             const isTouch = (ev && ev.pointerType === 'touch') || ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
             if (!isTouch) return;
-            // If a drag is in progress, skip.
             if (isDragging) return;
 
             const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
             if (!target || typeof target.closest !== 'function') return;
-
             const num = target.closest('.fc-daygrid-day-number');
             if (!num) return;
-            const dayCell = num.closest('.fc-daygrid-day');
-            if (!dayCell) return;
-            const dateStr = dayCell.dataset.date;
-            if (!dateStr) return;
+            const cell = num.closest('.fc-daygrid-day');
+            if (!cell) return;
 
+            const date = cell.dataset.date;
+            if (!date) return;
+
+            // Stop scroll while dragging/selecting.
             try { ev.preventDefault(); } catch (_) {}
             try { ev.stopPropagation(); } catch (_) {}
 
-            if (isPastDate(dateStr)) {
-                return openPastDayModal(dateStr);
+            _ccSuppressMouseDownUntil = Date.now() + 700;
+            _ccTouchDragPointerId = ev.pointerId;
+            try { calendarEl.setPointerCapture(ev.pointerId); } catch (_) {}
+
+            const isPast = isPastDate(date);
+
+            // Fully-booked days cannot be overridden.
+            try {
+                if (!isPast && (typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled()) && window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(date))) {
+                    ccToastFullyBooked([String(date)]);
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+
+            // Mixed selection guard.
+            if (isPast && [...selectedDates].some(d => !isPastDate(d)) ||
+                !isPast && [...selectedDates].some(d => isPastDate(d)))
+            {
+                alert('You can only select past days or available days — not both at the same time.');
+                isDragging = false;
+                dragStartDate = null;
+                dragMode = null;
+                dragStartIsUnavailable = false;
+                document.querySelectorAll('.fc-daygrid-day-number.temp-highlight').forEach(el => el.classList.remove('temp-highlight'));
+                return;
             }
-            toggleDateSelection(dateStr);
+
+            if (isPast) {
+                openPastDayModal(date);
+                return;
+            }
+
+            // Start drag selection.
+            isDragging = true;
+            dragStartDate = date;
+            dragMode = selectedDates.has(date) ? 'deselect' : 'select';
+            try {
+                const numEl = cell.querySelector('.fc-daygrid-day-number');
+                dragStartIsUnavailable = cell.classList.contains('fc-day-unavailable') || (numEl && numEl.classList.contains('unavailable-number'));
+            } catch (e) { dragStartIsUnavailable = false; }
+
+            toggleDateSelection(date, dragMode === 'select');
         } catch (err) { console.error('delegated pointerdown handler failed', err); }
     }, { passive: false });
+
+    calendarEl.addEventListener('pointermove', function(ev) {
+        try {
+            if (!isDragging || !dragStartDate) return;
+            if (!ev || ev.pointerType !== 'touch') return;
+            if (_ccTouchDragPointerId != null && ev.pointerId !== _ccTouchDragPointerId) return;
+
+            try { ev.preventDefault(); } catch (_) {}
+
+            const cell = _ccCellFromPointer(ev);
+            if (!cell) return;
+            const currentDate = cell.dataset.date;
+            if (!currentDate) return;
+
+            // Skip if mixed past/future detected
+            const isPast = isPastDate(currentDate);
+            if (isPast && [...selectedDates].some(d => !isPastDate(d)) ||
+                !isPast && [...selectedDates].some(d => isPastDate(d)))
+            {
+                isDragging = false;
+                dragStartDate = null;
+                dragMode = null;
+                dragStartIsUnavailable = false;
+                document.querySelectorAll('.fc-daygrid-day-number.temp-highlight').forEach(el => el.classList.remove('temp-highlight'));
+                return;
+            }
+
+            const start = parseYMD(dragStartDate);
+            const end = parseYMD(currentDate);
+            const minDate = start < end ? start : end;
+            const maxDate = start > end ? start : end;
+
+            const selector = dragStartIsUnavailable ? '.fc-daygrid-day.fc-day-unavailable' : '.fc-daygrid-day.fc-day-available';
+            const blockedDuringDrag = [];
+            document.querySelectorAll(selector).forEach(c => {
+                const dateStr = c.dataset.date;
+                const numberEl = c.querySelector('.fc-daygrid-day-number');
+                if (!numberEl || !dateStr) return;
+
+                // Skip fully-booked days during drag selection.
+                try {
+                    if ((typeof _ccFullyBookedProtectionEnabled === 'function' && _ccFullyBookedProtectionEnabled()) && window.__ccFullyBookedOutDates && window.__ccFullyBookedOutDates.has(String(dateStr))) {
+                        numberEl.classList.remove('temp-highlight');
+                        numberEl.classList.remove('selected');
+                        blockedDuringDrag.push(String(dateStr));
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+
+                const d = parseYMD(dateStr);
+                if (d >= minDate && d <= maxDate) {
+                    numberEl.classList.add('temp-highlight');
+                    if (dragMode === 'select') numberEl.classList.add('selected');
+                    else numberEl.classList.remove('selected');
+                } else {
+                    numberEl.classList.remove('temp-highlight');
+                    if (dragMode === 'select' && !selectedDates.has(dateStr)) numberEl.classList.remove('selected');
+                    if (dragMode === 'deselect' && selectedDates.has(dateStr)) numberEl.classList.add('selected');
+                }
+            });
+
+            try {
+                if (!window.__ccDragBlockedFullyBooked) window.__ccDragBlockedFullyBooked = new Set();
+                for (const d of blockedDuringDrag) window.__ccDragBlockedFullyBooked.add(d);
+            } catch (e) { /* ignore */ }
+        } catch (err) { console.error('delegated pointermove handler failed', err); }
+    }, { passive: false });
+
+    function _ccEndTouchDragSelection(ev) {
+        try {
+            if (!isDragging) return;
+            if (!ev || ev.pointerType !== 'touch') return;
+            if (_ccTouchDragPointerId != null && ev.pointerId !== _ccTouchDragPointerId) return;
+
+            // Commit ranged temp highlights.
+            document.querySelectorAll('.fc-daygrid-day-number.temp-highlight').forEach(el => {
+                el.classList.remove('temp-highlight');
+                const date = el.closest('.fc-daygrid-day').dataset.date;
+                if (dragMode === 'select') selectedDates.add(date);
+                else if (dragMode === 'deselect') selectedDates.delete(date);
+            });
+
+            isDragging = false;
+            dragStartDate = null;
+            dragMode = null;
+            dragStartIsUnavailable = false;
+            _ccTouchDragPointerId = null;
+
+            updateClearButton();
+            updateSelectButtonText();
+
+            try {
+                if (window.__ccDragBlockedFullyBooked) window.__ccDragBlockedFullyBooked.clear();
+            } catch (e) { /* ignore */ }
+
+            try { calendarEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+        } catch (err) { console.error('touch drag end failed', err); }
+    }
+
+    calendarEl.addEventListener('pointerup', _ccEndTouchDragSelection, { passive: false });
+    calendarEl.addEventListener('pointercancel', _ccEndTouchDragSelection, { passive: false });
 
     // Use a single delegated pointerup handler to toggle selection or open past-day modal.
     calendarEl.addEventListener('pointerup', function(ev) {
@@ -11508,6 +11659,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     calendarEl.addEventListener('mousedown', e => {
+        try {
+            if (typeof _ccSuppressMouseDownUntil === 'number' && Date.now() < _ccSuppressMouseDownUntil) return;
+        } catch (_) {}
         if (e.button !== 0) return;
         // Allow starting a drag from any rendered day cell (available OR unavailable),
         // but we will ignore past days below.
