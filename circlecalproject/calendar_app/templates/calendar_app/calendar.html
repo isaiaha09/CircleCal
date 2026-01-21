@@ -708,6 +708,15 @@ th[role='presentation'] { border-right-color: transparent !important; }
     border-color: var(--primary-700);
 }
 
+/* Mobile Safari can leave :hover “stuck” after a tap. Make selected available days always win. */
+.fc-day-available .fc-daygrid-day-number.selected,
+.fc-day-available .fc-daygrid-day-number.selected:hover {
+    background: linear-gradient(135deg, var(--primary-500), var(--primary-600)) !important;
+    color: white !important;
+    border-color: var(--primary-700) !important;
+    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4) !important;
+}
+
 /* Prevent frame highlighting */
   .fc-daygrid-day.fc-day-available {
       background: transparent !important;
