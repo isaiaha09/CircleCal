@@ -1467,9 +1467,31 @@ select:focus, input[type="time"]:focus, input[type="number"]:focus {
         // Mirror calendar.html interaction model:
         // - click day number toggles selection (past day opens read-only schedule)
         // - click+drag selects/deselects a range across same availability type
+        // Mobile: select on pointerdown so taps hit the visible circle reliably.
+        calEl.addEventListener('pointerdown', function(ev) {
+            try {
+                const isTouch = (ev && ev.pointerType === 'touch') || ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (!isTouch) return;
+                if (isDragging) return;
+                const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
+                if (!target || typeof target.closest !== 'function') return;
+                const num = target.closest('.fc-daygrid-day-number');
+                if (!num) return;
+                const dayCell = num.closest('.fc-daygrid-day');
+                if (!dayCell) return;
+                if (dayCell.classList.contains('fc-day-other')) return;
+                const dateStr = dayCell.dataset.date;
+                if (!dateStr) return;
+                try { ev.preventDefault(); } catch (_) {}
+                try { ev.stopPropagation(); } catch (_) {}
+                toggleDateSelection(dateStr);
+            } catch (err) { console.error('demo delegated pointerdown failed', err); }
+        }, { passive: false });
+
         calEl.addEventListener('pointerup', function(ev) {
             try {
                 if (isDragging) return;
+                if (ev && ev.pointerType === 'touch') return;
                 const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
                 if (!target || typeof target.closest !== 'function') return;
                 const num = target.closest('.fc-daygrid-day-number');

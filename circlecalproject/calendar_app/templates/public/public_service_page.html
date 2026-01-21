@@ -1432,10 +1432,17 @@ document.addEventListener("DOMContentLoaded", async function () {
       if (!availResp.ok) throw new Error("Failed to load availability");
       const slots = await availResp.json();
 
-      // If detailed fetch yields no slots, do not mutate the day circle state.
-      // Simply avoid opening the modal or show a lightweight notice.
+      // Replace the "Loading…" placeholder.
+      try { timeSlots.innerHTML = ''; } catch (_) {}
+
+      // If detailed fetch yields no slots, keep the modal open and show a message.
       if (!Array.isArray(slots) || slots.length === 0) {
-        // Avoid turning the circle grey on click; just return quietly
+        try {
+          const empty = document.createElement('div');
+          empty.className = 'text-gray-600';
+          empty.innerText = 'No available times on this day.';
+          timeSlots.appendChild(empty);
+        } catch (_) {}
         return;
       }
 

@@ -8238,11 +8238,43 @@ document.addEventListener('DOMContentLoaded', function() {
 
     try { attachDayNumberClickHandlers(); } catch (e) { console.warn('attachDayNumberClickHandlers failed', e); }
 
+    // Mobile: select on pointerdown (touch) so the user doesn't have to "tap near" the circle.
+    // Pointerup can miss when the finger drifts a couple pixels before release.
+    calendarEl.addEventListener('pointerdown', function(ev) {
+        try {
+            const isTouch = (ev && ev.pointerType === 'touch') || ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+            if (!isTouch) return;
+            // If a drag is in progress, skip.
+            if (isDragging) return;
+
+            const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
+            if (!target || typeof target.closest !== 'function') return;
+
+            const num = target.closest('.fc-daygrid-day-number');
+            if (!num) return;
+            const dayCell = num.closest('.fc-daygrid-day');
+            if (!dayCell) return;
+            const dateStr = dayCell.dataset.date;
+            if (!dateStr) return;
+
+            try { ev.preventDefault(); } catch (_) {}
+            try { ev.stopPropagation(); } catch (_) {}
+
+            if (isPastDate(dateStr)) {
+                return openPastDayModal(dateStr);
+            }
+            toggleDateSelection(dateStr);
+        } catch (err) { console.error('delegated pointerdown handler failed', err); }
+    }, { passive: false });
+
     // Use a single delegated pointerup handler to toggle selection or open past-day modal.
     calendarEl.addEventListener('pointerup', function(ev) {
         try {
             // If a drag is in progress, skip (drag logic will handle selection on mouseup)
             if (isDragging) return;
+
+            // Touch is handled on pointerdown for reliability.
+            if (ev && ev.pointerType === 'touch') return;
 
             // iOS Safari can report a Text node as the event target.
             const target = (ev && ev.target && ev.target.nodeType === 3) ? ev.target.parentElement : ev.target;
