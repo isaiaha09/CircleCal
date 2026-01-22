@@ -1246,7 +1246,9 @@ def manage_billing(request, org_slug):
         trial_end_iso = subscription.trial_end.isoformat()
         try:
             if subscription.start_date:
-                trial_total_days = max(1, (subscription.trial_end - subscription.start_date).days)
+                import math
+                total_seconds = (subscription.trial_end - subscription.start_date).total_seconds()
+                trial_total_days = max(1, int(math.ceil(total_seconds / 86400.0)))
         except Exception:
             trial_total_days = None
         show_invoices = False

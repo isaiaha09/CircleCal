@@ -261,12 +261,14 @@ class OrganizationMiddleware:
             if not sub:
                 basic_plan = Plan.objects.filter(slug="basic").first()
                 trial_days = 31
-                trial_end = timezone.now() + timezone.timedelta(days=trial_days)
+                start_dt = timezone.now()
+                trial_end = start_dt + timezone.timedelta(days=trial_days)
                 sub = Subscription.objects.create(
                     organization=org,
                     plan=basic_plan,
                     status="trialing",
                     active=False,
+                    start_date=start_dt,
                     trial_end=trial_end,
                 )
 
