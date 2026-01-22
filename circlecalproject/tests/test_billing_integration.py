@@ -136,3 +136,69 @@ class BillingIntegrationTests(TestCase):
         _, kwargs = mock_subscription_create.call_args
         self.assertIn('discounts', kwargs)
         self.assertEqual(kwargs['discounts'], [{'coupon': 'coupon_test_10off'}])
+
+    @patch('billing.views.stripe.Subscription.create')
+    @patch('billing.views.stripe.Customer.modify')
+    @patch('billing.views.stripe.PaymentMethod.list')
+    def test_change_subscription_plan_trial_to_paid_applies_user_discount_code_to_stripe(self, mock_pm_list, mock_customer_modify, mock_subscription_create):
+        """When converting a local trial (no Stripe subscription yet) to paid via manage.html,
+        the created Stripe subscription should include the user's Stripe-linked discount."""
+
+        from billing.models import Subscription
+
+        # Ensure org has a Stripe customer id and a trial subscription with no Stripe sub id.
+        self.org.stripe_customer_id = 'cus_test_999'
+        self.org.save(update_fields=['stripe_customer_id'])
+
+        Subscription.objects.create(
+            organization=self.org,
+            plan=self.plan,
+            status='trialing',
+            active=False,
+            start_date=timezone.now(),
+            trial_end=timezone.now() + timezone.timedelta(days=31),
+            stripe_subscription_id=None,
+        )
+
+        # Attach a Stripe-linked DiscountCode to the user
+        dc = DiscountCode.objects.create(
+            code='FREE99',
+            description='100% off',
+            percent_off=100,
+            active=True,
+            stripe_coupon_id='coupon_999',
+            start_date=timezone.now() - timezone.timedelta(days=1),
+            expires_at=timezone.now() + timezone.timedelta(days=30),
+        )
+        dc.users.add(self.user)
+
+        # Mock Stripe dependencies
+        class _PMList:
+            data = [type('PM', (), {'id': 'pm_1'})()]
+
+        mock_pm_list.return_value = _PMList()
+        mock_customer_modify.return_value = {'id': self.org.stripe_customer_id}
+        class _StripeSub(dict):
+            def __getattr__(self, item):
+                try:
+                    return self[item]
+                except KeyError as e:
+                    raise AttributeError(item) from e
+
+        mock_subscription_create.return_value = _StripeSub(
+            id='sub_1',
+            status='active',
+            current_period_end=int(timezone.now().timestamp()) + 30 * 86400,
+        )
+
+        resp = self.client.post(
+            f'/billing/api/bus/{self.org.slug}/subscription/change_plan/{self.plan.id}/',
+            data='{"start_immediately": true}',
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1'
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        _, kwargs = mock_subscription_create.call_args
+        self.assertIn('discounts', kwargs)
+        self.assertEqual(kwargs['discounts'], [{'coupon': 'coupon_999'}])

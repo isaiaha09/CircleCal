@@ -2761,13 +2761,46 @@ def change_subscription_plan(request, org_slug, plan_id):
                 invoice_settings={"default_payment_method": pm_id}
             )
 
+            # Apply any Stripe-linked DiscountCode for this user (promo code or coupon).
+            discounts = None
+            try:
+                from billing.models import DiscountCode
+
+                dc = (
+                    DiscountCode.objects.filter(users=request.user, active=True)
+                    .order_by('-created_at')
+                    .first()
+                )
+                if dc and dc.is_valid():
+                    promo_id = getattr(dc, 'stripe_promotion_code_id', None)
+                    coupon_id = getattr(dc, 'stripe_coupon_id', None)
+                    if promo_id:
+                        discounts = [{"promotion_code": str(promo_id)}]
+                    elif coupon_id:
+                        discounts = [{"coupon": str(coupon_id)}]
+            except Exception:
+                discounts = None
+
             # Create new Stripe subscription
-            stripe_sub = stripe.Subscription.create(
-                customer=org.stripe_customer_id,
-                items=[{"price": new_plan.stripe_price_id}],
-                default_payment_method=pm_id,
-                metadata={"organization_id": str(org.id), "plan_id": str(plan_id)},
-            )
+            sub_create_kwargs = {
+                'customer': org.stripe_customer_id,
+                'items': [{"price": new_plan.stripe_price_id}],
+                'default_payment_method': pm_id,
+                'metadata': {"organization_id": str(org.id), "plan_id": str(plan_id)},
+            }
+            if discounts:
+                sub_create_kwargs['discounts'] = discounts
+            try:
+                stripe_sub = stripe.Subscription.create(**sub_create_kwargs)
+            except Exception as e:
+                # Fallback for older Stripe API behavior where `coupon=` is accepted
+                # but `discounts=[{coupon: ...}]` may be rejected.
+                if discounts and isinstance(discounts, list) and discounts and isinstance(discounts[0], dict) and discounts[0].get('coupon'):
+                    sub_create_kwargs.pop('discounts', None)
+                    sub_create_kwargs['coupon'] = discounts[0].get('coupon')
+                    stripe_sub = stripe.Subscription.create(**sub_create_kwargs)
+                else:
+                    raise
             # Update local subscription
             sub.stripe_subscription_id = stripe_sub.id
             sub.plan = new_plan
