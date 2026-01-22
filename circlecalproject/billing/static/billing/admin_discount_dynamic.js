@@ -88,10 +88,23 @@
             else { console.warn('[admin_discount_dynamic] subscription field box not found to render empty select'); }
             return;
         }
-        // Use a predictable admin endpoint path. This assumes the admin is mounted at /admin/.
-        // If your admin is mounted elsewhere, update this path accordingly.
-        var url = '/admin/billing/applieddiscount/subscriptions-for-code/?code_id=' + encodeURIComponent(codeId);
+        // Build the endpoint relative to the current change-form URL so this works even
+        // when the admin is mounted under a custom prefix.
+        // Examples:
+        //  - /admin/billing/applieddiscount/add/            -> /admin/billing/applieddiscount/subscriptions-for-code/
+        //  - /admin/billing/applieddiscount/123/change/     -> /admin/billing/applieddiscount/subscriptions-for-code/
+        //  - /custom-admin/billing/applieddiscount/add/     -> /custom-admin/billing/applieddiscount/subscriptions-for-code/
+        var base = (window.location && window.location.pathname) ? String(window.location.pathname) : '';
+        base = base.replace(/(add\/|\d+\/change\/|\d+\/history\/).*$/, '');
+        if(base && base.charAt(base.length-1) !== '/') base = base + '/';
+        var url = base + 'subscriptions-for-code/?code_id=' + encodeURIComponent(codeId);
+
         fetch(url, {credentials: 'same-origin'}).then(function(resp){
+            if(!resp.ok){
+                var err = new Error('HTTP ' + resp.status + ' loading subscriptions');
+                err.__cc_status = resp.status;
+                throw err;
+            }
             return resp.json();
         }).then(function(json){
             var data = (json && json.data) || [];
@@ -108,6 +121,12 @@
             box.innerHTML = html;
         }).catch(function(err){
             console.error('Failed fetching subscriptions-for-code', err);
+            try {
+                var boxErr = findFieldBox('subscription');
+                if(boxErr){
+                    boxErr.innerHTML = buildSelectHtml('subscription', 'id_subscription', [], null, true, '-- Failed to load subscriptions --');
+                }
+            } catch(e) {}
         });
     }
 

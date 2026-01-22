@@ -25,6 +25,15 @@
       </div>
     </div>
 
+    {% if discount_code %}
+      <div class="mt-3 text-sm">
+        <span class="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-green-50 text-green-800 border border-green-200">
+          <span class="font-semibold">Discount applied</span>
+          <span class="text-green-700">{{ discount_code }}{% if discount_display %} — {{ discount_display }}{% endif %}</span>
+        </span>
+      </div>
+    {% endif %}
+
     {% if plan.description %}
       <p class="text-gray-600 mt-3">{{ plan.description }}</p>
     {% endif %}

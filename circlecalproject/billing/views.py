@@ -670,12 +670,47 @@ def embedded_checkout_page(request, org_slug, plan_id):
     publishable_key = settings.STRIPE_PUBLISHABLE_KEY
     subscription = getattr(org, "subscription", None)
     is_change_flow = bool(subscription and getattr(subscription, "stripe_subscription_id", None))
+
+    # Surface any admin-assigned DiscountCode to the user so it's clear a discount
+    # is expected before they confirm payment.
+    discount_display = None
+    discount_code = None
+    try:
+        from billing.models import DiscountCode
+        dc = (
+            DiscountCode.objects.filter(users=request.user, active=True)
+            .order_by('-created_at')
+            .first()
+        )
+        if dc and dc.is_valid() and (getattr(dc, 'stripe_coupon_id', None) or getattr(dc, 'stripe_promotion_code_id', None)):
+            discount_code = dc.code
+            if dc.percent_off is not None:
+                try:
+                    discount_display = f"{float(dc.percent_off):g}% off"
+                except Exception:
+                    discount_display = "Discount applied"
+            elif dc.amount_off_cents is not None:
+                try:
+                    amt = float(dc.amount_off_cents) / 100.0
+                    cur = (dc.currency or 'USD').upper()
+                    symbol = '$' if cur == 'USD' else ''
+                    discount_display = f"{symbol}{amt:,.2f} off"
+                except Exception:
+                    discount_display = "Discount applied"
+            else:
+                discount_display = "Discount applied"
+    except Exception:
+        discount_display = None
+        discount_code = None
+
     return render(request, "calendar_app/embedded_checkout.html", {
         "organization": org,
         "plan": plan,
         "subscription": subscription,
         "is_change_flow": is_change_flow,
         "stripe_publishable_key": publishable_key,
+        "discount_display": discount_display,
+        "discount_code": discount_code,
     })
 
 
@@ -703,20 +738,59 @@ def create_embedded_subscription(request, org_slug, plan_id):
         org.stripe_customer_id = customer.id
         org.save()
 
+    # If the user has an active admin-assigned DiscountCode (stored in DB),
+    # apply it to the Stripe subscription at creation time.
+    discounts = None
+    _coupon_id = None
+    try:
+        from billing.models import DiscountCode
+
+        dc = (
+            DiscountCode.objects.filter(users=request.user, active=True)
+            .order_by('-created_at')
+            .first()
+        )
+        if dc and dc.is_valid():
+            promo_id = getattr(dc, 'stripe_promotion_code_id', None)
+            _coupon_id = getattr(dc, 'stripe_coupon_id', None)
+            if promo_id:
+                discounts = [{"promotion_code": str(promo_id)}]
+            elif _coupon_id:
+                discounts = [{"coupon": str(_coupon_id)}]
+    except Exception:
+        discounts = None
+        _coupon_id = None
+
     # Create subscription in incomplete state; Stripe will require payment confirmation client-side.
     # Stripe API change (2025-03): Invoice.payment_intent removed; use Invoice.payments[*].payment.payment_intent.
     try:
-        sub = stripe.Subscription.create(
-            customer=org.stripe_customer_id,
-            items=[{"price": plan.stripe_price_id}],
-            payment_behavior="default_incomplete",
+        sub_create_kwargs = {
+            'customer': org.stripe_customer_id,
+            'items': [{"price": plan.stripe_price_id}],
+            'payment_behavior': "default_incomplete",
             # Ensure the card used for the first payment is saved and becomes the
             # subscription's default payment method. We'll also sync it into our
             # local PaymentMethod cache after confirmation.
-            payment_settings={"save_default_payment_method": "on_subscription"},
-            expand=["latest_invoice.payments"],
-            metadata={"organization_id": str(org.id), "plan_id": str(plan.id)},
-        )
+            'payment_settings': {"save_default_payment_method": "on_subscription"},
+            'expand': ["latest_invoice.payments"],
+            'metadata': {"organization_id": str(org.id), "plan_id": str(plan.id)},
+        }
+        if discounts:
+            sub_create_kwargs['discounts'] = discounts
+
+        try:
+            sub = stripe.Subscription.create(**sub_create_kwargs)
+        except Exception as e:
+            # Back-compat: some Stripe API versions/libs historically used `coupon`
+            # instead of `discounts=[{coupon: ...}]`.
+            msg = str(e).lower()
+            if discounts and ('unknown parameter' in msg or 'received unknown parameter' in msg) and 'discounts' in msg:
+                sub_create_kwargs.pop('discounts', None)
+                if _coupon_id:
+                    sub_create_kwargs['coupon'] = str(_coupon_id)
+                sub = stripe.Subscription.create(**sub_create_kwargs)
+            else:
+                raise
 
         latest_invoice = sub.get("latest_invoice")
         if not latest_invoice:
