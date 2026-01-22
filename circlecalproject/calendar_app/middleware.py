@@ -301,6 +301,12 @@ class OrganizationMiddleware:
                     "/accounts/signup",
                     "/accounts/profile/",
                     "/accounts/profile",
+                    "/accounts/two_factor/",
+                    "/accounts/two_factor",
+                    "/accounts/password/change/",
+                    "/accounts/password/change",
+                    "/accounts/password/change/done/",
+                    "/accounts/password/change/done",
                     "/accounts/logout/",
                     "/accounts/logout",
                 ]
