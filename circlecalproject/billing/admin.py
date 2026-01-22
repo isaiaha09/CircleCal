@@ -145,6 +145,7 @@ class DiscountCodeAdmin(admin.ModelAdmin):
     # Use a custom ModelForm with a richer users field
     form = DiscountCodeAdminForm
     readonly_fields = ('created_at',)
+    change_form_template = 'admin/billing/discountcode/change_form.html'
     actions = ('make_active', 'make_inactive')
 
     from django import forms
@@ -221,6 +222,37 @@ class DiscountCodeAdmin(admin.ModelAdmin):
             msg += " Errors: " + "; ".join(errors[:5])
         self.message_user(request, msg)
     create_stripe_resources.short_description = 'Create Stripe Coupon/Promotion for selected discounts'
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<path:object_id>/create-stripe/',
+                self.admin_site.admin_view(self.create_stripe_for_object),
+                name='billing_discountcode_create_stripe',
+            ),
+        ]
+        return custom_urls + urls
+
+    def create_stripe_for_object(self, request, object_id):
+        """Create Stripe Coupon/PromotionCode for a single DiscountCode from its change page."""
+        from django.shortcuts import get_object_or_404, redirect
+        dc = get_object_or_404(DiscountCode, pk=object_id)
+        if not self.has_change_permission(request, obj=dc):
+            self.message_user(request, 'You do not have permission to modify this discount.', level=messages.ERROR)
+            return redirect('admin:billing_discountcode_change', object_id)
+
+        try:
+            dc.create_stripe_coupon_and_promotion()
+            self.message_user(
+                request,
+                f"Created Stripe resources for {dc.code}. Coupon: {dc.stripe_coupon_id or '(none)'}",
+                level=messages.SUCCESS,
+            )
+        except Exception as e:
+            self.message_user(request, f"Failed to create Stripe resources for {dc.code}: {e}", level=messages.ERROR)
+
+        return redirect('admin:billing_discountcode_change', object_id)
 
     def apply_to_users_prorate(self, request, queryset):
         """Admin action: apply selected DiscountCodes to their assigned users' organizations with proration."""
