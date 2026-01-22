@@ -1188,19 +1188,23 @@ def manage_billing(request, org_slug):
 
     now = timezone.now()
 
-    # Self-heal: older versions of the trial scheduling flow overwrote
-    # subscription.plan even though the org is still on a free trial. That
-    # makes the UI appear upgraded without payment. When we detect a local
-    # (no Stripe subscription) active trial, ensure the displayed/current plan
-    # remains Basic and store any selected plan as a scheduled change.
+    # Self-heal: older versions of the trial plan-change flow could overwrite
+    # subscription.plan even though the org is still on a free trial (no paid
+    # Stripe subscription). This makes the UI appear upgraded without payment.
+    # For active local trials, force the current plan back to Basic and clear
+    # any scheduled change.
     try:
         if subscription and subscription.status == 'trialing' and subscription.trial_end and subscription.trial_end > now and not getattr(subscription, 'stripe_subscription_id', None):
             basic_plan = Plan.objects.filter(slug='basic').first()
+            needs_fix = False
             if basic_plan is not None and subscription.plan and getattr(subscription.plan, 'slug', None) != 'basic':
-                if not getattr(subscription, 'scheduled_plan', None):
-                    subscription.scheduled_plan = subscription.plan
-                    subscription.scheduled_change_at = subscription.trial_end
                 subscription.plan = basic_plan
+                needs_fix = True
+            if getattr(subscription, 'scheduled_plan', None) is not None or getattr(subscription, 'scheduled_change_at', None) is not None:
+                subscription.scheduled_plan = None
+                subscription.scheduled_change_at = None
+                needs_fix = True
+            if needs_fix:
                 try:
                     subscription.save(update_fields=['plan', 'scheduled_plan', 'scheduled_change_at'])
                 except Exception:
@@ -2731,16 +2735,16 @@ def change_subscription_plan(request, org_slug, plan_id):
         # If user chose to wait until trial ends, only update the local plan
         # pointer and don't create a Stripe subscription yet.
         if not start_immediately:
-            # Do not change the active/current plan while the user is still on
-            # a free trial. Instead, store the user's intent as a scheduled
-            # plan change that can be applied when the trial ends.
-            sub.scheduled_plan = new_plan
-            sub.scheduled_change_at = getattr(sub, 'trial_end', None) or getattr(sub, 'current_period_end', None)
+            # Do not change or schedule a plan while the user is still on a free
+            # trial. A plan should only change after a paid Stripe subscription
+            # exists.
+            sub.scheduled_plan = None
+            sub.scheduled_change_at = None
             try:
                 sub.save(update_fields=['scheduled_plan', 'scheduled_change_at', 'cancel_at_period_end'])
             except Exception:
                 sub.save()
-            return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
+            return JsonResponse({"status": "ok", "message": "No changes made."})
 
         try:
             # Check if customer has payment methods
@@ -2836,17 +2840,15 @@ def change_subscription_plan(request, org_slug, plan_id):
             current_price = None
 
     # If user requested to wait and the subscription is currently trialing,
-    # record the desired plan locally to take effect after trial ends.
+    # do nothing. The UI's Cancel should not schedule anything.
     if not start_immediately and getattr(sub, 'status', '') == 'trialing':
-        # Do not change the active/current plan while still trialing; store the
-        # intended plan as a scheduled change.
-        sub.scheduled_plan = new_plan
-        sub.scheduled_change_at = getattr(sub, 'trial_end', None) or getattr(sub, 'current_period_end', None)
+        sub.scheduled_plan = None
+        sub.scheduled_change_at = None
         try:
             sub.save(update_fields=['scheduled_plan', 'scheduled_change_at', 'cancel_at_period_end'])
         except Exception:
             sub.save()
-        return JsonResponse({"status": "ok", "message": "Plan scheduled to begin after trial."})
+        return JsonResponse({"status": "ok", "message": "No changes made."})
 
     # Decide upgrade vs downgrade based on Stripe price (preferred) or local DB price
     is_upgrade = None

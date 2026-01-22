@@ -1777,7 +1777,7 @@
 
     const msg = document.createElement('div');
     msg.className = 'mb-4 text-sm text-gray-800';
-    msg.textContent = 'You are currently on a trial. Click Confirm to end the trial and start the selected plan immediately (you will be billed), or Cancel to wait until the trial ends to begin the new plan.';
+    msg.textContent = 'You are currently on a trial. Click Confirm to end the trial and start the selected plan immediately (you will be billed). Click Cancel to keep your trial and make no changes.';
     box.appendChild(msg);
 
     const btnRow = document.createElement('div');
@@ -1806,7 +1806,12 @@
     document.body.appendChild(overlay);
 
     // close on Escape
-    function onKey(e){ if (e.key === 'Escape') { if (document.body.contains(overlay)) document.body.removeChild(overlay); document.removeEventListener('keydown', onKey); onCancel && onCancel(); } }
+    function onKey(e){
+      if (e.key === 'Escape') {
+        if (document.body.contains(overlay)) document.body.removeChild(overlay);
+        document.removeEventListener('keydown', onKey);
+      }
+    }
     document.addEventListener('keydown', onKey);
   }
 
@@ -1867,14 +1872,10 @@
                 .then(preview2 => openPreviewModal(preview2, planId))
                 .catch(err => showToast('Preview failed: ' + err.message, 'error'));
             },
-            // onCancel -> schedule change after trial
+            // onCancel -> do nothing (user backed out)
             function() {
-              window.__ccTrialImmediate = false;
-              return fetch(`/billing/api/bus/${orgSlug}/subscription/change_plan/${planId}/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                body: JSON.stringify({ start_immediately: false })
-              }).then(r => { if (!r.ok) throw new Error('Schedule failed'); return r.json(); }).then(p => { if (p && p.message) showToast(p.message,'info'); setTimeout(()=>window.location.reload(),500); });
+              try { window.__ccTrialImmediate = false; } catch (e) {}
+              // Intentionally no server call.
             }
           );
           return; // we've handled the trial flow via the modal
