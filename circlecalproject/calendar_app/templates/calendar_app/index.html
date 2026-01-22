@@ -46,6 +46,73 @@
      </div>
 </div>
 
+<section class="w-full pb-4 md:pb-8 px-0 flex justify-center sm:block sm:container sm:mx-auto sm:px-4 sm:max-w-6xl">
+    <div class="bg-white border border-blue-100 rounded-2xl shadow-lg p-6 md:p-8 w-[95vw] sm:w-full">
+        <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+            <div>
+                <h2 class="text-2xl md:text-3xl font-bold text-gray-900">More than just a calendar</h2>
+                <p class="text-gray-600 mt-1">CircleCal includes a full booking system, customer self-serve tools, and business-grade billing.</p>
+            </div>
+            <div class="flex gap-3">
+                <a href="{% url 'calendar_app:about' %}" class="inline-flex items-center justify-center px-4 py-1.5 leading-none rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200">Learn more</a>
+                <a href="{% url 'calendar_app:contact' %}" class="inline-flex items-center justify-center px-4 py-1.5 leading-none rounded-lg bg-blue-600 text-white hover:bg-blue-700">Talk to us</a>
+            </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Public booking pages</div>
+                <div class="text-sm text-gray-700 mt-1">Share a simple booking link per business/service — fast for customers, powerful for you.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Embeddable widget</div>
+                <div class="text-sm text-gray-700 mt-1">Embed the booking experience on your website with a revocable per-business embed key.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Custom domains</div>
+                <div class="text-sm text-gray-700 mt-1">Use your own booking domain (e.g. booking.yoursite.com) with verification and HTTPS.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Customer self-serve</div>
+                <div class="text-sm text-gray-700 mt-1">Customers can cancel or reschedule via secure links and download a calendar invite (.ics).</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Advanced availability</div>
+                <div class="text-sm text-gray-700 mt-1">Per-service rules, buffers, overrides, and real-time busy-time blocking to prevent double-booking.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Resources & facilities</div>
+                <div class="text-sm text-gray-700 mt-1">Manage facility resources (rooms/cages/etc.) and coordinate scheduling across them.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Team scheduling</div>
+                <div class="text-sm text-gray-700 mt-1">Invite staff/managers, assign roles, and coordinate bookings across a team plan.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Billing built-in</div>
+                <div class="text-sm text-gray-700 mt-1">Manage subscriptions, payment methods, invoices, and Stripe Connect for client payments.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Audit & exports</div>
+                <div class="text-sm text-gray-700 mt-1">Owner tools include booking audit history, exports, and safe undo for audit entries.</div>
+            </div>
+
+            <div class="border rounded-xl p-4 bg-blue-50/50">
+                <div class="font-semibold text-gray-900">Security & app-like UX</div>
+                <div class="text-sm text-gray-700 mt-1">Two-factor authentication, password reset/change, plus PWA install + offline fallback.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
 <div id="plans" class="container mx-auto py-6 md:py-10 px-4 max-w-6xl">
     <h2 class="text-3xl md:text-4xl font-bold text-center mb-3 md:mb-4 cc-reveal" style="--cc-reveal-delay: 0ms;">Choose Your Plan</h2>
     <p class="text-center text-gray-600 mb-8 md:mb-12 text-sm md:text-base cc-reveal" style="--cc-reveal-delay: 80ms;">Scale with CircleCal as your business grows</p>

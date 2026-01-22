@@ -2817,9 +2817,16 @@ def about(request):
     # Basic content can be enhanced later; provide features, plans summary, and purpose.
     features = [
         'Simple booking UI with powerful scheduling rules',
-        'Public booking pages and embeddable widgets',
-        'Team management and staff roles',
-        'Flexible pricing and subscription plans (Free, Pro, Team)',
+        'Public booking pages (per business/service) and embeddable widgets',
+        'Verified custom domains for branded booking pages',
+        'Customer self-serve links for cancellation/rescheduling plus calendar invites (.ics)',
+        'Advanced availability: buffers, overrides, busy-time blocking, and per-service constraints',
+        'Facility resources & scheduling (rooms/cages/etc.)',
+        'Team management and role-based access (staff/manager)',
+        'Billing built-in: subscriptions, payment methods, invoices, plan changes, and Stripe Connect onboarding',
+        'Installable PWA + offline fallback page for an app-like experience',
+        'Account security: password reset/change and two-factor authentication (2FA)',
+        'Owner tools: booking audit history, export, and undo',
         'Notifications, confirmation emails, and integrations',
     ]
     plans = [
