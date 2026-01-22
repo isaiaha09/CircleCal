@@ -127,16 +127,16 @@
 
                         /* Ensure modal range rows shrink correctly and inputs do not overflow */
                         #timeModal .modal-range-row { gap:6px !important; justify-content:flex-start !important; align-items:center !important; }
-                        #timeModal .modal-range-row label { min-width: 26px !important; width: auto !important; font-size:11px !important; text-align:right !important; }
+                        #timeModal .modal-range-row label { min-width: 40px !important; width: auto !important; font-size:11px !important; text-align:right !important; white-space:nowrap !important; }
                         /* Give more horizontal room to time inputs while keeping them responsive */
-                        #timeModal .modal-range-row .time-input-container { flex: 1 1 260px !important; min-width: 0 !important; }
+                        #timeModal .modal-range-row .time-input-container { flex: 1 1 0 !important; min-width: 0 !important; }
                         #timeModal .modal-range-row input[type="time"],
                         #timeModal .modal-range-row .modal-range-start,
                         #timeModal .modal-range-row .modal-range-end {
                             width: 100% !important;
-                            max-width: 260px !important;
+                            max-width: none !important;
                             padding: 4px 6px !important;
-                            font-size: 2px !important; /* smaller time text */
+                            font-size: 14px !important;
                             line-height: 20px !important;
                             box-sizing: border-box !important;
                             text-align: center !important;
@@ -153,6 +153,19 @@
                             flex: 0 0 auto !important;
                             margin-left: 8px !important;
                         }
+
+                        /* Mobile-only: make modal remove control a compact X button */
+                        #timeModal .modal-range-row .remove-range-btn {
+                            width: 32px !important;
+                            height: 32px !important;
+                            padding: 0 !important;
+                            display: inline-flex !important;
+                            align-items: center !important;
+                            justify-content: center !important;
+                            gap: 0 !important;
+                        }
+                        #timeModal .modal-range-row .remove-range-btn .remove-text { display: none !important; }
+                        #timeModal .modal-range-row .remove-range-btn .remove-icon { font-size: 16px !important; line-height: 1 !important; }
                         /* Tweak webkit datetime fields to match smaller font/line-height */
                         #timeModal input[type="time"]::-webkit-datetime-edit-hour-field,
                         #timeModal input[type="time"]::-webkit-datetime-edit-minute-field,
@@ -2722,9 +2735,9 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
 
     /* Fixed (small) label width so inputs can take remaining space */
     #modalRangesContainer .range-label {
-        flex: 0 0 60px !important;
-        min-width: 60px !important;
-        text-align: left !important;
+        flex: 0 0 42px !important;
+        min-width: 42px !important;
+        text-align: right !important;
         font-size: 13px !important;
         white-space: nowrap !important;
     }
@@ -2741,7 +2754,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     #modalRangesContainer input.modal-range-end {
         width: 100% !important;
         max-width: none !important;
-        padding: 8px 8px !important;
+        padding: 8px 4px !important;
         font-size: 14px !important;
         box-sizing: border-box !important;
         line-height: 1.2 !important;
@@ -2769,13 +2782,13 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
         padding: 12px !important;
     }
     #modalRangesContainer .range-label {
-        flex: 0 0 48px !important;
-        min-width: 48px !important;
+        flex: 0 0 36px !important;
+        min-width: 36px !important;
         font-size: 12px !important;
     }
     #modalRangesContainer input[type="time"] {
-        font-size: 13px !important;
-        padding: 6px 6px !important;
+        font-size: 9px !important;
+        padding: 6px 1px !important;
     }
     #timeModal button { padding: 8px 10px !important; font-size: 12px !important; }
 }
@@ -8832,6 +8845,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const startLabel = document.createElement('label');
+        startLabel.className = 'range-label';
         startLabel.textContent = 'Start:';
         startLabel.style.minWidth = '45px';
         startLabel.style.textAlign = 'right';
@@ -8877,6 +8891,7 @@ document.addEventListener('DOMContentLoaded', function() {
         start.addEventListener('change', () => _ccValidateModalRangesAndMaybeRevert(start));
 
         const endLabel = document.createElement('label');
+        endLabel.className = 'range-label';
         endLabel.textContent = 'End:';
         endLabel.style.minWidth = '40px';
         endLabel.style.textAlign = 'right';
@@ -8914,8 +8929,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.textContent = 'Remove';
-        removeBtn.style.padding = '6px 8px';
+        removeBtn.className = 'remove-range-btn cc-modal-remove-range-btn';
+        removeBtn.setAttribute('aria-label', 'Remove time range');
+        removeBtn.innerHTML = '<span class="remove-icon" aria-hidden="true">✖</span><span class="remove-text">Remove</span>';
+        removeBtn.style.display = 'inline-flex';
+        removeBtn.style.alignItems = 'center';
+        removeBtn.style.justifyContent = 'center';
+        removeBtn.style.gap = '6px';
+        removeBtn.style.padding = '6px 10px';
         removeBtn.style.border = 'none';
         removeBtn.style.background = '#dc3545';
         removeBtn.style.color = 'white';
