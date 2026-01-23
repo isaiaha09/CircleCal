@@ -41,6 +41,8 @@ except Exception:
     TF_PATTERNS = None
 
 urlpatterns = [
+    # Versioned API for mobile/web clients
+    path('api/v1/', include('circlecalproject.api_urls')),
     path('manifest.webmanifest', pwa_views.manifest_webmanifest, name='pwa_manifest'),
     path('manifest.json', pwa_views.manifest_json, name='pwa_manifest_json'),
     path('sw.js', pwa_views.service_worker, name='pwa_service_worker'),

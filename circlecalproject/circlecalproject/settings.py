@@ -59,6 +59,13 @@ LOGIN_REDIRECT_URL = 'calendar_app:post_login'
 LOGOUT_REDIRECT_URL = '/'
 
 
+# --- API / Mobile readiness ---
+# React Native native clients generally do not require CORS (they are not a
+# browser and do not enforce it), but enabling CORS helps for Expo Web and any
+# future web clients.
+
+
+
 # Application definition
 
 # Optionally include the AdminLTE theme packages when available.
@@ -79,11 +86,34 @@ try:
 except Exception:
     _storages_apps = []
 
+_cors_apps = []
+try:
+    if importlib.util.find_spec('corsheaders') is not None:
+        _cors_apps = ['corsheaders']
+except Exception:
+    _cors_apps = []
+
+_api_apps = []
+try:
+    if importlib.util.find_spec('rest_framework') is not None:
+        _api_apps.append('rest_framework')
+except Exception:
+    pass
+
+try:
+    if importlib.util.find_spec('rest_framework_simplejwt') is not None:
+        _api_apps.append('rest_framework_simplejwt')
+except Exception:
+    pass
+
 INSTALLED_APPS = [
     # Admin LTE theme (only if installed)
     *_adminlte_apps,
     # Optional storage backends (e.g., Google Cloud Storage via django-storages)
     *_storages_apps,
+    # Optional CORS + API libs (used by mobile/web clients)
+    *_cors_apps,
+    *_api_apps,
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -107,6 +137,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Must be near the top, especially before CommonMiddleware
+    *(('corsheaders.middleware.CorsMiddleware',) if _cors_apps else ()),
     'django.contrib.sessions.middleware.SessionMiddleware',
     'calendar_app.middleware.AdminPinMiddleware',
     'calendar_app.middleware.CustomDomainMiddleware',
@@ -123,6 +155,28 @@ MIDDLEWARE = [
     # Place timezone middleware AFTER OrganizationMiddleware
     'calendar_app.middleware.UserTimezoneMiddleware',
 ]
+
+if _cors_apps:
+    CORS_ALLOWED_ORIGINS = [
+        'https://circlecal.app',
+        'https://www.circlecal.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:19006',
+        'http://127.0.0.1:19006',
+    ]
+
+if 'rest_framework' in _api_apps:
+    REST_FRAMEWORK = {
+        'DEFAULT_AUTHENTICATION_CLASSES': [
+            'rest_framework_simplejwt.authentication.JWTAuthentication',
+            'rest_framework.authentication.SessionAuthentication',
+        ],
+        # Protect endpoints explicitly (per-view) to avoid surprises.
+        'DEFAULT_PERMISSION_CLASSES': [
+            'rest_framework.permissions.AllowAny',
+        ],
+    }
 
 ROOT_URLCONF = 'circlecalproject.urls'
 
