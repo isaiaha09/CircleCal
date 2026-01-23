@@ -53,7 +53,7 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{mode === 'owner' ? 'Business owner sign in' : 'Staff/manager sign in'}</Text>
+      <Text style={styles.title}>{mode === 'owner' ? 'Business Owner Sign-In' : 'Staff || Manager Sign-In'}</Text>
 
       <TextInput
         value={identifier}
@@ -105,6 +105,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
     marginBottom: 18,
+    textAlign: 'center',
   },
   input: {
     borderWidth: 1,

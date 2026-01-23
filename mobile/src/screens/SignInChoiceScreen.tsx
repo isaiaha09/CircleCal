@@ -9,15 +9,15 @@ type Props = {
 export function SignInChoiceScreen({ onSelectOwner, onSelectStaff }: Props) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Choose sign-in type</Text>
+      <Text style={styles.title}>Choose Sign-In</Text>
       <Text style={styles.subtitle}>Select the account type you use for CircleCal.</Text>
 
       <Pressable style={styles.primaryBtn} onPress={onSelectOwner}>
-        <Text style={styles.primaryBtnText}>Business owner</Text>
+        <Text style={styles.primaryBtnText}>Business Owner</Text>
       </Pressable>
 
       <Pressable style={styles.secondaryBtn} onPress={onSelectStaff}>
-        <Text style={styles.secondaryBtnText}>Staff / manager</Text>
+        <Text style={styles.secondaryBtnText}>Staff || Manager</Text>
       </Pressable>
     </View>
   );
@@ -34,11 +34,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#111827',
+    textAlign: 'center',
   },
   subtitle: {
     marginTop: 8,
     color: '#6b7280',
     marginBottom: 18,
+    textAlign: 'center',
   },
   primaryBtn: {
     backgroundColor: '#2563eb',
@@ -52,6 +54,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+    textAlign: 'center',
   },
   secondaryBtn: {
     borderWidth: 1,
@@ -65,6 +68,7 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '700',
     fontSize: 16,
+    textAlign: 'center',
   },
   btnHint: {
     marginTop: 6,
