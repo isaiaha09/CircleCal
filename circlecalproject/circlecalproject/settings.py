@@ -167,10 +167,16 @@ if _cors_apps:
     ]
 
 if 'rest_framework' in _api_apps:
+    _has_simplejwt = 'rest_framework_simplejwt' in _api_apps
+    _auth_classes = [
+        'rest_framework.authentication.SessionAuthentication',
+    ]
+    if _has_simplejwt:
+        _auth_classes.insert(0, 'rest_framework_simplejwt.authentication.JWTAuthentication')
+
     REST_FRAMEWORK = {
         'DEFAULT_AUTHENTICATION_CLASSES': [
-            'rest_framework_simplejwt.authentication.JWTAuthentication',
-            'rest_framework.authentication.SessionAuthentication',
+            *_auth_classes,
         ],
         # Protect endpoints explicitly (per-view) to avoid surprises.
         'DEFAULT_PERMISSION_CLASSES': [
