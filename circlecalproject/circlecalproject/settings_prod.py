@@ -304,6 +304,12 @@ LOGGING = {
             'level': 'WARNING',
             'propagate': True,
         },
+        # Ensure unhandled exceptions (500s) show up in Render logs with tracebacks.
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': True,
+        },
     },
 }
 
