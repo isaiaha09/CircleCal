@@ -5,12 +5,15 @@ import { StatusBar } from 'expo-status-bar';
 
 import { getAccessToken } from './src/lib/auth';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { SignInChoiceScreen } from './src/screens/SignInChoiceScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 
 type RootStackParamList = {
   Welcome: undefined;
-  SignIn: undefined;
+  SignInChoice: undefined;
+  SignInOwner: undefined;
+  SignInStaff: undefined;
   Home: undefined;
 };
 
@@ -42,12 +45,31 @@ export default function App() {
       <Stack.Navigator initialRouteName={initialRouteName}>
         <Stack.Screen name="Welcome" options={{ headerShown: false }}>
           {({ navigation }) => (
-            <WelcomeScreen onPressSignIn={() => navigation.navigate('SignIn')} />
+            <WelcomeScreen onPressSignIn={() => navigation.navigate('SignInChoice')} />
           )}
         </Stack.Screen>
-        <Stack.Screen name="SignIn" options={{ title: 'Sign in' }}>
+        <Stack.Screen name="SignInChoice" options={{ title: 'Sign in' }}>
           {({ navigation }) => (
-            <SignInScreen onSignedIn={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })} />
+            <SignInChoiceScreen
+              onSelectOwner={() => navigation.navigate('SignInOwner')}
+              onSelectStaff={() => navigation.navigate('SignInStaff')}
+            />
+          )}
+        </Stack.Screen>
+        <Stack.Screen name="SignInOwner" options={{ title: 'Business owner sign in' }}>
+          {({ navigation }) => (
+            <SignInScreen
+              mode="owner"
+              onSignedIn={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            />
+          )}
+        </Stack.Screen>
+        <Stack.Screen name="SignInStaff" options={{ title: 'Staff/manager sign in' }}>
+          {({ navigation }) => (
+            <SignInScreen
+              mode="staff"
+              onSignedIn={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            />
           )}
         </Stack.Screen>
         <Stack.Screen name="Home" options={{ title: 'CircleCal' }}>

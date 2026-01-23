@@ -7,6 +7,17 @@ export type ApiError = {
   body?: unknown;
 };
 
+async function readResponseBody(resp: Response): Promise<unknown> {
+  // Read text first so we can try JSON parse, but still keep HTML/text for debugging.
+  const text = await resp.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { text };
+  }
+}
+
 async function buildHeaders(extra?: HeadersInit): Promise<HeadersInit> {
   const token = await getAccessToken();
   return {
@@ -24,12 +35,7 @@ export async function apiGet<T>(path: string): Promise<T> {
   });
 
   if (!resp.ok) {
-    let body: unknown = undefined;
-    try {
-      body = await resp.json();
-    } catch {
-      // ignore
-    }
+    const body = await readResponseBody(resp);
     const err: ApiError = {
       status: resp.status,
       message: `Request failed: ${resp.status}`,
@@ -49,12 +55,7 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
   });
 
   if (!resp.ok) {
-    let body: unknown = undefined;
-    try {
-      body = await resp.json();
-    } catch {
-      // ignore
-    }
+    const body = await readResponseBody(resp);
     const err: ApiError = {
       status: resp.status,
       message: `Request failed: ${resp.status}`,

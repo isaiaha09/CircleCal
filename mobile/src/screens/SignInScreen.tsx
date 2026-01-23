@@ -1,36 +1,66 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
 import { API_BASE_URL } from '../config';
+import { setAccessToken, setRefreshToken } from '../lib/auth';
+import type { ApiError } from '../lib/api';
+import { apiPost } from '../lib/api';
 
 type Props = {
+  mode: 'owner' | 'staff';
   onSignedIn: () => void;
 };
 
-export function SignInScreen({ onSignedIn }: Props) {
-  const [email, setEmail] = useState('');
+export function SignInScreen({ mode, onSignedIn }: Props) {
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const disabled = useMemo(() => !email.trim() || !password, [email, password]);
+  const disabled = useMemo(
+    () => !identifier.trim() || !password || submitting,
+    [identifier, password, submitting]
+  );
 
   async function handleSignIn() {
-    // Placeholder until we add real JWT endpoints in Django.
-    Alert.alert(
-      'API login not wired yet',
-      `Next step is adding /api/v1/auth/login to CircleCal.\n\nAPI base: ${API_BASE_URL}`
-    );
-    onSignedIn();
+    setSubmitting(true);
+    try {
+      // SimpleJWT's TokenObtainPairView expects "username" + "password".
+      // We pass email/username into "username"; your Django auth backend supports either.
+      const token = await apiPost<{ access: string; refresh: string }>(
+        '/api/v1/auth/token/',
+        {
+          username: identifier.trim(),
+          password,
+        }
+      );
+
+      await Promise.all([setAccessToken(token.access), setRefreshToken(token.refresh)]);
+      onSignedIn();
+    } catch (e) {
+      const err = e as Partial<ApiError>;
+      const maybeBody = err.body as any;
+      const detail =
+        (typeof maybeBody?.detail === 'string' && maybeBody.detail) ||
+        (typeof maybeBody?.text === 'string' && maybeBody.text.slice(0, 160)) ||
+        'Check your credentials and try again.';
+
+      const statusLine = typeof err.status === 'number' ? `HTTP ${err.status}` : 'Network error';
+      Alert.alert('Sign in failed', `${statusLine}\n${detail}\n\nAPI: ${API_BASE_URL}`);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Sign in</Text>
+      <Text style={styles.title}>{mode === 'owner' ? 'Business owner sign in' : 'Staff/manager sign in'}</Text>
 
       <TextInput
-        value={email}
-        onChangeText={setEmail}
-        placeholder="Email"
+        value={identifier}
+        onChangeText={setIdentifier}
+        placeholder={mode === 'owner' ? 'Username' : 'Email'}
         autoCapitalize="none"
-        keyboardType="email-address"
+        keyboardType={mode === 'owner' ? 'default' : 'email-address'}
         style={styles.input}
       />
 
@@ -47,10 +77,18 @@ export function SignInScreen({ onSignedIn }: Props) {
         disabled={disabled}
         onPress={handleSignIn}
       >
-        <Text style={styles.primaryBtnText}>Continue</Text>
+        {submitting ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.primaryBtnText}>Continue</Text>
+        )}
       </Pressable>
 
-      <Text style={styles.hint}>You’ll be able to sign in once the API auth endpoints are added.</Text>
+      <Text style={styles.hint}>
+        {mode === 'owner'
+          ? 'Use your owner username and password.'
+          : 'Use your staff/manager email and password.'}
+      </Text>
     </View>
   );
 }
