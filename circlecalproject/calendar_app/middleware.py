@@ -168,7 +168,11 @@ class OrganizationMiddleware:
     def process_template_response(self, request, response):
         if hasattr(request, "organization"):
             if hasattr(response, "context_data"):
-                response.context_data["organization"] = request.organization
+                # DRF Response objects can have context_data=None; don't crash API endpoints.
+                if response.context_data is None:
+                    response.context_data = {}
+                if isinstance(response.context_data, dict):
+                    response.context_data["organization"] = request.organization
         return response
 
 
