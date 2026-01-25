@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from django.conf import settings
+from django.db.models import Q
+from django.utils.dateparse import parse_date, parse_datetime
+
+from accounts.models import Business, Membership
+from bookings.models import Booking
+
+try:
+    from rest_framework.exceptions import ValidationError
+    from rest_framework.permissions import IsAuthenticated
+    from rest_framework.response import Response
+    from rest_framework.views import APIView
+except Exception as exc:  # pragma: no cover
+    raise RuntimeError(
+        "Django REST Framework is required for API views. "
+        "Install 'djangorestframework' and ensure 'rest_framework' is in INSTALLED_APPS."
+    ) from exc
+
+
+def _get_org_and_membership(*, user, org_param: str | None):
+    if not org_param:
+        raise ValidationError({"org": "This query param is required (org slug or id)."})
+
+    org: Business | None
+    if str(org_param).isdigit():
+        org = Business.objects.filter(id=int(org_param)).first()
+    else:
+        org = Business.objects.filter(slug=str(org_param)).first()
+
+    if not org:
+        raise ValidationError({"org": "Unknown organization."})
+
+    membership = Membership.objects.filter(user=user, organization=org, is_active=True).first()
+    if not membership:
+        # Do not leak existence details beyond the org param validation above.
+        raise ValidationError({"detail": "You do not have access to this organization."})
+
+    return org, membership
+
+
+def _parse_from_to(*, from_raw: str | None, to_raw: str | None, org_tz: ZoneInfo):
+    """Parse optional from/to into aware datetimes in org timezone.
+
+    - Accepts ISO datetimes or YYYY-MM-DD.
+    - Date inputs are interpreted as whole-day bounds: [from, to).
+    """
+
+    def _parse_one(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        dt = parse_datetime(raw)
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=org_tz)
+            return dt.astimezone(org_tz)
+
+        d = parse_date(raw)
+        if d is not None:
+            return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=org_tz)
+
+        raise ValidationError({"detail": f"Invalid datetime/date: {raw}"})
+
+    from_dt = _parse_one(from_raw)
+    to_dt = _parse_one(to_raw)
+
+    # If `to` was provided as a date, interpret as start-of-day; caller treats as exclusive.
+    return from_dt, to_dt
+
+
+def _serialize_booking_list_item(b: Booking):
+    svc = getattr(b, "service", None)
+    au = getattr(b, "assigned_user", None)
+    return {
+        "id": b.id,
+        "public_ref": getattr(b, "public_ref", None),
+        "title": b.title,
+        "start": b.start.isoformat() if b.start else None,
+        "end": b.end.isoformat() if b.end else None,
+        "is_blocking": bool(getattr(b, "is_blocking", False)),
+        "client_name": b.client_name,
+        "client_email": b.client_email,
+        "service": {"id": svc.id, "name": svc.name} if svc else None,
+        "assigned_user": {"id": au.id, "username": au.get_username()} if au else None,
+        "payment_status": getattr(b, "payment_status", ""),
+        "payment_method": getattr(b, "payment_method", ""),
+    }
+
+
+class BookingsListView(APIView):
+    """Minimal bookings list for the mobile MVP (org-scoped)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        org_param = request.query_params.get("org")
+        org, membership = _get_org_and_membership(user=request.user, org_param=org_param)
+
+        try:
+            org_tz = ZoneInfo(getattr(org, "timezone", getattr(settings, "TIME_ZONE", "UTC")))
+        except Exception:
+            org_tz = ZoneInfo(getattr(settings, "TIME_ZONE", "UTC"))
+
+        from_dt, to_dt = _parse_from_to(
+            from_raw=request.query_params.get("from"),
+            to_raw=request.query_params.get("to"),
+            org_tz=org_tz,
+        )
+
+        # Default window: next 14 days starting today (org tz)
+        if from_dt is None and to_dt is None:
+            now = datetime.now(tz=org_tz)
+            from_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            to_dt = from_dt + timedelta(days=14)
+        elif from_dt is not None and to_dt is None:
+            to_dt = from_dt + timedelta(days=14)
+        elif from_dt is None and to_dt is not None:
+            from_dt = to_dt - timedelta(days=14)
+
+        # Treat `to` as exclusive; if the caller gave a date boundary they likely mean whole-day.
+        # (No change needed; our date parser already returns start-of-day.)
+
+        qs = (
+            Booking.objects.filter(organization=org)
+            .select_related("service", "assigned_user")
+            .order_by("start")
+        )
+
+        # Exclude internal per-date override markers (not real client bookings).
+        qs = qs.exclude(service__isnull=True, client_name__startswith="scope:")
+
+        # Staff users default to seeing their own assignments + unassigned bookings.
+        if membership.role == "staff":
+            qs = qs.filter(Q(assigned_user__isnull=True) | Q(assigned_user=request.user))
+
+        if from_dt is not None:
+            qs = qs.filter(end__gt=from_dt)
+        if to_dt is not None:
+            qs = qs.filter(start__lt=to_dt)
+
+        try:
+            limit = int(request.query_params.get("limit") or 200)
+        except Exception:
+            limit = 200
+        limit = max(1, min(limit, 500))
+
+        items = [_serialize_booking_list_item(b) for b in qs[:limit]]
+        return Response(
+            {
+                "org": {"id": org.id, "slug": org.slug, "name": org.name},
+                "from": from_dt.isoformat() if from_dt else None,
+                "to": to_dt.isoformat() if to_dt else None,
+                "count": len(items),
+                "bookings": items,
+            }
+        )
+
+
+class BookingDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, booking_id: int):
+        org_param = request.query_params.get("org")
+        org, membership = _get_org_and_membership(user=request.user, org_param=org_param)
+
+        qs = Booking.objects.filter(organization=org, id=int(booking_id)).select_related(
+            "service", "assigned_user"
+        )
+
+        # Exclude internal per-date override markers (not real client bookings).
+        qs = qs.exclude(service__isnull=True, client_name__startswith="scope:")
+
+        if membership.role == "staff":
+            qs = qs.filter(Q(assigned_user__isnull=True) | Q(assigned_user=request.user))
+
+        b = qs.first()
+        if not b:
+            raise ValidationError({"detail": "Booking not found."})
+
+        return Response(
+            {
+                "org": {"id": org.id, "slug": org.slug, "name": org.name},
+                "booking": _serialize_booking_list_item(b),
+            }
+        )
