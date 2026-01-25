@@ -11,6 +11,8 @@ import { BusinessesScreen } from './src/screens/BusinessesScreen';
 import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { ScheduleScreen } from './src/screens/ScheduleScreen';
+import { ServiceEditScreen } from './src/screens/ServiceEditScreen.tsx';
+import { ServicesScreen } from './src/screens/ServicesScreen.tsx';
 import { SignInChoiceScreen } from './src/screens/SignInChoiceScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
@@ -27,6 +29,8 @@ type RootStackParamList = {
   Bookings: { orgSlug: string };
   Businesses: undefined;
   Profile: undefined;
+  Services: { orgSlug: string };
+  ServiceEdit: { orgSlug: string; serviceId: number };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -98,6 +102,7 @@ export default function App() {
               onOpenBookings={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Bookings', { orgSlug })}
               onOpenBusinesses={() => navigation.navigate('Businesses')}
               onOpenProfile={() => navigation.navigate('Profile')}
+              onOpenServices={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Services', { orgSlug })}
             />
           )}
         </Stack.Screen>
@@ -152,6 +157,27 @@ export default function App() {
           {({ navigation }) => (
             <ProfileScreen
               onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Services" options={{ title: 'Services' }}>
+          {({ route, navigation }) => (
+            <ServicesScreen
+              orgSlug={route.params.orgSlug}
+              onOpenEdit={({ orgSlug, serviceId }: { orgSlug: string; serviceId: number }) =>
+                navigation.navigate('ServiceEdit', { orgSlug, serviceId })
+              }
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="ServiceEdit" options={{ title: 'Edit service' }}>
+          {({ route, navigation }) => (
+            <ServiceEditScreen
+              orgSlug={route.params.orgSlug}
+              serviceId={route.params.serviceId}
+              onSaved={() => navigation.goBack()}
             />
           )}
         </Stack.Screen>

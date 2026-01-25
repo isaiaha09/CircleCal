@@ -155,6 +155,17 @@ export type BookingListItem = {
   payment_method?: string;
 };
 
+export type ServiceListItem = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  duration: number;
+  price: number | string;
+  is_active: boolean;
+  show_on_public_calendar: boolean;
+};
+
 export async function apiGetOrgs(): Promise<{ orgs: OrgListItem[] }> {
   return apiGet('/api/v1/orgs/');
 }
@@ -189,4 +200,59 @@ export async function apiGetBookingDetail(params: {
   const usp = new URLSearchParams();
   usp.set('org', params.org);
   return apiGet(`/api/v1/bookings/${params.bookingId}/?${usp.toString()}`);
+}
+
+export async function apiGetServices(params: { org: string }): Promise<{
+  org: { id: number; slug: string; name: string };
+  count: number;
+  services: ServiceListItem[];
+}> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiGet(`/api/v1/services/?${usp.toString()}`);
+}
+
+export async function apiCreateService(params: {
+  org: string;
+  name: string;
+  duration: number;
+  price?: number | string;
+  description?: string;
+}): Promise<{
+  org: { id: number; slug: string; name: string };
+  service: ServiceListItem;
+}> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiPost(`/api/v1/services/?${usp.toString()}`, {
+    name: params.name,
+    duration: params.duration,
+    price: params.price ?? 0,
+    description: params.description ?? '',
+  });
+}
+
+export async function apiGetServiceDetail(params: {
+  org: string;
+  serviceId: number;
+}): Promise<{
+  org: { id: number; slug: string; name: string };
+  service: ServiceListItem;
+}> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiGet(`/api/v1/services/${params.serviceId}/?${usp.toString()}`);
+}
+
+export async function apiPatchService(params: {
+  org: string;
+  serviceId: number;
+  patch: Partial<Pick<ServiceListItem, 'name' | 'description' | 'duration' | 'price' | 'is_active' | 'show_on_public_calendar'>>;
+}): Promise<{
+  org: { id: number; slug: string; name: string };
+  service: ServiceListItem;
+}> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiPatch(`/api/v1/services/${params.serviceId}/?${usp.toString()}`, params.patch);
 }

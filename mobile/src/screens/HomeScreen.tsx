@@ -15,6 +15,7 @@ type Props = {
   onOpenBookings: (args: { orgSlug: string }) => void;
   onOpenBusinesses: () => void;
   onOpenProfile: () => void;
+  onOpenServices: (args: { orgSlug: string }) => void;
 };
 
 function isoDate(d: Date): string {
@@ -49,6 +50,7 @@ export function HomeScreen({
   onOpenBookings,
   onOpenBusinesses,
   onOpenProfile,
+  onOpenServices,
 }: Props) {
   const [me, setMe] = useState<{ username: string; email: string } | null>(null);
   const [orgs, setOrgs] = useState<OrgListItem[]>([]);
@@ -294,9 +296,15 @@ export function HomeScreen({
           <Text style={styles.portalSubtitle}>Update your personal info and settings</Text>
         </Pressable>
 
-        <Pressable style={styles.portalTile} onPress={() => onOpenPortal({ title: 'Services' })}>
-          <Text style={styles.portalTitle}>Services</Text>
-          <Text style={styles.portalSubtitle}>Manage your service offerings</Text>
+        <Pressable
+          style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
+          disabled={!activeOrg}
+          onPress={() => (activeOrg ? onOpenServices({ orgSlug: activeOrg.slug }) : null)}
+        >
+          <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Services</Text>
+          <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
+            Manage your service offerings
+          </Text>
         </Pressable>
 
         <Pressable style={[styles.portalTile, styles.portalTileDisabled]} disabled>

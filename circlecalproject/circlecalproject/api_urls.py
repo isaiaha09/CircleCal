@@ -6,6 +6,7 @@ from .api_views import HealthView, HelloView, MeView
 from .api_bookings import BookingDetailView, BookingsListView
 from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
+from .api_services import ServiceDetailView, ServicesListCreateView
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="api_health"),
@@ -16,6 +17,8 @@ urlpatterns = [
     path("bookings/<int:booking_id>/", BookingDetailView.as_view(), name="api_booking_detail"),
     path("profile/", ProfileView.as_view(), name="api_profile"),
     path("profile/avatar/", ProfileAvatarUploadView.as_view(), name="api_profile_avatar"),
+    path("services/", ServicesListCreateView.as_view(), name="api_services"),
+    path("services/<int:service_id>/", ServiceDetailView.as_view(), name="api_service_detail"),
 ]
 
 # JWT endpoints (optional): only register if SimpleJWT is installed.
