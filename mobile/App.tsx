@@ -9,6 +9,7 @@ import { BookingDetailScreen } from './src/screens/BookingDetailScreen';
 import { BookingsScreen } from './src/screens/BookingsScreen';
 import { BusinessesScreen } from './src/screens/BusinessesScreen';
 import { BillingScreen } from './src/screens/BillingScreen';
+import { PricingScreen } from './src/screens/PricingScreen';
 import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { ScheduleScreen } from './src/screens/ScheduleScreen';
@@ -29,6 +30,7 @@ type RootStackParamList = {
   Portal: { title: string };
   Bookings: { orgSlug: string };
   Billing: { orgSlug: string };
+  Pricing: { orgSlug: string };
   Businesses: undefined;
   Profile: undefined;
   Services: { orgSlug: string };
@@ -103,6 +105,7 @@ export default function App() {
               onOpenPortal={({ title }: { title: string }) => navigation.navigate('Portal', { title })}
               onOpenBookings={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Bookings', { orgSlug })}
               onOpenBilling={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Billing', { orgSlug })}
+              onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
               onOpenBusinesses={() => navigation.navigate('Businesses')}
               onOpenProfile={() => navigation.navigate('Profile')}
               onOpenServices={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Services', { orgSlug })}
@@ -147,6 +150,10 @@ export default function App() {
 
         <Stack.Screen name="Billing" options={{ title: 'Billing' }}>
           {({ route }) => <BillingScreen orgSlug={route.params.orgSlug} />}
+        </Stack.Screen>
+
+        <Stack.Screen name="Pricing" options={{ title: 'Pricing' }}>
+          {({ route }) => <PricingScreen orgSlug={route.params.orgSlug} />}
         </Stack.Screen>
 
         <Stack.Screen name="Businesses" options={{ title: 'Businesses' }}>
