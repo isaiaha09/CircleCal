@@ -272,6 +272,28 @@
     line-height: 1.5rem;
     box-shadow: 0 4px 24px rgba(0,0,0,0.12);
   }
+
+  /* Mobile-only: keep details popover on-screen */
+  @media (max-width: 767px) {
+    #mainServiceDetails {
+      left: 50% !important;
+      top: 48px;
+      transform: translateX(-50%);
+      width: min(340px, calc(100vw - 24px));
+      max-width: calc(100vw - 24px);
+    }
+  }
+
+  /* Touch devices (regardless of viewport width): keep popover on-screen */
+  @media (hover: none), (pointer: coarse) {
+    #mainServiceDetails {
+      left: 50% !important;
+      top: 48px;
+      transform: translateX(-50%);
+      width: min(340px, calc(100vw - 24px));
+      max-width: calc(100vw - 24px);
+    }
+  }
   #mainServiceDetails strong {
     font-weight: 600;
     color: #111;
@@ -403,6 +425,11 @@
     const mainSvcRefundText = document.getElementById("mainSvcRefundText");
     const serviceInfoIcon = document.getElementById("serviceInfoIcon");
 
+    // If this page variant doesn't render the service selector/info box, do nothing.
+    if (!mainServiceSelect || !mainServiceDetails || !serviceInfoIcon) {
+      return;
+    }
+
     function updateMainServiceDetails(slug) {
       const d = SERVICE_MAP[slug];
       if (!d) return;
@@ -439,7 +466,7 @@
     let infoVisible = false;
     function showInfoBox() {
       updateMainServiceDetails(mainServiceSelect.value);
-      mainServiceDetails.style.display = '';
+      mainServiceDetails.style.display = 'block';
       mainServiceDetails.classList.add('visible');
       infoVisible = true;
     }
@@ -448,15 +475,80 @@
       mainServiceDetails.classList.remove('visible');
       infoVisible = false;
     }
-    serviceInfoIcon.addEventListener('mouseenter', showInfoBox);
-    serviceInfoIcon.addEventListener('mouseleave', hideInfoBox);
-    serviceInfoIcon.addEventListener('click', function () {
-      if (infoVisible) {
-        hideInfoBox();
-      } else {
-        showInfoBox();
+
+    function toggleInfoBox() {
+      if (infoVisible) hideInfoBox();
+      else showInfoBox();
+    }
+
+    // Make the icon reliably tappable/clickable without changing layout.
+    try {
+      serviceInfoIcon.setAttribute('role', 'button');
+      serviceInfoIcon.setAttribute('tabindex', '0');
+      serviceInfoIcon.style.touchAction = 'manipulation';
+      serviceInfoIcon.style.webkitTapHighlightColor = 'transparent';
+      serviceInfoIcon.style.userSelect = 'none';
+    } catch (_) {}
+    // Choose interaction model:
+    // - Desktop: hover (fine pointer)
+    // - Touch devices: press-to-toggle (no hover/coarse pointer)
+    // Also supports DevTools responsive mode.
+    const _ccUseHover = (function(){
+      try {
+        return !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+      } catch (e) { return true; }
+    })();
+    const _ccTapMode = !_ccUseHover;
+
+    if (_ccUseHover) {
+      serviceInfoIcon.addEventListener('mouseenter', showInfoBox);
+      serviceInfoIcon.addEventListener('mouseleave', hideInfoBox);
+    }
+
+    // Mobile browsers often fire a synthetic click after pointerup.
+    // Guard so we don't toggle twice (open then immediately close).
+    let _ccLastPointerUpAt = 0;
+    serviceInfoIcon.addEventListener('pointerup', function (e) {
+      // Mobile: press to toggle.
+      // Desktop: hover controls visibility.
+      if (!_ccTapMode) return;
+      _ccLastPointerUpAt = Date.now();
+      try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+      toggleInfoBox();
+    });
+
+    serviceInfoIcon.addEventListener('click', function (e) {
+      // Mobile: press to toggle.
+      // Desktop: hover controls visibility (ignore mouse click).
+      if (!_ccTapMode) return;
+      // If we just handled a pointerup, ignore the follow-up click.
+      if (Date.now() - _ccLastPointerUpAt < 800) {
+        try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+        return;
+      }
+      try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+      toggleInfoBox();
+    });
+
+    serviceInfoIcon.addEventListener('keydown', function (e) {
+      const k = e && e.key;
+      if (k === 'Enter' || k === ' ') {
+        try { e.preventDefault(); } catch (_) {}
+        toggleInfoBox();
       }
     });
+
+    // Tap-mode: tap outside to close
+    if (_ccTapMode) {
+      document.addEventListener('pointerdown', function (e) {
+        try {
+          if (!infoVisible) return;
+          const t = e && e.target;
+          if (t && (t.closest('#mainServiceDetails') || t.closest('#serviceInfoIcon'))) return;
+          hideInfoBox();
+        } catch (_) {}
+      }, { capture: true });
+    }
 
     // Update info box when dropdown changes
     if (mainServiceSelect) {
