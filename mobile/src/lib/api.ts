@@ -166,6 +166,54 @@ export type ServiceListItem = {
   show_on_public_calendar: boolean;
 };
 
+export type BillingSummary = {
+  org: { id: number; slug: string; name: string };
+  plan: { slug: string; name: string | null; price: string; billing_period: string | null };
+  subscription:
+    | {
+        status: string | null;
+        cancel_at_period_end: boolean;
+        current_period_end: string | null;
+        trial_end: string | null;
+        scheduled_plan: { id: number | null; slug: string | null; name: string | null } | null;
+        scheduled_change_at: string | null;
+      }
+    | null;
+  features: {
+    can_add_service: boolean;
+    can_add_staff: boolean;
+    can_edit_weekly_availability: boolean;
+    can_use_offline_payment_methods: boolean;
+    can_use_resources: boolean;
+  };
+  usage: { active_services_count: number; active_members_count: number };
+  stripe: {
+    enabled: boolean;
+    customer_id: boolean;
+    connect_account_id: boolean;
+    connect_details_submitted: boolean;
+    connect_charges_enabled: boolean;
+    connect_payouts_enabled: boolean;
+  };
+  payment_methods: Array<{
+    id: number;
+    brand: string | null;
+    last4: string | null;
+    exp_month: number | null;
+    exp_year: number | null;
+    is_default: boolean;
+  }>;
+};
+
+export type BillingPlan = {
+  id: number;
+  name: string;
+  slug: string;
+  price: string;
+  billing_period: string;
+  description: string;
+};
+
 export async function apiGetOrgs(): Promise<{ orgs: OrgListItem[] }> {
   return apiGet('/api/v1/orgs/');
 }
@@ -255,4 +303,34 @@ export async function apiPatchService(params: {
   const usp = new URLSearchParams();
   usp.set('org', params.org);
   return apiPatch(`/api/v1/services/${params.serviceId}/?${usp.toString()}`, params.patch);
+}
+
+export async function apiGetBillingSummary(params: { org: string }): Promise<BillingSummary> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiGet(`/api/v1/billing/summary/?${usp.toString()}`);
+}
+
+export async function apiGetBillingPlans(params: { org: string }): Promise<{
+  org: { id: number; slug: string; name: string };
+  plans: BillingPlan[];
+}> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiGet(`/api/v1/billing/plans/?${usp.toString()}`);
+}
+
+export async function apiCreateBillingPortalSession(params: { org: string }): Promise<{ url: string }> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiPost(`/api/v1/billing/portal/?${usp.toString()}`, {});
+}
+
+export async function apiCreateBillingCheckoutSession(params: {
+  org: string;
+  planId: number;
+}): Promise<{ url: string }> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiPost(`/api/v1/billing/checkout/?${usp.toString()}`, { plan_id: params.planId });
 }

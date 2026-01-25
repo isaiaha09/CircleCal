@@ -13,6 +13,7 @@ type Props = {
   onOpenSchedule: (args: { orgSlug: string }) => void;
   onOpenPortal: (args: { title: string }) => void;
   onOpenBookings: (args: { orgSlug: string }) => void;
+  onOpenBilling: (args: { orgSlug: string }) => void;
   onOpenBusinesses: () => void;
   onOpenProfile: () => void;
   onOpenServices: (args: { orgSlug: string }) => void;
@@ -48,6 +49,7 @@ export function HomeScreen({
   onOpenSchedule,
   onOpenPortal,
   onOpenBookings,
+  onOpenBilling,
   onOpenBusinesses,
   onOpenProfile,
   onOpenServices,
@@ -247,9 +249,15 @@ export function HomeScreen({
 
       <Text style={styles.sectionTitle}>Portals</Text>
       <View style={styles.portalGrid}>
-        <Pressable style={styles.portalTile} onPress={() => onOpenPortal({ title: 'Billing' })}>
-          <Text style={styles.portalTitle}>Billing</Text>
-          <Text style={styles.portalSubtitle}>In-app billing: trial countdown, plan, payment methods</Text>
+        <Pressable
+          style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
+          disabled={!activeOrg}
+          onPress={() => (activeOrg ? onOpenBilling({ orgSlug: activeOrg.slug }) : null)}
+        >
+          <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Billing</Text>
+          <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
+            Plan, trial, payment methods
+          </Text>
         </Pressable>
 
         <Pressable

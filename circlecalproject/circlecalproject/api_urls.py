@@ -7,6 +7,13 @@ from .api_bookings import BookingDetailView, BookingsListView
 from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
 from .api_services import ServiceDetailView, ServicesListCreateView
+from .api_billing import (
+    BillingCheckoutSessionView,
+    BillingPlanHealthView,
+    BillingPlansView,
+    BillingPortalSessionView,
+    BillingSummaryView,
+)
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="api_health"),
@@ -19,6 +26,12 @@ urlpatterns = [
     path("profile/avatar/", ProfileAvatarUploadView.as_view(), name="api_profile_avatar"),
     path("services/", ServicesListCreateView.as_view(), name="api_services"),
     path("services/<int:service_id>/", ServiceDetailView.as_view(), name="api_service_detail"),
+
+    path("billing/summary/", BillingSummaryView.as_view(), name="api_billing_summary"),
+    path("billing/plans/", BillingPlansView.as_view(), name="api_billing_plans"),
+    path("billing/portal/", BillingPortalSessionView.as_view(), name="api_billing_portal"),
+    path("billing/checkout/", BillingCheckoutSessionView.as_view(), name="api_billing_checkout"),
+    path("billing/plan-health/", BillingPlanHealthView.as_view(), name="api_billing_plan_health"),
 ]
 
 # JWT endpoints (optional): only register if SimpleJWT is installed.
