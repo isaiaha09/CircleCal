@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Alert, ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { API_BASE_URL } from '../config';
-import { setAccessToken, setRefreshToken } from '../lib/auth';
+import { clearActiveOrgSlug, setAccessToken, setRefreshToken } from '../lib/auth';
 import type { ApiError } from '../lib/api';
 import { apiPost } from '../lib/api';
 
@@ -35,6 +35,8 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
       );
 
       await Promise.all([setAccessToken(token.access), setRefreshToken(token.refresh)]);
+      // If a different user signs in, the previously selected org might not be valid.
+      await clearActiveOrgSlug();
       onSignedIn();
     } catch (e) {
       const err = e as Partial<ApiError>;

@@ -1,7 +1,15 @@
-﻿
+﻿.vscode
 .venv
 venv
 .venv/ 
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.ipa
+*.apk
+*.aab
 .env
 .env.*
 !circlecalproject/.env.example

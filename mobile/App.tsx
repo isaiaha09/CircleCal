@@ -5,6 +5,12 @@ import { StatusBar } from 'expo-status-bar';
 
 import { getAccessToken } from './src/lib/auth';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { BookingDetailScreen } from './src/screens/BookingDetailScreen';
+import { BookingsScreen } from './src/screens/BookingsScreen';
+import { BusinessesScreen } from './src/screens/BusinessesScreen';
+import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
+import { ScheduleScreen } from './src/screens/ScheduleScreen';
 import { SignInChoiceScreen } from './src/screens/SignInChoiceScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
@@ -15,6 +21,12 @@ type RootStackParamList = {
   SignInOwner: undefined;
   SignInStaff: undefined;
   Home: undefined;
+  BookingDetail: { orgSlug: string; bookingId: number };
+  Schedule: { orgSlug: string };
+  Portal: { title: string };
+  Bookings: { orgSlug: string };
+  Businesses: undefined;
+  Profile: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -72,9 +84,75 @@ export default function App() {
             />
           )}
         </Stack.Screen>
-        <Stack.Screen name="Home" options={{ title: 'CircleCal' }}>
+        <Stack.Screen name="Home" options={{ title: 'Dashboard' }}>
           {({ navigation }) => (
-            <HomeScreen onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })} />
+            <HomeScreen
+              onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
+              onOpenBooking={({ orgSlug, bookingId }: { orgSlug: string; bookingId: number }) =>
+                navigation.navigate('BookingDetail', { orgSlug, bookingId })
+              }
+              onOpenSchedule={({ orgSlug }: { orgSlug: string }) =>
+                navigation.navigate('Schedule', { orgSlug })
+              }
+              onOpenPortal={({ title }: { title: string }) => navigation.navigate('Portal', { title })}
+              onOpenBookings={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Bookings', { orgSlug })}
+              onOpenBusinesses={() => navigation.navigate('Businesses')}
+              onOpenProfile={() => navigation.navigate('Profile')}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen
+          name="BookingDetail"
+          options={{ title: 'Booking' }}
+        >
+          {({ route }) => (
+            <BookingDetailScreen orgSlug={route.params.orgSlug} bookingId={route.params.bookingId} />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Schedule" options={{ title: 'Today' }}>
+          {({ route, navigation }) => (
+            <ScheduleScreen
+              orgSlug={route.params.orgSlug}
+              onOpenBooking={({ orgSlug, bookingId }: { orgSlug: string; bookingId: number }) =>
+                navigation.navigate('BookingDetail', { orgSlug, bookingId })
+              }
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Portal" options={{ title: 'Portal' }}>
+          {({ route }) => <PortalPlaceholderScreen title={route.params.title} />}
+        </Stack.Screen>
+
+        <Stack.Screen name="Bookings" options={{ title: 'Bookings' }}>
+          {({ route, navigation }) => (
+            <BookingsScreen
+              orgSlug={route.params.orgSlug}
+              onOpenBooking={({ orgSlug, bookingId }: { orgSlug: string; bookingId: number }) =>
+                navigation.navigate('BookingDetail', { orgSlug, bookingId })
+              }
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Businesses" options={{ title: 'Businesses' }}>
+          {({ navigation }) => (
+            <BusinessesScreen
+              onSelected={({ orgSlug }: { orgSlug: string }) => {
+                // Return to dashboard; dashboard will refresh on focus.
+                navigation.goBack();
+              }}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Profile" options={{ title: 'Profile' }}>
+          {({ navigation }) => (
+            <ProfileScreen
+              onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
+            />
           )}
         </Stack.Screen>
       </Stack.Navigator>
