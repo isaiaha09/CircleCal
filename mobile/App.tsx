@@ -9,6 +9,7 @@ import { BookingDetailScreen } from './src/screens/BookingDetailScreen';
 import { BookingsScreen } from './src/screens/BookingsScreen';
 import { BusinessesScreen } from './src/screens/BusinessesScreen';
 import { BillingScreen } from './src/screens/BillingScreen';
+import { CalendarScreen } from './src/screens/CalendarScreen';
 import { PricingScreen } from './src/screens/PricingScreen';
 import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
@@ -26,6 +27,7 @@ type RootStackParamList = {
   SignInStaff: undefined;
   Home: undefined;
   BookingDetail: { orgSlug: string; bookingId: number };
+  Calendar: { orgSlug: string };
   Schedule: { orgSlug: string };
   Portal: { title: string };
   Bookings: { orgSlug: string };
@@ -99,6 +101,9 @@ export default function App() {
               onOpenBooking={({ orgSlug, bookingId }: { orgSlug: string; bookingId: number }) =>
                 navigation.navigate('BookingDetail', { orgSlug, bookingId })
               }
+              onOpenCalendar={({ orgSlug }: { orgSlug: string }) =>
+                navigation.navigate('Calendar', { orgSlug })
+              }
               onOpenSchedule={({ orgSlug }: { orgSlug: string }) =>
                 navigation.navigate('Schedule', { orgSlug })
               }
@@ -119,6 +124,17 @@ export default function App() {
         >
           {({ route }) => (
             <BookingDetailScreen orgSlug={route.params.orgSlug} bookingId={route.params.bookingId} />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Calendar" options={{ title: 'Calendar' }}>
+          {({ route, navigation }) => (
+            <CalendarScreen
+              orgSlug={route.params.orgSlug}
+              onOpenBooking={({ orgSlug, bookingId }: { orgSlug: string; bookingId: number }) =>
+                navigation.navigate('BookingDetail', { orgSlug, bookingId })
+              }
+            />
           )}
         </Stack.Screen>
 

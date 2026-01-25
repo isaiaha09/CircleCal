@@ -10,6 +10,7 @@ import { clearActiveOrgSlug, getActiveOrgSlug, setActiveOrgSlug, signOut } from 
 type Props = {
   onSignedOut: () => void;
   onOpenBooking: (args: { orgSlug: string; bookingId: number }) => void;
+  onOpenCalendar: (args: { orgSlug: string }) => void;
   onOpenSchedule: (args: { orgSlug: string }) => void;
   onOpenPortal: (args: { title: string }) => void;
   onOpenBookings: (args: { orgSlug: string }) => void;
@@ -47,6 +48,7 @@ function safeParseDate(iso: string | null): Date | null {
 export function HomeScreen({
   onSignedOut,
   onOpenBooking,
+  onOpenCalendar,
   onOpenSchedule,
   onOpenPortal,
   onOpenBookings,
@@ -281,11 +283,11 @@ export function HomeScreen({
         <Pressable
           style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
           disabled={!activeOrg}
-          onPress={() => (activeOrg ? onOpenSchedule({ orgSlug: activeOrg.slug }) : null)}
+          onPress={() => (activeOrg ? onOpenCalendar({ orgSlug: activeOrg.slug }) : null)}
         >
           <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Calendar</Text>
           <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
-            Open your scheduling calendar
+            Month view & daily agenda
           </Text>
         </Pressable>
 
