@@ -6,6 +6,8 @@ from .api_views import HealthView, HelloView, MeView
 from .api_bookings import BookingDetailView, BookingsListView
 from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
+from .api_profile import ProfileOverviewView
+from .api_org_settings import OrgOfflinePaymentsView
 from .api_services import ServiceDetailView, ServicesListCreateView
 from .api_resources import ResourceDetailView, ResourcesListCreateView
 from .api_team import TeamInvitesView, TeamMemberDetailView, TeamMembersView
@@ -25,7 +27,10 @@ urlpatterns = [
     path("bookings/", BookingsListView.as_view(), name="api_bookings_list"),
     path("bookings/<int:booking_id>/", BookingDetailView.as_view(), name="api_booking_detail"),
     path("profile/", ProfileView.as_view(), name="api_profile"),
+    path("profile/overview/", ProfileOverviewView.as_view(), name="api_profile_overview"),
     path("profile/avatar/", ProfileAvatarUploadView.as_view(), name="api_profile_avatar"),
+
+    path("org/offline-payments/", OrgOfflinePaymentsView.as_view(), name="api_org_offline_payments"),
     path("services/", ServicesListCreateView.as_view(), name="api_services"),
     path("services/<int:service_id>/", ServiceDetailView.as_view(), name="api_service_detail"),
 
