@@ -67,6 +67,20 @@ class ProfileForm(forms.ModelForm):
 
     def clean_avatar(self):
         avatar = self.cleaned_data.get("avatar")
+
+        # IMPORTANT (Cloudinary): When the user is *not* uploading a new avatar,
+        # Django may populate `cleaned_data['avatar']` with the existing FieldFile.
+        # For Cloudinary-backed storage, `storage.open()` is intentionally not
+        # supported (no streaming), so we must not attempt PIL/Image.open().
+        uploaded = self.files.get("avatar")
+        if not uploaded:
+            # ClearableFileInput uses False to indicate clear.
+            if avatar is False:
+                return None
+            return avatar
+
+        # From here on, we know there's a new uploaded file.
+        avatar = uploaded
         if avatar:
             if Image is None:
                 raise forms.ValidationError("Server error: image processing library not installed; please install Pillow.")
