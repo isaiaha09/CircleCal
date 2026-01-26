@@ -336,3 +336,32 @@ class BillingPlanHealthView(APIView):
                 "suggested_command": "python manage.py seed_plans --force",
             }
         )
+
+
+
+    class StripeExpressDashboardLinkView(APIView):
+        """Create a one-time Stripe Express Dashboard login link for the connected account."""
+
+        permission_classes = [IsAuthenticated]
+
+        def post(self, request):
+            org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
+            _require_billing_admin(membership)
+
+            acct_id = getattr(org, "stripe_connect_account_id", None)
+            if not acct_id:
+                raise ValidationError({"detail": "No Stripe connected account found for this business."})
+            if not _stripe_enabled():
+                raise ValidationError({"detail": "Stripe is not configured on this server."})
+
+            try:
+                stripe.api_key = settings.STRIPE_SECRET_KEY
+                link = stripe.Account.create_login_link(acct_id)
+                url = getattr(link, "url", None) or link.get("url")
+                if not url:
+                    raise ValueError("Stripe did not return a login link URL.")
+                return Response({"url": url})
+            except ValidationError:
+                raise
+            except Exception:
+                raise ValidationError({"detail": "Could not open Stripe Express Dashboard. Please try again."})

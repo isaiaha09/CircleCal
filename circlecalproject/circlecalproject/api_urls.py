@@ -17,6 +17,7 @@ from .api_billing import (
     BillingPlansView,
     BillingPortalSessionView,
     BillingSummaryView,
+    StripeExpressDashboardLinkView,
 )
 
 urlpatterns = [
@@ -46,6 +47,11 @@ urlpatterns = [
     path("billing/portal/", BillingPortalSessionView.as_view(), name="api_billing_portal"),
     path("billing/checkout/", BillingCheckoutSessionView.as_view(), name="api_billing_checkout"),
     path("billing/plan-health/", BillingPlanHealthView.as_view(), name="api_billing_plan_health"),
+    path(
+        "billing/stripe/express-dashboard/",
+        StripeExpressDashboardLinkView.as_view(),
+        name="api_billing_stripe_express_dashboard",
+    ),
 ]
 
 # JWT endpoints (optional): only register if SimpleJWT is installed.
