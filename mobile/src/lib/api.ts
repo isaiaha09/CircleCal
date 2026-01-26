@@ -1,11 +1,60 @@
 import { API_BASE_URL } from '../config';
-import { getAccessToken } from './auth';
+import {
+  clearAccessToken,
+  clearRefreshToken,
+  getAccessToken,
+  getRefreshToken,
+  setAccessToken,
+  setRefreshToken,
+} from './auth';
 
 export type ApiError = {
   status: number;
   message: string;
   body?: unknown;
 };
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refresh = await getRefreshToken();
+    if (!refresh) return false;
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/v1/auth/token/refresh/`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh }),
+      });
+
+      if (!resp.ok) {
+        // Refresh token expired/invalid. Clear tokens so next app start routes to sign-in.
+        await Promise.all([clearAccessToken(), clearRefreshToken()]);
+        return false;
+      }
+
+      const data = (await resp.json()) as { access?: string; refresh?: string };
+      if (typeof data.access !== 'string' || !data.access) return false;
+      await setAccessToken(data.access);
+      if (typeof data.refresh === 'string' && data.refresh) await setRefreshToken(data.refresh);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
+}
 
 async function readResponseBody(resp: Response): Promise<unknown> {
   // Read text first so we can try JSON parse, but still keep HTML/text for debugging.
@@ -38,83 +87,67 @@ async function buildHeadersMultipart(extra?: HeadersInit): Promise<HeadersInit> 
   };
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'GET',
-    headers: await buildHeaders(),
-  });
+async function apiRequest<T>(
+  path: string,
+  buildInit: () => Promise<RequestInit>,
+  opts?: { allowRefresh?: boolean }
+): Promise<T> {
+  const allowRefresh = opts?.allowRefresh !== false;
 
-  if (!resp.ok) {
-    const body = await readResponseBody(resp);
-    const err: ApiError = {
-      status: resp.status,
-      message: `Request failed: ${resp.status}`,
-      body,
-    };
-    throw err;
+  const doOnce = async (): Promise<T> => {
+    const resp = await fetch(`${API_BASE_URL}${path}`, await buildInit());
+    if (!resp.ok) {
+      const body = await readResponseBody(resp);
+      const err: ApiError = {
+        status: resp.status,
+        message: `Request failed: ${resp.status}`,
+        body,
+      };
+      throw err;
+    }
+    return (await resp.json()) as T;
+  };
+
+  try {
+    return await doOnce();
+  } catch (e) {
+    const err = e as Partial<ApiError>;
+    if (allowRefresh && err.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        return apiRequest<T>(path, buildInit, { allowRefresh: false });
+      }
+    }
+    throw e;
   }
+}
 
-  return (await resp.json()) as T;
+export async function apiGet<T>(path: string): Promise<T> {
+  return apiRequest<T>(path, async () => ({ method: 'GET', headers: await buildHeaders() }));
 }
 
 export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE_URL}${path}`, {
+  return apiRequest<T>(path, async () => ({
     method: 'POST',
     headers: await buildHeaders(),
     body: JSON.stringify(payload ?? {}),
-  });
-
-  if (!resp.ok) {
-    const body = await readResponseBody(resp);
-    const err: ApiError = {
-      status: resp.status,
-      message: `Request failed: ${resp.status}`,
-      body,
-    };
-    throw err;
-  }
-
-  return (await resp.json()) as T;
+  }));
 }
 
 export async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE_URL}${path}`, {
+  return apiRequest<T>(path, async () => ({
     method: 'PATCH',
     headers: await buildHeaders(),
     body: JSON.stringify(payload ?? {}),
-  });
-
-  if (!resp.ok) {
-    const body = await readResponseBody(resp);
-    const err: ApiError = {
-      status: resp.status,
-      message: `Request failed: ${resp.status}`,
-      body,
-    };
-    throw err;
-  }
-
-  return (await resp.json()) as T;
+  }));
 }
 
 export async function apiPostFormData<T>(path: string, form: FormData): Promise<T> {
-  const resp = await fetch(`${API_BASE_URL}${path}`, {
+  return apiRequest<T>(path, async () => ({
     method: 'POST',
     headers: await buildHeadersMultipart(),
     body: form,
-  });
-
-  if (!resp.ok) {
-    const body = await readResponseBody(resp);
-    const err: ApiError = {
-      status: resp.status,
-      message: `Request failed: ${resp.status}`,
-      body,
-    };
-    throw err;
-  }
-
-  return (await resp.json()) as T;
+  }));
 }
 
 export type ApiProfileResponse = {
@@ -122,6 +155,8 @@ export type ApiProfileResponse = {
     id: number;
     username: string;
     email: string;
+    first_name?: string;
+    last_name?: string;
   };
   profile: {
     display_name: string | null;
@@ -130,7 +165,54 @@ export type ApiProfileResponse = {
     booking_reminders: boolean;
     avatar_url: string | null;
     avatar_updated_at: string | null;
+    scheduled_account_deletion_at?: string | null;
+    scheduled_account_deletion_reason?: string | null;
   };
+  recent_logins?: Array<{
+    timestamp: string | null;
+    ip_address: string | null;
+    user_agent: string;
+  }>;
+  memberships?: Array<{
+    org: { id: number; slug: string; name: string };
+    role: string;
+    is_active: boolean;
+  }>;
+  pending_invites?: Array<{
+    org: { id: number; slug: string; name: string };
+    role: string;
+    created_at: string | null;
+    accept_url: string | null;
+  }>;
+  org_overview?: {
+    org: { id: number; slug: string; name: string };
+    membership: { role: string };
+    features: {
+      can_use_offline_payment_methods: boolean;
+    };
+    offline_payment: {
+      can_edit: boolean;
+      offline_venmo: string;
+      offline_zelle: string;
+    };
+    stripe: {
+      connect_account_id: boolean;
+      connect_details_submitted: boolean;
+      connect_charges_enabled: boolean;
+      connect_payouts_enabled: boolean;
+      connected_account_url: string | null;
+    };
+  };
+};
+
+export type ApiProfileOverviewResponse = ApiProfileResponse;
+
+export type OrgOfflinePaymentsResponse = {
+  org: { id: number; slug: string; name: string };
+  can_use_offline_payment_methods: boolean;
+  can_edit: boolean;
+  offline_venmo: string;
+  offline_zelle: string;
 };
 
 export type OrgListItem = {
@@ -214,8 +296,102 @@ export type BillingPlan = {
   description: string;
 };
 
+export type TeamMember = {
+  id: number;
+  role: 'owner' | 'admin' | 'manager' | 'staff' | string;
+  is_active: boolean;
+  created_at: string | null;
+  user: {
+    id: number | null;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+  };
+};
+
+export type TeamInvite = {
+  id: number;
+  email: string;
+  role: 'admin' | 'manager' | 'staff' | string;
+  accepted: boolean;
+  created_at: string | null;
+  accept_url: string | null;
+};
+
+export type FacilityResourceListItem = {
+  id: number;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  max_services: number;
+  in_use: boolean;
+};
+
 export async function apiGetOrgs(): Promise<{ orgs: OrgListItem[] }> {
   return apiGet('/api/v1/orgs/');
+}
+
+export async function apiGetTeamMembers(params: { org: string }): Promise<{
+  org: { id: number; slug: string; name: string };
+  count: number;
+  members: TeamMember[];
+}> {
+  return apiGet(`/api/v1/team/members/?org=${encodeURIComponent(params.org)}`);
+}
+
+export async function apiUpdateTeamMember(params: {
+  org: string;
+  memberId: number;
+  patch: { role?: string; is_active?: boolean };
+}): Promise<{ member: TeamMember }> {
+  return apiPatch(`/api/v1/team/members/${params.memberId}/?org=${encodeURIComponent(params.org)}`, params.patch);
+}
+
+export async function apiGetTeamInvites(params: { org: string }): Promise<{
+  org: { id: number; slug: string; name: string };
+  count: number;
+  invites: TeamInvite[];
+}> {
+  return apiGet(`/api/v1/team/invites/?org=${encodeURIComponent(params.org)}`);
+}
+
+export async function apiCreateTeamInvite(params: {
+  org: string;
+  email: string;
+  role: 'admin' | 'manager' | 'staff';
+}): Promise<{ invite: TeamInvite; sent: boolean; send_error?: string }> {
+  return apiPost(`/api/v1/team/invites/?org=${encodeURIComponent(params.org)}`, {
+    email: params.email,
+    role: params.role,
+  });
+}
+
+export async function apiGetResources(params: { org: string }): Promise<{
+  org: { id: number; slug: string; name: string };
+  count: number;
+  resources: FacilityResourceListItem[];
+}> {
+  return apiGet(`/api/v1/resources/?org=${encodeURIComponent(params.org)}`);
+}
+
+export async function apiCreateResource(params: {
+  org: string;
+  name: string;
+  max_services?: number;
+}): Promise<{ resource: FacilityResourceListItem }> {
+  return apiPost(`/api/v1/resources/?org=${encodeURIComponent(params.org)}`, {
+    name: params.name,
+    max_services: params.max_services,
+  });
+}
+
+export async function apiUpdateResource(params: {
+  org: string;
+  resourceId: number;
+  patch: { name?: string; is_active?: boolean; max_services?: number };
+}): Promise<{ resource: FacilityResourceListItem }> {
+  return apiPatch(`/api/v1/resources/${params.resourceId}/?org=${encodeURIComponent(params.org)}`, params.patch);
 }
 
 export async function apiGetBookings(params: {
@@ -311,6 +487,31 @@ export async function apiGetBillingSummary(params: { org: string }): Promise<Bil
   return apiGet(`/api/v1/billing/summary/?${usp.toString()}`);
 }
 
+export async function apiGetProfileOverview(params?: { org?: string | null }): Promise<ApiProfileOverviewResponse> {
+  const org = params?.org;
+  if (org) {
+    const usp = new URLSearchParams();
+    usp.set('org', org);
+    return apiGet(`/api/v1/profile/overview/?${usp.toString()}`);
+  }
+  return apiGet(`/api/v1/profile/overview/`);
+}
+
+export async function apiGetOrgOfflinePayments(params: { org: string }): Promise<OrgOfflinePaymentsResponse> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiGet(`/api/v1/org/offline-payments/?${usp.toString()}`);
+}
+
+export async function apiPatchOrgOfflinePayments(params: {
+  org: string;
+  patch: Partial<Pick<OrgOfflinePaymentsResponse, 'offline_venmo' | 'offline_zelle'>>;
+}): Promise<OrgOfflinePaymentsResponse> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiPatch(`/api/v1/org/offline-payments/?${usp.toString()}`, params.patch);
+}
+
 export async function apiGetBillingPlans(params: { org: string }): Promise<{
   org: { id: number; slug: string; name: string };
   plans: BillingPlan[];
@@ -333,4 +534,10 @@ export async function apiCreateBillingCheckoutSession(params: {
   const usp = new URLSearchParams();
   usp.set('org', params.org);
   return apiPost(`/api/v1/billing/checkout/?${usp.toString()}`, { plan_id: params.planId });
+}
+
+export async function apiCreateStripeExpressDashboardLink(params: { org: string }): Promise<{ url: string }> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  return apiPost(`/api/v1/billing/stripe/express-dashboard/?${usp.toString()}`, {});
 }

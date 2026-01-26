@@ -13,7 +13,9 @@ import { CalendarScreen } from './src/screens/CalendarScreen';
 import { PricingScreen } from './src/screens/PricingScreen';
 import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
+import { ResourcesScreen } from './src/screens/ResourcesScreen';
 import { ScheduleScreen } from './src/screens/ScheduleScreen';
+import { StaffScreen } from './src/screens/StaffScreen';
 import { ServiceEditScreen } from './src/screens/ServiceEditScreen.tsx';
 import { ServicesScreen } from './src/screens/ServicesScreen.tsx';
 import { SignInChoiceScreen } from './src/screens/SignInChoiceScreen';
@@ -33,6 +35,8 @@ type RootStackParamList = {
   Bookings: { orgSlug: string };
   Billing: { orgSlug: string };
   Pricing: { orgSlug: string };
+  Resources: { orgSlug: string };
+  Staff: { orgSlug: string };
   Businesses: undefined;
   Profile: undefined;
   Services: { orgSlug: string };
@@ -111,6 +115,8 @@ export default function App() {
               onOpenBookings={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Bookings', { orgSlug })}
               onOpenBilling={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Billing', { orgSlug })}
               onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+              onOpenResources={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Resources', { orgSlug })}
+              onOpenStaff={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Staff', { orgSlug })}
               onOpenBusinesses={() => navigation.navigate('Businesses')}
               onOpenProfile={() => navigation.navigate('Profile')}
               onOpenServices={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Services', { orgSlug })}
@@ -172,6 +178,24 @@ export default function App() {
           {({ route }) => <PricingScreen orgSlug={route.params.orgSlug} />}
         </Stack.Screen>
 
+        <Stack.Screen name="Resources" options={{ title: 'Resources' }}>
+          {({ route, navigation }) => (
+            <ResourcesScreen
+              orgSlug={route.params.orgSlug}
+              onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="Staff" options={{ title: 'Staff' }}>
+          {({ route, navigation }) => (
+            <StaffScreen
+              orgSlug={route.params.orgSlug}
+              onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+            />
+          )}
+        </Stack.Screen>
+
         <Stack.Screen name="Businesses" options={{ title: 'Businesses' }}>
           {({ navigation }) => (
             <BusinessesScreen
@@ -187,6 +211,9 @@ export default function App() {
           {({ navigation }) => (
             <ProfileScreen
               onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
+              onOpenBusinesses={() => navigation.navigate('Businesses')}
+              onOpenBilling={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Billing', { orgSlug })}
+              onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
             />
           )}
         </Stack.Screen>

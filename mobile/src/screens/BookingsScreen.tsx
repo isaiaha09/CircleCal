@@ -78,10 +78,12 @@ export function BookingsScreen({ orgSlug, onOpenBooking }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Bookings</Text>
-      <Text style={styles.subtitle}>
-        {window.from} → {window.to}
-      </Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Bookings</Text>
+        <Text style={styles.subtitle}>
+          {window.from} → {window.to}
+        </Text>
+      </View>
 
       {loading ? (
         <View style={{ paddingTop: 18 }}>
@@ -103,7 +105,7 @@ export function BookingsScreen({ orgSlug, onOpenBooking }: Props) {
               <Text style={styles.emptyText}>No bookings found in this window.</Text>
             </View>
           }
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={styles.listContent}
         />
       )}
     </View>
@@ -113,9 +115,15 @@ export function BookingsScreen({ orgSlug, onOpenBooking }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
-    paddingTop: 18,
     backgroundColor: '#fff',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 18,
+  },
+  listContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   title: {
     fontSize: 28,

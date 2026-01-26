@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { CalendarList, DateData } from 'react-native-calendars';
+import { Calendar, DateData } from 'react-native-calendars';
 
 import type { ApiError, BookingListItem } from '../lib/api';
 import { apiGetBookings } from '../lib/api';
@@ -17,17 +17,22 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function addDays(d: Date, days: number): Date {
-  const n = new Date(d);
-  n.setDate(n.getDate() + days);
-  return n;
-}
-
 function monthWindow(yyyyMmDd: string): { from: string; toExclusive: string } {
   const [y, m] = yyyyMmDd.split('-').map((x) => Number(x));
   const first = new Date(y, (m || 1) - 1, 1);
   const nextMonth = new Date(y, (m || 1), 1);
   return { from: isoDate(first), toExclusive: isoDate(nextMonth) };
+}
+
+function monthAnchorForDate(dateString: string): string {
+  return `${dateString.slice(0, 7)}-01`;
+}
+
+function shiftMonth(anchor: string, deltaMonths: number): string {
+  const [y, m] = anchor.split('-').map((x) => Number(x));
+  const d = new Date(y, (m || 1) - 1, 1);
+  d.setMonth(d.getMonth() + deltaMonths);
+  return isoDate(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 
 function localDayKey(iso: string | null): string | null {
@@ -50,9 +55,7 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bookingsByDay, setBookingsByDay] = useState<Record<string, BookingListItem[]>>({});
-  const [activeMonthAnchor, setActiveMonthAnchor] = useState<string>(today);
-
-  const visibleWindow = useMemo(() => monthWindow(activeMonthAnchor), [activeMonthAnchor]);
+  const [activeMonthAnchor, setActiveMonthAnchor] = useState<string>(monthAnchorForDate(today));
 
   async function loadMonth(anchor: string) {
     setLoading(true);
@@ -111,17 +114,16 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
 
   function onDayPress(d: DateData) {
     setSelected(d.dateString);
-    // If user taps outside the current month window, update anchor so we fetch that month.
-    const monthAnchor = `${d.dateString.slice(0, 7)}-01`;
+    const monthAnchor = monthAnchorForDate(d.dateString);
     if (monthAnchor !== activeMonthAnchor) setActiveMonthAnchor(monthAnchor);
   }
 
-  function onVisibleMonthsChange(ms: DateData[]) {
-    // CalendarList provides an array; use the first visible month.
-    const m = ms?.[0];
+  function onMonthChange(m: DateData) {
     if (!m?.dateString) return;
-    const monthAnchor = `${m.dateString.slice(0, 7)}-01`;
-    if (monthAnchor !== activeMonthAnchor) setActiveMonthAnchor(monthAnchor);
+    const nextAnchor = monthAnchorForDate(m.dateString);
+    if (nextAnchor !== activeMonthAnchor) setActiveMonthAnchor(nextAnchor);
+    // Keep the selected day visible within the month.
+    if (selected.slice(0, 7) !== nextAnchor.slice(0, 7)) setSelected(nextAnchor);
   }
 
   function renderBooking({ item }: { item: BookingListItem }) {
@@ -143,30 +145,31 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Calendar</Text>
-      <Text style={styles.subtitle}>Tap a day to see bookings.</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Calendar</Text>
+        <Text style={styles.subtitle}>Tap a day to see bookings.</Text>
 
-      <View style={styles.calendarCard}>
-        <CalendarList
-          current={selected}
-          pastScrollRange={12}
-          futureScrollRange={12}
-          onDayPress={onDayPress}
-          onVisibleMonthsChange={onVisibleMonthsChange}
-          markedDates={markedDates}
-          theme={{
-            todayTextColor: '#2563eb',
-            arrowColor: '#111827',
-            textDayFontWeight: '600',
-            textMonthFontWeight: '800',
-            textDayHeaderFontWeight: '700',
-          }}
-        />
-      </View>
+        <View style={styles.calendarCard}>
+          <Calendar
+            current={activeMonthAnchor}
+            enableSwipeMonths
+            onDayPress={onDayPress}
+            onMonthChange={onMonthChange}
+            markedDates={markedDates}
+            theme={{
+              todayTextColor: '#2563eb',
+              arrowColor: '#111827',
+              textDayFontWeight: '600',
+              textMonthFontWeight: '800',
+              textDayHeaderFontWeight: '700',
+            }}
+          />
+        </View>
 
-      <View style={styles.agendaHeader}>
-        <Text style={styles.sectionTitle}>Agenda</Text>
-        <Text style={styles.sectionSubtitle}>{selected}</Text>
+        <View style={styles.agendaHeader}>
+          <Text style={styles.sectionTitle}>Agenda</Text>
+          <Text style={styles.sectionSubtitle}>{selected}</Text>
+        </View>
       </View>
 
       {loading ? (
@@ -189,7 +192,7 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
               <Text style={styles.emptyText}>No bookings on this day.</Text>
             </View>
           }
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={styles.listContent}
         />
       )}
     </View>
@@ -199,9 +202,15 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
-    paddingTop: 18,
     backgroundColor: '#fff',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 18,
+  },
+  listContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   title: {
     fontSize: 28,

@@ -35,6 +35,8 @@ export function BillingScreen({ orgSlug }: Props) {
   const [busy, setBusy] = useState<'portal' | `checkout:${number}` | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const currentSlug = (summary?.plan?.slug || 'basic').toLowerCase();
+
   const title = useMemo(() => {
     if (!summary?.org?.name) return 'Billing';
     return `Billing · ${summary.org.name}`;
@@ -178,25 +180,35 @@ export function BillingScreen({ orgSlug }: Props) {
         {plans.length === 0 ? (
           <Text style={styles.cardText}>No plans available.</Text>
         ) : (
-          plans.map((p) => (
-            <View key={p.id} style={styles.planRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.planName}>
-                  {p.name} · {p.billing_period} · {formatMoney(p.price)}
-                </Text>
-                {p.description ? <Text style={styles.meta}>{p.description}</Text> : null}
+          plans.map((p) => {
+            const isCurrent = String(p.slug).toLowerCase() === currentSlug;
+            return (
+              <View key={p.id} style={[styles.planRow, isCurrent ? styles.planRowActive : null]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.planName}>
+                    {p.name} · {p.billing_period} · {formatMoney(p.price)}
+                  </Text>
+                  {p.description ? <Text style={styles.meta}>{p.description}</Text> : null}
+                </View>
+
+                {isCurrent ? (
+                  <View style={styles.currentPill}>
+                    <Text style={styles.currentPillText}>Current plan</Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={[styles.secondaryBtn, busy ? styles.secondaryBtnDisabled : null]}
+                    disabled={busy !== null}
+                    onPress={() => checkout(p.id)}
+                  >
+                    <Text style={styles.secondaryBtnText}>
+                      {busy === `checkout:${p.id}` ? 'Starting…' : 'Choose'}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
-              <Pressable
-                style={[styles.secondaryBtn, busy ? styles.secondaryBtnDisabled : null]}
-                disabled={busy !== null}
-                onPress={() => checkout(p.id)}
-              >
-                <Text style={styles.secondaryBtnText}>
-                  {busy === `checkout:${p.id}` ? 'Starting…' : 'Choose'}
-                </Text>
-              </Pressable>
-            </View>
-          ))
+            );
+          })
         )}
       </View>
     </ScrollView>
@@ -280,8 +292,21 @@ const styles = StyleSheet.create({
     gap: 10,
     alignItems: 'center',
   },
+  planRowActive: {
+    backgroundColor: '#eff6ff',
+  },
   planName: {
     fontWeight: '800',
     color: '#111827',
+  },
+  currentPill: {
+    backgroundColor: '#111827',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+  },
+  currentPillText: {
+    color: '#fff',
+    fontWeight: '800',
   },
 });

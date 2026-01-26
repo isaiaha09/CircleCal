@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
-import type { ApiError } from '../lib/api';
+import type { ApiError, BillingSummary } from '../lib/api';
 import type { BookingListItem, OrgListItem } from '../lib/api';
-import { apiGet, apiGetBookings, apiGetOrgs } from '../lib/api';
+import { apiGet, apiGetBillingSummary, apiGetBookings, apiGetOrgs } from '../lib/api';
 import { clearActiveOrgSlug, getActiveOrgSlug, setActiveOrgSlug, signOut } from '../lib/auth';
 
 type Props = {
@@ -16,6 +16,8 @@ type Props = {
   onOpenBookings: (args: { orgSlug: string }) => void;
   onOpenBilling: (args: { orgSlug: string }) => void;
   onOpenPricing: (args: { orgSlug: string }) => void;
+  onOpenResources: (args: { orgSlug: string }) => void;
+  onOpenStaff: (args: { orgSlug: string }) => void;
   onOpenBusinesses: () => void;
   onOpenProfile: () => void;
   onOpenServices: (args: { orgSlug: string }) => void;
@@ -54,6 +56,8 @@ export function HomeScreen({
   onOpenBookings,
   onOpenBilling,
   onOpenPricing,
+  onOpenResources,
+  onOpenStaff,
   onOpenBusinesses,
   onOpenProfile,
   onOpenServices,
@@ -61,6 +65,8 @@ export function HomeScreen({
   const [me, setMe] = useState<{ username: string; email: string } | null>(null);
   const [orgs, setOrgs] = useState<OrgListItem[]>([]);
   const [activeOrg, setActiveOrg] = useState<OrgListItem | null>(null);
+  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+  const [loadingPlan, setLoadingPlan] = useState(false);
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingBookings, setLoadingBookings] = useState(false);
@@ -91,6 +97,19 @@ export function HomeScreen({
     }
   }
 
+  async function loadPlan(orgSlug: string) {
+    setLoadingPlan(true);
+    try {
+      const s = await apiGetBillingSummary({ org: orgSlug });
+      setBillingSummary(s);
+    } catch {
+      // If billing isn't enabled or user isn't authorized, keep portals gated.
+      setBillingSummary(null);
+    } finally {
+      setLoadingPlan(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -113,7 +132,9 @@ export function HomeScreen({
         setActiveOrg(chosen);
         if (chosen) {
           await setActiveOrgSlug(chosen.slug);
-          if (!cancelled) await loadBookings(chosen.slug);
+          if (!cancelled) {
+            await Promise.all([loadBookings(chosen.slug), loadPlan(chosen.slug)]);
+          }
         }
       } catch (e) {
         const err = e as Partial<ApiError>;
@@ -139,13 +160,18 @@ export function HomeScreen({
       (async () => {
         if (loading) return;
         try {
+          // Always refresh plan gates on focus (e.g., after upgrading in Stripe).
+          if (activeOrg?.slug) {
+            await loadPlan(activeOrg.slug);
+          }
+
           const storedSlug = await getActiveOrgSlug();
           if (cancelled) return;
           if (!storedSlug || storedSlug === activeOrg?.slug) return;
           const chosen = orgs.find((o) => o.slug === storedSlug) || null;
           if (!chosen) return;
           setActiveOrg(chosen);
-          await loadBookings(chosen.slug);
+          await Promise.all([loadBookings(chosen.slug), loadPlan(chosen.slug)]);
         } catch {
           // ignore
         }
@@ -164,7 +190,7 @@ export function HomeScreen({
   async function handleSelectOrg(o: OrgListItem) {
     setActiveOrg(o);
     await setActiveOrgSlug(o.slug);
-    await loadBookings(o.slug);
+    await Promise.all([loadBookings(o.slug), loadPlan(o.slug)]);
   }
 
   const header = (
@@ -291,12 +317,29 @@ export function HomeScreen({
           </Text>
         </Pressable>
 
-        <Pressable style={[styles.portalTile, styles.portalTileDisabled]} disabled>
-          <Text style={[styles.portalTitle, styles.portalTitleDisabled]}>Resources</Text>
-          <Text style={[styles.portalSubtitle, styles.portalSubtitleDisabled]}>
-            Manage space and capacity (Team plan only)
-          </Text>
-        </Pressable>
+        {(() => {
+          const allowed = !!activeOrg && !!billingSummary?.features?.can_use_resources;
+          const disabled = !activeOrg || loadingPlan || !allowed;
+          const subtitle = !activeOrg
+            ? 'Select a business first'
+            : loadingPlan
+              ? 'Checking plan…'
+              : allowed
+                ? 'Manage space and capacity'
+                : 'Team plan only';
+          return (
+            <Pressable
+              style={[styles.portalTile, disabled ? styles.portalTileDisabled : null]}
+              disabled={disabled}
+                onPress={() => (activeOrg ? onOpenResources({ orgSlug: activeOrg.slug }) : null)}
+            >
+              <Text style={[styles.portalTitle, disabled ? styles.portalTitleDisabled : null]}>Resources</Text>
+              <Text style={[styles.portalSubtitle, disabled ? styles.portalSubtitleDisabled : null]}>
+                {subtitle}
+              </Text>
+            </Pressable>
+          );
+        })()}
 
         <Pressable
           style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
@@ -317,7 +360,6 @@ export function HomeScreen({
         <Pressable
           style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
           disabled={!activeOrg}
-          onPress={() => (activeOrg ? onOpenServices({ orgSlug: activeOrg.slug }) : null)}
         >
           <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Services</Text>
           <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
@@ -325,12 +367,29 @@ export function HomeScreen({
           </Text>
         </Pressable>
 
-        <Pressable style={[styles.portalTile, styles.portalTileDisabled]} disabled>
-          <Text style={[styles.portalTitle, styles.portalTitleDisabled]}>Staff</Text>
-          <Text style={[styles.portalSubtitle, styles.portalSubtitleDisabled]}>
-            Manage staff roles & invitations (Team plan only)
-          </Text>
-        </Pressable>
+        {(() => {
+          const allowed = !!activeOrg && !!billingSummary?.features?.can_add_staff;
+          const disabled = !activeOrg || loadingPlan || !allowed;
+          const subtitle = !activeOrg
+            ? 'Select a business first'
+            : loadingPlan
+              ? 'Checking plan…'
+              : allowed
+                ? 'Roles & invitations'
+                : 'Team plan only';
+          return (
+            <Pressable
+              style={[styles.portalTile, disabled ? styles.portalTileDisabled : null]}
+              disabled={disabled}
+              onPress={() => (activeOrg ? onOpenStaff({ orgSlug: activeOrg.slug }) : null)}
+            >
+              <Text style={[styles.portalTitle, disabled ? styles.portalTitleDisabled : null]}>Staff</Text>
+              <Text style={[styles.portalSubtitle, disabled ? styles.portalSubtitleDisabled : null]}>
+                {subtitle}
+              </Text>
+            </Pressable>
+          );
+        })()}
       </View>
 
       <Text style={styles.sectionTitle}>Upcoming</Text>
@@ -360,7 +419,7 @@ export function HomeScreen({
   return (
     <View style={styles.container}>
       {loading ? (
-        <View style={{ paddingTop: 64 }}>
+        <View style={styles.loadingBox}>
           <ActivityIndicator />
         </View>
       ) : (
@@ -369,7 +428,7 @@ export function HomeScreen({
           keyExtractor={(b) => String(b.id)}
           renderItem={renderItem}
           ListHeaderComponent={header}
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={styles.listContent}
           onRefresh={() => (activeOrg ? loadBookings(activeOrg.slug) : Promise.resolve())}
           refreshing={loadingBookings}
           ListEmptyComponent={
@@ -384,9 +443,11 @@ export function HomeScreen({
         />
       )}
 
-      <Pressable style={styles.secondaryBtn} onPress={handleSignOut}>
-        <Text style={styles.secondaryBtnText}>Sign out</Text>
-      </Pressable>
+      <View style={styles.footer}>
+        <Pressable style={styles.secondaryBtn} onPress={handleSignOut}>
+          <Text style={styles.secondaryBtnText}>Sign out</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -394,8 +455,20 @@ export function HomeScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    backgroundColor: '#fff',
+  },
+  listContent: {
+    paddingHorizontal: 24,
     paddingTop: 18,
+    paddingBottom: 24,
+  },
+  loadingBox: {
+    paddingTop: 64,
+    paddingHorizontal: 24,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingBottom: 18,
     backgroundColor: '#fff',
   },
   title: {

@@ -120,37 +120,39 @@ export function ServicesScreen({ orgSlug, onOpenEdit }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Services</Text>
-      <Text style={styles.subtitle}>Manage your service offerings</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Services</Text>
+        <Text style={styles.subtitle}>Manage your service offerings</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Create a service</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Create a service</Text>
 
-        <TextInput value={name} onChangeText={setName} placeholder="Service name" style={styles.input} />
+          <TextInput value={name} onChangeText={setName} placeholder="Service name" style={styles.input} />
 
-        <View style={styles.inlineRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.inlineLabel}>Duration (min)</Text>
-            <TextInput
-              value={duration}
-              onChangeText={setDuration}
-              keyboardType="number-pad"
-              style={styles.input}
-            />
+          <View style={styles.inlineRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.inlineLabel}>Duration (min)</Text>
+              <TextInput
+                value={duration}
+                onChangeText={setDuration}
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.inlineLabel}>Price</Text>
+              <TextInput value={price} onChangeText={setPrice} keyboardType="decimal-pad" style={styles.input} />
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.inlineLabel}>Price</Text>
-            <TextInput value={price} onChangeText={setPrice} keyboardType="decimal-pad" style={styles.input} />
-          </View>
+
+          <Pressable
+            style={[styles.primaryBtn, !canCreate || saving ? styles.primaryBtnDisabled : null]}
+            disabled={!canCreate || saving}
+            onPress={handleCreate}
+          >
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Create</Text>}
+          </Pressable>
         </View>
-
-        <Pressable
-          style={[styles.primaryBtn, !canCreate || saving ? styles.primaryBtnDisabled : null]}
-          disabled={!canCreate || saving}
-          onPress={handleCreate}
-        >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Create</Text>}
-        </Pressable>
       </View>
 
       {loading ? (
@@ -176,7 +178,7 @@ export function ServicesScreen({ orgSlug, onOpenEdit }: Props) {
               <Text style={styles.emptyText}>No services yet. Create your first one above.</Text>
             </View>
           }
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={styles.listContent}
         />
       )}
     </View>
@@ -186,9 +188,15 @@ export function ServicesScreen({ orgSlug, onOpenEdit }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
-    paddingTop: 18,
     backgroundColor: '#fff',
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 18,
+  },
+  listContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   title: {
     fontSize: 28,
