@@ -4,17 +4,30 @@ from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_logged_in
 from .models import Profile
 from .models import LoginActivity
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
-    if created:
+    # Never block user creation on profile provisioning.
+    if not created:
+        return
+    try:
         Profile.objects.create(user=instance)
+    except Exception as exc:
+        logger.exception("Failed to create Profile for user_id=%s: %s", getattr(instance, 'id', None), exc)
 
 @receiver(post_save, sender=User)
 def save_user_profile(sender, instance, **kwargs):
-    # Ensure profile exists for users created before this feature
-    profile, _ = Profile.objects.get_or_create(user=instance)
-    profile.save()
+    # Ensure profile exists for users created before this feature.
+    # Avoid calling profile.save() here — it is unnecessary and can cause
+    # unexpected failures (storage/migrations) after any User save (e.g. email update).
+    try:
+        Profile.objects.get_or_create(user=instance)
+    except Exception as exc:
+        logger.exception("Failed to ensure Profile exists for user_id=%s: %s", getattr(instance, 'id', None), exc)
 
 
 @receiver(user_logged_in)
