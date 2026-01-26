@@ -7,6 +7,8 @@ from .api_bookings import BookingDetailView, BookingsListView
 from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
 from .api_services import ServiceDetailView, ServicesListCreateView
+from .api_resources import ResourceDetailView, ResourcesListCreateView
+from .api_team import TeamInvitesView, TeamMemberDetailView, TeamMembersView
 from .api_billing import (
     BillingCheckoutSessionView,
     BillingPlanHealthView,
@@ -26,6 +28,13 @@ urlpatterns = [
     path("profile/avatar/", ProfileAvatarUploadView.as_view(), name="api_profile_avatar"),
     path("services/", ServicesListCreateView.as_view(), name="api_services"),
     path("services/<int:service_id>/", ServiceDetailView.as_view(), name="api_service_detail"),
+
+    path("resources/", ResourcesListCreateView.as_view(), name="api_resources"),
+    path("resources/<int:resource_id>/", ResourceDetailView.as_view(), name="api_resource_detail"),
+
+    path("team/members/", TeamMembersView.as_view(), name="api_team_members"),
+    path("team/members/<int:member_id>/", TeamMemberDetailView.as_view(), name="api_team_member_detail"),
+    path("team/invites/", TeamInvitesView.as_view(), name="api_team_invites"),
 
     path("billing/summary/", BillingSummaryView.as_view(), name="api_billing_summary"),
     path("billing/plans/", BillingPlansView.as_view(), name="api_billing_plans"),
