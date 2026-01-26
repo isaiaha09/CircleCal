@@ -231,3 +231,54 @@ class TeamInvitesView(APIView):
         if error:
             payload["send_error"] = error
         return Response(payload)
+
+    def delete(self, request):
+        """Delete a pending invite.
+
+        This exists as a compatibility path so clients can call:
+        DELETE /api/v1/team/invites/?org=<slug>&invite_id=<id>
+        even if the invite detail route isn't available.
+        """
+
+        org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
+        _require_team_admin(membership)
+        _require_team_plan(org)
+
+        invite_id = request.query_params.get("invite_id")
+        if not invite_id:
+            data = request.data or {}
+            invite_id = data.get("invite_id")
+
+        try:
+            invite_id_int = int(invite_id)
+        except Exception:
+            raise ValidationError({"invite_id": "Valid invite_id is required."})
+
+        inv = Invite.objects.filter(organization=org, id=invite_id_int).first()
+        if not inv:
+            raise ValidationError({"detail": "Invite not found."})
+
+        if bool(getattr(inv, "accepted", False)):
+            raise ValidationError({"detail": "Invite is already accepted."})
+
+        inv.delete()
+        return Response({"deleted": True})
+
+
+class TeamInviteDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, invite_id: int):
+        org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
+        _require_team_admin(membership)
+        _require_team_plan(org)
+
+        inv = Invite.objects.filter(organization=org, id=int(invite_id)).first()
+        if not inv:
+            raise ValidationError({"detail": "Invite not found."})
+
+        if bool(getattr(inv, "accepted", False)):
+            raise ValidationError({"detail": "Invite is already accepted."})
+
+        inv.delete()
+        return Response({"deleted": True})

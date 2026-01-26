@@ -10,7 +10,7 @@ from .api_profile import ProfileOverviewView
 from .api_org_settings import OrgOfflinePaymentsView
 from .api_services import ServiceDetailView, ServicesListCreateView
 from .api_resources import ResourceDetailView, ResourcesListCreateView
-from .api_team import TeamInvitesView, TeamMemberDetailView, TeamMembersView
+from .api_team import TeamInviteDetailView, TeamInvitesView, TeamMemberDetailView, TeamMembersView
 from .api_billing import (
     BillingCheckoutSessionView,
     BillingPlanHealthView,
@@ -41,6 +41,7 @@ urlpatterns = [
     path("team/members/", TeamMembersView.as_view(), name="api_team_members"),
     path("team/members/<int:member_id>/", TeamMemberDetailView.as_view(), name="api_team_member_detail"),
     path("team/invites/", TeamInvitesView.as_view(), name="api_team_invites"),
+    path("team/invites/<int:invite_id>/", TeamInviteDetailView.as_view(), name="api_team_invite_detail"),
 
     path("billing/summary/", BillingSummaryView.as_view(), name="api_billing_summary"),
     path("billing/plans/", BillingPlansView.as_view(), name="api_billing_plans"),
