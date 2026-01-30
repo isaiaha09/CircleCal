@@ -50,7 +50,7 @@ def _unique_resource_slug_for_org(org: Organization, base_slug: str, exclude_id:
 
 @login_required
 @require_http_methods(['GET', 'POST'])
-@require_roles(['owner'])
+@require_roles(['owner', 'admin', 'manager'])
 def resources_page(request, org_slug):
     """Owner-facing management for facility resources (cages/rooms/etc)."""
     org = request.organization
@@ -127,7 +127,7 @@ def resources_page(request, org_slug):
 
 @login_required
 @require_http_methods(['GET', 'POST'])
-@require_roles(['owner'])
+@require_roles(['owner', 'admin', 'manager'])
 def edit_resource(request, org_slug, resource_id):
     org = request.organization
     try:
@@ -193,7 +193,7 @@ def edit_resource(request, org_slug, resource_id):
 
 @login_required
 @require_http_methods(['POST'])
-@require_roles(['owner'])
+@require_roles(['owner', 'admin', 'manager'])
 def toggle_resource_active(request, org_slug, resource_id):
     org = request.organization
     try:
