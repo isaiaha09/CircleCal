@@ -176,16 +176,19 @@
             <span class="member-role role-{{ m.role }}">{{ m.role|title }}</span>
             
             <div class="member-actions">
-                <div class="dropdown">
-                    <button class="action-btn btn-change-role">Change Role ▾</button>
-                    <div class="dropdown-content">
-                        <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=owner">Owner</a>
-                        <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=admin">Admin</a>
-                        <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=manager">Manager</a>
-                        <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=staff">Staff</a>
+                {% if m.role == 'owner' or m.user_id == org.owner_id %}
+                    <div class="action-btn" style="background:#fef3c7;color:#92400e;cursor:default;">Owner (locked)</div>
+                {% else %}
+                    <div class="dropdown">
+                        <button class="action-btn btn-change-role">Change Role ▾</button>
+                        <div class="dropdown-content">
+                            <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=admin">Admin</a>
+                            <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=manager">Manager</a>
+                            <a href="{% url 'calendar_app:update_member_role' org.slug m.id %}?role=staff">Staff</a>
+                        </div>
                     </div>
-                </div>
-                <a href="{% url 'calendar_app:remove_member' org.slug m.id %}" class="action-btn btn-remove" onclick="return confirm('Remove {{ m.user.username }} from the team?')">Remove</a>
+                    <a href="{% url 'calendar_app:remove_member' org.slug m.id %}" class="action-btn btn-remove" onclick="return confirm('Remove {{ m.user.username }} from the team?')">Remove</a>
+                {% endif %}
             </div>
         </div>
         {% endfor %}

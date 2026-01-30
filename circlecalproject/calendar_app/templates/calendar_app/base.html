@@ -628,7 +628,9 @@
                             <nav class="hidden md:flex items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
+                                {% if user_org_role == 'owner' %}
                                 <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
+                                {% endif %}
                                 <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="text-gray-700 hover:text-blue-600">Switch</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
@@ -674,7 +676,9 @@
                             {% else %}
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Calendar</a>
+                                {% if user_org_role == 'owner' %}
                                 <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
+                                {% endif %}
                                 <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Team</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Switch Business</a>
                             {% endif %}

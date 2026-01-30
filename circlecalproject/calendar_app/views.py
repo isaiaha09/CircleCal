@@ -5041,6 +5041,8 @@ def invite_member(request, org_slug):
     if request.method == "POST":
         email = request.POST["email"]
         role = request.POST.get("role", "staff")
+        if role not in {"admin", "manager", "staff"}:
+            return HttpResponseForbidden("Invalid role.")
 
         token = get_random_string(48)
 
@@ -5123,8 +5125,8 @@ def remove_member(request, org_slug, member_id):
 
     member = get_object_or_404(Membership, id=member_id, organization=org)
 
-    # Owner cannot remove themselves
-    if member.user == org.owner:
+    # Owner membership is protected (cannot be removed).
+    if member.user_id == getattr(org, "owner_id", None) or member.role == "owner":
         return HttpResponseForbidden("Cannot remove organization owner.")
 
     member.delete()
@@ -5148,8 +5150,12 @@ def update_member_role(request, org_slug, member_id):
 
     member = get_object_or_404(Membership, id=member_id, organization=org)
 
+    # Owner membership is protected (cannot be changed).
+    if member.user_id == getattr(org, "owner_id", None) or member.role == "owner":
+        return HttpResponseForbidden("Cannot change organization owner.")
+
     new_role = request.GET.get("role")
-    if new_role not in ["owner", "admin", "manager", "staff"]:
+    if new_role not in ["admin", "manager", "staff"]:
         return HttpResponseForbidden("Invalid role.")
 
     member.role = new_role
@@ -5245,10 +5251,15 @@ def pricing_page(request, org_slug):
     from billing.models import Plan
     from billing.utils import get_subscription
     from django.db.models import Q
+    from accounts.models import Membership
     
     org = request.organization
     if not org:
         return redirect("calendar_app:choose_business")
+
+    membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
+    if not membership or membership.role != 'owner':
+        return redirect('calendar_app:dashboard', org_slug=org.slug)
     
     # Only show active plans and order by price (low -> high)
     plans = Plan.objects.filter(is_active=True).order_by('price')
@@ -8717,87 +8728,4 @@ def bookings_audit_export(request, org_slug):
                 pass
 
         for item in export:
-            if y < 60:
-                c.showPage()
-                c.setFont('Helvetica', 11)
-                y = height - 40
-            ev = item.get('display_event') or item.get('event_type', '')
-            # prefer booking_ref which may be the public_ref from snapshot
-            bid = item.get('booking_ref') or item.get('booking_id') or '-'
-            c.drawString(40, y, f"Event: {str(ev).capitalize()}  ID: {bid}")
-            y -= line_h
-            c.drawString(60, y, f"Service: {item.get('service') or '-'}")
-            y -= line_h
-            # Business (already available)
-            c.drawString(60, y, f"Business: {item.get('business') or org.name}")
-            y -= line_h
-            # Client
-            c.drawString(60, y, f"Client: {item.get('client_name') or '-'} <{item.get('client_email') or '-'}>")
-            y -= line_h
-            # Charge (placed between Client and Start/End)
-            price = item.get('service_price')
-            if price is not None:
-                try:
-                    c.drawString(60, y, f"Charge: ${price:.2f}")
-                except Exception:
-                    c.drawString(60, y, f"Charge: {price}")
-                y -= line_h
-            # Indicate retained charge for non-refunded cancellations
-            try:
-                if (item.get('event_type') or '').lower() == AuditBooking.EVENT_CANCELLED and item.get('non_refunded'):
-                    c.drawString(60, y, "Note: Cancellation charge retained (no refund)")
-                    y -= line_h
-            except Exception:
-                pass
-            # Prefer the human-readable display computed above
-            start_disp = item.get('start_display') or item.get('start') or '-'
-            end_disp = item.get('end_display') or item.get('end') or None
-            if end_disp:
-                c.drawString(60, y, f"Start: {start_disp}  —  End: {end_disp}")
-                y -= line_h
-            else:
-                c.drawString(60, y, f"Start: {start_disp}")
-                y -= line_h
-            y -= (line_h * 1.5)
-        c.save()
-        packet.seek(0)
-        resp = HttpResponse(packet.read(), content_type='application/pdf')
-        resp['Content-Disposition'] = 'attachment; filename="audit_export.pdf"'
-        return resp
-    except Exception as e:
-        # If reportlab isn't installed, fall back to JSON export.
-        # For other errors during PDF generation, log the exception and
-        # return a 500 during DEBUG so it's visible while developing.
-        import logging
-        logger = logging.getLogger(__name__)
-        from django.conf import settings
-        # Module import errors indicate reportlab isn't available
-        if isinstance(e, (ImportError, ModuleNotFoundError)):
-            resp = JsonResponse({'items': export, 'summary': export_summary})
-            resp['Content-Disposition'] = 'attachment; filename="audit_export.json"'
-            return resp
-        # Log the PDF generation failure
-        logger.exception('Error generating PDF audit export')
-        if getattr(settings, 'DEBUG', False):
-            import traceback
-            tb = traceback.format_exc()
-            return HttpResponse(tb, status=500, content_type='text/plain')
-        return HttpResponse('PDF generation failed', status=500)
-
-
-@login_required
-@require_roles(['owner', 'admin', 'manager'])
-@require_http_methods(['POST'])
-def bookings_audit_delete(request, org_slug):
-    """Permanently delete selected audit entries. Accepts POST with {'ids': [1,2,3]}"""
-    org = request.organization
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-        ids = payload.get('ids', [])
-    except Exception:
-        return HttpResponseBadRequest('Invalid JSON')
-
-    qs = AuditBooking.objects.filter(organization=org, id__in=ids)
-    count = qs.count()
-    qs.delete()
-    return JsonResponse({'status': 'ok', 'deleted': count})
+      

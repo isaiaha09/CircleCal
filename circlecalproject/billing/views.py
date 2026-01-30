@@ -229,8 +229,8 @@ def stripe_invoice_upcoming(**kwargs):
 
 
 def _require_org_owner_or_admin(request, org):
-    if not user_has_role(request.user, org, ["owner", "admin"]):
-        return HttpResponseForbidden("Only owners/admins can manage billing.")
+    if not user_has_role(request.user, org, ["owner"]):
+        return HttpResponseForbidden("Only owners can manage billing.")
     return None
 
 

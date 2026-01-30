@@ -44,8 +44,8 @@ def _get_org_and_membership(*, user, org_param: str | None):
 
 
 def _require_billing_admin(membership: Membership):
-    if membership.role not in {"owner", "admin"}:
-        raise ValidationError({"detail": "Only owners/admins can manage billing."})
+    if membership.role not in {"owner"}:
+        raise ValidationError({"detail": "Only owners can manage billing."})
 
 
 def _stripe_enabled() -> bool:

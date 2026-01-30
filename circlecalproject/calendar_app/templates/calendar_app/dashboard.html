@@ -187,11 +187,13 @@
 
             <!-- Full dashboard for owners/admins (alphabetical left-to-right) -->
             {% if org %}
-                <!-- Billing -->
+                {% if user_org_role == 'owner' %}
+                <!-- Billing (owner only) -->
                 <a href="{% url 'billing:manage_billing' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
                     <h2 class="text-xl md:text-2xl font-semibold text-blue-600 text-center leading-tight break-words">Billing</h2>
                     <p class="text-gray-600 mt-2 text-center">In-app billing: trial countdown, plan, payment methods</p>
                 </a>
+                {% endif %}
 
                 <!-- Bookings -->
                 <a href="{% url 'calendar_app:bookings_list' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
@@ -229,11 +231,13 @@
             {% endif %}
 
             {% if org %}
-                <!-- Pricing -->
+                {% if user_org_role == 'owner' %}
+                <!-- Pricing (owner only) -->
                 <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
                     <h2 class="text-xl md:text-2xl font-semibold text-blue-600 text-center leading-tight break-words">Pricing</h2>
                     <p class="text-gray-600 mt-2 text-center">View available plans</p>
                 </a>
+                {% endif %}
             {% endif %}
 
             <!-- Profile -->
