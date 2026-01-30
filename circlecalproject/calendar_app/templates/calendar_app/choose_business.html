@@ -1,5 +1,5 @@
 {% extends "calendar_app/base.html" %}
-{% load static %}
+{% load static circlecal_filters %}
 
 {% block title %}Choose Your Business{% endblock %}
 
@@ -76,7 +76,7 @@
                         {% if org.members.all %}
                             {% for m in org.members.all %}
                                 {% if m.user == request.user %}
-                                    <span class="org-role">{{ m.role|title }}</span>
+                                    <span class="org-role">{{ m.role|role_label }}</span>
                                 {% endif %}
                             {% endfor %}
                         {% endif %}

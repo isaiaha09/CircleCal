@@ -1,5 +1,5 @@
 {% extends "calendar_app/base.html" %}
-{% load static %}
+{% load static circlecal_filters %}
 {% block title %}Profile{% endblock %}
 {% block main_class %}w-full max-w-none px-0 py-0{% endblock %}
 {% block content %}
@@ -636,7 +636,7 @@
           <li class="bg-gray-50 border border-blue-100 rounded-lg p-3">
             <div class="flex items-center justify-between gap-3">
               <div class="font-medium text-gray-800">{{ m.organization.name }}</div>
-              <div class="text-xs text-gray-500">{{ m.role|title }}</div>
+              <div class="text-xs text-gray-500">{{ m.role|role_label }}</div>
             </div>
 
             {% if m.role == 'owner' or m.organization.owner_id == user.id %}
@@ -728,7 +728,7 @@
         <h3 class="font-semibold text-sm text-blue-800 mb-1">Pending Invites</h3>
         <ul class="text-sm text-gray-700 space-y-1">
           {% for inv in pending_invites %}
-            <li>{{ inv.organization.name }} — {{ inv.role|title }}</li>
+            <li>{{ inv.organization.name }} — {{ inv.role|role_label }}</li>
           {% endfor %}
         </ul>
       </div>

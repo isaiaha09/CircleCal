@@ -17,3 +17,21 @@ def length_is(value, arg):
         return len(value) == target
     except Exception:
         return False
+
+
+@register.filter(name='role_label')
+def role_label(value):
+    """Display label for membership roles.
+
+    Keeps stored role values intact (e.g. 'admin' remains 'admin'); this is UI-only.
+    """
+    try:
+        r = (str(value) if value is not None else '').strip().lower()
+    except Exception:
+        r = ''
+
+    if r == 'admin':
+        return 'GM'
+    if not r:
+        return 'Staff'
+    return r[:1].upper() + r[1:]

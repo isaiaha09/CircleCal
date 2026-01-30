@@ -376,7 +376,7 @@ def login_choice_view(request):
 
 
 class StaffLoginView(CustomLoginView):
-	"""Login view for staff/managers/admins only. After successful authentication,
+	"""Login view for staff/managers/GMs only. After successful authentication,
 	verify the user has a Membership with role 'manager', 'staff', or 'admin'. If not,
 	log them out and show an error message.
 	"""
@@ -421,7 +421,7 @@ class StaffLoginView(CustomLoginView):
 					pass
 				return TemplateResponse(self.request, 'registration/login.html', {
 					'form': getattr(self, 'get_form_class', lambda: None)(),
-					'error': 'This login path is for staff, managers, and admins only. Use the Owner login if you are an owner.'
+					'error': 'This login path is for staff, managers, and GMs only. Use the Owner login if you are an owner.'
 				})
 		# If super() already returned a redirect (e.g. honoring post_login_redirect cookie),
 		# inspect the target. For staff/manager logins we should NOT send them to the

@@ -1,3 +1,4 @@
+{% load circlecal_filters %}
 <!DOCTYPE html>
 <html>
 <head>
@@ -26,7 +27,7 @@
             <p class="muted">You've been invited to join <strong>{{ org.name }}</strong> on CircleCal. Click the button below to accept the invitation and create your account (or sign in if you already have one).</p>
 
             <div class="card">
-                <p style="margin:0 0 8px;"><strong>Role:</strong> {{ role|title }}</p>
+                <p style="margin:0 0 8px;"><strong>Role:</strong> {{ role|role_label }}</p>
                 <p style="margin:0;" class="muted">Invitation sent to: {{ email }}</p>
             </div>
 
