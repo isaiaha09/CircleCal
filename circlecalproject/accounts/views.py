@@ -371,13 +371,13 @@ class CustomLoginView(TwoFactorLoginView):
 
 
 def login_choice_view(request):
-	"""Render a simple page allowing the user to choose Owner vs Staff/Manager login."""
+	"""Render a simple page allowing the user to choose Owner vs Staff/Manager/Admin login."""
 	return TemplateResponse(request, 'registration/login_choice.html', {})
 
 
 class StaffLoginView(CustomLoginView):
-	"""Login view for staff/managers only. After successful authentication,
-	verify the user has a Membership with role 'manager' or 'staff'. If not,
+	"""Login view for staff/managers/admins only. After successful authentication,
+	verify the user has a Membership with role 'manager', 'staff', or 'admin'. If not,
 	log them out and show an error message.
 	"""
 
@@ -407,10 +407,10 @@ class StaffLoginView(CustomLoginView):
 				from django.urls import reverse
 				return redirect(f"{reverse('accounts:login_staff')}?pwa_only=1")
 
-			# Normal staff/manager enforcement
+			# Normal staff/manager/admin enforcement
 			try:
 				from .models import Membership
-				has_role = Membership.objects.filter(user=user, role__in=['manager', 'staff']).exists()
+				has_role = Membership.objects.filter(user=user, role__in=['manager', 'staff', 'admin']).exists()
 			except Exception:
 				has_role = False
 			if not has_role:
@@ -421,7 +421,7 @@ class StaffLoginView(CustomLoginView):
 					pass
 				return TemplateResponse(self.request, 'registration/login.html', {
 					'form': getattr(self, 'get_form_class', lambda: None)(),
-					'error': 'This login path is for staff and managers only. Use the Owner login if you are an owner.'
+					'error': 'This login path is for staff, managers, and admins only. Use the Owner login if you are an owner.'
 				})
 		# If super() already returned a redirect (e.g. honoring post_login_redirect cookie),
 		# inspect the target. For staff/manager logins we should NOT send them to the
@@ -444,7 +444,7 @@ class StaffLoginView(CustomLoginView):
 				return response
 		# For staff/manager users, prefer sending them directly to their org dashboard.
 		try:
-			mem = Membership.objects.filter(user=user, role__in=['manager', 'staff'], is_active=True).select_related('organization').first()
+			mem = Membership.objects.filter(user=user, role__in=['manager', 'staff', 'admin'], is_active=True).select_related('organization').first()
 			if mem and getattr(mem, 'organization', None):
 				return redirect('calendar_app:dashboard', org_slug=mem.organization.slug)
 		except Exception:
