@@ -6015,6 +6015,26 @@ document.addEventListener('DOMContentLoaded', function() {
             try{ localStorage.removeItem('cc_selected_member'); }catch(e){}
             try{ localStorage.removeItem('cc_selected_scope'); }catch(e){}
         }
+
+        // Deep-link: allow setting the selected team member from querystring.
+        // Used by Service edit prompts when a member has no availability.
+        try{
+            const params = new URLSearchParams(window.location.search || '');
+            const qSel = params.get('select_member');
+            if (IS_TEAM && qSel) {
+                const exists = MEMBERS.some(m => String(m.id) === String(qSel));
+                if (exists) {
+                    SELECTED_MEMBER = String(qSel);
+                    try{ localStorage.setItem('cc_selected_member', SELECTED_MEMBER); }catch(e){}
+                }
+                try{
+                    params.delete('select_member');
+                    const qs = params.toString();
+                    const nextUrl = window.location.pathname + (qs ? ('?' + qs) : '') + (window.location.hash || '');
+                    window.history.replaceState({}, '', nextUrl);
+                } catch(e) {}
+            }
+        }catch(e){ /* ignore */ }
         // Visible services after filtering by selected member
         let VISIBLE_SERVICES = [];
 

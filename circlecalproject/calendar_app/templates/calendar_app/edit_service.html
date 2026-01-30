@@ -631,10 +631,10 @@
                 {% for m in org.members.all %}
                   {% if m.is_active %}
                     {% with user=m.user %}
-                      <div class="member-item flex items-center justify-between py-2 px-2 rounded hover:bg-gray-50" data-name="{% if user.first_name or user.last_name %}{{ user.first_name }} {{ user.last_name }}{% else %}{{ user.email }}{% endif %}" data-id="{{ m.id }}">
+                      <div class="member-item flex items-center justify-between py-2 px-2 rounded hover:bg-gray-50 {% if m.id not in members_with_any_availability_ids %}opacity-60{% endif %}" data-name="{% if user.first_name or user.last_name %}{{ user.first_name }} {{ user.last_name }}{% else %}{{ user.email }}{% endif %}" data-id="{{ m.id }}" data-has-avail="{% if m.id in members_with_any_availability_ids %}1{% else %}0{% endif %}">
                         <div>
                           <div class="text-sm text-gray-800">{% if user.first_name or user.last_name %}{{ user.first_name }} {{ user.last_name }}{% else %}{{ user.email }}{% endif %}</div>
-                          <div class="text-xs text-gray-500">{{ m.role|title }}</div>
+                          <div class="text-xs text-gray-500">{{ m.role|title }}{% if m.id not in members_with_any_availability_ids %}<span class="ml-2 text-xs text-red-600">No availability</span>{% endif %}</div>
                         </div>
                         <div class="select-indicator text-sm text-blue-600" aria-hidden="true">&nbsp;</div>
                       </div>
@@ -770,6 +770,21 @@
               const indicator = it.querySelector('.select-indicator');
               if (selected.has(id)) { indicator.textContent = '✓'; it.classList.add('bg-blue-50'); }
               it.addEventListener('click', function(){
+                  // Team plan rule: prevent assigning members with no availability configured.
+                  try{
+                    const hasAvail = it.getAttribute('data-has-avail');
+                    if (!selected.has(id) && String(hasAvail) === '0'){
+                      const nameEl = it.querySelector('.text-sm');
+                      const name = nameEl ? nameEl.textContent.trim() : (it.getAttribute('data-name')||'This member');
+                      const url = new URL("{% url 'calendar_app:calendar' org.slug %}", window.location.origin);
+                      url.searchParams.set('select_member', String(id));
+                      const ok = confirm(name + " has no availability set yet.\n\nOpen Calendar to set their availability now?");
+                      if (ok){
+                        try{ window.location.href = url.toString(); }catch(e){}
+                      }
+                      return;
+                    }
+                  }catch(e){ /* ignore */ }
                   if (selected.has(id)){
                     selected.delete(id); indicator.textContent = '\u00A0'; it.classList.remove('bg-blue-50');
                   } else { selected.add(id); indicator.textContent = '✓'; it.classList.add('bg-blue-50'); }

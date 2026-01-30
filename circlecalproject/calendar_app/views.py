@@ -6800,6 +6800,17 @@ def edit_service(request, org_slug, service_id):
                     else:
                         pm_offline_methods = []
 
+                    members_with_any_availability_ids = []
+                    if is_team_plan:
+                        try:
+                            members_with_any_availability_ids = list(
+                                MemberWeeklyAvailability.objects.filter(membership__organization=org, is_active=True)
+                                .values_list('membership_id', flat=True)
+                                .distinct()
+                            )
+                        except Exception:
+                            members_with_any_availability_ids = []
+
                     return render(request, "calendar_app/edit_service.html", {
                         "org": org,
                         "service": service,
@@ -6807,6 +6818,7 @@ def edit_service(request, org_slug, service_id):
                         "conflict_services": conflict_services,
                         "can_edit_slug": can_edit_slug,
                         'assigned_member_ids': assigned_member_ids,
+                        'members_with_any_availability_ids': members_with_any_availability_ids,
                         'can_edit_service_availability': can_edit_service_availability,
                         'service_availability_disabled_reason': service_availability_disabled_reason,
                         'service_availability_fully_blocked': svc_no_room_lock,
@@ -6919,14 +6931,58 @@ def edit_service(request, org_slug, service_id):
                     existing_ids = set(existing_qs.values_list('membership_id', flat=True))
                     to_add = desired - existing_ids
                     to_remove = existing_ids - desired
+
+                    blocked_no_avail = []
                     for mid in to_add:
                         try:
+                            if is_team_plan:
+                                try:
+                                    has_any_avail = MemberWeeklyAvailability.objects.filter(membership_id=mid, is_active=True).exists()
+                                except Exception:
+                                    has_any_avail = True
+                                if not has_any_avail:
+                                    blocked_no_avail.append(int(mid))
+                                    continue
+
                             mem = Membership.objects.get(id=mid, organization=org)
                             ServiceAssignment.objects.create(service=service, membership=mem)
                         except Exception:
                             continue
                     if to_remove:
                         ServiceAssignment.objects.filter(service=service, membership_id__in=list(to_remove)).delete()
+
+                    if blocked_no_avail:
+                        # Server-side safety net: ensure the user sees why assignments didn't apply.
+                        try:
+                            blocked_mems = list(
+                                Membership.objects.filter(id__in=blocked_no_avail, organization=org)
+                                .select_related('user')
+                            )
+                        except Exception:
+                            blocked_mems = []
+
+                        names = []
+                        for m in blocked_mems:
+                            try:
+                                u = getattr(m, 'user', None)
+                                fn = (getattr(u, 'first_name', '') or '').strip() if u else ''
+                                ln = (getattr(u, 'last_name', '') or '').strip() if u else ''
+                                if fn or ln:
+                                    names.append(f"{fn} {ln}".strip())
+                                else:
+                                    names.append((getattr(u, 'email', '') or '').strip() if u else f"Member #{m.id}")
+                            except Exception:
+                                names.append(f"Member #{getattr(m, 'id', '?')}")
+
+                        if not names:
+                            names = [f"Member #{mid}" for mid in blocked_no_avail]
+
+                        messages.error(
+                            request,
+                            "These team members have no availability set and were not assigned: "
+                            + ", ".join(names)
+                            + ". Ask them to open their Calendar and set availability first."
+                        )
                 except Exception:
                     # Fail open if model/migration missing
                     pass
@@ -7398,6 +7454,17 @@ def edit_service(request, org_slug, service_id):
         facility_resources = []
         selected_resource_ids = []
 
+    members_with_any_availability_ids = []
+    if is_team_plan:
+        try:
+            members_with_any_availability_ids = list(
+                MemberWeeklyAvailability.objects.filter(membership__organization=org, is_active=True)
+                .values_list('membership_id', flat=True)
+                .distinct()
+            )
+        except Exception:
+            members_with_any_availability_ids = []
+
     return render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
@@ -7410,6 +7477,7 @@ def edit_service(request, org_slug, service_id):
         "can_toggle_public": can_toggle_public,
         "can_toggle_facility_required": can_toggle_facility_required,
         'assigned_member_ids': assigned_member_ids,
+        'members_with_any_availability_ids': members_with_any_availability_ids,
         'service_availability_assignee_names': service_availability_assignee_names,
         'can_edit_service_availability': can_edit_service_availability,
         'service_availability_disabled_reason': service_availability_disabled_reason,
