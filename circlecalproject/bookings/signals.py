@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 from datetime import datetime
 from django.conf import settings
 from accounts.models import Business as Organization
+from accounts.models import Membership
+from accounts.push import send_push_to_user
 from .models import OrgSettings, Booking, ServiceSettingFreeze, AuditBooking, Service
 from .emails import send_booking_confirmation, send_booking_cancellation, send_internal_booking_cancellation_notification
 
@@ -65,6 +67,285 @@ def service_signature_updated_at(sender, instance, **kwargs):
 # Confirmation emails are sent explicitly from views to avoid duplicates.
 
 
+@receiver(post_save, sender=Booking)
+def push_notify_assigned_user_on_create(sender, instance: Booking, created: bool, **kwargs):
+    """Send a push to the assigned user when a new booking is created.
+
+    Product rules:
+    - Never notify clients via push.
+    - Never notify uninvolved staff.
+    Therefore we ONLY notify `assigned_user` (if set).
+    """
+
+    if not created:
+        return
+
+    # Skip internal override markers / blocks.
+    if getattr(instance, 'service_id', None) is None:
+        return
+    if bool(getattr(instance, 'is_blocking', False)):
+        return
+
+    assigned = getattr(instance, 'assigned_user', None)
+    if not assigned:
+        return
+
+    # Build a short human-friendly time string in org timezone when possible.
+    when_str = None
+    try:
+        org = getattr(instance, 'organization', None)
+        tz_name = getattr(org, 'timezone', None) if org else None
+        org_tz = ZoneInfo(tz_name) if tz_name else ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
+        dt = getattr(instance, 'start', None)
+        if dt is not None:
+            when_str = dt.astimezone(org_tz).strftime('%a %b %d, %I:%M %p')
+    except Exception:
+        when_str = None
+
+    title = 'New booking'
+    base = (getattr(instance, 'title', None) or 'Booking').strip() or 'Booking'
+    body = f"{base}{' • ' + when_str if when_str else ''}"
+
+    data = {
+        'orgSlug': getattr(getattr(instance, 'organization', None), 'slug', None),
+        'bookingId': getattr(instance, 'id', None),
+        'kind': 'booking_created',
+    }
+
+    # Only navigate on tap when orgSlug+bookingId are present.
+    if not data.get('orgSlug') or not data.get('bookingId'):
+        return
+
+    def _send():
+        try:
+            send_push_to_user(user=assigned, title=title, body=body, data=data)
+        except Exception:
+            # Best-effort: never block booking creation.
+            pass
+
+    try:
+        transaction.on_commit(_send)
+    except Exception:
+        _send()
+
+
+@receiver(pre_save, sender=Booking)
+def booking_capture_prev_state(sender, instance: Booking, **kwargs):
+    """Capture previous assignment/schedule info so post_save can emit targeted push notifications."""
+
+    try:
+        if not getattr(instance, 'pk', None):
+            return
+    except Exception:
+        return
+
+    try:
+        prev = (
+            Booking.objects.filter(pk=instance.pk)
+            .only('assigned_user_id', 'assigned_team_id', 'start', 'end')
+            .first()
+        )
+    except Exception:
+        prev = None
+
+    if not prev:
+        return
+
+    try:
+        instance._prev_assigned_user_id = getattr(prev, 'assigned_user_id', None)
+        instance._prev_assigned_team_id = getattr(prev, 'assigned_team_id', None)
+        instance._prev_start = getattr(prev, 'start', None)
+        instance._prev_end = getattr(prev, 'end', None)
+    except Exception:
+        pass
+
+
+def _booking_when_str(instance: Booking) -> str | None:
+    try:
+        org = getattr(instance, 'organization', None)
+        tz_name = getattr(org, 'timezone', None) if org else None
+        org_tz = ZoneInfo(tz_name) if tz_name else ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
+        dt = getattr(instance, 'start', None)
+        if dt is None:
+            return None
+        return dt.astimezone(org_tz).strftime('%a %b %d, %I:%M %p')
+    except Exception:
+        return None
+
+
+def _has_active_membership(*, user, org) -> bool:
+    try:
+        if not user or not org:
+            return False
+    except Exception:
+        return False
+
+    try:
+        return Membership.objects.filter(user=user, organization=org, is_active=True).exists()
+    except Exception:
+        return False
+
+
+def _involved_staff_users_for_booking(instance: Booking) -> list:
+    """Return involved internal users for a booking.
+
+    Product rule: notify only staff involved in the booking.
+    We treat involved as:
+    - assigned_user
+    - all active members of assigned_team (if present)
+    """
+    users = []
+    org = getattr(instance, 'organization', None)
+
+    try:
+        au = getattr(instance, 'assigned_user', None)
+        if au:
+            if _has_active_membership(user=au, org=org):
+                users.append(au)
+    except Exception:
+        pass
+
+    try:
+        team = getattr(instance, 'assigned_team', None)
+        if team:
+            try:
+                for m in team.memberships.filter(is_active=True).select_related('user'):
+                    u = getattr(m, 'user', None)
+                    if u:
+                        if _has_active_membership(user=u, org=org):
+                            users.append(u)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # De-dup by user id.
+    uniq = []
+    seen = set()
+    for u in users:
+        try:
+            uid = getattr(u, 'id', None)
+        except Exception:
+            uid = None
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        uniq.append(u)
+    return uniq
+
+
+@receiver(post_save, sender=Booking)
+def push_notify_assigned_users_on_update(sender, instance: Booking, created: bool, **kwargs):
+    """Send push notifications for booking updates (reassigned/rescheduled).
+
+    Only involved assignees receive pushes:
+    - assigned_user
+    - members of assigned_team
+    - previous assigned_user (when reassigned away)
+    """
+
+    if created:
+        return
+
+    # Skip internal override markers / blocks.
+    if getattr(instance, 'service_id', None) is None:
+        return
+    if bool(getattr(instance, 'is_blocking', False)):
+        return
+
+    prev_user_id = getattr(instance, '_prev_assigned_user_id', None)
+    prev_team_id = getattr(instance, '_prev_assigned_team_id', None)
+    prev_start = getattr(instance, '_prev_start', None)
+    prev_end = getattr(instance, '_prev_end', None)
+
+    # If we couldn't capture previous state, do nothing.
+    if prev_user_id is None and prev_team_id is None and prev_start is None and prev_end is None:
+        return
+
+    org_slug = getattr(getattr(instance, 'organization', None), 'slug', None)
+    booking_id = getattr(instance, 'id', None)
+    if not org_slug or not booking_id:
+        return
+
+    base = (getattr(instance, 'title', None) or 'Booking').strip() or 'Booking'
+    when_str = _booking_when_str(instance)
+
+    # Reassignment detection
+    new_user_id = getattr(instance, 'assigned_user_id', None)
+    new_team_id = getattr(instance, 'assigned_team_id', None)
+    reassigned = (prev_user_id != new_user_id) or (prev_team_id != new_team_id)
+
+    # Rescheduled detection
+    rescheduled = (prev_start != getattr(instance, 'start', None)) or (prev_end != getattr(instance, 'end', None))
+
+    def _send_to(user, title: str, body: str, data: dict):
+        try:
+            send_push_to_user(user=user, title=title, body=body, data=data)
+        except Exception:
+            pass
+
+    def _work():
+        # Dedupe: compute a single message per recipient for this save.
+        recipients = _involved_staff_users_for_booking(instance)
+
+        if reassigned and rescheduled:
+            title = 'Booking updated'
+            body = f"{base}{' • ' + when_str if when_str else ''}"
+            data = {
+                'orgSlug': org_slug,
+                'bookingId': booking_id,
+                'kind': 'booking_updated',
+                'changes': ['reassigned', 'rescheduled'],
+            }
+            for u in recipients:
+                _send_to(u, title, body, data)
+        elif reassigned:
+            title = 'Booking assigned'
+            body = f"{base}{' • ' + when_str if when_str else ''}"
+            data = {
+                'orgSlug': org_slug,
+                'bookingId': booking_id,
+                'kind': 'booking_reassigned',
+            }
+            for u in recipients:
+                _send_to(u, title, body, data)
+        elif rescheduled:
+            title = 'Booking rescheduled'
+            body = f"{base}{' • ' + when_str if when_str else ''}"
+            data = {
+                'orgSlug': org_slug,
+                'bookingId': booking_id,
+                'kind': 'booking_rescheduled',
+            }
+            for u in recipients:
+                _send_to(u, title, body, data)
+
+        # If the booking was reassigned away from a specific user, notify that user too,
+        # but open the list (they may no longer have access to the detail).
+        if reassigned and prev_user_id and prev_user_id != new_user_id:
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                prev_user = User.objects.filter(id=prev_user_id).first()
+            except Exception:
+                prev_user = None
+
+            if prev_user and _has_active_membership(user=prev_user, org=getattr(instance, 'organization', None)):
+                title2 = 'Booking reassigned'
+                body2 = f"{base}{' • ' + when_str if when_str else ''}"
+                data2 = {
+                    'orgSlug': org_slug,
+                    'open': 'Bookings',
+                    'kind': 'booking_reassigned_away',
+                }
+                _send_to(prev_user, title2, body2, data2)
+
+    try:
+        transaction.on_commit(_work)
+    except Exception:
+        _work()
+
+
 @receiver(post_delete, sender=Booking)
 def send_cancellation_email(sender, instance, **kwargs):
     """Send cancellation email when booking is deleted."""
@@ -81,6 +362,35 @@ def send_cancellation_email(sender, instance, **kwargs):
         return
     if instance.is_blocking:
         return
+
+    # Push notification to involved internal assignees only (no clients, no uninvolved staff).
+    try:
+        org_slug = getattr(getattr(instance, 'organization', None), 'slug', None)
+        if org_slug:
+            base = (getattr(instance, 'title', None) or 'Booking').strip() or 'Booking'
+            when_str = _booking_when_str(instance)
+            title = 'Booking cancelled'
+            body = f"{base}{' • ' + when_str if when_str else ''}"
+            # Cancellation deletes the booking, so open the Bookings list instead of detail.
+            data = {
+                'orgSlug': org_slug,
+                'open': 'Bookings',
+                'kind': 'booking_cancelled',
+            }
+
+            def _push_work():
+                try:
+                    for u in _involved_staff_users_for_booking(instance):
+                        send_push_to_user(user=u, title=title, body=body, data=data)
+                except Exception:
+                    pass
+
+            try:
+                transaction.on_commit(_push_work)
+            except Exception:
+                _push_work()
+    except Exception:
+        pass
 
     # Always notify internal recipients (owner/managers, and assignees when assigned).
     try:
@@ -265,6 +575,7 @@ def booking_post_delete_audit(sender, instance, **kwargs):
                 end=instance.end if getattr(instance, 'end', None) else None,
                 client_name=getattr(instance, 'client_name', ''),
                 client_email=getattr(instance, 'client_email', ''),
+                created_by=getattr(instance, '_audit_created_by', None),
                 extra=extra or '',
             )
         except Exception:

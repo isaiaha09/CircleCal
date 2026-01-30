@@ -8,6 +8,7 @@ from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
 from .api_profile import ProfileOverviewView
 from .api_org_settings import OrgOfflinePaymentsView
+from .api_push import PushTokensView
 from .api_services import ServiceDetailView, ServicesListCreateView
 from .api_resources import ResourceDetailView, ResourcesListCreateView
 from .api_team import TeamInviteDetailView, TeamInvitesView, TeamMemberDetailView, TeamMembersView
@@ -30,6 +31,8 @@ urlpatterns = [
     path("profile/", ProfileView.as_view(), name="api_profile"),
     path("profile/overview/", ProfileOverviewView.as_view(), name="api_profile_overview"),
     path("profile/avatar/", ProfileAvatarUploadView.as_view(), name="api_profile_avatar"),
+
+    path("push/tokens/", PushTokensView.as_view(), name="api_push_tokens"),
 
     path("org/offline-payments/", OrgOfflinePaymentsView.as_view(), name="api_org_offline_payments"),
     path("services/", ServicesListCreateView.as_view(), name="api_services"),

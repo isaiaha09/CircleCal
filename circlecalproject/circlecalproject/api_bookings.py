@@ -184,6 +184,71 @@ class BookingDetailView(APIView):
         return Response(
             {
                 "org": {"id": org.id, "slug": org.slug, "name": org.name},
+                "membership": {"role": membership.role},
                 "booking": _serialize_booking_list_item(b),
             }
         )
+
+    def delete(self, request, booking_id: int):
+        """Cancel/delete a booking (mobile quick actions).
+
+        Query params:
+        - org: required
+        - action: 'cancel' (default) | 'delete'
+
+        Notes:
+        - We implement cancellation by deleting the Booking but marking the audit
+          event type as 'cancelled' so history remains visible.
+        """
+
+        org_param = request.query_params.get("org")
+        org, membership = _get_org_and_membership(user=request.user, org_param=org_param)
+
+        action = (request.query_params.get("action") or "cancel").strip().lower()
+        if action not in {"cancel", "delete"}:
+            raise ValidationError({"action": "Invalid action. Use 'cancel' or 'delete'."})
+
+        if action == "delete":
+            if membership.role not in {"owner", "admin"}:
+                raise ValidationError({"detail": "Only owners/GMs can delete bookings."})
+        else:
+            if membership.role not in {"owner", "admin", "manager"}:
+                raise ValidationError({"detail": "Only owners/GMs/managers can cancel bookings."})
+
+        qs = Booking.objects.filter(organization=org, id=int(booking_id)).select_related(
+            "service", "assigned_user"
+        )
+        qs = qs.exclude(service__isnull=True, client_name__startswith="scope:")
+
+        b = qs.first()
+        if not b:
+            raise ValidationError({"detail": "Booking not found."})
+
+        # Optional reason for audit trail.
+        reason = None
+        try:
+            if isinstance(getattr(request, "data", None), dict):
+                reason = request.data.get("reason")
+        except Exception:
+            reason = None
+        if not reason:
+            reason = request.query_params.get("reason")
+        try:
+            reason = (str(reason).strip() if reason is not None else None) or None
+        except Exception:
+            reason = None
+
+        try:
+            # Audit signal reads these attributes.
+            b._audit_created_by = request.user
+            if reason:
+                b._audit_extra = f"mobile:{action} :: {reason}"
+            else:
+                b._audit_extra = f"mobile:{action}"
+            if action == "cancel":
+                b._audit_event_type = "cancelled"
+        except Exception:
+            pass
+
+        b.delete()
+        return Response({"detail": "Cancelled." if action == "cancel" else "Deleted."})

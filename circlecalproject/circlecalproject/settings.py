@@ -39,6 +39,12 @@ TURNSTILE_SITE_KEY = os.getenv('TURNSTILE_SITE_KEY', '').strip()
 TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY', '').strip()
 TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', '1').strip().lower() in ('1', 'true', 'yes', 'on')
 
+# --- Push notifications (Expo) ---
+# The mobile app registers Expo push tokens to the backend.
+# Server-side sending is best-effort and should be explicitly enabled.
+EXPO_PUSH_ENABLED = os.getenv('EXPO_PUSH_ENABLED', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+EXPO_PUSH_URL = os.getenv('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send').strip() or 'https://exp.host/--/api/v2/push/send'
+
 # Cloudinary is configured via environment variables (e.g. CLOUDINARY_URL).
 # No Django setting is required; our storage adapter reads env vars directly.
 # SECURITY WARNING: don't run with debug turned on in production!

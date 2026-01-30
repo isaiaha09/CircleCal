@@ -174,3 +174,27 @@ class TeamMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} in {self.team} ({self.role})"
+
+
+class PushDevice(models.Model):
+    """Stores a mobile device push token for a user.
+
+    We currently support Expo push tokens (used by the mobile app).
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_devices')
+    token = models.CharField(max_length=255, unique=True, db_index=True)
+    platform = models.CharField(max_length=16, blank=True, default='')  # ios|android|web
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['last_seen_at']),
+        ]
+
+    def __str__(self):
+        return f"PushDevice user_id={self.user_id} active={self.is_active}"
