@@ -3421,8 +3421,12 @@ def save_availability(request, slug):
 
     # If client provided bulk maps, and user has permissions, persist them and return
     if member_map and isinstance(member_map, dict):
-        # Only owner/admin may set arbitrary member maps; non-owner may only write their own membership
-        if not (user_has_role(request.user, org, ('owner',)) or user_has_role(request.user, org, ('admin',))):
+        # Only owner/admin/manager may set arbitrary member maps; staff may only write their own membership
+        if not (
+            user_has_role(request.user, org, ('owner',))
+            or user_has_role(request.user, org, ('admin',))
+            or user_has_role(request.user, org, ('manager',))
+        ):
             # allow only if member_map contains solely the current_membership id
             allowed_id = str(current_membership.id) if current_membership else None
             for mid in member_map.keys():
@@ -3451,7 +3455,11 @@ def save_availability(request, slug):
         return JsonResponse({'success': True, 'member_count': created_count})
 
     if service_map and isinstance(service_map, dict):
-        if not (user_has_role(request.user, org, ('owner',)) or user_has_role(request.user, org, ('admin',))):
+        if not (
+            user_has_role(request.user, org, ('owner',))
+            or user_has_role(request.user, org, ('admin',))
+            or user_has_role(request.user, org, ('manager',))
+        ):
             return HttpResponseForbidden('Insufficient permissions to set service availability')
         created_count = 0
         # Freeze weekly windows for booked dates before changing service weekly availability.
@@ -3529,7 +3537,7 @@ def save_availability(request, slug):
             if not svc:
                 return HttpResponseBadRequest('Service not found')
             # Only owner/admin may save service-level availability
-            if not request.user_has_role('owner', org) and not request.user_has_role('admin', org):
+            if not (request.user_has_role('owner', org) or request.user_has_role('admin', org) or request.user_has_role('manager', org)):
                 return HttpResponseForbidden('Insufficient permissions to set service availability')
 
             # If this is a single-assignee service, only allow service availability edits when applicable.
@@ -3625,7 +3633,7 @@ def save_availability(request, slug):
             if not membership:
                 return HttpResponseBadRequest('Membership not found')
             # Allow if owner/admin, or if current user represents this membership
-            if not (request.user_has_role('owner', org) or request.user_has_role('admin', org)):
+            if not (request.user_has_role('owner', org) or request.user_has_role('admin', org) or request.user_has_role('manager', org)):
                 if not current_membership or current_membership.id != membership.id:
                     return HttpResponseForbidden('Insufficient permissions to set this member availability')
 
@@ -3652,6 +3660,13 @@ def save_availability(request, slug):
             return JsonResponse({'success': True, 'count': len(cleaned), 'target': f'mem:{membership.id}'})
 
     # Default: organization-level weekly availability (existing behavior)
+    # Team plan: only owner/admin/manager may change org-level availability.
+    try:
+        if not (request.user_has_role('owner', org) or request.user_has_role('admin', org) or request.user_has_role('manager', org)):
+            return HttpResponseForbidden('Insufficient permissions to set organization availability')
+    except Exception:
+        pass
+
     # Guardrail: do not allow shrinking org defaults below explicit service availability for
     # solo services whose assignees inherit org defaults (no member override rows).
     try:
@@ -4602,7 +4617,7 @@ def org_custom_domain_settings(request, org_slug):
 
 
 @require_http_methods(["GET", "POST"])
-@require_roles(["owner", "admin"])
+@require_roles(["owner", "admin", "manager"])
 def create_service(request, org_slug):
     org = get_object_or_404(Organization, slug=org_slug)
     try:
@@ -5373,7 +5388,7 @@ def logout(request):
 
 
 @login_required
-@require_roles(['owner', 'admin'])
+@require_roles(['owner', 'admin', 'manager'])
 def services_page(request, org_slug):
     """
     List all services for this organization (internal management page).
@@ -7506,7 +7521,7 @@ def edit_service(request, org_slug, service_id):
 
 @login_required
 @require_http_methods(['POST'])
-@require_roles(['owner', 'admin'])
+@require_roles(['owner', 'admin', 'manager'])
 def delete_service(request, org_slug, service_id):
     """
     Delete a service (owner/admin only).
