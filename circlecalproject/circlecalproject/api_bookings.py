@@ -5,10 +5,11 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
 from accounts.models import Business, Membership
-from bookings.models import Booking
+from bookings.models import AuditBooking, Booking
 
 try:
     from rest_framework.exceptions import ValidationError
@@ -252,3 +253,114 @@ class BookingDetailView(APIView):
 
         b.delete()
         return Response({"detail": "Cancelled." if action == "cancel" else "Deleted."})
+
+
+class BookingsAuditListView(APIView):
+    """Mobile-friendly booking audit list (org-scoped).
+
+    Mirrors the web audit JSON but uses JWT auth.
+
+    Query params:
+    - org: required (slug or id)
+    - page: optional (default 1)
+    - per_page: optional (default 25, max 100)
+    - since: optional ISO8601; returns entries with created_at > since
+    - include_snapshot: optional (0/1). Default 0 to keep payload small.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        org_param = request.query_params.get("org")
+        org, _membership = _get_org_and_membership(user=request.user, org_param=org_param)
+
+        try:
+            page = int(request.query_params.get("page") or 1)
+        except Exception:
+            page = 1
+        page = max(1, page)
+
+        try:
+            per_page = int(request.query_params.get("per_page") or 25)
+        except Exception:
+            per_page = 25
+        per_page = max(1, min(per_page, 100))
+
+        include_snapshot_raw = str(request.query_params.get("include_snapshot") or "0").strip()
+        include_snapshot = include_snapshot_raw in {"1", "true", "True", "yes", "on"}
+
+        qs = AuditBooking.objects.filter(organization=org).select_related("service").order_by("-created_at")
+
+        since_raw = request.query_params.get("since")
+        if since_raw:
+            try:
+                s = since_raw.strip()
+                if s.endswith("Z"):
+                    s = s[:-1] + "+00:00"
+                since_dt = datetime.fromisoformat(s)
+                if since_dt.tzinfo is None:
+                    since_dt = since_dt.replace(tzinfo=timezone.utc)
+                qs = qs.filter(created_at__gt=since_dt)
+            except Exception:
+                # Ignore parsing errors and return full page.
+                pass
+
+        total = qs.count()
+        start = (page - 1) * per_page
+        end = start + per_page
+
+        items = []
+        for a in qs[start:end]:
+            snap = a.booking_snapshot if isinstance(a.booking_snapshot, dict) else {}
+            public_ref = None
+            try:
+                public_ref = snap.get("public_ref")
+            except Exception:
+                public_ref = None
+
+            non_refunded = False
+            refund_within_cutoff = False
+            try:
+                if a.event_type == AuditBooking.EVENT_CANCELLED and snap and (snap.get("refund_forced") or snap.get("refund_id")):
+                    non_refunded = False
+                    refund_within_cutoff = False
+                elif a.event_type == AuditBooking.EVENT_CANCELLED and a.service and a.start and a.created_at:
+                    hrs = (a.start - a.created_at).total_seconds() / 3600.0
+                    if getattr(a.service, "refunds_allowed", False):
+                        cutoff = float(getattr(a.service, "refund_cutoff_hours", 0) or 0)
+                        refundable = hrs >= cutoff
+                        refund_within_cutoff = hrs < cutoff
+                    else:
+                        refundable = False
+                    non_refunded = not refundable
+            except Exception:
+                non_refunded = False
+                refund_within_cutoff = False
+
+            svc = a.service
+            items.append(
+                {
+                    "id": a.id,
+                    "booking_id": a.booking_id,
+                    "public_ref": public_ref,
+                    "event_type": a.event_type,
+                    "service": {
+                        "id": svc.id,
+                        "name": svc.name,
+                        "price": float(svc.price) if getattr(svc, "price", None) is not None else None,
+                    }
+                    if svc
+                    else None,
+                    "start": a.start.isoformat() if a.start else None,
+                    "end": a.end.isoformat() if a.end else None,
+                    "client_name": a.client_name,
+                    "client_email": a.client_email,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "extra": a.extra,
+                    "non_refunded": non_refunded,
+                    "refund_within_cutoff": refund_within_cutoff,
+                    **({"snapshot": snap} if include_snapshot else {}),
+                }
+            )
+
+        return Response({"org": {"id": org.id, "slug": org.slug, "name": org.name}, "total": total, "page": page, "per_page": per_page, "items": items})

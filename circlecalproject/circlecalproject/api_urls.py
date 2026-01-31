@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.urls import path
 
 from .api_views import HealthView, HelloView, MeView
-from .api_bookings import BookingDetailView, BookingsListView
+from .api_bookings import BookingDetailView, BookingsAuditListView, BookingsListView
 from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
 from .api_profile import ProfileOverviewView
@@ -27,6 +27,7 @@ urlpatterns = [
     path("me/", MeView.as_view(), name="api_me"),
     path("orgs/", OrgsListView.as_view(), name="api_orgs"),
     path("bookings/", BookingsListView.as_view(), name="api_bookings_list"),
+    path("bookings/audit/", BookingsAuditListView.as_view(), name="api_bookings_audit_list"),
     path("bookings/<int:booking_id>/", BookingDetailView.as_view(), name="api_booking_detail"),
     path("profile/", ProfileView.as_view(), name="api_profile"),
     path("profile/overview/", ProfileOverviewView.as_view(), name="api_profile_overview"),
