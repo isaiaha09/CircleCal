@@ -129,6 +129,41 @@ def test_public_booking_flow():
             # Pick the first enabled day (not .disabled)
             day = page.query_selector('.day-circle:not(.disabled)')
             if not day:
+                # Common edge case: it's late on the last day of the month, so today's
+                # remaining slots are exhausted and tomorrow is in the next month.
+                # Advance a month and retry a couple times before failing.
+                try:
+                    prev_header = None
+                    try:
+                        prev_header = page.inner_text('#monthHeader')
+                    except Exception:
+                        prev_header = None
+
+                    for _ in range(2):
+                        btn = page.query_selector('#nextMonthBtn')
+                        if not btn:
+                            break
+                        btn.click()
+                        try:
+                            if prev_header is not None:
+                                page.wait_for_function(
+                                    "(prev) => { const el = document.getElementById('monthHeader'); return !!el && el.innerText && el.innerText !== prev; }",
+                                    arg=prev_header,
+                                    timeout=8000,
+                                )
+                                prev_header = page.inner_text('#monthHeader')
+                        except Exception:
+                            # Fallback: small delay to allow re-render
+                            page.wait_for_timeout(400)
+
+                        page.wait_for_selector('.day-circle', timeout=15000)
+                        day = page.query_selector('.day-circle:not(.disabled)')
+                        if day:
+                            break
+                except Exception:
+                    day = None
+
+            if not day:
                 debug = dump_debug(page, svc_url)
                 raise AssertionError(f"No enabled day found in the calendar to open time slots\n{debug}")
             day.click()
