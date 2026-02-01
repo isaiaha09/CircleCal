@@ -212,6 +212,8 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 # Expose current membership role for the active organization
                 'calendar_app.context_processors.current_membership_role',
+                # App-webview flags (native app vs browser/PWA)
+                'calendar_app.context_processors.cc_app_context',
             ],
             'builtins': [
                 'calendar_app.templatetags.circlecal_filters',

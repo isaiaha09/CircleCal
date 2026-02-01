@@ -16,3 +16,24 @@ def current_membership_role(request):
         role = None
 
     return {'user_org_role': role}
+
+
+def cc_app_context(request):
+    """Expose app-webview related flags.
+
+    We keep the logic out of templates to avoid Django template smart-if
+    parsing limitations and to ensure consistent behavior across pages.
+    """
+    ua = (request.META.get('HTTP_USER_AGENT') or '')
+    is_app_ua = 'CircleCalApp' in ua
+
+    cc_app_param = request.GET.get('cc_app') == '1'
+    cc_app_cookie = request.COOKIES.get('cc_app') == '1'
+    cc_app_mode = bool(is_app_ua and (cc_app_param or cc_app_cookie))
+
+    return {
+        'cc_is_app_ua': is_app_ua,
+        'cc_app_param': cc_app_param,
+        'cc_app_cookie': cc_app_cookie,
+        'cc_app_mode': cc_app_mode,
+    }
