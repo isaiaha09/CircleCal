@@ -227,10 +227,16 @@
     :root { --row-height: 78px; }
 
     .bookings-container {
-      width: 95vw;
-      max-width: 95vw;
+      width: 100%;
+      max-width: 100%;
       margin: 24px auto;
-      padding: 0;
+      padding: 0 14px;
+    }
+
+    /* Native app WebView already pads <main> in app mode; avoid double padding. */
+    body[data-cc-app="1"] .bookings-container {
+      padding-left: 0;
+      padding-right: 0;
     }
 
     /* Ensure padding/borders don't create overflow */
