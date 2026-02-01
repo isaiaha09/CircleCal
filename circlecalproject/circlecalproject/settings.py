@@ -53,12 +53,20 @@ DEBUG = True
 ALLOWED_HOSTS = [
     '127.0.0.1',
     'localhost',
+    # Allow ngrok-hosted dev tunnels.
+    '.ngrok-free.app',
+    '.ngrok-free.dev',
+    '.ngrok.io',
     'nonpendant-profligately-tessa.ngrok-free.dev',
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
     'http://localhost:8000',
+    # Allow ngrok-hosted dev tunnels.
+    'https://*.ngrok-free.app',
+    'https://*.ngrok-free.dev',
+    'https://*.ngrok.io',
 ]
 
 LOGIN_REDIRECT_URL = 'calendar_app:post_login'

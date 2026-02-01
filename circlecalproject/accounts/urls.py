@@ -12,12 +12,16 @@ from .views import (
     CustomLoginView,
     login_choice_view,
     StaffLoginView,
+    mobile_sso_consume_view,
 )
 from .forms import PasswordResetIncludeInactiveForm
 app_name = 'accounts'
 
 # Use our custom templates under registration/
 urlpatterns = [
+    # Mobile WebView SSO
+    path('mobile/sso/<str:token>/', mobile_sso_consume_view, name='mobile_sso_consume'),
+
     # Profile
     path('profile/', profile_view, name='profile'),
     

@@ -3,6 +3,8 @@ from django.conf import settings
 from django.utils import timezone
 from .storage import OverwriteStorage
 import os
+import secrets
+from datetime import timedelta
 
 User = settings.AUTH_USER_MODEL
 
@@ -198,3 +200,41 @@ class PushDevice(models.Model):
 
     def __str__(self):
         return f"PushDevice user_id={self.user_id} active={self.is_active}"
+
+
+class MobileSSOToken(models.Model):
+    """One-time token used to establish a Django session in a WebView.
+
+    Flow:
+    - Mobile app authenticates via JWT (SimpleJWT).
+    - Mobile requests an SSO link (API) -> server creates a MobileSSOToken.
+    - WebView loads /accounts/mobile/sso/<token> which logs the user in via session.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mobile_sso_tokens')
+    token = models.CharField(max_length=96, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'used_at']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    @classmethod
+    def create_for_user(cls, user, *, ttl_seconds: int = 300):
+        now = timezone.now()
+        # 48 bytes -> URL-safe token typically ~64 chars.
+        token = secrets.token_urlsafe(48)
+        return cls.objects.create(
+            user=user,
+            token=token,
+            expires_at=now + timedelta(seconds=int(ttl_seconds)),
+        )
+
+    def is_valid(self) -> bool:
+        if self.used_at is not None:
+            return False
+        return timezone.now() <= self.expires_at

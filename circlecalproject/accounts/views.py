@@ -1,11 +1,13 @@
 from django.shortcuts import render
 from django.shortcuts import render, redirect
+from django.db import transaction
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from .forms import ProfileForm, StaffAuthenticationForm
-from .models import LoginActivity, Membership, Invite
+from .models import LoginActivity, Membership, Invite, MobileSSOToken
 from billing.models import Subscription
 from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET
 from django.contrib.auth import logout
 from django.urls import reverse
 from two_factor.views import LoginView as TwoFactorLoginView
@@ -16,8 +18,45 @@ from django.template.response import TemplateResponse
 from django.contrib.auth import authenticate, login
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.http import HttpResponse
+from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 # Create your views here.
+
+
+@require_GET
+def mobile_sso_consume_view(request, token: str):
+	"""Consume a one-time token and establish a session for WebView usage."""
+	next_url = (request.GET.get('next') or '/').strip() or '/'
+	if not url_has_allowed_host_and_scheme(
+		next_url,
+		allowed_hosts={request.get_host()},
+		require_https=request.is_secure(),
+	):
+		next_url = '/'
+
+	now = timezone.now()
+	with transaction.atomic():
+		tok = (
+			MobileSSOToken.objects.select_for_update()
+			.filter(token=token, used_at__isnull=True, expires_at__gte=now)
+			.select_related('user')
+			.first()
+		)
+		if tok is None:
+			return HttpResponse('This login link is invalid or expired.', status=400)
+		tok.used_at = now
+		tok.save(update_fields=['used_at'])
+
+	backend = 'django.contrib.auth.backends.ModelBackend'
+	try:
+		backend = (getattr(settings, 'AUTHENTICATION_BACKENDS', None) or [backend])[0]
+	except Exception:
+		backend = 'django.contrib.auth.backends.ModelBackend'
+
+	login(request, tok.user, backend=backend)
+	return redirect(next_url)
 @login_required
 def profile_view(request):
 	user = request.user
