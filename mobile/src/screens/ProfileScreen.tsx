@@ -26,15 +26,25 @@ import {
   apiPostFormData,
 } from '../lib/api';
 import { clearActiveOrgSlug, getActiveOrgSlug, signOut } from '../lib/auth';
+import { canManageBilling, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   onSignedOut: () => void;
   onOpenBusinesses?: () => void;
   onOpenBilling?: (args: { orgSlug: string }) => void;
   onOpenPricing?: (args: { orgSlug: string }) => void;
+  forceNameCompletion?: boolean;
+  onRequiredProfileCompleted?: () => void;
 };
 
-export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, onOpenPricing }: Props) {
+export function ProfileScreen({
+  onSignedOut,
+  onOpenBusinesses,
+  onOpenBilling,
+  onOpenPricing,
+  forceNameCompletion,
+  onRequiredProfileCompleted,
+}: Props) {
   const [resp, setResp] = useState<ApiProfileOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +175,10 @@ export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, on
       });
       setResp(next);
       Alert.alert('Saved', 'Your profile settings were updated.');
+
+      if (forceNameCompletion && onRequiredProfileCompleted) {
+        onRequiredProfileCompleted();
+      }
     } catch (e) {
       const err = e as Partial<ApiError>;
       const body = err.body as any;
@@ -284,6 +298,8 @@ export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, on
 
   const canEditOffline = !!(offlinePayments?.can_edit || resp?.org_overview?.offline_payment?.can_edit);
   const stripeConnected = !!resp?.org_overview?.stripe?.connect_account_id;
+  const activeOrgRole = normalizeOrgRole(resp?.org_overview?.membership?.role);
+  const canAccessBilling = canManageBilling(activeOrgRole);
 
   async function handleOpenStripeExpressDashboard() {
     if (!activeOrgSlug) return;
@@ -397,11 +413,19 @@ export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, on
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Business</Text>
         <Text style={styles.cardText}>Current: {activeOrgSlug || 'None selected'}</Text>
-        {onOpenBusinesses ? (
-          <Pressable style={styles.secondaryBtn} onPress={onOpenBusinesses}>
-            <Text style={styles.secondaryBtnText}>Change business</Text>
-          </Pressable>
-        ) : null}
+        {(() => {
+          const canSwitchBusiness = (resp?.memberships ?? []).some((m) => {
+            const r = normalizeOrgRole(m.role);
+            return r === 'owner' || r === 'admin';
+          });
+          if (!canSwitchBusiness) return null;
+          if (!onOpenBusinesses) return null;
+          return (
+            <Pressable style={styles.secondaryBtn} onPress={onOpenBusinesses}>
+              <Text style={styles.secondaryBtnText}>Change business</Text>
+            </Pressable>
+          );
+        })()}
       </View>
 
       <View style={styles.card}>
@@ -438,7 +462,7 @@ export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, on
           resp.memberships.map((m, idx) => (
             <View key={`mem-${idx}`} style={{ marginTop: 10 }}>
               <Text style={styles.rowValue}>{m.org.name}</Text>
-              <Text style={styles.meta}>Role: {m.role}</Text>
+              <Text style={styles.meta}>Role: {humanRole(m.role)}</Text>
             </View>
           ))
         ) : (
@@ -451,7 +475,7 @@ export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, on
             {resp.pending_invites.map((inv, idx) => (
               <View key={`inv-${idx}`} style={{ marginTop: 10 }}>
                 <Text style={styles.rowValue}>{inv.org.name}</Text>
-                <Text style={styles.meta}>Role: {inv.role}</Text>
+                <Text style={styles.meta}>Role: {humanRole(inv.role)}</Text>
                 {inv.accept_url ? (
                   <Pressable style={styles.secondaryBtn} onPress={() => openUrl(inv.accept_url as string)}>
                     <Text style={styles.secondaryBtnText}>Open invite</Text>
@@ -463,50 +487,50 @@ export function ProfileScreen({ onSignedOut, onOpenBusinesses, onOpenBilling, on
         ) : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Billing</Text>
-        {loadingOrg ? <ActivityIndicator /> : billingSummary ? (
-          <>
-            <Text style={styles.cardText}>
-              {billingSummary.plan?.name || billingSummary.plan?.slug || 'Basic'}
-              {billingSummary.plan?.billing_period ? ` · ${billingSummary.plan.billing_period}` : ''}
-            </Text>
-            <Text style={styles.meta}>Status: {billingSummary.subscription?.status || '—'}</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-              {onOpenBilling && activeOrgSlug ? (
-                <Pressable style={styles.secondaryBtnSmall} onPress={() => onOpenBilling({ orgSlug: activeOrgSlug })}>
-                  <Text style={styles.secondaryBtnText}>Open billing</Text>
-                </Pressable>
-              ) : null}
-              {onOpenPricing && activeOrgSlug ? (
-                <Pressable style={styles.secondaryBtnSmall} onPress={() => onOpenPricing({ orgSlug: activeOrgSlug })}>
-                  <Text style={styles.secondaryBtnText}>View pricing</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          </>
-        ) : (
-          <Text style={styles.cardText}>Billing details unavailable for this account.</Text>
-        )}
-      </View>
+      {canAccessBilling ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Billing</Text>
+          {loadingOrg ? <ActivityIndicator /> : billingSummary ? (
+            <>
+              <Text style={styles.cardText}>
+                {billingSummary.plan?.name || billingSummary.plan?.slug || 'Basic'}
+                {billingSummary.plan?.billing_period ? ` · ${billingSummary.plan.billing_period}` : ''}
+              </Text>
+              <Text style={styles.meta}>Status: {billingSummary.subscription?.status || '—'}</Text>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                {onOpenBilling && activeOrgSlug ? (
+                  <Pressable style={styles.secondaryBtnSmall} onPress={() => onOpenBilling({ orgSlug: activeOrgSlug })}>
+                    <Text style={styles.secondaryBtnText}>Open billing</Text>
+                  </Pressable>
+                ) : null}
+                {onOpenPricing && activeOrgSlug ? (
+                  <Pressable style={styles.secondaryBtnSmall} onPress={() => onOpenPricing({ orgSlug: activeOrgSlug })}>
+                    <Text style={styles.secondaryBtnText}>View pricing</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.cardText}>Billing details unavailable for this account.</Text>
+          )}
+        </View>
+      ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Stripe account</Text>
-        {stripeConnected ? (
-          <>
-            <Text style={styles.cardText}>Stripe is connected.</Text>
-            <Pressable style={styles.secondaryBtn} onPress={handleOpenStripeExpressDashboard} disabled={openingStripe}>
-              {openingStripe ? (
-                <ActivityIndicator />
-              ) : (
-                <Text style={styles.secondaryBtnText}>Open Stripe Express Dashboard</Text>
-              )}
-            </Pressable>
-          </>
-        ) : (
-          <Text style={styles.cardText}>No Stripe connected account found.</Text>
-        )}
-      </View>
+      {canAccessBilling ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Stripe account</Text>
+          {stripeConnected ? (
+            <>
+              <Text style={styles.cardText}>Stripe is connected.</Text>
+              <Pressable style={styles.secondaryBtn} onPress={handleOpenStripeExpressDashboard} disabled={openingStripe}>
+                {openingStripe ? <ActivityIndicator /> : <Text style={styles.secondaryBtnText}>Open Stripe Express Dashboard</Text>}
+              </Pressable>
+            </>
+          ) : (
+            <Text style={styles.cardText}>No Stripe connected account found.</Text>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Offline payment info (Venmo/Zelle)</Text>

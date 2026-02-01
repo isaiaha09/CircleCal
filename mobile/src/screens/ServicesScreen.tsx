@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-import type { ApiError, ServiceListItem } from '../lib/api';
-import { apiCreateService, apiGetServices, apiPatchService } from '../lib/api';
+import type { ApiError, OrgListItem, ServiceListItem } from '../lib/api';
+import { apiCreateService, apiGetOrgs, apiGetServices, apiPatchService } from '../lib/api';
+import { canManageServices, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -22,6 +23,8 @@ export function ServicesScreen({ orgSlug, onOpenEdit }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<string>('');
+  const [roleLoading, setRoleLoading] = useState(true);
 
   const [name, setName] = useState('');
   const [duration, setDuration] = useState('60');
@@ -33,6 +36,8 @@ export function ServicesScreen({ orgSlug, onOpenEdit }: Props) {
     const p = Number(price);
     return n.length > 0 && Number.isFinite(d) && d > 0 && Number.isFinite(p) && p >= 0;
   }, [name, duration, price]);
+
+  const allowed = useMemo(() => canManageServices(role), [role]);
 
   async function load() {
     setLoading(true);
@@ -54,9 +59,60 @@ export function ServicesScreen({ orgSlug, onOpenEdit }: Props) {
   }
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      try {
+        setRoleLoading(true);
+        const orgsResp = await apiGetOrgs();
+        const org = (orgsResp.orgs ?? []).find((o: OrgListItem) => o.slug === orgSlug);
+        const nextRole = normalizeOrgRole(org?.role);
+        if (cancelled) return;
+        setRole(nextRole);
+        setRoleLoading(false);
+        if (!canManageServices(nextRole)) {
+          setError(`Services are restricted to Owners/GMs/Managers (you are ${humanRole(nextRole)}).`);
+          setServices([]);
+          setLoading(false);
+          return;
+        }
+        await load();
+      } catch (e) {
+        const err = e as Partial<ApiError>;
+        const body = err.body as any;
+        const msg =
+          (typeof body?.detail === 'string' && body.detail) ||
+          (typeof err.message === 'string' && err.message) ||
+          'Failed to load services.';
+        if (!cancelled) setError(msg);
+      } finally {
+        if (!cancelled) setRoleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug]);
+
+  if (roleLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Services</Text>
+        <Text style={styles.subtitle}>Manage your service offerings</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardText}>{error || 'Services are restricted to Owners/GMs/Managers.'}</Text>
+        </View>
+      </View>
+    );
+  }
 
   async function handleCreate() {
     if (!canCreate) return;

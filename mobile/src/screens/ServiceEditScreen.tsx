@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-import type { ApiError, ServiceListItem } from '../lib/api';
-import { apiGetServiceDetail, apiPatchService } from '../lib/api';
+import type { ApiError, OrgListItem, ServiceListItem } from '../lib/api';
+import { apiGetOrgs, apiGetServiceDetail, apiPatchService } from '../lib/api';
+import { canManageServices, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -15,6 +16,8 @@ export function ServiceEditScreen({ orgSlug, serviceId, onSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<string>('');
+  const [roleLoading, setRoleLoading] = useState(true);
 
   const initial = useMemo(() => {
     return {
@@ -68,9 +71,58 @@ export function ServiceEditScreen({ orgSlug, serviceId, onSaved }: Props) {
   }
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      try {
+        setRoleLoading(true);
+        const orgsResp = await apiGetOrgs();
+        const org = (orgsResp.orgs ?? []).find((o: OrgListItem) => o.slug === orgSlug);
+        const nextRole = normalizeOrgRole(org?.role);
+        if (cancelled) return;
+        setRole(nextRole);
+        setRoleLoading(false);
+        if (!canManageServices(nextRole)) {
+          setError(`Service editing is restricted to Owners/GMs/Managers (you are ${humanRole(nextRole)}).`);
+          setLoading(false);
+          return;
+        }
+        await load();
+      } catch (e) {
+        const err = e as Partial<ApiError>;
+        const body = err.body as any;
+        const msg =
+          (typeof body?.detail === 'string' && body.detail) ||
+          (typeof err.message === 'string' && err.message) ||
+          'Failed to load service.';
+        if (!cancelled) setError(msg);
+      } finally {
+        if (!cancelled) setRoleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug, serviceId]);
+
+  if (roleLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!canManageServices(role)) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Edit service</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardText}>{error || 'Service editing is restricted to Owners/GMs/Managers.'}</Text>
+        </View>
+      </View>
+    );
+  }
 
   async function handleSave() {
     setSaving(true);

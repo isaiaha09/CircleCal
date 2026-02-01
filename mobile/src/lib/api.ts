@@ -142,12 +142,34 @@ export async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
   }));
 }
 
+export async function apiDelete<T>(path: string, payload?: unknown): Promise<T> {
+  return apiRequest<T>(path, async () => {
+    const init: RequestInit = {
+      method: 'DELETE',
+      headers: await buildHeaders(),
+    };
+    if (payload !== undefined) init.body = JSON.stringify(payload);
+    return init;
+  });
+}
+
 export async function apiPostFormData<T>(path: string, form: FormData): Promise<T> {
   return apiRequest<T>(path, async () => ({
     method: 'POST',
     headers: await buildHeadersMultipart(),
     body: form,
   }));
+}
+
+export async function apiRegisterPushToken(args: { token: string; platform?: string }): Promise<{ ok: boolean }> {
+  return apiPost('/api/v1/push/tokens/', {
+    token: args.token,
+    platform: args.platform ?? '',
+  });
+}
+
+export async function apiUnregisterPushToken(args: { token: string }): Promise<{ ok: boolean; deleted?: number }> {
+  return apiDelete('/api/v1/push/tokens/', { token: args.token });
 }
 
 export type ApiProfileResponse = {
@@ -235,6 +257,23 @@ export type BookingListItem = {
   assigned_user?: { id: number; username: string } | null;
   payment_status?: string;
   payment_method?: string;
+};
+
+export type BookingAuditItem = {
+  id: number;
+  booking_id: number | null;
+  public_ref?: string | null;
+  event_type: 'deleted' | 'cancelled' | string;
+  service?: { id: number; name: string; price?: number | null } | null;
+  start: string | null;
+  end: string | null;
+  client_name: string;
+  client_email: string;
+  created_at: string | null;
+  extra?: string;
+  non_refunded?: boolean;
+  refund_within_cutoff?: boolean;
+  snapshot?: any;
 };
 
 export type ServiceListItem = {
@@ -367,6 +406,33 @@ export async function apiCreateTeamInvite(params: {
   });
 }
 
+export async function apiDeleteTeamInvite(params: { org: string; inviteId: number }): Promise<{ deleted: boolean }> {
+  try {
+    // Preferred (new) endpoint.
+    return await apiRequest(
+      `/api/v1/team/invites/${params.inviteId}/?org=${encodeURIComponent(params.org)}`,
+      async () => ({
+        method: 'DELETE',
+        headers: await buildHeaders(),
+      })
+    );
+  } catch (e) {
+    const err = e as Partial<ApiError>;
+    if (err.status !== 404) throw e;
+
+    // Fallback (compat): some deployments may not have the detail route yet.
+    return apiRequest(
+      `/api/v1/team/invites/?org=${encodeURIComponent(params.org)}&invite_id=${encodeURIComponent(
+        String(params.inviteId)
+      )}`,
+      async () => ({
+        method: 'DELETE',
+        headers: await buildHeaders(),
+      })
+    );
+  }
+}
+
 export async function apiGetResources(params: { org: string }): Promise<{
   org: { id: number; slug: string; name: string };
   count: number;
@@ -419,11 +485,56 @@ export async function apiGetBookingDetail(params: {
   bookingId: number;
 }): Promise<{
   org: { id: number; slug: string; name: string };
+  membership?: { role: string };
   booking: BookingListItem;
 }> {
   const usp = new URLSearchParams();
   usp.set('org', params.org);
   return apiGet(`/api/v1/bookings/${params.bookingId}/?${usp.toString()}`);
+}
+
+export async function apiGetBookingAudit(params: {
+  org: string;
+  page?: number;
+  per_page?: number;
+  since?: string;
+  include_snapshot?: boolean;
+}): Promise<{
+  org: { id: number; slug: string; name: string };
+  total: number;
+  page: number;
+  per_page: number;
+  items: BookingAuditItem[];
+}> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  if (typeof params.page === 'number') usp.set('page', String(params.page));
+  if (typeof params.per_page === 'number') usp.set('per_page', String(params.per_page));
+  if (params.since) usp.set('since', params.since);
+  if (params.include_snapshot) usp.set('include_snapshot', '1');
+  return apiGet(`/api/v1/bookings/audit/?${usp.toString()}`);
+}
+
+export async function apiCancelBooking(params: {
+  org: string;
+  bookingId: number;
+  reason?: string;
+}): Promise<{ detail: string }> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  usp.set('action', 'cancel');
+  return apiDelete(`/api/v1/bookings/${params.bookingId}/?${usp.toString()}`, params.reason ? { reason: params.reason } : undefined);
+}
+
+export async function apiDeleteBooking(params: {
+  org: string;
+  bookingId: number;
+  reason?: string;
+}): Promise<{ detail: string }> {
+  const usp = new URLSearchParams();
+  usp.set('org', params.org);
+  usp.set('action', 'delete');
+  return apiDelete(`/api/v1/bookings/${params.bookingId}/?${usp.toString()}`, params.reason ? { reason: params.reason } : undefined);
 }
 
 export async function apiGetServices(params: { org: string }): Promise<{

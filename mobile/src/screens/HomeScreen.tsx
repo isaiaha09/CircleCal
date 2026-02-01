@@ -4,11 +4,14 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import type { ApiError, BillingSummary } from '../lib/api';
 import type { BookingListItem, OrgListItem } from '../lib/api';
-import { apiGet, apiGetBillingSummary, apiGetBookings, apiGetOrgs } from '../lib/api';
+import { apiGet, apiGetBillingSummary, apiGetBookings, apiGetOrgs, apiGetProfileOverview } from '../lib/api';
 import { clearActiveOrgSlug, getActiveOrgSlug, setActiveOrgSlug, signOut } from '../lib/auth';
+import { canManageBilling, canManageResources, canManageServices, canManageStaff, normalizeOrgRole } from '../lib/permissions';
+import { unregisterPushTokenBestEffort } from '../lib/push';
 
 type Props = {
   onSignedOut: () => void;
+  onForceProfileCompletion: () => void;
   onOpenBooking: (args: { orgSlug: string; bookingId: number }) => void;
   onOpenCalendar: (args: { orgSlug: string }) => void;
   onOpenSchedule: (args: { orgSlug: string }) => void;
@@ -49,6 +52,7 @@ function safeParseDate(iso: string | null): Date | null {
 
 export function HomeScreen({
   onSignedOut,
+  onForceProfileCompletion,
   onOpenBooking,
   onOpenCalendar,
   onOpenSchedule,
@@ -78,6 +82,33 @@ export function HomeScreen({
     to.setDate(to.getDate() + 14);
     return { from: isoDate(from), to: isoDate(to) };
   }, []);
+
+  const activeRole = useMemo(() => normalizeOrgRole(activeOrg?.role), [activeOrg?.role]);
+  const allowBilling = useMemo(() => canManageBilling(activeRole), [activeRole]);
+  const allowPricing = allowBilling;
+  const allowStaff = useMemo(() => canManageStaff(activeRole), [activeRole]);
+  const allowResourcesByRole = useMemo(() => canManageResources(activeRole), [activeRole]);
+  const allowServicesByRole = useMemo(() => canManageServices(activeRole), [activeRole]);
+  const isStaff = activeRole === 'staff';
+  const allowBusinesses = useMemo(
+    () => (orgs ?? []).some((o) => {
+      const r = normalizeOrgRole(o.role);
+      return r === 'owner' || r === 'admin';
+    }),
+    [orgs]
+  );
+
+  async function maybeForceCompleteName(role: string | null | undefined) {
+    const r = normalizeOrgRole(role);
+    if (r !== 'staff' && r !== 'manager') return;
+
+    const overview = await apiGetProfileOverview();
+    const firstName = ((overview.user as any)?.first_name ?? '').trim();
+    const lastName = ((overview.user as any)?.last_name ?? '').trim();
+    if (!firstName || !lastName) {
+      onForceProfileCompletion();
+    }
+  }
 
   async function loadBookings(orgSlug: string) {
     setLoadingBookings(true);
@@ -132,6 +163,13 @@ export function HomeScreen({
         setActiveOrg(chosen);
         if (chosen) {
           await setActiveOrgSlug(chosen.slug);
+          try {
+            // Staff/manager users must complete First + Last name before accessing the dashboard.
+            await maybeForceCompleteName(chosen.role);
+            if (cancelled) return;
+          } catch {
+            // If the profile check fails, do not block access.
+          }
           if (!cancelled) {
             await Promise.all([loadBookings(chosen.slug), loadPlan(chosen.slug)]);
           }
@@ -160,6 +198,16 @@ export function HomeScreen({
       (async () => {
         if (loading) return;
         try {
+          // Re-check on focus in case user updated their name on Profile.
+          if (activeOrg?.role) {
+            try {
+              await maybeForceCompleteName(activeOrg.role);
+              if (cancelled) return;
+            } catch {
+              // ignore
+            }
+          }
+
           // Always refresh plan gates on focus (e.g., after upgrading in Stripe).
           if (activeOrg?.slug) {
             await loadPlan(activeOrg.slug);
@@ -183,6 +231,7 @@ export function HomeScreen({
   );
 
   async function handleSignOut() {
+    await unregisterPushTokenBestEffort();
     await Promise.all([signOut(), clearActiveOrgSlug()]);
     onSignedOut();
   }
@@ -279,16 +328,38 @@ export function HomeScreen({
 
       <Text style={styles.sectionTitle}>Portals</Text>
       <View style={styles.portalGrid}>
-        <Pressable
-          style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
-          disabled={!activeOrg}
-          onPress={() => (activeOrg ? onOpenBilling({ orgSlug: activeOrg.slug }) : null)}
-        >
-          <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Billing</Text>
-          <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
-            Plan, trial, payment methods
-          </Text>
-        </Pressable>
+        {isStaff ? (
+          <>
+            <Pressable
+              style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
+              disabled={!activeOrg}
+              onPress={() => (activeOrg ? onOpenBookings({ orgSlug: activeOrg.slug }) : null)}
+            >
+              <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Bookings</Text>
+              <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
+                View your bookings
+              </Text>
+            </Pressable>
+
+            <Pressable style={styles.portalTile} onPress={onOpenProfile}>
+              <Text style={styles.portalTitle}>Profile</Text>
+              <Text style={styles.portalSubtitle}>Update your personal info and settings</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+        {allowBilling ? (
+          <Pressable
+            style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
+            disabled={!activeOrg}
+            onPress={() => (activeOrg ? onOpenBilling({ orgSlug: activeOrg.slug }) : null)}
+          >
+            <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Billing</Text>
+            <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
+              {!activeOrg ? 'Select a business first' : 'Plan, trial, payment methods'}
+            </Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
@@ -301,10 +372,12 @@ export function HomeScreen({
           </Text>
         </Pressable>
 
-        <Pressable style={styles.portalTile} onPress={onOpenBusinesses}>
-          <Text style={styles.portalTitle}>Businesses</Text>
-          <Text style={styles.portalSubtitle}>View and manage your businesses</Text>
-        </Pressable>
+        {allowBusinesses ? (
+          <Pressable style={styles.portalTile} onPress={onOpenBusinesses}>
+            <Text style={styles.portalTitle}>Businesses</Text>
+            <Text style={styles.portalSubtitle}>View and manage your businesses</Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
@@ -319,14 +392,16 @@ export function HomeScreen({
 
         {(() => {
           const allowed = !!activeOrg && !!billingSummary?.features?.can_use_resources;
-          const disabled = !activeOrg || loadingPlan || !allowed;
+          const disabled = !activeOrg || loadingPlan || !allowResourcesByRole || (!allowBilling ? false : !allowed);
           const subtitle = !activeOrg
             ? 'Select a business first'
             : loadingPlan
               ? 'Checking plan…'
-              : allowed
-                ? 'Manage space and capacity'
-                : 'Team plan only';
+              : !allowResourcesByRole
+                ? 'Owner/GM/Manager only'
+                : allowBilling
+                  ? (allowed ? 'Manage space and capacity' : 'Team plan only')
+                  : 'Manage space and capacity';
           return (
             <Pressable
               style={[styles.portalTile, disabled ? styles.portalTileDisabled : null]}
@@ -341,16 +416,18 @@ export function HomeScreen({
           );
         })()}
 
-        <Pressable
-          style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
-          disabled={!activeOrg}
-          onPress={() => (activeOrg ? onOpenPricing({ orgSlug: activeOrg.slug }) : null)}
-        >
-          <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Pricing</Text>
-          <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
-            {activeOrg ? 'Plans & upgrades' : 'Select a business first'}
-          </Text>
-        </Pressable>
+        {allowPricing ? (
+          <Pressable
+            style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
+            disabled={!activeOrg}
+            onPress={() => (activeOrg ? onOpenPricing({ orgSlug: activeOrg.slug }) : null)}
+          >
+            <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Pricing</Text>
+            <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
+              {!activeOrg ? 'Select a business first' : 'Plans & upgrades'}
+            </Text>
+          </Pressable>
+        ) : null}
 
         <Pressable style={styles.portalTile} onPress={onOpenProfile}>
           <Text style={styles.portalTitle}>Profile</Text>
@@ -358,38 +435,30 @@ export function HomeScreen({
         </Pressable>
 
         <Pressable
-          style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
-          disabled={!activeOrg}
+          style={[styles.portalTile, (!activeOrg || !allowServicesByRole) ? styles.portalTileDisabled : null]}
+          disabled={!activeOrg || !allowServicesByRole}
+          onPress={() => (activeOrg && allowServicesByRole ? onOpenServices({ orgSlug: activeOrg.slug }) : null)}
         >
-          <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Services</Text>
-          <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
-            Manage your service offerings
+          <Text style={[styles.portalTitle, (!activeOrg || !allowServicesByRole) ? styles.portalTitleDisabled : null]}>Services</Text>
+          <Text style={[styles.portalSubtitle, (!activeOrg || !allowServicesByRole) ? styles.portalSubtitleDisabled : null]}>
+            {!activeOrg ? 'Select a business first' : allowServicesByRole ? 'Manage your service offerings' : 'Owner/GM/Manager only'}
           </Text>
         </Pressable>
 
-        {(() => {
-          const allowed = !!activeOrg && !!billingSummary?.features?.can_add_staff;
-          const disabled = !activeOrg || loadingPlan || !allowed;
-          const subtitle = !activeOrg
-            ? 'Select a business first'
-            : loadingPlan
-              ? 'Checking plan…'
-              : allowed
-                ? 'Roles & invitations'
-                : 'Team plan only';
-          return (
-            <Pressable
-              style={[styles.portalTile, disabled ? styles.portalTileDisabled : null]}
-              disabled={disabled}
-              onPress={() => (activeOrg ? onOpenStaff({ orgSlug: activeOrg.slug }) : null)}
-            >
-              <Text style={[styles.portalTitle, disabled ? styles.portalTitleDisabled : null]}>Staff</Text>
-              <Text style={[styles.portalSubtitle, disabled ? styles.portalSubtitleDisabled : null]}>
-                {subtitle}
-              </Text>
-            </Pressable>
-          );
-        })()}
+        {allowStaff ? (
+          <Pressable
+            style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
+            disabled={!activeOrg}
+            onPress={() => (activeOrg ? onOpenStaff({ orgSlug: activeOrg.slug }) : null)}
+          >
+            <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Staff</Text>
+            <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
+              {!activeOrg ? 'Select a business first' : 'Roles & invitations'}
+            </Text>
+          </Pressable>
+        ) : null}
+          </>
+        )}
       </View>
 
       <Text style={styles.sectionTitle}>Upcoming</Text>

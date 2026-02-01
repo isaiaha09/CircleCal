@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 
 import type { ApiError, FacilityResourceListItem } from '../lib/api';
-import { apiCreateResource, apiGetResources, apiUpdateResource } from '../lib/api';
+import { apiCreateResource, apiGetOrgs, apiGetResources, apiUpdateResource } from '../lib/api';
+import { canManageBilling, canManageResources, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -32,6 +33,8 @@ function errorMessage(e: unknown, fallback: string): string {
 export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
   const [resources, setResources] = useState<FacilityResourceListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [roleLoading, setRoleLoading] = useState(true);
+  const [orgRole, setOrgRole] = useState<string>('');
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +43,8 @@ export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
   const [creating, setCreating] = useState(false);
 
   const canCreate = useMemo(() => (name || '').trim().length > 0, [name]);
+  const allowed = useMemo(() => canManageResources(orgRole), [orgRole]);
+  const canSeePricing = useMemo(() => canManageBilling(orgRole), [orgRole]);
 
   async function load() {
     setError(null);
@@ -55,6 +60,18 @@ export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
     let cancelled = false;
     (async () => {
       try {
+        setRoleLoading(true);
+        const orgsResp = await apiGetOrgs();
+        const found = (orgsResp.orgs ?? []).find((o) => o.slug === orgSlug);
+        const role = normalizeOrgRole(found?.role);
+        if (!cancelled) setOrgRole(role);
+        if (!cancelled) setRoleLoading(false);
+
+        if (!canManageResources(role)) {
+          setResources([]);
+          setError(`Resources are restricted to Owners/GMs/Managers (you are ${humanRole(role)}).`);
+          return;
+        }
         await load();
       } finally {
         if (!cancelled) setLoading(false);
@@ -135,9 +152,11 @@ export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
       {error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={styles.primaryBtn} onPress={() => onOpenPricing({ orgSlug })}>
-            <Text style={styles.primaryBtnText}>View plans</Text>
-          </Pressable>
+          {canSeePricing ? (
+            <Pressable style={styles.primaryBtn} onPress={() => onOpenPricing({ orgSlug })}>
+              <Text style={styles.primaryBtnText}>View plans</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -175,11 +194,23 @@ export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
     </View>
   );
 
-  if (loading) {
+  if (loading || roleLoading) {
     return (
       <View style={styles.loadingBox}>
         <ActivityIndicator />
         <Text style={styles.loadingText}>Loading resources…</Text>
+      </View>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <View style={{ flex: 1, padding: 16, paddingTop: 12, backgroundColor: '#fff' }}>
+        <Text style={styles.title}>Resources</Text>
+        <Text style={styles.subtitle}>Manage rooms, cages, fields, and other capacity</Text>
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error || 'Resources are restricted to Owners/GMs/Managers.'}</Text>
+        </View>
       </View>
     );
   }

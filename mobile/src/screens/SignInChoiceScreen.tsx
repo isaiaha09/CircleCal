@@ -17,7 +17,7 @@ export function SignInChoiceScreen({ onSelectOwner, onSelectStaff }: Props) {
       </Pressable>
 
       <Pressable style={styles.secondaryBtn} onPress={onSelectStaff}>
-        <Text style={styles.secondaryBtnText}>Staff || Manager</Text>
+        <Text style={styles.secondaryBtnText}>Staff | Manager | GM</Text>
       </Pressable>
     </View>
   );

@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 const ACCESS_TOKEN_KEY = 'cc_access_token';
 const REFRESH_TOKEN_KEY = 'cc_refresh_token';
 const ACTIVE_ORG_SLUG_KEY = 'cc_active_org_slug';
+const PUSH_TOKEN_KEY = 'cc_push_token';
 
 export async function getAccessToken(): Promise<string | null> {
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
@@ -30,6 +31,18 @@ export async function clearRefreshToken(): Promise<void> {
 
 export async function signOut(): Promise<void> {
   await Promise.all([clearAccessToken(), clearRefreshToken()]);
+}
+
+export async function getStoredPushToken(): Promise<string | null> {
+  return SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+}
+
+export async function setStoredPushToken(token: string): Promise<void> {
+  await SecureStore.setItemAsync(PUSH_TOKEN_KEY, token);
+}
+
+export async function clearStoredPushToken(): Promise<void> {
+  await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
 }
 
 export async function getActiveOrgSlug(): Promise<string | null> {

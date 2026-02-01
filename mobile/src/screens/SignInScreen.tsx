@@ -1,10 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-
-import { API_BASE_URL } from '../config';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { clearActiveOrgSlug, setAccessToken, setRefreshToken } from '../lib/auth';
 import type { ApiError } from '../lib/api';
 import { apiPost } from '../lib/api';
+import { registerPushTokenIfPossible } from '../lib/push';
 
 type Props = {
   mode: 'owner' | 'staff';
@@ -15,6 +14,7 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const disabled = useMemo(
     () => !identifier.trim() || !password || submitting,
@@ -23,6 +23,7 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
 
   async function handleSignIn() {
     setSubmitting(true);
+    setError(null);
     try {
       // SimpleJWT's TokenObtainPairView expects "username" + "password".
       // We pass email/username into "username"; your Django auth backend supports either.
@@ -37,17 +38,24 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
       await Promise.all([setAccessToken(token.access), setRefreshToken(token.refresh)]);
       // If a different user signs in, the previously selected org might not be valid.
       await clearActiveOrgSlug();
+      // Best-effort: register device token for push notifications.
+      await registerPushTokenIfPossible();
       onSignedIn();
     } catch (e) {
       const err = e as Partial<ApiError>;
-      const maybeBody = err.body as any;
-      const detail =
-        (typeof maybeBody?.detail === 'string' && maybeBody.detail) ||
-        (typeof maybeBody?.text === 'string' && maybeBody.text.slice(0, 160)) ||
-        'Check your credentials and try again.';
+      const status = typeof err.status === 'number' ? err.status : null;
 
-      const statusLine = typeof err.status === 'number' ? `HTTP ${err.status}` : 'Network error';
-      Alert.alert('Sign in failed', `${statusLine}\n${detail}\n\nAPI: ${API_BASE_URL}`);
+      if (status === 401) {
+        setError(
+          mode === 'owner'
+            ? 'Incorrect username or password. Please try again.'
+            : 'Incorrect email or password. Please try again.'
+        );
+        return;
+      }
+
+      // Keep other errors generic so we don't surface raw API error text.
+      setError('Sign in failed. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -55,7 +63,9 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{mode === 'owner' ? 'Business Owner Sign-In' : 'Staff || Manager Sign-In'}</Text>
+      <Text style={styles.title}>
+        {mode === 'owner' ? 'Business Owner Sign-In' : 'Staff | Manager | GM Sign-In'}
+      </Text>
 
       <TextInput
         value={identifier}
@@ -86,10 +96,12 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
         )}
       </Pressable>
 
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
       <Text style={styles.hint}>
         {mode === 'owner'
           ? 'Use your owner username and password.'
-          : 'Use your staff/manager email and password.'}
+          : 'Use your staff/manager/GM email and password.'}
       </Text>
     </View>
   );
@@ -134,6 +146,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 16,
+  },
+  errorText: {
+    marginTop: 10,
+    color: '#b91c1c',
+    fontSize: 14,
+    textAlign: 'center',
   },
   hint: {
     marginTop: 12,

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 
 import type { ApiError, BookingListItem } from '../lib/api';
-import { apiGetBookingDetail } from '../lib/api';
+import { apiCancelBooking, apiDeleteBooking, apiGetBookingDetail } from '../lib/api';
+import { normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -17,10 +19,13 @@ function formatWhen(iso: string | null): string {
 }
 
 export function BookingDetailScreen({ orgSlug, bookingId }: Props) {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [booking, setBooking] = useState<BookingListItem | null>(null);
   const [orgName, setOrgName] = useState<string>(orgSlug);
+  const [orgRole, setOrgRole] = useState<string>('');
+  const [busyAction, setBusyAction] = useState<'cancel' | 'delete' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,6 +34,7 @@ export function BookingDetailScreen({ orgSlug, bookingId }: Props) {
         const resp = await apiGetBookingDetail({ org: orgSlug, bookingId });
         if (cancelled) return;
         setOrgName(resp.org?.name ?? orgSlug);
+        setOrgRole(normalizeOrgRole(resp.membership?.role));
         setBooking(resp.booking);
       } catch (e) {
         const err = e as Partial<ApiError>;
@@ -75,16 +81,94 @@ export function BookingDetailScreen({ orgSlug, bookingId }: Props) {
 
             <Text style={styles.rowLabel}>Title</Text>
             <Text style={styles.rowValue}>{booking.title || '(none)'}</Text>
+
+            {orgRole && orgRole !== 'staff' ? (
+              <View style={styles.actionsRow}>
+                {(orgRole === 'owner' || orgRole === 'admin' || orgRole === 'manager') ? (
+                  <Pressable
+                    style={[styles.actionBtn, styles.cancelBtn, busyAction ? { opacity: 0.6 } : null]}
+                    disabled={busyAction !== null}
+                    onPress={() => {
+                      Alert.alert(
+                        'Cancel booking?',
+                        'This will remove the booking from the schedule and record it in the audit history.',
+                        [
+                          { text: 'Keep', style: 'cancel' },
+                          {
+                            text: 'Cancel booking',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                setBusyAction('cancel');
+                                await apiCancelBooking({ org: orgSlug, bookingId });
+                                Alert.alert('Cancelled', 'Booking cancelled.');
+                                navigation.goBack();
+                              } catch (e) {
+                                const err = e as Partial<ApiError>;
+                                const body = err.body as any;
+                                const msg =
+                                  (typeof body?.detail === 'string' && body.detail) ||
+                                  (typeof err.message === 'string' && err.message) ||
+                                  'Failed to cancel booking.';
+                                Alert.alert('Cancel failed', msg);
+                              } finally {
+                                setBusyAction(null);
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={styles.actionBtnText}>Cancel</Text>
+                  </Pressable>
+                ) : null}
+
+                {(orgRole === 'owner' || orgRole === 'admin') ? (
+                  <Pressable
+                    style={[styles.actionBtn, styles.deleteBtn, busyAction ? { opacity: 0.6 } : null]}
+                    disabled={busyAction !== null}
+                    onPress={() => {
+                      Alert.alert(
+                        'Delete booking?',
+                        'This is permanent (but still recorded in audit history).',
+                        [
+                          { text: 'Keep', style: 'cancel' },
+                          {
+                            text: 'Delete',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                setBusyAction('delete');
+                                await apiDeleteBooking({ org: orgSlug, bookingId });
+                                Alert.alert('Deleted', 'Booking deleted.');
+                                navigation.goBack();
+                              } catch (e) {
+                                const err = e as Partial<ApiError>;
+                                const body = err.body as any;
+                                const msg =
+                                  (typeof body?.detail === 'string' && body.detail) ||
+                                  (typeof err.message === 'string' && err.message) ||
+                                  'Failed to delete booking.';
+                                Alert.alert('Delete failed', msg);
+                              } finally {
+                                setBusyAction(null);
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={styles.actionBtnText}>Delete</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
           </>
         ) : (
           <Text style={styles.cardText}>Not found</Text>
         )}
-      </View>
-
-      <View style={styles.hintBox}>
-        <Text style={styles.hint}>
-          Next step: add quick actions here (cancel/reschedule) once the backend endpoints are ready.
-        </Text>
       </View>
     </ScrollView>
   );
@@ -106,6 +190,25 @@ const styles = StyleSheet.create({
   cardText: { color: '#374151' },
   rowLabel: { marginTop: 10, fontWeight: '700', color: '#111827' },
   rowValue: { marginTop: 4, color: '#374151' },
-  hintBox: { marginTop: 14 },
-  hint: { color: '#6b7280' },
+  actionsRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  actionBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  cancelBtn: {
+    backgroundColor: '#111827',
+  },
+  deleteBtn: {
+    backgroundColor: '#b91c1c',
+  },
+  actionBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
 });

@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { ApiError, BillingPlan, BillingSummary } from '../lib/api';
+import type { ApiError, BillingPlan, BillingSummary, OrgListItem } from '../lib/api';
 import {
   apiCreateBillingCheckoutSession,
   apiCreateBillingPortalSession,
   apiGetBillingPlans,
   apiGetBillingSummary,
+  apiGetOrgs,
 } from '../lib/api';
+import { canManageBilling, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -31,6 +33,8 @@ export function PricingScreen({ orgSlug }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'portal' | `choose:${number}` | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<string>('');
+  const [roleLoading, setRoleLoading] = useState(true);
 
   const currentSlug = (summary?.plan?.slug || 'basic').toLowerCase();
 
@@ -39,12 +43,27 @@ export function PricingScreen({ orgSlug }: Props) {
     return `Pricing · ${summary.org.name}`;
   }, [summary?.org?.name]);
 
+  const allowed = useMemo(() => canManageBilling(role), [role]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
+        setRoleLoading(true);
+        const orgsResp = await apiGetOrgs();
+        const org = (orgsResp.orgs ?? []).find((o: OrgListItem) => o.slug === orgSlug);
+        const nextRole = normalizeOrgRole(org?.role);
+        if (cancelled) return;
+        setRole(nextRole);
+        if (!canManageBilling(nextRole)) {
+          setSummary(null);
+          setPlans([]);
+          setError(`Pricing/Upgrades are restricted to Owners only (you are ${humanRole(nextRole)}).`);
+          return;
+        }
+
         const [s, p] = await Promise.all([apiGetBillingSummary({ org: orgSlug }), apiGetBillingPlans({ org: orgSlug })]);
         if (cancelled) return;
         setSummary(s);
@@ -58,13 +77,35 @@ export function PricingScreen({ orgSlug }: Props) {
           'Failed to load pricing.';
         if (!cancelled) setError(msg);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setRoleLoading(false);
+          setLoading(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [orgSlug]);
+
+  if (loading || roleLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Pricing</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardText}>{error || 'Pricing/Upgrades are restricted to Owners only.'}</Text>
+        </View>
+      </View>
+    );
+  }
 
   async function openPortal() {
     setBusy('portal');
@@ -106,14 +147,6 @@ export function PricingScreen({ orgSlug }: Props) {
     } finally {
       setBusy(null);
     }
-  }
-
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator />
-      </View>
-    );
   }
 
   return (

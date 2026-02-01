@@ -12,7 +12,15 @@ import {
 } from 'react-native';
 
 import type { ApiError, TeamInvite, TeamMember } from '../lib/api';
-import { apiCreateTeamInvite, apiGetTeamInvites, apiGetTeamMembers, apiUpdateTeamMember } from '../lib/api';
+import {
+  apiCreateTeamInvite,
+  apiDeleteTeamInvite,
+  apiGetOrgs,
+  apiGetTeamInvites,
+  apiGetTeamMembers,
+  apiUpdateTeamMember,
+} from '../lib/api';
+import { canManageBilling, canManageStaff, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -45,18 +53,32 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [loading, setLoading] = useState(true);
+  const [roleLoading, setRoleLoading] = useState(true);
+  const [orgRole, setOrgRole] = useState<string>('');
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatingMemberId, setUpdatingMemberId] = useState<number | null>(null);
+  const [deletingInviteId, setDeletingInviteId] = useState<number | null>(null);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'staff' | 'manager' | 'admin'>('staff');
   const [sendingInvite, setSendingInvite] = useState(false);
 
   const canInvite = useMemo(() => normalizeEmail(inviteEmail).includes('@'), [inviteEmail]);
+  const allowed = useMemo(() => canManageStaff(orgRole), [orgRole]);
+  const canSeePricing = useMemo(() => canManageBilling(orgRole), [orgRole]);
 
-  async function loadAll() {
+  async function loadAll(roleOverride?: string) {
     setError(null);
+
+    const roleToUse = roleOverride ?? orgRole;
+    if (!canManageStaff(roleToUse)) {
+      setMembers([]);
+      setInvites([]);
+      setError(`Staff management is restricted to Owners/GMs (you are ${humanRole(roleToUse)}).`);
+      return;
+    }
+
     try {
       const [m, i] = await Promise.all([
         apiGetTeamMembers({ org: orgSlug }),
@@ -75,7 +97,14 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        await loadAll();
+        setRoleLoading(true);
+        const orgsResp = await apiGetOrgs();
+        const found = (orgsResp.orgs ?? []).find((o) => o.slug === orgSlug);
+        const role = normalizeOrgRole(found?.role);
+        if (!cancelled) setOrgRole(role);
+        if (!cancelled) setRoleLoading(false);
+
+        await loadAll(role);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -169,6 +198,27 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
     }
   }
 
+  async function handleDeleteInvite(inv: TeamInvite) {
+    Alert.alert('Remove invite', `Remove invite for ${inv.email}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setDeletingInviteId(inv.id);
+          try {
+            await apiDeleteTeamInvite({ org: orgSlug, inviteId: inv.id });
+            await loadAll();
+          } catch (e) {
+            Alert.alert('Remove failed', errorMessage(e, 'Could not remove invite.'));
+          } finally {
+            setDeletingInviteId(null);
+          }
+        },
+      },
+    ]);
+  }
+
   const header = (
     <View style={styles.headerPad}>
       <Text style={styles.title}>Staff</Text>
@@ -177,9 +227,11 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
       {error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={styles.primaryBtn} onPress={() => onOpenPricing({ orgSlug })}>
-            <Text style={styles.primaryBtnText}>View plans</Text>
-          </Pressable>
+          {canSeePricing ? (
+            <Pressable style={styles.primaryBtn} onPress={() => onOpenPricing({ orgSlug })}>
+              <Text style={styles.primaryBtnText}>View plans</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -205,7 +257,7 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
                 onPress={() => setInviteRole(r)}
               >
                 <Text style={[styles.rolePillText, selected ? styles.rolePillTextSelected : null]}>
-                  {r}
+                  {r === 'admin' ? 'GM' : r}
                 </Text>
               </Pressable>
             );
@@ -234,16 +286,25 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
         <View key={inv.id} style={styles.rowCard}>
           <View style={styles.rowTextCol}>
             <Text style={styles.rowTitle}>{inv.email}</Text>
-            <Text style={styles.rowMeta}>Role: {inv.role}</Text>
+            <Text style={styles.rowMeta}>Role: {humanRole(inv.role)}</Text>
           </View>
-          {inv.accept_url ? (
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            {inv.accept_url ? (
+              <Pressable
+                style={styles.secondaryBtn}
+                onPress={() => Linking.openURL(inv.accept_url as string).catch(() => null)}
+              >
+                <Text style={styles.secondaryBtnText}>Open link</Text>
+              </Pressable>
+            ) : null}
             <Pressable
-              style={styles.secondaryBtn}
-              onPress={() => Linking.openURL(inv.accept_url as string).catch(() => null)}
+              style={[styles.dangerBtn, deletingInviteId === inv.id ? { opacity: 0.6 } : null]}
+              onPress={() => handleDeleteInvite(inv)}
+              disabled={deletingInviteId !== null}
             >
-              <Text style={styles.secondaryBtnText}>Open link</Text>
+              <Text style={styles.dangerBtnText}>{deletingInviteId === inv.id ? 'Removing…' : 'Remove'}</Text>
             </Pressable>
-          ) : null}
+          </View>
         </View>
       ))}
 
@@ -254,11 +315,23 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
     </View>
   );
 
-  if (loading) {
+  if (loading || roleLoading) {
     return (
       <View style={styles.loadingBox}>
         <ActivityIndicator />
         <Text style={styles.loadingText}>Loading staff…</Text>
+      </View>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <View style={{ flex: 1, padding: 16, paddingTop: 12, backgroundColor: '#fff' }}>
+        <Text style={styles.title}>Staff</Text>
+        <Text style={styles.subtitle}>Invite and manage your team</Text>
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error || `Staff management is restricted to Owners/GMs.`}</Text>
+        </View>
       </View>
     );
   }
@@ -308,7 +381,7 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
                               selected ? styles.rolePillSmallTextSelected : null,
                             ]}
                           >
-                            {r}
+                            {r === 'admin' ? 'GM' : r}
                           </Text>
                         </Pressable>
                       );

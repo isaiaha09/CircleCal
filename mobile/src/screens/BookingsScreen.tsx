@@ -2,11 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ApiError, BookingListItem } from '../lib/api';
-import { apiGetBookings } from '../lib/api';
+import { apiGetBookings, apiGetOrgs } from '../lib/api';
+import { normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
   onOpenBooking: (args: { orgSlug: string; bookingId: number }) => void;
+  onOpenAudit?: (args: { orgSlug: string }) => void;
+  setHeaderTitle?: (title: string) => void;
 };
 
 function isoDate(d: Date): string {
@@ -23,10 +26,11 @@ function formatWhen(iso: string | null): string {
   return d.toLocaleString();
 }
 
-export function BookingsScreen({ orgSlug, onOpenBooking }: Props) {
+export function BookingsScreen({ orgSlug, onOpenBooking, onOpenAudit, setHeaderTitle }: Props) {
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [orgRole, setOrgRole] = useState<string>('');
 
   const window = useMemo(() => {
     const from = new Date();
@@ -59,6 +63,24 @@ export function BookingsScreen({ orgSlug, onOpenBooking }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiGetOrgs();
+        const found = (resp.orgs ?? []).find((o) => o.slug === orgSlug);
+        const r = found?.role ? normalizeOrgRole(found.role) : '';
+        if (!cancelled) setOrgRole(r);
+        if (!cancelled && setHeaderTitle) setHeaderTitle(r === 'staff' ? 'My bookings' : 'Bookings');
+      } catch {
+        if (!cancelled && setHeaderTitle) setHeaderTitle('Bookings');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug, setHeaderTitle]);
+
   function renderItem({ item }: { item: BookingListItem }) {
     const title = item.service?.name || item.title || 'Booking';
     const who = item.client_name || item.client_email || (item.is_blocking ? 'Blocked' : '');
@@ -79,10 +101,19 @@ export function BookingsScreen({ orgSlug, onOpenBooking }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Bookings</Text>
+        <Text style={styles.title}>{orgRole === 'staff' ? 'My bookings' : 'Bookings'}</Text>
         <Text style={styles.subtitle}>
           {window.from} → {window.to}
         </Text>
+        {orgRole === 'staff' ? (
+          <Text style={styles.staffNote}>Showing only bookings assigned to you.</Text>
+        ) : null}
+
+        {onOpenAudit ? (
+          <Pressable style={styles.auditBtn} onPress={() => onOpenAudit({ orgSlug })}>
+            <Text style={styles.auditBtnText}>Cancelled / Deleted</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {loading ? (
@@ -133,6 +164,22 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 8,
     color: '#6b7280',
+  },
+  staffNote: {
+    marginTop: 8,
+    color: '#6b7280',
+  },
+  auditBtn: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  auditBtnText: {
+    color: 'white',
+    fontWeight: '700',
   },
   card: {
     marginTop: 16,

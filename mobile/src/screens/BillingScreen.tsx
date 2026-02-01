@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { ApiError, BillingPlan, BillingSummary } from '../lib/api';
-import { apiCreateBillingCheckoutSession, apiCreateBillingPortalSession, apiGetBillingPlans, apiGetBillingSummary } from '../lib/api';
+import type { ApiError, BillingPlan, BillingSummary, OrgListItem } from '../lib/api';
+import { apiCreateBillingCheckoutSession, apiCreateBillingPortalSession, apiGetBillingPlans, apiGetBillingSummary, apiGetOrgs } from '../lib/api';
+import { canManageBilling, humanRole, normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
   orgSlug: string;
@@ -34,6 +35,8 @@ export function BillingScreen({ orgSlug }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'portal' | `checkout:${number}` | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<string>('');
+  const [roleLoading, setRoleLoading] = useState(true);
 
   const currentSlug = (summary?.plan?.slug || 'basic').toLowerCase();
 
@@ -42,12 +45,27 @@ export function BillingScreen({ orgSlug }: Props) {
     return `Billing · ${summary.org.name}`;
   }, [summary?.org?.name]);
 
+  const allowed = useMemo(() => canManageBilling(role), [role]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
+        setRoleLoading(true);
+        const orgsResp = await apiGetOrgs();
+        const org = (orgsResp.orgs ?? []).find((o: OrgListItem) => o.slug === orgSlug);
+        const nextRole = normalizeOrgRole(org?.role);
+        if (cancelled) return;
+        setRole(nextRole);
+        if (!canManageBilling(nextRole)) {
+          setSummary(null);
+          setPlans([]);
+          setError(`Billing is restricted to Owners only (you are ${humanRole(nextRole)}).`);
+          return;
+        }
+
         const [s, p] = await Promise.all([apiGetBillingSummary({ org: orgSlug }), apiGetBillingPlans({ org: orgSlug })]);
         if (cancelled) return;
         setSummary(s);
@@ -61,7 +79,10 @@ export function BillingScreen({ orgSlug }: Props) {
           'Failed to load billing.';
         if (!cancelled) setError(msg);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setRoleLoading(false);
+          setLoading(false);
+        }
       }
     })();
     return () => {
@@ -111,10 +132,21 @@ export function BillingScreen({ orgSlug }: Props) {
     }
   }
 
-  if (loading) {
+  if (loading || roleLoading) {
     return (
       <View style={styles.container}>
         <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Billing</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardText}>{error || `Billing is restricted to Owners/GMs.`}</Text>
+        </View>
       </View>
     );
   }
