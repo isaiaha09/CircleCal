@@ -574,18 +574,55 @@
                 background: none !important;
                 content: none !important;
             }
+
+            /*
+              App Mode (mobile app WebView)
+              - Enabled by ?cc_app=1 (and persisted via cc_app cookie)
+              - Hide web chrome so the native shell can own navigation
+              - Use full-width layout and tighter padding
+            */
+            body[data-cc-app="1"]::before,
+            body[data-cc-app="1"]::after {
+                display: none !important;
+            }
+            body[data-cc-app="1"] .cc-site-header,
+            body[data-cc-app="1"] #mobileMenu,
+            body[data-cc-app="1"] #cc-cookie-banner,
+            body[data-cc-app="1"] footer {
+                display: none !important;
+            }
+            body[data-cc-app="1"] main {
+                max-width: 100% !important;
+                width: 100% !important;
+                padding: 14px 14px 18px 14px !important;
+            }
         </style>
 
     {% block extra_head %}{% endblock %}
 </head>
 
 {% if request.GET.embed == '1' or request.custom_domain_organization %}
-<body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="1">
+<body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="1" data-cc-app="{% if (request.GET.cc_app == '1' or request.COOKIES.cc_app == '1') and 'CircleCalApp' in request.META.HTTP_USER_AGENT %}1{% else %}0{% endif %}">
 {% else %}
-<body class="bg-blue-50  text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="0">
+<body class="bg-blue-50  text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="0" data-cc-app="{% if (request.GET.cc_app == '1' or request.COOKIES.cc_app == '1') and 'CircleCalApp' in request.META.HTTP_USER_AGENT %}1{% else %}0{% endif %}">
 {% endif %}
 
-    {% if request.GET.embed != '1' and not request.custom_domain_organization %}
+    {% if request.GET.cc_app == '1' %}
+    <script>
+        // Persist app-mode across navigations even if links/forms don't include ?cc_app=1.
+        (function(){
+            try {
+                // Only persist when running inside the native app WebView.
+                var ua = (navigator && navigator.userAgent) ? String(navigator.userAgent) : '';
+                if (ua.indexOf('CircleCalApp') === -1) return;
+                var maxAge = 60 * 60 * 24 * 365; // 1 year
+                document.cookie = 'cc_app=1; Path=/; Max-Age=' + maxAge + '; SameSite=Lax';
+            } catch (e) {}
+        })();
+    </script>
+    {% endif %}
+
+    {% if request.GET.embed != '1' and not request.custom_domain_organization and not ((request.GET.cc_app == '1' or request.COOKIES.cc_app == '1') and 'CircleCalApp' in request.META.HTTP_USER_AGENT) %}
     <header class="bg-white border-b shadow-sm relative z-50 cc-site-header">
         <div class="max-w-7xl mx-auto px-4 py-10 md:py-9">
             <div class="flex items-center relative">
@@ -708,7 +745,7 @@
     {% endif %}
 
     <!-- Content -->
-    <main class="{% block main_class %}max-w-6xl mx-auto px-4 py-6 md:p-6{% endblock %}">
+    <main class="{% block main_class %}{% if (request.GET.cc_app == '1' or request.COOKIES.cc_app == '1') and 'CircleCalApp' in request.META.HTTP_USER_AGENT %}w-full px-4 py-4{% else %}max-w-6xl mx-auto px-4 py-6 md:p-6{% endif %}{% endblock %}">
         {% if messages %}
         <div class="mb-4 px-4 sm:px-0" role="status" aria-live="polite">
             <div class="mx-auto w-full max-w-3xl space-y-2">
@@ -727,7 +764,7 @@
         {% block content %}{% endblock %}
     </main>
 
-    {% if request.GET.embed != '1' and not request.custom_domain_organization %}
+    {% if request.GET.embed != '1' and not request.custom_domain_organization and not ((request.GET.cc_app == '1' or request.COOKIES.cc_app == '1') and 'CircleCalApp' in request.META.HTTP_USER_AGENT) %}
     <div id="cc-cookie-banner" class="hidden" style="position:fixed;left:0;right:0;bottom:0;z-index:10001;">
         <div class="bg-white border-t shadow-sm" style="padding-bottom: env(safe-area-inset-bottom);">
             <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

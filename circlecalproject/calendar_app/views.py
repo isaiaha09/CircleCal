@@ -2863,17 +2863,33 @@ def post_login_redirect(request):
     except Exception:
         profile_complete = False
 
+    ua = (request.META.get('HTTP_USER_AGENT') or '')
+    is_app_ua = ('CircleCalApp' in ua)
+    is_app_mode = is_app_ua and ((request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1'))
+
+    def _redirect_named(view_name: str, **kwargs):
+        from django.urls import reverse
+        try:
+            url = reverse(view_name, kwargs=kwargs)
+        except Exception:
+            # Fall back to the name-based redirect if reverse isn't available for some reason.
+            return redirect(view_name, **kwargs)
+        if is_app_mode:
+            joiner = '&' if ('?' in url) else '?'
+            url = f"{url}{joiner}cc_app=1"
+        return redirect(url)
+
     if count == 0:
-        return redirect("calendar_app:create_business")
+        return _redirect_named('calendar_app:create_business')
 
     if count == 1:
         # If profile incomplete, send user to profile editing page first
         if not profile_complete:
-            return redirect('accounts:profile')
+            return _redirect_named('accounts:profile')
         org = memberships.first().organization
-        return redirect("calendar_app:dashboard", org_slug=org.slug)
+        return _redirect_named('calendar_app:dashboard', org_slug=org.slug)
 
-    return redirect("calendar_app:choose_business")
+    return _redirect_named('calendar_app:choose_business')
 
 
 @login_required

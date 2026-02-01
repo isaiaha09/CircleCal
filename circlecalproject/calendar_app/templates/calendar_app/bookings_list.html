@@ -2027,6 +2027,39 @@ if (exportAuditBtn) {
     });
   }
 }
+
+// App deep-link: open a booking modal from query param.
+(function(){
+  try {
+    var params = new URLSearchParams(window.location.search || '');
+    var raw = params.get('cc_open_booking');
+    if (!raw) return;
+    var id = parseInt(String(raw), 10);
+    if (!isFinite(id)) return;
+
+    // Retry briefly in case the table renders async.
+    var tries = 0;
+    var maxTries = 30; // ~6s @ 200ms
+    var timer = setInterval(function(){
+      tries += 1;
+      try {
+        if (typeof window.viewBooking === 'function') {
+          window.viewBooking(id);
+          clearInterval(timer);
+
+          // Remove the param so back/refresh doesn't keep reopening.
+          try {
+            var u = new URL(window.location.href);
+            u.searchParams.delete('cc_open_booking');
+            window.history.replaceState({}, document.title, u.toString());
+          } catch (e) {}
+          return;
+        }
+      } catch(e) {}
+      if (tries >= maxTries) clearInterval(timer);
+    }, 200);
+  } catch (e) {}
+})();
 </script>
 <script>
 // Visible rows selector: persist in localStorage and apply CSS variable
