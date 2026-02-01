@@ -57,6 +57,29 @@ def mobile_sso_consume_view(request, token: str):
 
 	login(request, tok.user, backend=backend)
 	return redirect(next_url)
+
+
+@require_GET
+def mobile_app_logout_view(request):
+	"""Log out the Django session for the native app WebView.
+
+	We intentionally allow GET here (unlike the standard LogoutView POST)
+	but restrict it to requests coming from the native app WebView UA marker.
+	"""
+	ua = (request.META.get('HTTP_USER_AGENT') or '')
+	if 'CircleCalApp' not in ua:
+		return HttpResponse('Not found', status=404)
+
+	next_url = (request.GET.get('next') or '/').strip() or '/'
+	if not url_has_allowed_host_and_scheme(
+		next_url,
+		allowed_hosts={request.get_host()},
+		require_https=request.is_secure(),
+	):
+		next_url = '/'
+
+	logout(request)
+	return redirect(next_url)
 @login_required
 def profile_view(request):
 	user = request.user

@@ -13,6 +13,7 @@ from .views import (
     login_choice_view,
     StaffLoginView,
     mobile_sso_consume_view,
+    mobile_app_logout_view,
 )
 from .forms import PasswordResetIncludeInactiveForm
 app_name = 'accounts'
@@ -21,6 +22,9 @@ app_name = 'accounts'
 urlpatterns = [
     # Mobile WebView SSO
     path('mobile/sso/<str:token>/', mobile_sso_consume_view, name='mobile_sso_consume'),
+
+    # Mobile WebView logout (app UA only)
+    path('mobile/logout/', mobile_app_logout_view, name='mobile_logout'),
 
     # Profile
     path('profile/', profile_view, name='profile'),
