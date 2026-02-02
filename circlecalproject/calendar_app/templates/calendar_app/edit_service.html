@@ -2955,7 +2955,7 @@
     </div>
     <div style="display:flex; justify-content:flex-end; gap:10px;">
       <button id="ccAdvancedUpgradeCancelBtn" type="button" style="background:#e5e7eb; color:#111827; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">Cancel</button>
-      <button id="ccAdvancedUpgradeGoBtn" type="button" style="background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:800;">View pricing</button>
+      <button id="ccAdvancedUpgradeGoBtn" type="button" style="background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:800;">{% if cc_app_mode %}OK{% else %}View pricing{% endif %}</button>
     </div>
   </div>
 </div>
@@ -2965,6 +2965,7 @@
     try{
       const CAN_USE_PRO_TEAM = {{ can_use_pro_team|yesno:'true,false' }};
       if (CAN_USE_PRO_TEAM) return;
+      const CC_APP_MODE = {{ cc_app_mode|yesno:'true,false' }};
       const PRICING_URL = "{% url 'calendar_app:pricing_page' org.slug %}";
 
       function openModal(){
@@ -2972,14 +2973,26 @@
         const cancelBtn = document.getElementById('ccAdvancedUpgradeCancelBtn');
         const goBtn = document.getElementById('ccAdvancedUpgradeGoBtn');
         if (!modal || !cancelBtn || !goBtn){
-          const go = confirm('A Pro subscription or higher is required to have access to the advanced settings features.\n\nPress OK to view pricing, or Cancel to stay here.');
-          if (go) { try { window.location.href = PRICING_URL; } catch(e) {} }
+          if (CC_APP_MODE) {
+            alert('A Pro subscription or higher is required to have access to the advanced settings features.\n\nTo use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app.');
+          } else {
+            const go = confirm('A Pro subscription or higher is required to have access to the advanced settings features.\n\nPress OK to view pricing, or Cancel to stay here.');
+            if (go) { try { window.location.href = PRICING_URL; } catch(e) {} }
+          }
           return;
         }
         modal.style.display = 'flex';
         function close(){ try{ modal.style.display = 'none'; }catch(e){} }
         cancelBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} close(); };
-        goBtn.onclick = function(e){ try{ e.preventDefault(); }catch(err){} try{ window.location.href = PRICING_URL; }catch(err){} };
+        goBtn.onclick = function(e){
+          try{ e.preventDefault(); }catch(err){}
+          if (CC_APP_MODE) {
+            close();
+            try { alert('Upgrade required. To use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app.'); } catch (err) {}
+          } else {
+            try{ window.location.href = PRICING_URL; }catch(err){}
+          }
+        };
         modal.onclick = function(e){ try{ if (e && e.target === modal) close(); }catch(err){} };
         try{
           document.addEventListener('keydown', function onKey(e){

@@ -231,7 +231,7 @@
             {% endif %}
 
             {% if org %}
-                {% if user_org_role == 'owner' %}
+                {% if user_org_role == 'owner' and not cc_app_mode %}
                 <!-- Pricing (owner only) -->
                 <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="block bg-white p-6 rounded-lg shadow hover:shadow-md transition border">
                     <h2 class="text-xl md:text-2xl font-semibold text-blue-600 text-center leading-tight break-words">Pricing</h2>

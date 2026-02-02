@@ -31,10 +31,16 @@
                 </div>
 
                 <div class="text-sm text-gray-600">Full pricing details are on the 
-                    {% if request.organization %}
+                    {% if request.organization and not cc_app_mode %}
                         <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-blue-600 underline">pricing page</a>
+                    {% elif request.organization and cc_app_mode %}
+                        <span>web app (billing is not available in the mobile app)</span>
                     {% else %}
-                        <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 underline">pricing & sign up</a>
+                        {% if not cc_app_mode %}
+                            <a href="{% url 'calendar_app:signup' %}" class="text-blue-600 underline">pricing & sign up</a>
+                        {% else %}
+                            <span>web app (billing is not available in the mobile app)</span>
+                        {% endif %}
                     {% endif %}.
                     Read our <a href="{% url 'calendar_app:privacy' %}" class="text-blue-600 underline">privacy policy</a> or <a href="{% url 'calendar_app:contact' %}" class="text-blue-600 underline">contact support</a> if you have questions.
                 </div>
@@ -108,10 +114,12 @@
         <!-- Testimonials removed per request -->
 
         <div class="mt-8 text-center about-actions">
-            {% if request.organization %}
-                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="btn-primary">See full pricing</a>
-            {% else %}
-                <a href="{% url 'calendar_app:signup' %}" class="btn-primary">See full pricing</a>
+            {% if not cc_app_mode %}
+                {% if request.organization %}
+                    <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="btn-primary">See full pricing</a>
+                {% else %}
+                    <a href="{% url 'calendar_app:signup' %}" class="btn-primary">See full pricing</a>
+                {% endif %}
             {% endif %}
             <a href="{% url 'calendar_app:contact' %}" class="ml-3 btn-ghost">Contact support</a>
         </div>

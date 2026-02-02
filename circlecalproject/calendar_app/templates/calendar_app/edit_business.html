@@ -25,7 +25,12 @@
             >
             {% if not can_change_identity %}
                 <div style="margin-top:10px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">
-                    <strong>Plan required:</strong> Changing your business name or public URL requires an active <strong>Pro/Team</strong> plan (not trial). <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
+                    <strong>Plan required:</strong> Changing your business name or public URL requires an active <strong>Pro/Team</strong> plan (not trial).
+                    {% if not cc_app_mode %}
+                        <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
+                    {% else %}
+                        <span> To use this feature, please upgrade your plan on circlecal.app (in a browser) first.</span>
+                    {% endif %}
                 </div>
             {% endif %}
         </div>
@@ -61,7 +66,12 @@
             {% else %}
                 {% if not can_change_identity %}
                     <div style="margin-top:10px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">
-                        <strong>Plan required:</strong> Upgrade to <strong>Pro/Team</strong> to change your public URL. <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
+                        <strong>Plan required:</strong> Upgrade to <strong>Pro/Team</strong> to change your public URL.
+                        {% if not cc_app_mode %}
+                            <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
+                        {% else %}
+                            <span> To use this feature, please upgrade your plan on circlecal.app (in a browser) first.</span>
+                        {% endif %}
                     </div>
                 {% else %}
                     <div style="margin-top:10px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;">

@@ -713,7 +713,11 @@
               {% if not m.can_use_embed_widget or not m.can_use_custom_domain %}
                 <div class="mt-2 text-xs text-gray-500">
                   Embed + Custom Domain require an active Pro/Team plan (not trial).
-                  <a href="{% url 'calendar_app:pricing_page' m.organization.slug %}" class="text-blue-700 font-semibold underline">View pricing</a>
+                  {% if not cc_app_mode %}
+                    <a href="{% url 'calendar_app:pricing_page' m.organization.slug %}" class="text-blue-700 font-semibold underline">View pricing</a>
+                  {% else %}
+                    <span class="text-gray-600">To use this feature, please upgrade your plan on circlecal.app (in a browser) first.</span>
+                  {% endif %}
                 </div>
               {% endif %}
             {% endif %}
