@@ -1,5 +1,9 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { AuthCard } from '../components/AuthCard';
+import { theme } from '../ui/theme';
 
 type Props = {
   onSelectOwner: () => void;
@@ -8,70 +12,62 @@ type Props = {
 
 export function SignInChoiceScreen({ onSelectOwner, onSelectStaff }: Props) {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Choose Sign-In</Text>
-      <Text style={styles.subtitle}>Select the account type you use for CircleCal.</Text>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.container}>
+        <AuthCard title="Sign in" subtitle="Choose the account type you use for CircleCal.">
+          <Pressable style={styles.primaryBtn} onPress={onSelectOwner}>
+            <Text style={styles.primaryBtnText}>Business Owner</Text>
+          </Pressable>
 
-      <Pressable style={styles.primaryBtn} onPress={onSelectOwner}>
-        <Text style={styles.primaryBtnText}>Business Owner</Text>
-      </Pressable>
+          <Pressable style={styles.secondaryBtn} onPress={onSelectStaff}>
+            <Text style={styles.secondaryBtnText}>Staff | Manager | GM</Text>
+          </Pressable>
 
-      <Pressable style={styles.secondaryBtn} onPress={onSelectStaff}>
-        <Text style={styles.secondaryBtnText}>Staff | Manager | GM</Text>
-      </Pressable>
-    </View>
+          <Text style={styles.hint}>You can switch accounts later.</Text>
+        </AuthCard>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.colors.bg },
   container: {
     flex: 1,
-    padding: 24,
-    paddingTop: 72,
-    backgroundColor: '#fff',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  subtitle: {
-    marginTop: 8,
-    color: '#6b7280',
-    marginBottom: 18,
-    textAlign: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 24,
+    backgroundColor: theme.colors.bg,
   },
   primaryBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.colors.primaryDark,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: theme.radius.md,
     marginBottom: 12,
-    textAlign: 'center',
+    alignItems: 'center',
   },
   primaryBtnText: {
     color: '#fff',
-    fontWeight: '700',
+    fontWeight: '800',
     fontSize: 16,
     textAlign: 'center',
   },
   secondaryBtn: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.colors.border,
+    backgroundColor: '#fff',
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 12,
-    textAlign: 'center',
+    borderRadius: theme.radius.md,
+    alignItems: 'center',
   },
   secondaryBtnText: {
-    color: '#111827',
-    fontWeight: '700',
+    color: theme.colors.text,
+    fontWeight: '800',
     fontSize: 16,
     textAlign: 'center',
   },
-  btnHint: {
-    marginTop: 6,
-    color: '#6b7280',
-  },
+  hint: { marginTop: 12, color: theme.colors.muted, fontSize: 12, textAlign: 'center' },
 });

@@ -1,9 +1,25 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { clearActiveOrgSlug, setAccessToken, setRefreshToken } from '../lib/auth';
 import type { ApiError } from '../lib/api';
 import { apiPost } from '../lib/api';
 import { registerPushTokenIfPossible } from '../lib/push';
+import { API_BASE_URL } from '../config';
+
+import { AuthCard } from '../components/AuthCard';
+import { theme } from '../ui/theme';
 
 type Props = {
   mode: 'owner' | 'staff';
@@ -62,80 +78,103 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>
-        {mode === 'owner' ? 'Business Owner Sign-In' : 'Staff | Manager | GM Sign-In'}
-      </Text>
-
-      <TextInput
-        value={identifier}
-        onChangeText={setIdentifier}
-        placeholder={mode === 'owner' ? 'Username' : 'Email'}
-        autoCapitalize="none"
-        keyboardType={mode === 'owner' ? 'default' : 'email-address'}
-        style={styles.input}
-      />
-
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        placeholder="Password"
-        secureTextEntry
-        style={styles.input}
-      />
-
-      <Pressable
-        style={[styles.primaryBtn, disabled ? styles.primaryBtnDisabled : null]}
-        disabled={disabled}
-        onPress={handleSignIn}
+    <SafeAreaView style={styles.safe}>
+      <KeyboardAvoidingView
+        style={styles.safe}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        // Keep this low; SafeAreaView already accounts for top inset.
+        keyboardVerticalOffset={0}
       >
-        {submitting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.primaryBtnText}>Continue</Text>
-        )}
-      </Pressable>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical={false}
+        >
+          <AuthCard
+            title={mode === 'owner' ? 'Business Owner' : 'Staff | Manager | GM'}
+            subtitle="Log in to continue"
+          >
+            <TextInput
+              value={identifier}
+              onChangeText={setIdentifier}
+              placeholder={mode === 'owner' ? 'Username' : 'Email'}
+              autoCapitalize="none"
+              keyboardType={mode === 'owner' ? 'default' : 'email-address'}
+              textContentType={mode === 'owner' ? 'username' : 'emailAddress'}
+              autoCorrect={false}
+              style={styles.input}
+              returnKeyType="next"
+            />
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              secureTextEntry
+              textContentType="password"
+              style={styles.input}
+              returnKeyType="go"
+              onSubmitEditing={() => {
+                if (!disabled) handleSignIn();
+              }}
+            />
 
-      <Text style={styles.hint}>
-        {mode === 'owner'
-          ? 'Use your owner username and password.'
-          : 'Use your staff/manager/GM email and password.'}
-      </Text>
-    </View>
+            <Pressable
+              style={[styles.primaryBtn, disabled ? styles.primaryBtnDisabled : null]}
+              disabled={disabled}
+              onPress={handleSignIn}
+            >
+              {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Login</Text>}
+            </Pressable>
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <View style={styles.linkRow}>
+              <Pressable onPress={() => Linking.openURL(`${API_BASE_URL}/signup/`)}>
+                <Text style={styles.link}>Create an account</Text>
+              </Pressable>
+              <Text style={styles.dot}>•</Text>
+              <Pressable onPress={() => Linking.openURL(`${API_BASE_URL}/accounts/password/reset/`)}>
+                <Text style={styles.link}>Forgot password</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.hint}>
+              {mode === 'owner'
+                ? 'Use your owner username and password.'
+                : 'Use your staff/manager/GM email and password.'}
+            </Text>
+          </AuthCard>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 24,
-    paddingTop: 72,
-    backgroundColor: '#fff',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 18,
-    textAlign: 'center',
+  safe: { flex: 1, backgroundColor: theme.colors.bg },
+  scrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 24,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#cfe0ff',
+    borderRadius: theme.radius.md,
     paddingVertical: 12,
     paddingHorizontal: 14,
     fontSize: 16,
     marginBottom: 12,
-    backgroundColor: '#fff',
+    backgroundColor: '#fbfdff',
   },
   primaryBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.colors.primary,
     paddingVertical: 12,
     paddingHorizontal: 18,
-    borderRadius: 10,
+    borderRadius: theme.radius.md,
     alignItems: 'center',
     marginTop: 6,
   },
@@ -144,17 +183,28 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: {
     color: '#fff',
-    fontWeight: '600',
+    fontWeight: '800',
     fontSize: 16,
   },
   errorText: {
     marginTop: 10,
-    color: '#b91c1c',
+    color: theme.colors.danger,
     fontSize: 14,
     textAlign: 'center',
   },
+  linkRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+  },
+  link: { color: theme.colors.primaryDark, fontWeight: '800', fontSize: 13, paddingVertical: 6 },
+  dot: { color: theme.colors.muted, marginHorizontal: 8 },
   hint: {
     marginTop: 12,
-    color: '#6b7280',
+    color: theme.colors.muted,
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

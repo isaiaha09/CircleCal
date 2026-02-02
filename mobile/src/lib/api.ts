@@ -168,6 +168,12 @@ export async function apiRegisterPushToken(args: { token: string; platform?: str
   });
 }
 
+export async function apiGetMobileSsoLink(args?: { next?: string }): Promise<{ url: string; expires_in: number }> {
+  const next = (args?.next ?? '/').trim() || '/';
+  // Use GET so we can pass `next` easily; endpoint also supports POST.
+  return apiGet(`/api/v1/mobile/sso-link/?next=${encodeURIComponent(next)}`);
+}
+
 export async function apiUnregisterPushToken(args: { token: string }): Promise<{ ok: boolean; deleted?: number }> {
   return apiDelete('/api/v1/push/tokens/', { token: args.token });
 }

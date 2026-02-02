@@ -8,6 +8,7 @@ import * as Notifications from 'expo-notifications';
 import { getAccessToken } from './src/lib/auth';
 import { apiGetOrgs } from './src/lib/api';
 import { normalizeOrgRole } from './src/lib/permissions';
+import { WebAppScreen, webPathFromPushData } from './src/screens/WebAppScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { BookingDetailScreen } from './src/screens/BookingDetailScreen';
 import { BookingAuditScreen } from './src/screens/BookingAuditScreen';
@@ -32,6 +33,7 @@ type RootStackParamList = {
   SignInChoice: undefined;
   SignInOwner: undefined;
   SignInStaff: undefined;
+  WebApp: { initialPath?: string } | undefined;
   Home: undefined;
   BookingDetail: { orgSlug: string; bookingId: number };
   BookingAudit: { orgSlug: string };
@@ -299,8 +301,7 @@ export default function App() {
   const [initialRouteName, setInitialRouteName] = useState<keyof RootStackParamList>('Welcome');
   const [ready, setReady] = useState(false);
   const [pendingNav, setPendingNav] = useState<
-    | { name: 'BookingDetail'; params: { orgSlug: string; bookingId: number } }
-    | { name: 'Bookings'; params: { orgSlug: string } }
+    | { name: 'WebApp'; params?: { initialPath?: string } }
     | null
   >(null);
 
@@ -312,8 +313,9 @@ export default function App() {
 
     // Some notifications (e.g. cancellations/reassigned-away) should open a list, not a deleted/forbidden detail.
     if (orgSlug && open === 'Bookings') {
-      const target = { name: 'Bookings' as const, params: { orgSlug } };
-      if (navigationRef.isReady()) navigationRef.navigate(target.name, target.params);
+      const initialPath = webPathFromPushData({ orgSlug, open: 'Bookings' });
+      const target = { name: 'WebApp' as const, params: { initialPath } };
+      if (navigationRef.isReady()) navigationRef.navigate(target.name, target.params as any);
       else setPendingNav(target);
       return;
     }
@@ -322,8 +324,9 @@ export default function App() {
     const bookingId = typeof bookingIdRaw === 'number' ? bookingIdRaw : Number(bookingIdRaw);
     if (!orgSlug || !Number.isFinite(bookingId)) return;
 
-    const target = { name: 'BookingDetail' as const, params: { orgSlug, bookingId } };
-    if (navigationRef.isReady()) navigationRef.navigate(target.name, target.params);
+    const initialPath = webPathFromPushData({ orgSlug, bookingId });
+    const target = { name: 'WebApp' as const, params: { initialPath } };
+    if (navigationRef.isReady()) navigationRef.navigate(target.name, target.params as any);
     else setPendingNav(target);
   }
 
@@ -332,7 +335,7 @@ export default function App() {
     (async () => {
       try {
         const token = await getAccessToken();
-        if (!cancelled) setInitialRouteName(token ? 'Home' : 'Welcome');
+        if (!cancelled) setInitialRouteName(token ? 'WebApp' : 'Welcome');
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -400,7 +403,9 @@ export default function App() {
           {({ navigation }) => (
             <SignInScreen
               mode="owner"
-              onSignedIn={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+              onSignedIn={() =>
+                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/' } }] })
+              }
             />
           )}
         </Stack.Screen>
@@ -408,7 +413,18 @@ export default function App() {
           {({ navigation }) => (
             <SignInScreen
               mode="staff"
-              onSignedIn={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+              onSignedIn={() =>
+                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/' } }] })
+              }
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="WebApp" options={{ headerShown: false }}>
+          {({ navigation, route }) => (
+            <WebAppScreen
+              initialPath={route.params?.initialPath}
+              onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
             />
           )}
         </Stack.Screen>
