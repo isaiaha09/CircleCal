@@ -297,6 +297,7 @@ class OrganizationMiddleware:
                 # Allow pricing, embedded checkout, and auth pages
                 allow_paths = [
                     f"/bus/{org.slug}/pricing/",
+                    f"/bus/{org.slug}/billing-unavailable/",
                     f"/billing/org/{org.slug}/embedded/",
                     f"/billing/api/bus/{org.slug}/embedded/",
                     "/accounts/login/",
@@ -317,6 +318,16 @@ class OrganizationMiddleware:
                 path = request.path
                 if not any(path.startswith(ap) for ap in allow_paths):
                     from django.urls import reverse
+                    try:
+                        ua = (request.META.get('HTTP_USER_AGENT') or '')
+                        is_app_ua = 'circlecalapp' in ua.lower()
+                    except Exception:
+                        is_app_ua = False
+
+                    if is_app_ua:
+                        messages.error(request, 'Your trial has ended. Pricing and billing are not available in the mobile app. Please manage billing on the web.')
+                        return redirect(reverse("calendar_app:app_billing_unavailable", kwargs={"org_slug": org.slug}))
+
                     return redirect(reverse("calendar_app:pricing_page", kwargs={"org_slug": org.slug}))
 
             # 7. Stripe Connect enforcement (for client card payments): owners/admins must connect.

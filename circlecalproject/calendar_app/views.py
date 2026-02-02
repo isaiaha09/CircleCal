@@ -5273,6 +5273,17 @@ def pricing_page(request, org_slug):
     if not org:
         return redirect("calendar_app:choose_business")
 
+    # Mobile app policy: pricing/billing is not available inside the native app WebView.
+    try:
+        ua = (request.META.get('HTTP_USER_AGENT') or '')
+        ua_lower = ua.lower()
+        is_app_ua = 'circlecalapp' in ua_lower
+    except Exception:
+        is_app_ua = False
+
+    if is_app_ua:
+        return redirect('calendar_app:dashboard', org_slug=org.slug)
+
     membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
     if not membership or membership.role != 'owner':
         return redirect('calendar_app:dashboard', org_slug=org.slug)
@@ -5312,6 +5323,28 @@ def pricing_page(request, org_slug):
         "display_plan": display_plan,
         "subscription": subscription,
         "now": now,
+    })
+
+
+@login_required
+@require_http_methods(['GET'])
+def app_billing_unavailable(request, org_slug):
+    """Inform app users that billing is managed on the web (no pricing/billing in-app)."""
+
+    org = request.organization
+    if not org:
+        return redirect("calendar_app:choose_business")
+
+    # Keep this page safe to show in web too, but tailor copy when in app.
+    try:
+        ua = (request.META.get('HTTP_USER_AGENT') or '')
+        is_app_ua = 'circlecalapp' in ua.lower()
+    except Exception:
+        is_app_ua = False
+
+    return render(request, 'calendar_app/app_billing_unavailable.html', {
+        'org': org,
+        'is_app_ua': is_app_ua,
     })
 
 

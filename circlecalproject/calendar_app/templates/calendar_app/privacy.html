@@ -7,11 +7,7 @@
 {% block content %}
 <div class="w-[95vw] mx-auto mt-8 bg-white border rounded-lg shadow-sm p-6 md:p-8 text-left sm:w-full sm:mt-0">
     <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-2 text-center sm:text-left">Privacy Policy</h1>
-    <p class="text-sm text-gray-600 mb-6 text-center sm:text-left">Effective date: December 25, 2025</p>
-
-    <div class="text-sm text-gray-600 mb-6">
-        <p class="mb-2"><strong>Note:</strong> This Privacy Policy is provided as a general template for CircleCal and is not legal advice. Consider reviewing it with a qualified attorney, especially for California/US compliance and your specific data flows.</p>
-    </div>
+    <p class="text-sm text-gray-600 mb-6 text-center sm:text-left">Effective date: February 1, 2026</p>
 
     <div class="space-y-6 text-gray-800">
         <section>
@@ -22,17 +18,20 @@
         <section>
             <h2 class="text-xl font-semibold mb-2">2. Information We Collect</h2>
             <ul class="list-disc pl-6 space-y-2">
-                <li><strong>Account information:</strong> name, email, username, and profile details you provide.</li>
-                <li><strong>Business information:</strong> business name, services, availability, and settings you configure.</li>
-                <li><strong>Booking information:</strong> appointment details and, where provided, client/customer names and contact details.</li>
-                <li><strong>Technical information:</strong> IP address, device/browser details, and logs needed to operate and secure the Service.</li>
-                <li><strong>Payment information:</strong> payments are processed by Stripe. CircleCal receives limited billing metadata (such as plan status and transaction identifiers) but does not store full card numbers.</li>
+                <li><strong>Account information:</strong> username, email address, and your name (if provided).</li>
+                <li><strong>Profile information:</strong> optional display name, timezone, notification preferences, and profile photo/avatar (if you upload one).</li>
+                <li><strong>Organization information:</strong> business name, slug, staff roles/memberships, services, availability/scheduling configuration, and related settings (including optional custom domain and embed settings if enabled).</li>
+                <li><strong>Booking information:</strong> appointment details (time, service, assigned staff/team/resource). If provided by the business or customer, this may include customer/client name and email address.</li>
+                <li><strong>Billing information:</strong> subscription billing is processed by Stripe. CircleCal stores and uses limited billing metadata such as Stripe customer/subscription identifiers, invoice identifiers, plan status, and non-sensitive payment method metadata (e.g., brand and last4). CircleCal does not store full card numbers.</li>
+                <li><strong>Client payment tracking (if enabled by a business):</strong> payment method selection (e.g., offline vs Stripe), payment status, and Stripe Checkout session identifiers associated with a booking.</li>
+                <li><strong>Push notifications (mobile app):</strong> if you enable notifications, we collect and store your Expo push token, device platform (iOS/Android), and last-seen timestamp so we can deliver notifications you request.</li>
+                <li><strong>Technical and security information:</strong> IP address, browser/app user agent, and logs needed to operate, debug, and secure the Service (including login activity and abuse prevention/rate-limiting signals).</li>
             </ul>
         </section>
 
         <section>
             <h2 class="text-xl font-semibold mb-2">3. Cookies</h2>
-            <p>CircleCal currently uses <strong>essential cookies</strong> and similar technologies required to operate the Service, such as keeping you signed in and protecting the platform. We do not currently use advertising cookies.</p>
+            <p>CircleCal uses <strong>essential cookies</strong> and similar technologies required to operate the Service, such as keeping you signed in (session cookies), CSRF/security protections, and remembering app-mode display settings. We do not currently use advertising cookies.</p>
         </section>
 
         <section>
@@ -51,7 +50,7 @@
             <h2 class="text-xl font-semibold mb-2">5. How We Share Information</h2>
             <p>We may share information in the following ways:</p>
             <ul class="list-disc pl-6 space-y-2">
-                <li><strong>Service providers:</strong> with vendors who help us run the Service (for example, payment processing via Stripe, hosting, and email delivery), subject to contractual protections.</li>
+                <li><strong>Service providers:</strong> with vendors who help us run the Service (for example, payment processing via Stripe, push delivery via Expo, bot protection via Cloudflare Turnstile, hosting, storage for uploaded media, and email delivery), subject to contractual protections.</li>
                 <li><strong>Within an organization:</strong> business owners may grant access to staff or managers; those users can access business data according to their role.</li>
                 <li><strong>Legal and safety:</strong> if required by law or to protect rights, safety, and security.</li>
                 <li><strong>Business transfers:</strong> if we are involved in a merger, acquisition, or sale of assets.</li>
@@ -70,7 +69,7 @@
 
         <section>
             <h2 class="text-xl font-semibold mb-2">8. Your Choices and Rights</h2>
-            <p>You may be able to request access, correction, or deletion of your information by contacting us. If you are a customer/client booking with a business that uses CircleCal, your request may need to be directed to that business as well.</p>
+            <p>You may be able to access, update, or delete certain information through your account settings. You may also request access, correction, or deletion of your information by contacting us. If you are a customer/client booking with a business that uses CircleCal, your request may need to be directed to that business as well.</p>
             <p class="mt-2">If you are a California resident, you may have additional rights under California privacy laws (such as the CCPA/CPRA), subject to applicable exceptions.</p>
         </section>
 

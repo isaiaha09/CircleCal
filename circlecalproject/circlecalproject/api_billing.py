@@ -23,6 +23,27 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 
+def _is_app_request(request) -> bool:
+    """Detect requests originating from the native CircleCal mobile app."""
+
+    try:
+        ua = (request.META.get("HTTP_USER_AGENT") or "")
+        return "circlecalapp" in ua.lower()
+    except Exception:
+        return False
+
+
+def _deny_in_app_billing(request) -> None:
+    """Prevent subscription purchase/management from inside the mobile app.
+
+    CircleCal does not offer pricing or billing flows inside the mobile app.
+    Use the web app in a browser for subscription management.
+    """
+
+    if _is_app_request(request):
+        raise ValidationError({"detail": "Pricing and billing are not available in the mobile app."})
+
+
 def _get_org_and_membership(*, user, org_param: str | None):
     if not org_param:
         raise ValidationError({"org": "This query param is required (org slug or id)."})
@@ -198,6 +219,7 @@ class BillingPlansView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        _deny_in_app_billing(request)
         org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
         _require_billing_admin(membership)
 
@@ -226,6 +248,7 @@ class BillingPortalSessionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        _deny_in_app_billing(request)
         org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
         _require_billing_admin(membership)
 
@@ -253,6 +276,7 @@ class BillingCheckoutSessionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        _deny_in_app_billing(request)
         org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
         _require_billing_admin(membership)
 
@@ -344,6 +368,7 @@ class StripeExpressDashboardLinkView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        _deny_in_app_billing(request)
         org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
         _require_billing_admin(membership)
 

@@ -49,6 +49,11 @@ def _sync_connect_status(org):
 def stripe_connect_start(request, org_slug):
     """Start/continue Stripe Connect Express onboarding for this business."""
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
@@ -109,6 +114,9 @@ def stripe_connect_start(request, org_slug):
 @require_http_methods(["GET"])
 def stripe_connect_refresh(request, org_slug):
     """Stripe sends users here if they need to re-start onboarding."""
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
     return redirect('billing:stripe_connect_start', org_slug=org_slug)
 
 
@@ -117,6 +125,11 @@ def stripe_connect_refresh(request, org_slug):
 def stripe_connect_return(request, org_slug):
     """Stripe returns here after onboarding; refresh status and send user back."""
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
@@ -143,6 +156,11 @@ def stripe_express_dashboard(request, org_slug):
     Uses Stripe's login link API so the user doesn't need to already be logged into Stripe.
     """
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
@@ -234,6 +252,22 @@ def _require_org_owner_or_admin(request, org):
     return None
 
 
+def _is_app_ua(request) -> bool:
+    try:
+        ua = (request.META.get('HTTP_USER_AGENT') or '')
+        return 'circlecalapp' in ua.lower()
+    except Exception:
+        return False
+
+
+def _deny_in_app_billing(request):
+    """CircleCal does not expose pricing/billing inside the native mobile app."""
+
+    if _is_app_ua(request):
+        return HttpResponseForbidden('Pricing and billing are not available in the mobile app. Please use CircleCal in a browser to manage your subscription.')
+    return None
+
+
 @require_http_methods(["GET"])
 def create_checkout_session(request, org_slug, plan_id):
     """
@@ -241,6 +275,11 @@ def create_checkout_session(request, org_slug, plan_id):
     URL: /billing/org/<org_slug>/checkout/<plan_id>/
     """
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
@@ -419,6 +458,11 @@ def billing_portal(request, org_slug):
     URL: /billing/org/<org_slug>/portal/
     """
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
@@ -659,6 +703,11 @@ def stripe_webhook(request):
 def embedded_checkout_page(request, org_slug, plan_id):
     """Render embedded Payment Element page under base.html."""
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err
@@ -721,6 +770,11 @@ from django.views.decorators.csrf import csrf_exempt
 def create_embedded_subscription(request, org_slug, plan_id):
     """Create an incomplete subscription and return client_secret for Payment Element."""
     org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
     err = _require_org_owner_or_admin(request, org)
     if err:
         return err

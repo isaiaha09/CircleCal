@@ -665,7 +665,7 @@
                             <nav class="hidden md:flex items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
-                                {% if user_org_role == 'owner' %}
+                                {% if user_org_role == 'owner' and not cc_app_mode %}
                                 <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
                                 {% endif %}
                                 <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
@@ -713,7 +713,7 @@
                             {% else %}
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Calendar</a>
-                                {% if user_org_role == 'owner' %}
+                                {% if user_org_role == 'owner' and not cc_app_mode %}
                                 <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
                                 {% endif %}
                                 <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Team</a>
@@ -1812,7 +1812,9 @@
                         {% if request.user.is_authenticated and request.organization %}
                             <li><a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Calendar</a></li>
                             <li><a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Dashboard</a></li>
+                            {% if not cc_app_mode %}
                             <li><a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Pricing</a></li>
+                            {% endif %}
                             <li><a href="{% url 'calendar_app:privacy' %}" class="text-gray-600 hover:text-blue-600">Privacy Policy</a></li>
                             <li><a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-600 hover:text-blue-600">Team</a></li>
                             <li><a href="{% url 'calendar_app:terms' %}" class="text-gray-600 hover:text-blue-600">Terms of Service</a></li>

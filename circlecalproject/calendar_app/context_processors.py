@@ -25,7 +25,14 @@ def cc_app_context(request):
     parsing limitations and to ensure consistent behavior across pages.
     """
     ua = (request.META.get('HTTP_USER_AGENT') or '')
-    is_app_ua = 'CircleCalApp' in ua
+    ua_lower = ua.lower()
+    is_app_ua = 'circlecalapp' in ua_lower
+
+    app_platform = None
+    if 'circlecalapp-ios' in ua_lower:
+        app_platform = 'ios'
+    elif 'circlecalapp-android' in ua_lower:
+        app_platform = 'android'
 
     cc_app_param = request.GET.get('cc_app') == '1'
     cc_app_cookie = request.COOKIES.get('cc_app') == '1'
@@ -36,4 +43,7 @@ def cc_app_context(request):
         'cc_app_param': cc_app_param,
         'cc_app_cookie': cc_app_cookie,
         'cc_app_mode': cc_app_mode,
+        'cc_app_platform': app_platform,
+        'cc_app_ios': bool(app_platform == 'ios'),
+        'cc_app_android': bool(app_platform == 'android'),
     }
