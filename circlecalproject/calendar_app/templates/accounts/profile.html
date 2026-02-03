@@ -20,6 +20,38 @@
     <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm w-full sm:w-auto">Save Changes</button>
   </div>
 
+  {% if cc_app_mode %}
+  <div class="w-full mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+    <div class="font-bold mb-1">Mobile setup steps</div>
+    <ol class="list-decimal pl-5 space-y-1">
+      {% if not user.first_name or not user.last_name %}
+        <li>
+          Enter your <span class="font-semibold">First Name</span> and <span class="font-semibold">Last Name</span> below.
+        </li>
+      {% else %}
+        <li>
+          First + Last name are already set.
+        </li>
+      {% endif %}
+      <li>
+        Tap <span class="font-semibold">Save Changes</span>.
+      </li>
+      {% if stripe_connect_modal_enabled and stripe_connect_start_url %}
+        <li>
+          Tap <span class="font-semibold">Continue to Stripe</span> and finish Stripe’s setup.
+        </li>
+        <li>
+          When you’re done, CircleCal will bring you back into the app automatically.
+        </li>
+      {% else %}
+        <li>
+          If prompted, connect Stripe from this page to accept card payments.
+        </li>
+      {% endif %}
+    </ol>
+  </div>
+  {% endif %}
+
   {# Require First/Last Name before leaving Profile (until saved). #}
   <div id="profile-name-required-modal" class="hidden fixed inset-0 z-50" style="z-index: 20001;">
     <div class="absolute inset-0 bg-black/50"></div>
