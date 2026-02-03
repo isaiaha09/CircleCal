@@ -554,6 +554,13 @@ class StaffLoginView(CustomLoginView):
 @login_required
 @require_POST
 def delete_account_view(request):
+	# Detect mobile app WebView traffic (UA marker).
+	try:
+		ua = (request.META.get('HTTP_USER_AGENT') or '')
+		is_app_mode = bool('CircleCalApp' in ua)
+	except Exception:
+		is_app_mode = False
+
 	# Verify password was provided and matches
 	password = request.POST.get('password')
 	u = request.user
@@ -608,12 +615,27 @@ def delete_account_view(request):
 		messages.success(request, "Your account has been deleted.")
 	except Exception:
 		messages.error(request, "We couldn't delete your account right now. Please try again.")
+
+	# In the mobile app, redirect to the app-logout endpoint so native can sign out and show a toast.
+	if is_app_mode:
+		try:
+			return redirect(reverse('accounts:mobile_logout') + '?next=/&cc_flash=deleted')
+		except Exception:
+			return redirect('/')
+
 	return redirect("calendar_app:home")
 
 
 @login_required
 @require_POST
 def deactivate_account_view(request):
+	# Detect mobile app WebView traffic (UA marker).
+	try:
+		ua = (request.META.get('HTTP_USER_AGENT') or '')
+		is_app_mode = bool('CircleCalApp' in ua)
+	except Exception:
+		is_app_mode = False
+
 	# Require current password to confirm
 	password = request.POST.get('password')
 	u = request.user
@@ -672,6 +694,15 @@ def deactivate_account_view(request):
 		messages.success(request, "Your account has been deactivated. If you had connected Stripe in CircleCal, it has been disconnected here (your Stripe account itself is not deleted). To permanently delete your Stripe account, do that directly in Stripe.")
 	except Exception:
 		messages.error(request, "We couldn't deactivate your account right now. Please try again.")
+
+	# In the mobile app, redirect to the app-logout endpoint so native can sign out and show a toast.
+	# Reactivation for deactivated accounts is web-only.
+	if is_app_mode:
+		try:
+			return redirect(reverse('accounts:mobile_logout') + '?next=/&cc_flash=deactivated')
+		except Exception:
+			return redirect('/')
+
 	return redirect('calendar_app:home')
 
 
