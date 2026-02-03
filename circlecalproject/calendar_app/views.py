@@ -5479,6 +5479,19 @@ def signup(request):
     turnstile_enabled = bool(turnstile_is_enabled() if turnstile_is_enabled else False)
     turnstile_site_key = (get_turnstile_site_key() if get_turnstile_site_key else '')
 
+    # Mobile app WebView: Turnstile can get stuck in an embedded WebView environment.
+    # Disable Turnstile for app-only traffic on the Signup page (rate limiting still applies).
+    try:
+        ua = (request.META.get('HTTP_USER_AGENT') or '')
+        is_app_ua = 'circlecalapp' in ua.lower()
+        cc_app_param = request.GET.get('cc_app') == '1'
+        cc_app_cookie = request.COOKIES.get('cc_app') == '1'
+        if is_app_ua and (cc_app_param or cc_app_cookie):
+            turnstile_enabled = False
+            turnstile_site_key = ''
+    except Exception:
+        pass
+
     if request.method == "POST":
         form = SignupForm(request.POST)
 
