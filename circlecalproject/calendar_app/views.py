@@ -5510,7 +5510,18 @@ def signup(request):
                 pass
 
             # Restart signup without the cc_restart flag to avoid loops.
-            return redirect(f"{request.path}?cc_app=1")
+            resp = redirect(f"{request.path}?cc_app=1")
+            try:
+                resp.delete_cookie('post_login_redirect')
+            except Exception:
+                pass
+            try:
+                # Reduce the chance of embedded browsers restoring a cached/previous page.
+                resp['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                resp['Pragma'] = 'no-cache'
+            except Exception:
+                pass
+            return resp
     except Exception:
         pass
 
