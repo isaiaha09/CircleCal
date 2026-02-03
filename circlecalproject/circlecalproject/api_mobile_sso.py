@@ -38,7 +38,18 @@ class MobileSSOLinkView(APIView):
         return self._issue(request, next_path)
 
     def _issue(self, request, next_path: str):
-        token_obj = MobileSSOToken.create_for_user(request.user, ttl_seconds=300)
+        # Stripe onboarding can easily take longer than 5 minutes on mobile.
+        # If the one-time token expires too quickly, users see a 400 "invalid or expired".
+        # Use a longer TTL for onboarding routes, keep a shorter TTL otherwise.
+        ttl_seconds = 300
+        try:
+            np = (next_path or '').lower()
+            if ('post-login' in np) or ('stripe' in np) or ('/accounts/profile' in np) or ('/profile' in np):
+                ttl_seconds = 60 * 60  # 1 hour
+        except Exception:
+            ttl_seconds = 300
+
+        token_obj = MobileSSOToken.create_for_user(request.user, ttl_seconds=ttl_seconds)
 
         consume_path = reverse(
             "accounts:mobile_sso_consume",
