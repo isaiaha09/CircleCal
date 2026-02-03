@@ -98,6 +98,13 @@ def stripe_connect_start(request, org_slug):
         # can deep-link back into the app (and close the in-app browser).
         try:
             if _is_app_ua(request) or str(request.GET.get('cc_app') or '') == '1':
+                # Remember that this onboarding was launched from the mobile app.
+                # This is a fallback for cases where cc_app=1 might not survive.
+                try:
+                    request.session['cc_app_stripe_connect'] = True
+                except Exception:
+                    pass
+
                 joiner = '&' if ('?' in refresh_url) else '?'
                 if 'cc_app=1' not in refresh_url:
                     refresh_url = f"{refresh_url}{joiner}cc_app=1"
@@ -152,7 +159,17 @@ def stripe_connect_return(request, org_slug):
         # If Connect onboarding was launched from the native app, return back to the app
         # (so the in-app browser can close and the user is back in the real app UI).
         try:
-            if str(request.GET.get('cc_app') or '') == '1':
+            launched_from_app = False
+            try:
+                launched_from_app = bool(request.session.get('cc_app_stripe_connect'))
+            except Exception:
+                launched_from_app = False
+
+            if str(request.GET.get('cc_app') or '') == '1' or launched_from_app:
+                try:
+                    request.session.pop('cc_app_stripe_connect', None)
+                except Exception:
+                    pass
                 return redirect('circlecal://stripe-return?status=connected')
         except Exception:
             pass
