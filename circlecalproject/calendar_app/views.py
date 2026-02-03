@@ -2929,7 +2929,10 @@ def post_login_redirect(request):
             cc_app_flow = True
     except Exception:
         pass
-    is_app_mode = bool(cc_app_param or cc_app_cookie or (is_app_ua and (cc_app_param or cc_app_cookie)) or cc_app_flow)
+    # Treat the WebView UA marker as sufficient to enable app-mode.
+    # Relying on cc_app query propagation alone is brittle because internal navigation
+    # can drop query params.
+    is_app_mode = bool(cc_app_param or cc_app_cookie or is_app_ua or cc_app_flow)
 
     def _redirect_named(view_name: str, **kwargs):
         from django.urls import reverse

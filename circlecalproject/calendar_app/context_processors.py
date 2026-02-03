@@ -36,13 +36,20 @@ def cc_app_context(request):
 
     cc_app_param = request.GET.get('cc_app') == '1'
     cc_app_cookie = request.COOKIES.get('cc_app') == '1'
-    cc_app_mode = bool(is_app_ua and (cc_app_param or cc_app_cookie))
+    try:
+        cc_app_flow = bool(request.session.get('cc_app_flow'))
+    except Exception:
+        cc_app_flow = False
+
+    # UA is set by the in-app WebView. Query params and cookies are best-effort.
+    cc_app_mode = bool(is_app_ua or cc_app_param or cc_app_cookie or cc_app_flow)
 
     return {
         'cc_is_app_ua': is_app_ua,
         'cc_app_param': cc_app_param,
         'cc_app_cookie': cc_app_cookie,
         'cc_app_mode': cc_app_mode,
+        'cc_app_flow': cc_app_flow,
         'cc_app_platform': app_platform,
         'cc_app_ios': bool(app_platform == 'ios'),
         'cc_app_android': bool(app_platform == 'android'),

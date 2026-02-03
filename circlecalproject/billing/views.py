@@ -44,7 +44,7 @@ def _make_app_flow_sig(org_id: int, purpose: str) -> str:
     return signing.dumps({'org': int(org_id), 'p': str(purpose)}, salt='cc_app_flow', compress=True)
 
 
-def _check_app_flow_sig(sig: str, org_id: int, purpose: str, *, max_age_seconds: int = 2 * 60 * 60) -> bool:
+def _check_app_flow_sig(sig: str, org_id: int, purpose: str, *, max_age_seconds: int = 24 * 60 * 60) -> bool:
     if not sig:
         return False
     try:
@@ -132,7 +132,8 @@ def stripe_connect_start(request, org_slug):
             except Exception:
                 cc_app_flow = False
 
-            if _is_app_ua(request) or str(request.GET.get('cc_app') or '') == '1' or cc_app_flow:
+            cc_app_cookie = str(request.COOKIES.get('cc_app') or '') == '1'
+            if _is_app_ua(request) or str(request.GET.get('cc_app') or '') == '1' or cc_app_cookie or cc_app_flow:
                 # Remember that this onboarding was launched from the mobile app.
                 # This is a fallback for cases where cc_app=1 might not survive.
                 try:
@@ -179,9 +180,10 @@ def stripe_connect_refresh(request, org_slug):
     sig_ok = _check_app_flow_sig(sig, org.id, 'stripe_connect')
     is_app = str(request.GET.get('cc_app') or '') == '1' or sig_ok
 
-    # If we're in the OS auth-session browser and cookies aren't shared, close it
-    # by deep-linking back into the app.
-    if is_app and sig_ok and not getattr(request.user, 'is_authenticated', False):
+    # If this flow was started from the mobile app (valid signature), always
+    # deep-link back into the app to close the OS auth-session browser.
+    # This must work whether or not cookies were shared (authenticated or not).
+    if is_app and sig_ok:
         return redirect('circlecal://stripe-return?status=refresh')
 
     if not getattr(request.user, 'is_authenticated', False):
@@ -199,10 +201,10 @@ def stripe_connect_return(request, org_slug):
     sig_ok = _check_app_flow_sig(sig, org.id, 'stripe_connect')
     is_app = str(request.GET.get('cc_app') or '') == '1' or sig_ok
 
-    # OS auth-session browsers frequently do not share CircleCal cookies.
-    # If we have a valid app-flow signature, allow the return without requiring login
-    # and immediately deep-link back into the app to close the browser.
-    if is_app and sig_ok and not getattr(request.user, 'is_authenticated', False):
+    # If we have a valid app-flow signature, immediately deep-link back into the app
+    # to close the OS auth-session browser.
+    # This must work even if the auth-session browser *does* share cookies.
+    if is_app and sig_ok:
         ok = _sync_connect_status(org)
         if ok and getattr(org, 'stripe_connect_charges_enabled', False):
             return redirect('circlecal://stripe-return?status=connected')
