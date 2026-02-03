@@ -29,7 +29,10 @@
                     {% if not cc_app_mode %}
                         <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
                     {% else %}
-                        <span> To use this feature, please upgrade your plan on circlecal.app (in a browser) first.</span>
+                        <span> Billing changes aren’t available in the mobile app. </span>
+                        <a href="{% url 'calendar_app:app_plans_page' org.slug %}?cc_app=1" style="color:#0b5ed7; text-decoration: underline;">View plans</a>
+                        <span> or </span>
+                        <a href="{% url 'calendar_app:contact' %}?cc_app=1" style="color:#0b5ed7; text-decoration: underline;">contact support</a>
                     {% endif %}
                 </div>
             {% endif %}
@@ -70,7 +73,10 @@
                         {% if not cc_app_mode %}
                             <a href="/pricing/" style="color:#0b5ed7; text-decoration: underline;">View pricing</a>
                         {% else %}
-                            <span> To use this feature, please upgrade your plan on circlecal.app (in a browser) first.</span>
+                            <span> Billing changes aren’t available in the mobile app. </span>
+                            <a href="{% url 'calendar_app:app_plans_page' org.slug %}?cc_app=1" style="color:#0b5ed7; text-decoration: underline;">View plans</a>
+                            <span> or </span>
+                            <a href="{% url 'calendar_app:contact' %}?cc_app=1" style="color:#0b5ed7; text-decoration: underline;">contact support</a>
                         {% endif %}
                     </div>
                 {% else %}

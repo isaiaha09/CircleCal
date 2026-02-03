@@ -683,8 +683,12 @@
                             <nav class="hidden md:flex items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
-                                {% if user_org_role == 'owner' and not cc_app_mode %}
-                                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
+                                {% if user_org_role == 'owner' %}
+                                  {% if cc_app_mode %}
+                                  <a href="{% url 'calendar_app:app_plans_page' request.organization.slug %}?cc_app=1" class="text-gray-700 hover:text-blue-600">Plans</a>
+                                  {% else %}
+                                  <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
+                                  {% endif %}
                                 {% endif %}
                                 <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="text-gray-700 hover:text-blue-600">Switch</a>
@@ -731,9 +735,13 @@
                             {% else %}
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Calendar</a>
-                                {% if user_org_role == 'owner' and not cc_app_mode %}
-                                <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
-                                {% endif %}
+                                                                {% if user_org_role == 'owner' %}
+                                                                    {% if cc_app_mode %}
+                                                                    <a href="{% url 'calendar_app:app_plans_page' request.organization.slug %}?cc_app=1" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Plans</a>
+                                                                    {% else %}
+                                                                    <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
+                                                                    {% endif %}
+                                                                {% endif %}
                                 <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Team</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Switch Business</a>
                             {% endif %}

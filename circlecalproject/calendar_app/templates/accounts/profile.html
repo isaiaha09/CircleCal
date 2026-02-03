@@ -716,7 +716,10 @@
                   {% if not cc_app_mode %}
                     <a href="{% url 'calendar_app:pricing_page' m.organization.slug %}" class="text-blue-700 font-semibold underline">View pricing</a>
                   {% else %}
-                    <span class="text-gray-600">To use this feature, please upgrade your plan on circlecal.app (in a browser) first.</span>
+                    <span class="text-gray-600">Billing changes aren’t available in the mobile app.</span>
+                    <a href="{% url 'calendar_app:app_plans_page' m.organization.slug %}?cc_app=1" class="text-blue-700 font-semibold underline">View plans</a>
+                    <span class="text-gray-600">or</span>
+                    <a href="{% url 'calendar_app:contact' %}?cc_app=1" class="text-blue-700 font-semibold underline">contact support</a>
                   {% endif %}
                 </div>
               {% endif %}

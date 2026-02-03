@@ -5,14 +5,16 @@
 {% block content %}
 <div class="max-w-2xl mx-auto">
   <div class="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-    <h1 class="text-xl font-bold text-gray-900 mb-2">Upgrade required</h1>
+    <h1 class="text-xl font-bold text-gray-900 mb-2">Not available in the mobile app</h1>
     <p class="text-gray-700">
-      This feature requires a higher plan.
-      Please upgrade your plan on circlecal.app (in a browser) first, then return to the app.
+      This feature requires a higher plan. Billing changes aren’t available in the mobile app.
+      You can view your current plan details, or contact support.
     </p>
 
-    <div class="mt-5">
-      <a href="{% url 'calendar_app:dashboard' org.slug %}" class="btn-primary">Back to dashboard</a>
+    <div class="mt-5 flex flex-wrap gap-3">
+      <a href="{% url 'calendar_app:app_plans_page' org.slug %}?cc_app=1" class="btn-primary">View plans</a>
+      <a href="{% url 'calendar_app:contact' %}?cc_app=1" class="btn-ghost">Contact support</a>
+      <a href="{% url 'calendar_app:dashboard' org.slug %}?cc_app=1" class="btn-ghost">Back to dashboard</a>
     </div>
   </div>
 </div>

@@ -5983,6 +5983,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const CAN_USE_OVERRIDES = {{ can_use_overrides|yesno:'true,false' }};
         const CC_APP_MODE = {{ cc_app_mode|yesno:'true,false' }};
         const PRICING_URL = "{% url 'calendar_app:pricing_page' organization.slug %}";
+        const APP_PLANS_URL = "{% url 'calendar_app:app_plans_page' organization.slug %}?cc_app=1";
         // Selected member id (string). Defaults to saved selection or provided default_member_id or first member id.
         const DEFAULT_MEMBER = {{ default_member_id|default:'null' }};
         // Selection storage:
@@ -6049,7 +6050,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!modal || !cancelBtn || !goBtn) {
                     const msg = 'A higher subscription plan is required to override days.';
                     if (CC_APP_MODE) {
-                        alert(msg + "\n\nTo use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app.");
+                        alert(msg + "\n\nThis feature isn’t available in the mobile app. You can view plan details in Plans or contact support.");
                     } else {
                         const go = confirm(msg + "\n\nPress OK to view pricing, or Cancel to stay on the calendar.");
                         if (go) {
@@ -6089,7 +6090,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     try { e.preventDefault(); } catch (err) {}
                     if (CC_APP_MODE) {
                         close();
-                        try { alert('Upgrade required. To use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app.'); } catch (err) {}
+                        try { window.location.href = APP_PLANS_URL; } catch (err) {}
                     } else {
                         try { window.location.href = PRICING_URL; } catch (err) {}
                     }
@@ -6104,7 +6105,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) {
                 const msg = 'Upgrade to at least the Pro plan to override days (per-date availability).';
                 if (CC_APP_MODE) {
-                    try { alert(msg + "\n\nTo use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app."); } catch (err) {}
+                    try { alert(msg + "\n\nThis feature isn’t available in the mobile app. You can view plan details in Plans or contact support."); } catch (err) {}
                 } else {
                     const go = confirm(msg + "\n\nPress OK to view pricing, or Cancel to stay on the calendar.");
                     if (go) {

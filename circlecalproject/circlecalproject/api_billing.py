@@ -37,7 +37,6 @@ def _deny_in_app_billing(request) -> None:
     """Prevent subscription purchase/management from inside the mobile app.
 
     CircleCal does not offer pricing or billing flows inside the mobile app.
-    Use the web app in a browser for subscription management.
     """
 
     if _is_app_request(request):

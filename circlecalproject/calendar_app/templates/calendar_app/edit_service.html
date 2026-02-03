@@ -2967,6 +2967,7 @@
       if (CAN_USE_PRO_TEAM) return;
       const CC_APP_MODE = {{ cc_app_mode|yesno:'true,false' }};
       const PRICING_URL = "{% url 'calendar_app:pricing_page' org.slug %}";
+      const APP_PLANS_URL = "{% url 'calendar_app:app_plans_page' org.slug %}?cc_app=1";
 
       function openModal(){
         const modal = document.getElementById('ccAdvancedUpgradeModal');
@@ -2974,7 +2975,7 @@
         const goBtn = document.getElementById('ccAdvancedUpgradeGoBtn');
         if (!modal || !cancelBtn || !goBtn){
           if (CC_APP_MODE) {
-            alert('A Pro subscription or higher is required to have access to the advanced settings features.\n\nTo use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app.');
+            alert('A Pro subscription or higher is required to have access to the advanced settings features.\n\nThis feature isn’t available in the mobile app. You can view plan details in Plans or contact support.');
           } else {
             const go = confirm('A Pro subscription or higher is required to have access to the advanced settings features.\n\nPress OK to view pricing, or Cancel to stay here.');
             if (go) { try { window.location.href = PRICING_URL; } catch(e) {} }
@@ -2988,7 +2989,7 @@
           try{ e.preventDefault(); }catch(err){}
           if (CC_APP_MODE) {
             close();
-            try { alert('Upgrade required. To use this feature, please upgrade your plan on circlecal.app (in a browser) first, then return to the app.'); } catch (err) {}
+            try { window.location.href = APP_PLANS_URL; } catch (err) {}
           } else {
             try{ window.location.href = PRICING_URL; }catch(err){}
           }
