@@ -36,4 +36,7 @@ urlpatterns = [
 
     # Stripe Express Dashboard (single-use login link)
     path("bus/<slug:org_slug>/stripe/connect/express-dashboard/", views.stripe_express_dashboard, name="stripe_express_dashboard"),
+
+    # Mobile deep-link return (used by Stripe Express Dashboard redirect_url)
+    path("stripe/express/return/", views.stripe_express_return_to_app, name="stripe_express_return_to_app"),
 ]

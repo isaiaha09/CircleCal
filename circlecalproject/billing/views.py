@@ -50,9 +50,8 @@ def stripe_connect_start(request, org_slug):
     """Start/continue Stripe Connect Express onboarding for this business."""
     org = get_object_or_404(Organization, slug=org_slug)
 
-    deny = _deny_in_app_billing(request)
-    if deny:
-        return deny
+    # Stripe Connect onboarding is not a subscription purchase/upgrade flow.
+    # Keep subscription billing blocked in-app, but allow Connect onboarding.
 
     err = _require_org_owner_or_admin(request, org)
     if err:
@@ -95,6 +94,19 @@ def stripe_connect_start(request, org_slug):
             reverse('billing:stripe_connect_return', kwargs={'org_slug': org.slug})
         )
 
+        # Preserve app-mode across the external Stripe flow so the return handler
+        # can deep-link back into the app (and close the in-app browser).
+        try:
+            if _is_app_ua(request) or str(request.GET.get('cc_app') or '') == '1':
+                joiner = '&' if ('?' in refresh_url) else '?'
+                if 'cc_app=1' not in refresh_url:
+                    refresh_url = f"{refresh_url}{joiner}cc_app=1"
+                joiner = '&' if ('?' in return_url) else '?'
+                if 'cc_app=1' not in return_url:
+                    return_url = f"{return_url}{joiner}cc_app=1"
+        except Exception:
+            pass
+
         link = stripe.AccountLink.create(
             account=acct_id,
             refresh_url=refresh_url,
@@ -114,9 +126,6 @@ def stripe_connect_start(request, org_slug):
 @require_http_methods(["GET"])
 def stripe_connect_refresh(request, org_slug):
     """Stripe sends users here if they need to re-start onboarding."""
-    deny = _deny_in_app_billing(request)
-    if deny:
-        return deny
     return redirect('billing:stripe_connect_start', org_slug=org_slug)
 
 
@@ -126,9 +135,7 @@ def stripe_connect_return(request, org_slug):
     """Stripe returns here after onboarding; refresh status and send user back."""
     org = get_object_or_404(Organization, slug=org_slug)
 
-    deny = _deny_in_app_billing(request)
-    if deny:
-        return deny
+    # Stripe Connect onboarding return is not subscription billing.
 
     err = _require_org_owner_or_admin(request, org)
     if err:
@@ -142,10 +149,35 @@ def stripe_connect_return(request, org_slug):
             request.session['cc_stripe_connected_dashboard_modal'] = True
         except Exception:
             pass
+        # If Connect onboarding was launched from the native app, return back to the app
+        # (so the in-app browser can close and the user is back in the real app UI).
+        try:
+            if str(request.GET.get('cc_app') or '') == '1':
+                return redirect('circlecal://stripe-return?status=connected')
+        except Exception:
+            pass
+
         return redirect('calendar_app:dashboard', org_slug=org.slug)
 
     messages.warning(request, 'Stripe connection started, but is not fully enabled yet. Please finish onboarding in Stripe.')
     return redirect('billing:stripe_connect_start', org_slug=org.slug)
+
+
+@require_http_methods(["GET"])
+def stripe_express_return_to_app(request):
+    """Return URL for Stripe Express Dashboard.
+
+    Stripe login links can specify a `redirect_url` that Stripe sends users to after they
+    exit the Express dashboard. For the mobile app, we immediately deep-link back into
+    the native app so the in-app browser closes.
+    """
+
+    # Always prefer deep-linking back into the app.
+    try:
+        return redirect('circlecal://stripe-return?status=express_done')
+    except Exception:
+        # Safe fallback for environments that don't allow custom schemes.
+        return redirect('accounts:profile')
 
 
 @login_required
@@ -157,9 +189,7 @@ def stripe_express_dashboard(request, org_slug):
     """
     org = get_object_or_404(Organization, slug=org_slug)
 
-    deny = _deny_in_app_billing(request)
-    if deny:
-        return deny
+    # Stripe Express Dashboard is not subscription billing.
 
     err = _require_org_owner_or_admin(request, org)
     if err:

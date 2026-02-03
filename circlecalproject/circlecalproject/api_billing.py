@@ -367,7 +367,8 @@ class StripeExpressDashboardLinkView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        _deny_in_app_billing(request)
+        # Stripe Express Dashboard is not a subscription purchase/upgrade flow.
+        # Allow owners to manage their connected Stripe account from the mobile app.
         org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
         _require_billing_admin(membership)
 
@@ -379,7 +380,22 @@ class StripeExpressDashboardLinkView(APIView):
 
         try:
             stripe.api_key = settings.STRIPE_SECRET_KEY
-            link = stripe.Account.create_login_link(acct_id)
+            # When opened inside the mobile app, ensure the user can return back to the app.
+            # Stripe will redirect to this URL when the user exits the Express dashboard.
+            try:
+                redirect_url = request.build_absolute_uri(reverse("billing:stripe_express_return_to_app"))
+            except Exception:
+                redirect_url = None
+
+            try:
+                link = (
+                    stripe.Account.create_login_link(acct_id, redirect_url=redirect_url)
+                    if redirect_url
+                    else stripe.Account.create_login_link(acct_id)
+                )
+            except Exception:
+                # Fallback for older stripe-python versions / parameter mismatch.
+                link = stripe.Account.create_login_link(acct_id)
             url = getattr(link, "url", None) or link.get("url")
             if not url:
                 raise ValueError("Stripe did not return a login link URL.")
