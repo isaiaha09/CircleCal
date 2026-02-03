@@ -20,8 +20,38 @@ from django.db.models import Q
 import logging
 import traceback
 from django.contrib import messages
+from django.contrib.auth.views import redirect_to_login
+from django.core import signing
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def _add_query_param(url: str, key: str, value: str, *, overwrite: bool = True) -> str:
+    try:
+        parts = urlsplit(url)
+        qs = parse_qsl(parts.query, keep_blank_values=True)
+        if overwrite:
+            qs = [(k, v) for (k, v) in qs if k != key]
+        qs.append((key, value))
+        new_query = urlencode(qs)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    except Exception:
+        return url
+
+
+def _make_app_flow_sig(org_id: int, purpose: str) -> str:
+    return signing.dumps({'org': int(org_id), 'p': str(purpose)}, salt='cc_app_flow', compress=True)
+
+
+def _check_app_flow_sig(sig: str, org_id: int, purpose: str, *, max_age_seconds: int = 2 * 60 * 60) -> bool:
+    if not sig:
+        return False
+    try:
+        payload = signing.loads(sig, salt='cc_app_flow', max_age=max_age_seconds)
+        return int(payload.get('org')) == int(org_id) and str(payload.get('p')) == str(purpose)
+    except Exception:
+        return False
 
 
 def _sync_connect_status(org):
@@ -44,7 +74,6 @@ def _sync_connect_status(org):
         return False
 
 
-@login_required
 @require_http_methods(["GET"])
 def stripe_connect_start(request, org_slug):
     """Start/continue Stripe Connect Express onboarding for this business."""
@@ -97,7 +126,13 @@ def stripe_connect_start(request, org_slug):
         # Preserve app-mode across the external Stripe flow so the return handler
         # can deep-link back into the app (and close the in-app browser).
         try:
-            if _is_app_ua(request) or str(request.GET.get('cc_app') or '') == '1':
+            cc_app_flow = False
+            try:
+                cc_app_flow = bool(request.session.get('cc_app_flow'))
+            except Exception:
+                cc_app_flow = False
+
+            if _is_app_ua(request) or str(request.GET.get('cc_app') or '') == '1' or cc_app_flow:
                 # Remember that this onboarding was launched from the mobile app.
                 # This is a fallback for cases where cc_app=1 might not survive.
                 try:
@@ -105,12 +140,18 @@ def stripe_connect_start(request, org_slug):
                 except Exception:
                     pass
 
-                joiner = '&' if ('?' in refresh_url) else '?'
-                if 'cc_app=1' not in refresh_url:
-                    refresh_url = f"{refresh_url}{joiner}cc_app=1"
-                joiner = '&' if ('?' in return_url) else '?'
-                if 'cc_app=1' not in return_url:
-                    return_url = f"{return_url}{joiner}cc_app=1"
+                # Add a signed token so the Stripe return/refresh handlers can
+                # identify app-originated flows even when the OS auth-session browser
+                # does not share CircleCal cookies (common on iOS/Android).
+                try:
+                    sig = _make_app_flow_sig(org.id, 'stripe_connect')
+                    refresh_url = _add_query_param(refresh_url, 'cc_sig', sig, overwrite=True)
+                    return_url = _add_query_param(return_url, 'cc_sig', sig, overwrite=True)
+                except Exception:
+                    pass
+
+                refresh_url = _add_query_param(refresh_url, 'cc_app', '1', overwrite=False)
+                return_url = _add_query_param(return_url, 'cc_app', '1', overwrite=False)
         except Exception:
             pass
 
@@ -129,18 +170,46 @@ def stripe_connect_start(request, org_slug):
         }, status=200)
 
 
-@login_required
 @require_http_methods(["GET"])
 def stripe_connect_refresh(request, org_slug):
     """Stripe sends users here if they need to re-start onboarding."""
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    sig = str(request.GET.get('cc_sig') or '')
+    sig_ok = _check_app_flow_sig(sig, org.id, 'stripe_connect')
+    is_app = str(request.GET.get('cc_app') or '') == '1' or sig_ok
+
+    # If we're in the OS auth-session browser and cookies aren't shared, close it
+    # by deep-linking back into the app.
+    if is_app and sig_ok and not getattr(request.user, 'is_authenticated', False):
+        return redirect('circlecal://stripe-return?status=refresh')
+
+    if not getattr(request.user, 'is_authenticated', False):
+        return redirect_to_login(request.get_full_path())
+
     return redirect('billing:stripe_connect_start', org_slug=org_slug)
 
 
-@login_required
 @require_http_methods(["GET"])
 def stripe_connect_return(request, org_slug):
     """Stripe returns here after onboarding; refresh status and send user back."""
     org = get_object_or_404(Organization, slug=org_slug)
+
+    sig = str(request.GET.get('cc_sig') or '')
+    sig_ok = _check_app_flow_sig(sig, org.id, 'stripe_connect')
+    is_app = str(request.GET.get('cc_app') or '') == '1' or sig_ok
+
+    # OS auth-session browsers frequently do not share CircleCal cookies.
+    # If we have a valid app-flow signature, allow the return without requiring login
+    # and immediately deep-link back into the app to close the browser.
+    if is_app and sig_ok and not getattr(request.user, 'is_authenticated', False):
+        ok = _sync_connect_status(org)
+        if ok and getattr(org, 'stripe_connect_charges_enabled', False):
+            return redirect('circlecal://stripe-return?status=connected')
+        return redirect('circlecal://stripe-return?status=pending')
+
+    if not getattr(request.user, 'is_authenticated', False):
+        return redirect_to_login(request.get_full_path())
 
     # Stripe Connect onboarding return is not subscription billing.
 
@@ -165,7 +234,12 @@ def stripe_connect_return(request, org_slug):
             except Exception:
                 launched_from_app = False
 
-            if str(request.GET.get('cc_app') or '') == '1' or launched_from_app:
+            try:
+                launched_from_app = launched_from_app or bool(request.session.get('cc_app_flow'))
+            except Exception:
+                pass
+
+            if is_app or launched_from_app:
                 try:
                     request.session.pop('cc_app_stripe_connect', None)
                 except Exception:

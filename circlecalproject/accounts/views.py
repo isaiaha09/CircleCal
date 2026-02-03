@@ -67,6 +67,16 @@ def mobile_sso_consume_view(request, token: str):
 			request.session.set_expiry(0)
 	except Exception:
 		pass
+
+	# Also record that this session is part of a mobile app flow when the
+	# SSO link is being used to enter cc_app=1 pages (even if the UA is a
+	# system browser auth-session, which won't include CircleCalApp).
+	try:
+		next_marker = (next_url or '')
+		if (request.GET.get('cc_app') == '1') or ('cc_app=1' in next_marker):
+			request.session['cc_app_flow'] = True
+	except Exception:
+		pass
 	return redirect(next_url)
 
 
@@ -262,7 +272,12 @@ def profile_view(request):
 					stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org2.slug})
 					try:
 						ua = (request.META.get('HTTP_USER_AGENT') or '')
-						is_app = ('circlecalapp' in ua.lower()) or (request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1')
+						is_app = (
+							('circlecalapp' in ua.lower())
+							or (request.GET.get('cc_app') == '1')
+							or (request.COOKIES.get('cc_app') == '1')
+							or bool(request.session.get('cc_app_flow'))
+						)
 						if is_app and stripe_connect_start_url and ('cc_app=1' not in stripe_connect_start_url):
 							joiner = '&' if ('?' in stripe_connect_start_url) else '?'
 							stripe_connect_start_url = f"{stripe_connect_start_url}{joiner}cc_app=1"
@@ -366,7 +381,12 @@ def profile_view(request):
 			stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org.slug})
 			try:
 				ua = (request.META.get('HTTP_USER_AGENT') or '')
-				is_app = ('circlecalapp' in ua.lower()) or (request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1')
+				is_app = (
+					('circlecalapp' in ua.lower())
+					or (request.GET.get('cc_app') == '1')
+					or (request.COOKIES.get('cc_app') == '1')
+					or bool(request.session.get('cc_app_flow'))
+				)
 				if is_app and stripe_connect_start_url and ('cc_app=1' not in stripe_connect_start_url):
 					joiner = '&' if ('?' in stripe_connect_start_url) else '?'
 					stripe_connect_start_url = f"{stripe_connect_start_url}{joiner}cc_app=1"

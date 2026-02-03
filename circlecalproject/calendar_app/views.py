@@ -2904,17 +2904,32 @@ def post_login_redirect(request):
     memberships = Membership.objects.filter(user=request.user, is_active=True).select_related("organization")
     count = memberships.count()
 
-    # If user's profile is incomplete, require profile completion before
-    # granting access to the dashboard. Treat missing Profile as incomplete.
+    # If user's profile is incomplete, staff/manager accounts may be required
+    # to complete Profile before continuing. Owners/admins should proceed.
     try:
         prof = request.user.profile
         profile_complete = bool(prof.avatar or (prof.timezone and prof.timezone != 'UTC'))
     except Exception:
         profile_complete = False
 
+    # App-mode propagation:
+    # - WebView requests have CircleCalApp UA.
+    # - OS auth-session browsers do not, but are still part of the mobile flow.
     ua = (request.META.get('HTTP_USER_AGENT') or '')
     is_app_ua = ('CircleCalApp' in ua)
-    is_app_mode = is_app_ua and ((request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1'))
+    cc_app_param = (request.GET.get('cc_app') == '1')
+    cc_app_cookie = (request.COOKIES.get('cc_app') == '1')
+    try:
+        cc_app_flow = bool(request.session.get('cc_app_flow'))
+    except Exception:
+        cc_app_flow = False
+    try:
+        if cc_app_param and not cc_app_flow:
+            request.session['cc_app_flow'] = True
+            cc_app_flow = True
+    except Exception:
+        pass
+    is_app_mode = bool(cc_app_param or cc_app_cookie or (is_app_ua and (cc_app_param or cc_app_cookie)) or cc_app_flow)
 
     def _redirect_named(view_name: str, **kwargs):
         from django.urls import reverse
@@ -2932,10 +2947,13 @@ def post_login_redirect(request):
         return _redirect_named('calendar_app:choose_business')
 
     if count == 1:
-        # If profile incomplete, send user to profile editing page first
-        if not profile_complete:
+        m = memberships.first()
+        org = m.organization
+        role = (getattr(m, 'role', '') or '').lower()
+
+        # Only enforce Profile completion for staff/manager.
+        if (role in ['staff', 'manager']) and (not profile_complete):
             return _redirect_named('accounts:profile')
-        org = memberships.first().organization
         return _redirect_named('calendar_app:dashboard', org_slug=org.slug)
 
     return _redirect_named('calendar_app:choose_business')
