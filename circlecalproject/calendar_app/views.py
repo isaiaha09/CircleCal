@@ -5490,6 +5490,30 @@ def signup(request):
     except Exception:
         pass
 
+    # Mobile app: if user taps "Create account" again after partially completing onboarding,
+    # we want to start the signup flow over (not resume mid-onboarding).
+    # This mirrors the web UX: signup starts fresh; login resumes.
+    try:
+        cc_restart = request.GET.get('cc_restart') == '1'
+        ua = (request.META.get('HTTP_USER_AGENT') or '')
+        is_app_ua = 'circlecalapp' in ua.lower()
+        if cc_restart and (request.GET.get('cc_app') == '1' or is_app_ua):
+            try:
+                if getattr(request, 'user', None) is not None and request.user.is_authenticated:
+                    logout(request)
+            except Exception:
+                pass
+            try:
+                # Clear any session state that could cause onboarding to resume.
+                request.session.flush()
+            except Exception:
+                pass
+
+            # Restart signup without the cc_restart flag to avoid loops.
+            return redirect(f"{request.path}?cc_app=1")
+    except Exception:
+        pass
+
     if request.method == "POST":
         form = SignupForm(request.POST)
 
