@@ -238,6 +238,8 @@ class OrganizationMiddleware:
                             '/accounts/delete',
                             '/accounts/logout/',
                             '/accounts/logout',
+                            '/post-login/',
+                            '/post-login',
                             '/choose-business/',
                             '/choose-business',
                             '/create-business/',
