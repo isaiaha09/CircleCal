@@ -5613,6 +5613,13 @@ def signup(request):
                 # (this will raise the same ValueError if Django requires it).
                 login(request, user)
 
+            # During onboarding (no business yet), prefer sessions that expire when the
+            # browser closes so closing the tab/app doesn't keep the user signed in.
+            try:
+                request.session.set_expiry(0)
+            except Exception:
+                pass
+
             # One-time onboarding nudge: when the user reaches the profile page
             # after signup, warn them that they'll be directed to Stripe Connect
             # before continuing business setup.

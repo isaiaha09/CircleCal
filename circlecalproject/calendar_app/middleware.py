@@ -225,6 +225,14 @@ class OrganizationMiddleware:
                     first = (getattr(request.user, 'first_name', '') or '').strip()
                     last = (getattr(request.user, 'last_name', '') or '').strip()
                     if not (first and last):
+                        # If the user has not created/joined any business yet, keep them
+                        # in the business-setup flow instead of forcing Profile.
+                        try:
+                            from accounts.models import Membership
+                            has_any_org = Membership.objects.filter(user=request.user, is_active=True).exists()
+                        except Exception:
+                            has_any_org = True
+
                         allow_paths = [
                             '/accounts/profile/',
                             '/accounts/profile',
@@ -249,6 +257,8 @@ class OrganizationMiddleware:
                         ]
                         if not any(path.startswith(ap) for ap in allow_paths):
                             from django.urls import reverse
+                            if not has_any_org:
+                                return redirect(reverse('calendar_app:choose_business'))
                             return redirect(reverse('accounts:profile'))
         except Exception:
             pass
