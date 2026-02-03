@@ -17,7 +17,7 @@
                 <p class="text-sm text-gray-600">Send us a message and we’ll get back to you as soon as we can.</p>
             </div>
 
-            <form method="post" class="space-y-4">
+            <form method="post" class="space-y-4" id="cc-contact-form" novalidate>
                 {% csrf_token %}
 
                 {% if form.errors %}
@@ -135,7 +135,7 @@
                     </div>
                 {% endif %}
 
-                <button type="submit" class="w-full bg-blue-600 text-white font-semibold px-4 py-3 rounded-lg hover:bg-blue-700 transition shadow-sm">
+                <button id="cc-contact-submit" type="submit" class="w-full bg-blue-600 text-white font-semibold px-4 py-3 rounded-lg hover:bg-blue-700 transition shadow-sm">
                     Send Message
                 </button>
 
@@ -168,6 +168,30 @@
             </style>
 
             <script>
+                (function(){
+                    // Guard against double-tap/double-click submits (common on mobile).
+                    const form = document.getElementById('cc-contact-form');
+                    const btn = document.getElementById('cc-contact-submit');
+                    if (!form || !btn) return;
+
+                    form.addEventListener('submit', function(ev){
+                        if (form.dataset.submitted === '1') {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            return false;
+                        }
+                        form.dataset.submitted = '1';
+                        try {
+                            btn.disabled = true;
+                            btn.classList.add('opacity-60', 'cursor-not-allowed');
+                            btn.textContent = 'Sending…';
+                        } catch(e) {
+                            // ignore
+                        }
+                        return true;
+                    }, { capture: true });
+                })();
+
                 (function(){
                     const subject = document.getElementById('id_subject');
                     const wrap = document.getElementById('other-subject-wrap');

@@ -2749,6 +2749,44 @@ def contact(request):
                     form.add_error('business_name', 'Could not verify the business name. Please try again later or leave this field empty.')
                     return render(request, 'calendar_app/contact.html', {'form': form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key})
 
+            # Dedupe: prevent accidental double-tap/double-submit from sending
+            # multiple admin + confirmation emails. If an identical submission
+            # arrives within a short window, accept it but do not re-send.
+            try:
+                from django.core.cache import cache
+                import hashlib
+
+                session_key = getattr(getattr(request, 'session', None), 'session_key', None) or ''
+                if not session_key:
+                    try:
+                        # Ensure a session key exists for anonymous users.
+                        request.session.save()
+                        session_key = request.session.session_key or ''
+                    except Exception:
+                        session_key = ''
+
+                xff = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip()
+                ip = xff or (request.META.get('REMOTE_ADDR') or '')
+                dedupe_scope = session_key or ip or 'unknown'
+
+                fingerprint = '|'.join([
+                    (business_name or '').strip(),
+                    (name or '').strip(),
+                    (email or '').strip().lower(),
+                    (final_subject or '').strip(),
+                    (message or '').strip(),
+                ])
+                digest = hashlib.sha256(fingerprint.encode('utf-8')).hexdigest()
+                dedupe_key = f"cc:contact:dedupe:{dedupe_scope}:{digest}"
+
+                dedupe_window_seconds = 20
+                if cache.get(dedupe_key):
+                    # Do NOT add another success message (prevents duplicates in UI).
+                    return redirect('calendar_app:contact')
+                cache.set(dedupe_key, True, timeout=dedupe_window_seconds)
+            except Exception:
+                pass
+
             body = (
                 f"New contact form submission\n\n"
                 f"Business: {business_name}\n"
