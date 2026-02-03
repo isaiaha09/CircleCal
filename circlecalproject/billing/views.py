@@ -621,6 +621,26 @@ def stripe_webhook(request):
     event_type = event["type"]
     data = event["data"]["object"]
 
+    # Stripe Connect: keep connect flags in sync even if the user doesn't return
+    # cleanly through our `stripe_connect_return` endpoint.
+    if event_type == "account.updated":
+        try:
+            acct_id = data.get("id")
+            if acct_id:
+                org = Organization.objects.filter(stripe_connect_account_id=acct_id).first()
+                if org:
+                    org.stripe_connect_details_submitted = bool(data.get("details_submitted"))
+                    org.stripe_connect_charges_enabled = bool(data.get("charges_enabled"))
+                    org.stripe_connect_payouts_enabled = bool(data.get("payouts_enabled"))
+                    org.save(update_fields=[
+                        "stripe_connect_details_submitted",
+                        "stripe_connect_charges_enabled",
+                        "stripe_connect_payouts_enabled",
+                    ])
+        except Exception:
+            # Webhooks should never crash the endpoint.
+            pass
+
     # 1) Checkout completed -> subscription created
     if event_type == "checkout.session.completed":
         org_id = data.get("metadata", {}).get("organization_id")

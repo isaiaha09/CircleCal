@@ -29,6 +29,40 @@ from django.views.decorators.csrf import csrf_exempt
 @require_GET
 def mobile_sso_consume_view(request, token: str):
 	"""Consume a one-time token and establish a session for WebView usage."""
+	def _return_to_app(reason: str) -> HttpResponse:
+		# The OS auth-session browser may not show/copy full URLs. Give the user a
+		# single tap escape hatch back into the native app.
+		dl = f"circlecal://stripe-return?status=error&reason={reason}" if reason else "circlecal://stripe-return?status=error"
+		html = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+	<meta charset=\"utf-8\" />
+	<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+	<title>Return to CircleCal</title>
+	<style>
+		body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:24px;background:#f8fafc;color:#0f172a;}}
+		.card{{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;}}
+		h1{{font-size:18px;margin:0 0 8px;}}
+		p{{margin:0 0 12px;color:#334155;line-height:1.4;}}
+		a.btn{{display:inline-block;margin-top:6px;background:#2563eb;color:#fff;text-decoration:none;padding:10px 14px;border-radius:10px;font-weight:700;}}
+		.muted{{margin-top:10px;font-size:12px;color:#64748b;}}
+	</style>
+</head>
+<body>
+	<div class=\"card\">
+		<h1>Return to CircleCal</h1>
+		<p>Your login link expired or was already used. Tap below to return to the CircleCal app and sign in again.</p>
+		<a class=\"btn\" href=\"{dl}\">Open CircleCal</a>
+		<div class=\"muted\">If nothing happens, close this browser window and open the CircleCal app manually.</div>
+	</div>
+	<script>
+		// Best-effort auto-bounce back to the app.
+		try {{ window.location.href = {dl!r}; }} catch (e) {{}}
+	</script>
+</body>
+</html>"""
+		return HttpResponse(html, content_type='text/html', status=200)
+
 	next_url = (request.GET.get('next') or '/').strip() or '/'
 	if not url_has_allowed_host_and_scheme(
 		next_url,
@@ -46,7 +80,7 @@ def mobile_sso_consume_view(request, token: str):
 			.first()
 		)
 		if tok is None:
-			return HttpResponse('This login link is invalid or expired.', status=400)
+			return _return_to_app('sso_expired')
 		tok.used_at = now
 		tok.save(update_fields=['used_at'])
 
