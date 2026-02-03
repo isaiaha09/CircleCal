@@ -2664,6 +2664,17 @@ def contact(request):
     turnstile_enabled = bool(turnstile_is_enabled() if turnstile_is_enabled else False)
     turnstile_site_key = (get_turnstile_site_key() if get_turnstile_site_key else '')
 
+    # Mobile app WebView: Turnstile can get stuck in an embedded WebView environment.
+    # Disable Turnstile for app-only traffic on the Contact page (rate limiting still applies).
+    try:
+        ua = (request.META.get('HTTP_USER_AGENT') or '')
+        ua_lower = ua.lower()
+        if 'circlecalapp' in ua_lower:
+            turnstile_enabled = False
+            turnstile_site_key = ''
+    except Exception:
+        pass
+
     if request.method == 'POST':
         form = ContactForm(request.POST)
 
