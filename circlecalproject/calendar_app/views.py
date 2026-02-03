@@ -5377,6 +5377,69 @@ def pricing_page(request, org_slug):
 
 @login_required
 @require_http_methods(['GET'])
+def app_plans_page(request, org_slug):
+    """Read-only plan info page safe for mobile app WebView.
+
+    This page intentionally provides no upgrade/checkout actions.
+    """
+    from accounts.models import Membership
+    from billing.models import Plan
+    from billing.utils import (
+        can_add_service,
+        can_add_staff,
+        can_edit_weekly_availability,
+        can_use_offline_payment_methods,
+        can_use_resources,
+        get_plan_slug,
+        get_subscription,
+    )
+
+    org = request.organization
+    if not org:
+        return redirect('calendar_app:choose_business')
+
+    # Only expose this page inside the mobile app WebView (app UA + cc_app mode).
+    ua = (request.META.get('HTTP_USER_AGENT') or '')
+    ua_lower = ua.lower()
+    is_app_ua = 'circlecalapp' in ua_lower
+    cc_app_param = request.GET.get('cc_app') == '1'
+    cc_app_cookie = request.COOKIES.get('cc_app') == '1'
+    if not (is_app_ua and (cc_app_param or cc_app_cookie)):
+        # On the website, owners should use the normal pricing page.
+        return redirect('calendar_app:pricing_page', org_slug=org.slug)
+
+    membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
+    if not membership or membership.role != 'owner':
+        return redirect('calendar_app:dashboard', org_slug=org.slug)
+
+    plans = Plan.objects.filter(is_active=True).order_by('price')
+    subscription = get_subscription(org)
+
+    current_plan = None
+    if subscription and getattr(subscription, 'plan', None):
+        current_plan = subscription.plan
+    else:
+        try:
+            current_plan = Plan.objects.filter(slug=get_plan_slug(org)).first()
+        except Exception:
+            current_plan = None
+
+    return render(request, 'calendar_app/app_plans.html', {
+        'org': org,
+        'plans': plans,
+        'subscription': subscription,
+        'current_plan': current_plan,
+        'plan_slug': get_plan_slug(org),
+        'can_use_resources': bool(can_use_resources(org)),
+        'can_add_staff': bool(can_add_staff(org)),
+        'can_add_service': bool(can_add_service(org)),
+        'can_edit_weekly_availability': bool(can_edit_weekly_availability(org)),
+        'can_use_offline_payment_methods': bool(can_use_offline_payment_methods(org)),
+    })
+
+
+@login_required
+@require_http_methods(['GET'])
 def app_billing_unavailable(request, org_slug):
     """Inform app users that billing is managed on the web (no pricing/billing in-app)."""
 

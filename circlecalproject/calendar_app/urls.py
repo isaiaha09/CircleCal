@@ -42,6 +42,7 @@ urlpatterns = [
     # Pricing page
     path('bus/<slug:org_slug>/pricing/', views.pricing_page, name="pricing_page"),
     path('bus/<slug:org_slug>/billing-unavailable/', views.app_billing_unavailable, name="app_billing_unavailable"),
+    path('bus/<slug:org_slug>/app-plans/', views.app_plans_page, name='app_plans_page'),
 
     # Services
     path('bus/<slug:org_slug>/services/', views.services_page, name="services_page"),
