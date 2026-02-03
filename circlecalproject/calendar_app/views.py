@@ -5490,6 +5490,31 @@ def signup(request):
     except Exception:
         pass
 
+    # If the embedded browser still has an authenticated session, do NOT try to
+    # proceed with signup. Instead, be explicit that they are already signed in.
+    # This matches web behavior and prevents "Create account" from appearing to
+    # resume mid-onboarding.
+    try:
+        user = getattr(request, 'user', None)
+        if user is not None and getattr(user, 'is_authenticated', False):
+            from django.urls import reverse
+            ua = (request.META.get('HTTP_USER_AGENT') or '')
+            is_app_ua = 'circlecalapp' in ua.lower()
+            is_app_mode = is_app_ua and ((request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1'))
+            continue_url = reverse('calendar_app:post_login')
+            if is_app_mode:
+                continue_url = f"{continue_url}?cc_app=1"
+            logout_and_signup_url = reverse('calendar_app:signup_restart')
+            if is_app_mode:
+                logout_and_signup_url = f"{logout_and_signup_url}?cc_app=1"
+            return render(request, 'registration/signup_already_signed_in.html', {
+                'username': getattr(user, 'get_username', lambda: '')() or getattr(user, 'username', ''),
+                'continue_url': continue_url,
+                'logout_and_signup_url': logout_and_signup_url,
+            })
+    except Exception:
+        pass
+
     # Mobile app: if user taps "Create account" again after partially completing onboarding,
     # we want to start the signup flow over (not resume mid-onboarding).
     # This mirrors the web UX: signup starts fresh; login resumes.
@@ -5593,6 +5618,57 @@ def signup(request):
         form = SignupForm()
 
     return render(request, "registration/signup.html", {"form": form, 'turnstile_enabled': turnstile_enabled, 'turnstile_site_key': turnstile_site_key})
+
+
+def signup_restart(request):
+    """Mobile helper: always start signup from a clean unauthenticated state.
+
+    In embedded browsers (SFSafariViewController / Chrome Custom Tabs), closing the tab does
+    not clear cookies. This endpoint force-logs-out and clears the main resume cookies
+    before redirecting to the normal signup page.
+    """
+    try:
+        from django.conf import settings
+        from django.contrib.auth import logout as auth_logout
+        from django.urls import reverse
+    except Exception:
+        settings = None
+        auth_logout = None
+        reverse = None
+
+    # Best-effort: clear auth state.
+    try:
+        if auth_logout:
+            auth_logout(request)
+    except Exception:
+        pass
+    try:
+        request.session.flush()
+    except Exception:
+        pass
+
+    try:
+        target = reverse('calendar_app:signup') if reverse else '/signup/'
+    except Exception:
+        target = '/signup/'
+
+    resp = redirect(f"{target}?cc_app=1")
+    try:
+        resp.delete_cookie('post_login_redirect')
+    except Exception:
+        pass
+    try:
+        if settings is not None:
+            resp.delete_cookie(getattr(settings, 'SESSION_COOKIE_NAME', 'sessionid'))
+            resp.delete_cookie(getattr(settings, 'CSRF_COOKIE_NAME', 'csrftoken'))
+    except Exception:
+        pass
+    try:
+        resp['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp['Pragma'] = 'no-cache'
+    except Exception:
+        pass
+    return resp
 
 def logout(request):
     from django.contrib.auth import logout as auth_logout

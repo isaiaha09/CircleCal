@@ -26,6 +26,7 @@ urlpatterns = [
 
 
     path("signup/", views.signup, name="signup"),
+    path("signup/restart/", views.signup_restart, name="signup_restart"),
     path("logout/", views.logout, name="logout"),
     path("post-login/", views.post_login_redirect, name="post_login"),
 

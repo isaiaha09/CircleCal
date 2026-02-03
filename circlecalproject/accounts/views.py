@@ -56,6 +56,16 @@ def mobile_sso_consume_view(request, token: str):
 		backend = 'django.contrib.auth.backends.ModelBackend'
 
 	login(request, tok.user, backend=backend)
+	# In app-mode, prefer session cookies that expire when the browser closes.
+	# This reduces "sticky" sign-in when the user cancels onboarding.
+	try:
+		ua = (request.META.get('HTTP_USER_AGENT') or '')
+		is_app_ua = 'CircleCalApp' in ua
+		cc_app_param = (request.GET.get('cc_app') == '1')
+		if is_app_ua or cc_app_param:
+			request.session.set_expiry(0)
+	except Exception:
+		pass
 	return redirect(next_url)
 
 
@@ -71,6 +81,13 @@ def mobile_app_logout_view(request):
 		return HttpResponse('Not found', status=404)
 
 	next_url = (request.GET.get('next') or '/').strip() or '/'
+	# Allow deep-link redirects back into the native app for this UA-gated endpoint.
+	try:
+		if next_url.startswith('circlecal://'):
+			logout(request)
+			return redirect(next_url)
+	except Exception:
+		pass
 	if not url_has_allowed_host_and_scheme(
 		next_url,
 		allowed_hosts={request.get_host()},
