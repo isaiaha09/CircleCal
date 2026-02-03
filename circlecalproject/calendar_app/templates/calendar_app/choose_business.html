@@ -8,7 +8,7 @@
 
 {% block content %}
 <style>
-    .org-page { max-width: 900px; margin: 60px auto; text-align: center; padding: 0 20px; }
+    .org-page { max-width: 900px; margin: 60px auto; text-align: center; padding: 0 20px; box-sizing: border-box; }
     .org-title { font-size: 2.2rem; font-weight: bold; margin-bottom: 10px; color: #000000ff; }
     .org-subtitle { color: rgba(0, 0, 0, 0.7); margin-bottom: 40px; }
     .org-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; padding: 10px; }
@@ -32,7 +32,11 @@
 
     /* Mobile: center cards and stack vertically */
     @media (max-width: 600px) {
-        .org-page { width: 95vw; max-width: 95vw; margin: 24px auto; padding: 0; }
+                /*
+                    In the native app WebView, <main> has padding applied in app-mode.
+                    Avoid vw-based widths here because 95vw + <main> padding can overflow and look right-shifted.
+                */
+                .org-page { width: 100%; max-width: 520px; margin: 24px auto; padding: 0; box-sizing: border-box; }
         .org-title { font-size: 2rem; }
         .org-subtitle { margin-bottom: 24px; }
 
