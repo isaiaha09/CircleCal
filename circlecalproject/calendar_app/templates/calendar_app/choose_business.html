@@ -134,6 +134,21 @@
                 if (navigating) return;
                 sendLogoutBeacon();
             });
+
+            document.addEventListener('visibilitychange', function () {
+                try {
+                    if (document.visibilityState === 'hidden') {
+                        if (navigating) return;
+                        sendLogoutBeacon();
+                    }
+                } catch (err) {}
+            });
+
+            // Some mobile browsers fire `freeze` when putting a page into back/forward cache.
+            window.addEventListener('freeze', function () {
+                if (navigating) return;
+                sendLogoutBeacon();
+            });
         })();
     </script>
     {% endif %}
