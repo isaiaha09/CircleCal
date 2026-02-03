@@ -40,7 +40,7 @@
   {% endif %}
 
   <div class="mt-6 flex gap-3">
-    <a href="{% url 'billing:stripe_connect_start' org.slug %}" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">
+    <a href="{% url 'billing:stripe_connect_start' org.slug %}{% if request.GET.cc_app == '1' or request.COOKIES.cc_app == '1' %}?cc_app=1{% endif %}" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">
       Try again
     </a>
     <a href="{% url 'billing:manage_billing' org.slug %}" class="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">

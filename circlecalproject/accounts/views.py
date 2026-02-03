@@ -260,6 +260,14 @@ def profile_view(request):
 				if needs_connect:
 					stripe_connect_modal_enabled = True
 					stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org2.slug})
+					try:
+						ua = (request.META.get('HTTP_USER_AGENT') or '')
+						is_app = ('circlecalapp' in ua.lower()) or (request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1')
+						if is_app and stripe_connect_start_url and ('cc_app=1' not in stripe_connect_start_url):
+							joiner = '&' if ('?' in stripe_connect_start_url) else '?'
+							stripe_connect_start_url = f"{stripe_connect_start_url}{joiner}cc_app=1"
+					except Exception:
+						pass
 			except Exception:
 				stripe_connect_modal_enabled = False
 				stripe_connect_start_url = None
@@ -356,6 +364,14 @@ def profile_view(request):
 		if needs_connect:
 			stripe_connect_modal_enabled = True
 			stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org.slug})
+			try:
+				ua = (request.META.get('HTTP_USER_AGENT') or '')
+				is_app = ('circlecalapp' in ua.lower()) or (request.GET.get('cc_app') == '1') or (request.COOKIES.get('cc_app') == '1')
+				if is_app and stripe_connect_start_url and ('cc_app=1' not in stripe_connect_start_url):
+					joiner = '&' if ('?' in stripe_connect_start_url) else '?'
+					stripe_connect_start_url = f"{stripe_connect_start_url}{joiner}cc_app=1"
+			except Exception:
+				pass
 	except Exception:
 		stripe_connect_modal_enabled = False
 		stripe_connect_start_url = None

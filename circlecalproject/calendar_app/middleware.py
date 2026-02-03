@@ -225,41 +225,51 @@ class OrganizationMiddleware:
                     first = (getattr(request.user, 'first_name', '') or '').strip()
                     last = (getattr(request.user, 'last_name', '') or '').strip()
                     if not (first and last):
-                        # If the user has not created/joined any business yet, keep them
-                        # in the business-setup flow instead of forcing Profile.
+                        # Only enforce this completion gate for staff/manager accounts.
+                        # Owners/admins should be allowed to proceed to the dashboard.
+                        is_staff_or_manager = False
                         try:
-                            from accounts.models import Membership
-                            has_any_org = Membership.objects.filter(user=request.user, is_active=True).exists()
+                            if getattr(request, 'user_has_role', None):
+                                is_staff_or_manager = bool(request.user_has_role(['staff', 'manager']))
                         except Exception:
-                            has_any_org = True
+                            is_staff_or_manager = False
 
-                        allow_paths = [
-                            '/accounts/profile/',
-                            '/accounts/profile',
-                            '/accounts/two_factor/',
-                            '/accounts/two_factor',
-                            '/accounts/password/change/',
-                            '/accounts/password/change',
-                            '/accounts/deactivate/',
-                            '/accounts/deactivate',
-                            '/accounts/delete/',
-                            '/accounts/delete',
-                            '/accounts/logout/',
-                            '/accounts/logout',
-                            '/post-login/',
-                            '/post-login',
-                            '/choose-business/',
-                            '/choose-business',
-                            '/create-business/',
-                            '/create-business',
-                            '/static/',
-                            settings.MEDIA_URL,
-                        ]
-                        if not any(path.startswith(ap) for ap in allow_paths):
-                            from django.urls import reverse
-                            if not has_any_org:
-                                return redirect(reverse('calendar_app:choose_business'))
-                            return redirect(reverse('accounts:profile'))
+                        if is_staff_or_manager:
+                            # If the user has not created/joined any business yet, keep them
+                            # in the business-setup flow instead of forcing Profile.
+                            try:
+                                from accounts.models import Membership
+                                has_any_org = Membership.objects.filter(user=request.user, is_active=True).exists()
+                            except Exception:
+                                has_any_org = True
+
+                            allow_paths = [
+                                '/accounts/profile/',
+                                '/accounts/profile',
+                                '/accounts/two_factor/',
+                                '/accounts/two_factor',
+                                '/accounts/password/change/',
+                                '/accounts/password/change',
+                                '/accounts/deactivate/',
+                                '/accounts/deactivate',
+                                '/accounts/delete/',
+                                '/accounts/delete',
+                                '/accounts/logout/',
+                                '/accounts/logout',
+                                '/post-login/',
+                                '/post-login',
+                                '/choose-business/',
+                                '/choose-business',
+                                '/create-business/',
+                                '/create-business',
+                                '/static/',
+                                settings.MEDIA_URL,
+                            ]
+                            if not any(path.startswith(ap) for ap in allow_paths):
+                                from django.urls import reverse
+                                if not has_any_org:
+                                    return redirect(reverse('calendar_app:choose_business'))
+                                return redirect(reverse('accounts:profile'))
         except Exception:
             pass
 
