@@ -154,6 +154,7 @@ MIDDLEWARE = [
     # Must be near the top, especially before CommonMiddleware
     *(('corsheaders.middleware.CorsMiddleware',) if _cors_apps else ()),
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'calendar_app.middleware.AppModeMiddleware',
     'calendar_app.middleware.AdminPinMiddleware',
     'calendar_app.middleware.CustomDomainMiddleware',
     'calendar_app.middleware.CanonicalHostRedirectMiddleware',

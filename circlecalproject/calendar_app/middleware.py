@@ -13,6 +13,53 @@ from django.contrib import messages
 from django.core.cache import cache
 
 
+class AppModeMiddleware:
+    """Persist a marker that this request chain belongs to the native app.
+
+    The in-app WebView sends a CircleCalApp-* user-agent, but OS-controlled
+    auth-session browsers (used for signup/login/Stripe) do not. We therefore
+    latch `cc_app_flow` on the Django session as soon as we see `cc_app=1`.
+
+    This allows downstream endpoints (e.g. Stripe Connect start) to reliably
+    identify app-originated flows even when query params are later dropped.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        cc_app_param = False
+        try:
+            cc_app_param = (request.GET.get('cc_app') == '1')
+        except Exception:
+            cc_app_param = False
+
+        if cc_app_param:
+            try:
+                request.session['cc_app_flow'] = True
+            except Exception:
+                pass
+
+        response = self.get_response(request)
+
+        # Best-effort: set a session cookie so app-mode is easier to detect
+        # within this browser context even if internal links drop cc_app=1.
+        if cc_app_param:
+            try:
+                if (request.COOKIES.get('cc_app') or '') != '1':
+                    response.set_cookie(
+                        'cc_app',
+                        '1',
+                        path='/',
+                        secure=bool(request.is_secure()),
+                        samesite='Lax',
+                    )
+            except Exception:
+                pass
+
+        return response
+
+
 class CustomDomainMiddleware:
     """Support verified per-business custom domains (e.g. booking.example.com).
 
