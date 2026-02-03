@@ -1378,4 +1378,40 @@
       } catch (e) {}
     })();
   </script>
+
+  {% if not request.organization and not memberships %}
+  <script>
+    (function () {
+      var navigating = false;
+      function markNavigating() { navigating = true; }
+      try {
+        document.addEventListener('click', function (e) {
+          var t = e.target;
+          if (!t || !t.closest) return;
+          var a = t.closest('a');
+          if (a && a.getAttribute('target') !== '_blank') { markNavigating(); return; }
+          var btn = t.closest('button');
+          if (btn && (btn.type || '').toLowerCase() === 'submit') { markNavigating(); return; }
+        }, true);
+        document.addEventListener('submit', function () { markNavigating(); }, true);
+      } catch (err) {}
+
+      function sendLogoutBeacon() {
+        try {
+          var url = '{% url "accounts:auto_logout" %}';
+          if (navigator && navigator.sendBeacon) {
+            navigator.sendBeacon(url, '');
+            return;
+          }
+          fetch(url, { method: 'POST', credentials: 'include', keepalive: true }).catch(function () {});
+        } catch (err) {}
+      }
+
+      window.addEventListener('pagehide', function () {
+        if (navigating) return;
+        sendLogoutBeacon();
+      });
+    })();
+  </script>
+  {% endif %}
 {% endblock %}

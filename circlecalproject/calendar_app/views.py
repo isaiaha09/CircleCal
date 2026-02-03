@@ -2929,7 +2929,7 @@ def post_login_redirect(request):
         return redirect(url)
 
     if count == 0:
-        return _redirect_named('calendar_app:create_business')
+        return _redirect_named('calendar_app:choose_business')
 
     if count == 1:
         # If profile incomplete, send user to profile editing page first
@@ -3958,8 +3958,14 @@ def create_business(request):
     else:
         form = OrganizationCreateForm()
 
+    try:
+        cc_auto_logout_on_close = not Membership.objects.filter(user=request.user, is_active=True).exists()
+    except Exception:
+        cc_auto_logout_on_close = False
+
     resp = render(request, "calendar_app/create_business.html", {
         "form": form,
+        "cc_auto_logout_on_close": cc_auto_logout_on_close,
     })
     # Mark this path so that if the user logs out before completing
     # creation, we can return them here after they log back in.
@@ -4002,6 +4008,7 @@ def choose_business(request):
     resp = render(request, "calendar_app/choose_business.html", {
         "organizations": organizations,
         "upgrade_plan_id": upgrade_plan_id,
+        "cc_auto_logout_on_close": (len(organizations) == 0),
     })
     # Preserve returning users to this page if they logout mid-onboarding
     try:

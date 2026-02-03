@@ -21,6 +21,7 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.csrf import csrf_exempt
 
 # Create your views here.
 
@@ -97,11 +98,46 @@ def mobile_app_logout_view(request):
 
 	logout(request)
 	return redirect(next_url)
+
+
+@csrf_exempt
+@require_POST
+def auto_logout_view(request):
+	"""Best-effort logout for onboarding cancellation.
+
+	Used by `navigator.sendBeacon()` / fetch(keepalive) on onboarding pages when the
+	user closes the tab/app. Logging out is not a security boundary and is safe to
+	allow without CSRF.
+	"""
+	try:
+		logout(request)
+	except Exception:
+		pass
+	resp = HttpResponse('', status=204)
+	# Clear main session cookies, but leave post_login_redirect in place
+	# so a user who logs back in can be routed back to onboarding.
+	try:
+		resp.delete_cookie(getattr(settings, 'SESSION_COOKIE_NAME', 'sessionid'))
+		resp.delete_cookie(getattr(settings, 'CSRF_COOKIE_NAME', 'csrftoken'))
+	except Exception:
+		pass
+	try:
+		resp['Cache-Control'] = 'no-store'
+	except Exception:
+		pass
+	return resp
 @login_required
 def profile_view(request):
 	user = request.user
 	from .models import Profile
 	profile, _ = Profile.objects.get_or_create(user=user)
+
+	# Used to keep onboarding resume behavior consistent: if the user has no org yet,
+	# we want post-login redirect to return them to Choose Business rather than Profile.
+	try:
+		has_any_org = Membership.objects.filter(user=user, is_active=True).exists()
+	except Exception:
+		has_any_org = True
 
 	def _annotate_membership_plan_features(membership_qs):
 		"""Attach per-org feature flags used by the Profile UI.
@@ -357,7 +393,10 @@ def profile_view(request):
 
 	if incomplete:
 		try:
-			resp.set_cookie('post_login_redirect', request.path, max_age=60*60*24)
+			if has_any_org:
+				resp.set_cookie('post_login_redirect', request.path, max_age=60*60*24)
+			else:
+				resp.set_cookie('post_login_redirect', reverse('calendar_app:choose_business'), max_age=60*60*24)
 		except Exception:
 			pass
 

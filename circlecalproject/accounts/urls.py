@@ -14,6 +14,7 @@ from .views import (
     StaffLoginView,
     mobile_sso_consume_view,
     mobile_app_logout_view,
+    auto_logout_view,
 )
 from .forms import PasswordResetIncludeInactiveForm
 app_name = 'accounts'
@@ -25,6 +26,9 @@ urlpatterns = [
 
     # Mobile WebView logout (app UA only)
     path('mobile/logout/', mobile_app_logout_view, name='mobile_logout'),
+
+    # Onboarding cancellation auto-logout (beacon endpoint)
+    path('auto-logout/', auto_logout_view, name='auto_logout'),
 
     # Profile
     path('profile/', profile_view, name='profile'),
