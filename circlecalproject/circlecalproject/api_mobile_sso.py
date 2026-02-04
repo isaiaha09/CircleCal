@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
+import secrets
+from datetime import timedelta
+
+from django.core import signing
 from django.urls import reverse
 from django.utils import timezone
 
@@ -49,15 +53,37 @@ class MobileSSOLinkView(APIView):
         except Exception:
             ttl_seconds = 300
 
-        token_obj = MobileSSOToken.create_for_user(request.user, ttl_seconds=ttl_seconds)
+        def _build_signed_token_url() -> tuple[str, int]:
+            # Fallback when DB-backed token creation fails (e.g., missing migration or DB outage).
+            now = timezone.now()
+            exp = int((now + timedelta(seconds=int(ttl_seconds))).timestamp())
+            payload = {
+                "uid": int(getattr(request.user, "id", 0) or 0),
+                "exp": exp,
+                "n": secrets.token_urlsafe(16),
+            }
+            signed = signing.dumps(payload, salt="cc_mobile_sso", compress=True)
+            consume_path = reverse(
+                "accounts:mobile_sso_consume",
+                kwargs={"token": f"sig_{signed}"},
+            )
+            url = request.build_absolute_uri(consume_path)
+            if next_path:
+                url = f"{url}?{urlencode({'next': next_path})}"
+            expires_in = max(0, exp - int(now.timestamp()))
+            return url, expires_in
 
-        consume_path = reverse(
-            "accounts:mobile_sso_consume",
-            kwargs={"token": token_obj.token},
-        )
-        url = request.build_absolute_uri(consume_path)
-        if next_path:
-            url = f"{url}?{urlencode({'next': next_path})}"
-
-        expires_in = max(0, int((token_obj.expires_at - timezone.now()).total_seconds()))
-        return Response({"url": url, "expires_in": expires_in})
+        try:
+            token_obj = MobileSSOToken.create_for_user(request.user, ttl_seconds=ttl_seconds)
+            consume_path = reverse(
+                "accounts:mobile_sso_consume",
+                kwargs={"token": token_obj.token},
+            )
+            url = request.build_absolute_uri(consume_path)
+            if next_path:
+                url = f"{url}?{urlencode({'next': next_path})}"
+            expires_in = max(0, int((token_obj.expires_at - timezone.now()).total_seconds()))
+            return Response({"url": url, "expires_in": expires_in})
+        except Exception:
+            url, expires_in = _build_signed_token_url()
+            return Response({"url": url, "expires_in": expires_in})

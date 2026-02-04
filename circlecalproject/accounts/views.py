@@ -23,6 +23,8 @@ from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.middleware.csrf import get_token
+from django.core import signing
+from django.views.decorators.csrf import csrf_exempt
 
 try:
 	from django_otp import devices_for_user
@@ -132,7 +134,7 @@ def mobile_sso_consume_view(request, token: str):
 						except Exception:
 							continue
 			except Exception:
-			verified = False
+					verified = False
 		
 		if error_msg or not verified:
 			if not error_msg:
@@ -198,20 +200,35 @@ def mobile_sso_consume_view(request, token: str):
 
 	# GET: consume token and decide whether 2FA is required.
 	now = timezone.now()
-	with transaction.atomic():
-		tok = (
-			MobileSSOToken.objects.select_for_update()
-			.filter(token=token, used_at__isnull=True, expires_at__gte=now)
-			.select_related('user')
-			.first()
-		)
-		if tok is None:
-			return _return_to_app('sso_expired')
-		# Mark used immediately to prevent the token being replayed in another browser.
-		tok.used_at = now
-		tok.save(update_fields=['used_at'])
-
-	user = getattr(tok, 'user', None)
+	user = None
+	# Signed-token fallback: sig_<signed-payload>
+	try:
+		if isinstance(token, str) and token.startswith('sig_'):
+			data = signing.loads(token[4:], salt='cc_mobile_sso', max_age=60 * 60 * 2)
+			exp = int((data or {}).get('exp') or 0)
+			uid = int((data or {}).get('uid') or 0)
+			if (not uid) or (exp and int(now.timestamp()) > exp):
+				return _return_to_app('sso_expired')
+			User = get_user_model()
+			user = User.objects.filter(id=uid).first()
+			if user is None:
+				return _return_to_app('sso_expired')
+		else:
+			with transaction.atomic():
+				tok = (
+					MobileSSOToken.objects.select_for_update()
+					.filter(token=token, used_at__isnull=True, expires_at__gte=now)
+					.select_related('user')
+					.first()
+				)
+				if tok is None:
+					return _return_to_app('sso_expired')
+				# Mark used immediately to prevent the token being replayed in another browser.
+				tok.used_at = now
+				tok.save(update_fields=['used_at'])
+				user = getattr(tok, 'user', None)
+	except Exception:
+		return _return_to_app('sso_expired')
 	# If user has 2FA devices, prompt for OTP inside the WebView.
 	try:
 		has_2fa = False
@@ -261,13 +278,13 @@ def mobile_sso_consume_view(request, token: str):
 		</form>
 		<div class=\"muted\">If you don’t have access to your authenticator, use a backup code on the website.</div>
 	</div>
-	<script>try{document.getElementById('otp').focus();}catch(e){}</script>
+	<script>try{{document.getElementById('otp').focus();}}catch(e){{}}</script>
 </body>
 </html>"""
 		return HttpResponse(html, content_type='text/html', status=200)
 
 	# No 2FA required: establish session immediately.
-	login(request, tok.user, backend=backend)
+	login(request, user, backend=backend)
 	# In app-mode, prefer session cookies that expire when the browser closes.
 	# This reduces "sticky" sign-in when the user cancels onboarding.
 	try:
