@@ -438,11 +438,17 @@ def send_internal_booking_cancellation_notification(booking, refund_info=None):
     if not recipients:
         return False
 
-    signer = TimestampSigner()
-    token = signer.sign(str(booking.id))
-    reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
-    base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
-    reschedule_url = f"{base_url}{reschedule_path}?token={token}"
+    booking_id = getattr(booking, 'id', None)
+    reschedule_url = None
+    try:
+        if booking_id:
+            signer = TimestampSigner()
+            token = signer.sign(str(booking_id))
+            reschedule_path = reverse('bookings:reschedule_booking', args=[booking_id])
+            base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
+            reschedule_url = f"{base_url}{reschedule_path}?token={token}"
+    except Exception:
+        reschedule_url = None
 
     context = {
         'booking': booking,

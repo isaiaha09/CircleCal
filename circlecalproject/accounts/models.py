@@ -26,6 +26,10 @@ class Profile(models.Model):
     display_name = models.CharField(max_length=255, blank=True, null=True, help_text='Optional display name used for client-facing messages')
     email_alerts = models.BooleanField(default=True)
     booking_reminders = models.BooleanField(default=True)
+
+    # Mobile app push notifications (Expo). When disabled, this user will not receive
+    # booking-related push notifications (and they won't appear in the in-app inbox).
+    push_booking_notifications_enabled = models.BooleanField(default=True)
     # If a user cancels at the end of their free trial, we can schedule their
     # account for automatic deletion when the trial ends (unless they subscribe).
     scheduled_account_deletion_at = models.DateTimeField(null=True, blank=True)

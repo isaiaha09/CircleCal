@@ -13,6 +13,9 @@ from .models import OrgSettings, Booking, ServiceSettingFreeze, AuditBooking, Se
 from .emails import send_booking_confirmation, send_booking_cancellation, send_internal_booking_cancellation_notification
 
 
+_BOOKING_PUSH_MANAGEMENT_ROLES = ('owner', 'admin', 'manager')
+
+
 @receiver(post_save, sender=Organization)
 def create_org_settings(sender, instance, created, **kwargs):
     if created:
@@ -73,8 +76,8 @@ def push_notify_assigned_user_on_create(sender, instance: Booking, created: bool
 
     Product rules:
     - Never notify clients via push.
-    - Never notify uninvolved staff.
-    Therefore we ONLY notify `assigned_user` (if set).
+    - Staff only receive pushes when involved (assigned user / assigned team).
+    - Management (owner/GM/manager) receives booking pushes for the org.
     """
 
     if not created:
@@ -86,14 +89,50 @@ def push_notify_assigned_user_on_create(sender, instance: Booking, created: bool
     if bool(getattr(instance, 'is_blocking', False)):
         return
 
-    assigned = getattr(instance, 'assigned_user', None)
-    if not assigned:
+    org = getattr(instance, 'organization', None)
+
+    recipients = []
+    try:
+        recipients.extend(_involved_staff_users_for_booking(instance))
+    except Exception:
+        pass
+    try:
+        recipients.extend(_management_users_for_org(org))
+    except Exception:
+        pass
+
+    # De-dup by user id.
+    uniq = []
+    seen = set()
+    for u in recipients:
+        try:
+            uid = getattr(u, 'id', None)
+        except Exception:
+            uid = None
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        uniq.append(u)
+    recipients = uniq
+
+    # Per-user booking push opt-out.
+    try:
+        recipients = [u for u in recipients if _user_booking_push_enabled(u)]
+    except Exception:
+        pass
+
+    # Owner-only org toggle.
+    try:
+        recipients = [u for u in recipients if _owner_allowed_by_org_toggle(user=u, org=org)]
+    except Exception:
+        pass
+
+    if not recipients:
         return
 
     # Build a short human-friendly time string in org timezone when possible.
     when_str = None
     try:
-        org = getattr(instance, 'organization', None)
         tz_name = getattr(org, 'timezone', None) if org else None
         org_tz = ZoneInfo(tz_name) if tz_name else ZoneInfo(getattr(settings, 'TIME_ZONE', 'UTC'))
         dt = getattr(instance, 'start', None)
@@ -118,7 +157,8 @@ def push_notify_assigned_user_on_create(sender, instance: Booking, created: bool
 
     def _send():
         try:
-            send_push_to_user(user=assigned, title=title, body=body, data=data)
+            for u in recipients:
+                send_push_to_user(user=u, title=title, body=body, data=data)
         except Exception:
             # Best-effort: never block booking creation.
             pass
@@ -186,6 +226,76 @@ def _has_active_membership(*, user, org) -> bool:
         return False
 
 
+def _owner_receives_staff_booking_push_enabled_for_org(org) -> bool:
+    """Org-level toggle for whether the owner should receive booking push notifications."""
+    try:
+        if not org:
+            return True
+    except Exception:
+        return True
+
+    try:
+        val = (
+            OrgSettings.objects.filter(organization_id=getattr(org, 'id', None))
+            .values_list('owner_receives_staff_booking_push_notifications_enabled', flat=True)
+            .first()
+        )
+        if val is not None:
+            return bool(val)
+    except Exception:
+        pass
+    return True
+
+
+def _user_booking_push_enabled(user) -> bool:
+    """Per-user booking push preference; fail-open if profile row missing."""
+    try:
+        if not user:
+            return False
+    except Exception:
+        return False
+
+    try:
+        uid = getattr(user, 'id', None)
+        if not uid:
+            return False
+
+        from accounts.models import Profile
+        val = (
+            Profile.objects.filter(user_id=uid)
+            .values_list('push_booking_notifications_enabled', flat=True)
+            .first()
+        )
+        if val is None:
+            return True
+        return bool(val)
+    except Exception:
+        return True
+
+
+def _owner_allowed_by_org_toggle(*, user, org) -> bool:
+    """When org toggle is off, suppress only the owner's booking pushes."""
+    try:
+        if not user or not org:
+            return True
+    except Exception:
+        return True
+
+    if _owner_receives_staff_booking_push_enabled_for_org(org):
+        return True
+
+    try:
+        if getattr(org, 'owner_id', None) == getattr(user, 'id', None):
+            return False
+    except Exception:
+        pass
+
+    try:
+        return not Membership.objects.filter(user=user, organization=org, is_active=True, role='owner').exists()
+    except Exception:
+        return True
+
+
 def _involved_staff_users_for_booking(instance: Booking) -> list:
     """Return involved internal users for a booking.
 
@@ -197,29 +307,109 @@ def _involved_staff_users_for_booking(instance: Booking) -> list:
     users = []
     org = getattr(instance, 'organization', None)
 
+    candidates = []
     try:
         au = getattr(instance, 'assigned_user', None)
         if au:
-            if _has_active_membership(user=au, org=org):
-                users.append(au)
+            candidates.append(au)
     except Exception:
         pass
 
     try:
         team = getattr(instance, 'assigned_team', None)
         if team:
-            try:
-                for m in team.memberships.filter(is_active=True).select_related('user'):
-                    u = getattr(m, 'user', None)
-                    if u:
-                        if _has_active_membership(user=u, org=org):
-                            users.append(u)
-            except Exception:
-                pass
+            for m in team.memberships.filter(is_active=True).select_related('user'):
+                u = getattr(m, 'user', None)
+                if u:
+                    candidates.append(u)
     except Exception:
         pass
 
+    # Resolve org membership roles in one query.
+    role_by_user_id = {}
+    try:
+        ids = []
+        seen_ids = set()
+        for u in candidates:
+            uid = getattr(u, 'id', None)
+            if uid and uid not in seen_ids:
+                seen_ids.add(uid)
+                ids.append(uid)
+        if ids and org:
+            for r in Membership.objects.filter(user_id__in=ids, organization=org, is_active=True).values('user_id', 'role'):
+                try:
+                    role_by_user_id[int(r.get('user_id'))] = (r.get('role') or '').strip().lower()
+                except Exception:
+                    continue
+    except Exception:
+        role_by_user_id = {}
+
+    for u in candidates:
+        try:
+            uid = getattr(u, 'id', None)
+        except Exception:
+            uid = None
+        if not uid:
+            continue
+
+        role = role_by_user_id.get(uid)
+        if not role:
+            continue
+        users.append(u)
+
     # De-dup by user id.
+    uniq = []
+    seen = set()
+    for u in users:
+        try:
+            uid = getattr(u, 'id', None)
+        except Exception:
+            uid = None
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        uniq.append(u)
+    return uniq
+
+
+def _management_users_for_org(org) -> list:
+    """Return active management users for an org.
+
+    Stored membership roles:
+    - owner
+    - admin (UI label: GM)
+    - manager
+    """
+
+    try:
+        if not org:
+            return []
+    except Exception:
+        return []
+
+    users = []
+    owner_allowed = _owner_receives_staff_booking_push_enabled_for_org(org)
+    try:
+        qs = (
+            Membership.objects.filter(
+                organization=org,
+                is_active=True,
+                role__in=_BOOKING_PUSH_MANAGEMENT_ROLES,
+            )
+            .select_related('user')
+        )
+        for m in qs:
+            try:
+                if (not owner_allowed) and (getattr(m, 'role', '').strip().lower() == 'owner'):
+                    continue
+            except Exception:
+                pass
+            u = getattr(m, 'user', None)
+            if u:
+                users.append(u)
+    except Exception:
+        return []
+
     uniq = []
     seen = set()
     for u in users:
@@ -286,7 +476,35 @@ def push_notify_assigned_users_on_update(sender, instance: Booking, created: boo
 
     def _work():
         # Dedupe: compute a single message per recipient for this save.
-        recipients = _involved_staff_users_for_booking(instance)
+        recipients = []
+        try:
+            recipients.extend(_involved_staff_users_for_booking(instance))
+        except Exception:
+            pass
+        try:
+            recipients.extend(_management_users_for_org(getattr(instance, 'organization', None)))
+        except Exception:
+            pass
+
+        uniq = []
+        seen = set()
+        for u in recipients:
+            try:
+                uid = getattr(u, 'id', None)
+            except Exception:
+                uid = None
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            uniq.append(u)
+        recipients = uniq
+
+        # Per-user booking push opt-out + owner-only org toggle.
+        try:
+            org = getattr(instance, 'organization', None)
+            recipients = [u for u in recipients if _user_booking_push_enabled(u) and _owner_allowed_by_org_toggle(user=u, org=org)]
+        except Exception:
+            pass
 
         if reassigned and rescheduled:
             title = 'Booking updated'
@@ -330,7 +548,13 @@ def push_notify_assigned_users_on_update(sender, instance: Booking, created: boo
             except Exception:
                 prev_user = None
 
-            if prev_user and _has_active_membership(user=prev_user, org=getattr(instance, 'organization', None)):
+            org_obj = getattr(instance, 'organization', None)
+            if (
+                prev_user
+                and _has_active_membership(user=prev_user, org=org_obj)
+                and _user_booking_push_enabled(prev_user)
+                and _owner_allowed_by_org_toggle(user=prev_user, org=org_obj)
+            ):
                 title2 = 'Booking reassigned'
                 body2 = f"{base}{' • ' + when_str if when_str else ''}"
                 data2 = {
@@ -363,7 +587,7 @@ def send_cancellation_email(sender, instance, **kwargs):
     if instance.is_blocking:
         return
 
-    # Push notification to involved internal assignees only (no clients, no uninvolved staff).
+    # Push notification (no clients). Staff only when involved; management always.
     try:
         org_slug = getattr(getattr(instance, 'organization', None), 'slug', None)
         if org_slug:
@@ -380,7 +604,29 @@ def send_cancellation_email(sender, instance, **kwargs):
 
             def _push_work():
                 try:
-                    for u in _involved_staff_users_for_booking(instance):
+                    recipients = []
+                    try:
+                        recipients.extend(_involved_staff_users_for_booking(instance))
+                    except Exception:
+                        pass
+                    try:
+                        recipients.extend(_management_users_for_org(getattr(instance, 'organization', None)))
+                    except Exception:
+                        pass
+
+                    seen = set()
+                    for u in recipients:
+                        try:
+                            uid = getattr(u, 'id', None)
+                        except Exception:
+                            uid = None
+                        if not uid or uid in seen:
+                            continue
+                        seen.add(uid)
+                        if not _user_booking_push_enabled(u):
+                            continue
+                        if not _owner_allowed_by_org_toggle(user=u, org=getattr(instance, 'organization', None)):
+                            continue
                         send_push_to_user(user=u, title=title, body=body, data=data)
                 except Exception:
                     pass

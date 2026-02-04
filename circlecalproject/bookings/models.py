@@ -294,6 +294,11 @@ class OrgSettings(models.Model):
     offline_venmo = models.TextField(blank=True, default='')
     offline_zelle = models.TextField(blank=True, default='')
 
+    # Push notifications
+    # When disabled, the *owner* will not receive booking-related push notifications.
+    # Staff and other management users are not affected by this toggle.
+    owner_receives_staff_booking_push_notifications_enabled = models.BooleanField(default=True)
+
     def __str__(self):
         try:
             org_name = self.organization.name

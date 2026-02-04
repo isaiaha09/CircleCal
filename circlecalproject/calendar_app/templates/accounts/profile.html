@@ -506,6 +506,28 @@
               {{ form.booking_reminders }}
             </div>
           </label>
+
+          <label class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium text-gray-800">Mobile push notifications (bookings)</div>
+              <div class="text-xs text-gray-500">Controls booking-related app push notifications + the in-app Notifications inbox.</div>
+            </div>
+            <div>
+              {{ form.push_booking_notifications_enabled }}
+            </div>
+          </label>
+
+          {% if is_owner_for_org and organization %}
+          <label class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium text-gray-800">Owner receives booking notifications</div>
+              <div class="text-xs text-gray-500">When off, you (the owner) won’t receive booking-related push notifications. Staff still controls their own booking notifications.</div>
+            </div>
+            <div>
+              <input type="checkbox" name="owner_receives_staff_booking_push_notifications_enabled" {% if owner_receives_staff_booking_push_notifications_enabled %}checked{% endif %} />
+            </div>
+          </label>
+          {% endif %}
         </div>
       </div>
     </div>

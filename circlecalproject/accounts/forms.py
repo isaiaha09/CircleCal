@@ -63,7 +63,7 @@ class ProfileForm(forms.ModelForm):
 
     class Meta:
         model = Profile
-        fields = ["avatar", "timezone", "display_name", "email_alerts", "booking_reminders"]
+        fields = ["avatar", "timezone", "display_name", "email_alerts", "booking_reminders", "push_booking_notifications_enabled"]
 
     def clean_avatar(self):
         avatar = self.cleaned_data.get("avatar")

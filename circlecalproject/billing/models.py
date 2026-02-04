@@ -1,4 +1,7 @@
 from django.db import models
+from django.db import transaction
+from django.db.models.signals import post_save, pre_save
+from django.dispatch import receiver
 from django.utils import timezone
 from accounts.models import Business as Organization
 from django.conf import settings
@@ -117,6 +120,153 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f"{self.organization.name} — {self.plan.name if self.plan else 'No plan'}"
+
+
+def _owner_users_for_org(org: Organization) -> list:
+    """Return distinct owner users for an org.
+
+    Billing/pricing notifications go only to owners (not GM/admin, not managers, not staff).
+    """
+    users = []
+    try:
+        u = getattr(org, 'owner', None)
+        if u:
+            users.append(u)
+    except Exception:
+        pass
+
+    try:
+        from accounts.models import Membership
+        for m in Membership.objects.filter(organization=org, is_active=True, role='owner').select_related('user'):
+            u2 = getattr(m, 'user', None)
+            if u2:
+                users.append(u2)
+    except Exception:
+        pass
+
+    uniq = []
+    seen = set()
+    for u in users:
+        try:
+            uid = getattr(u, 'id', None)
+        except Exception:
+            uid = None
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        uniq.append(u)
+    return uniq
+
+
+@receiver(pre_save, sender=Subscription)
+def _subscription_capture_prev(sender, instance: Subscription, **kwargs):
+    try:
+        if not getattr(instance, 'pk', None):
+            return
+    except Exception:
+        return
+
+    prev = None
+    try:
+        prev = Subscription.objects.filter(pk=instance.pk).only(
+            'status',
+            'plan_id',
+            'cancel_at_period_end',
+            'trial_end',
+            'current_period_end',
+            'active',
+        ).first()
+    except Exception:
+        prev = None
+    if not prev:
+        return
+
+    try:
+        instance._prev_status = getattr(prev, 'status', None)
+        instance._prev_plan_id = getattr(prev, 'plan_id', None)
+        instance._prev_cancel_at_period_end = getattr(prev, 'cancel_at_period_end', None)
+        instance._prev_trial_end = getattr(prev, 'trial_end', None)
+        instance._prev_current_period_end = getattr(prev, 'current_period_end', None)
+        instance._prev_active = getattr(prev, 'active', None)
+    except Exception:
+        pass
+
+
+@receiver(post_save, sender=Subscription)
+def push_notify_owner_on_subscription_change(sender, instance: Subscription, created: bool, **kwargs):
+    """Notify owners about subscription/pricing changes.
+
+    Rules:
+    - Owner gets all subscription/pricing notifications.
+    - GM/admin, managers, and staff do not receive billing pushes.
+    """
+    org = getattr(instance, 'organization', None)
+    if not org:
+        return
+
+    owners = _owner_users_for_org(org)
+    if not owners:
+        return
+
+    # Determine if something meaningful changed.
+    prev_status = getattr(instance, '_prev_status', None)
+    prev_plan_id = getattr(instance, '_prev_plan_id', None)
+    prev_cancel = getattr(instance, '_prev_cancel_at_period_end', None)
+    prev_trial_end = getattr(instance, '_prev_trial_end', None)
+    prev_period_end = getattr(instance, '_prev_current_period_end', None)
+    prev_active = getattr(instance, '_prev_active', None)
+
+    status = getattr(instance, 'status', None)
+    plan = getattr(getattr(instance, 'plan', None), 'name', None) or 'Plan'
+
+    should_notify = False
+    changes = []
+    if created:
+        should_notify = True
+        changes.append('created')
+    else:
+        if prev_status is not None and prev_status != status:
+            should_notify = True
+            changes.append('status')
+        if prev_plan_id is not None and prev_plan_id != getattr(instance, 'plan_id', None):
+            should_notify = True
+            changes.append('plan')
+        if prev_cancel is not None and prev_cancel != getattr(instance, 'cancel_at_period_end', None):
+            should_notify = True
+            changes.append('cancel_at_period_end')
+        if prev_trial_end is not None and prev_trial_end != getattr(instance, 'trial_end', None):
+            should_notify = True
+            changes.append('trial_end')
+        if prev_period_end is not None and prev_period_end != getattr(instance, 'current_period_end', None):
+            should_notify = True
+            changes.append('current_period_end')
+        if prev_active is not None and prev_active != getattr(instance, 'active', None):
+            should_notify = True
+            changes.append('active')
+
+    if not should_notify:
+        return
+
+    title = 'Billing update'
+    body = f"{plan} • {status or 'status updated'}"
+    data = {
+        'orgSlug': getattr(org, 'slug', None),
+        'kind': 'billing_subscription_updated',
+        'changes': changes,
+    }
+
+    def _send():
+        try:
+            from accounts.push import send_push_to_user
+            for u in owners:
+                send_push_to_user(user=u, title=title, body=body, data=data)
+        except Exception:
+            pass
+
+    try:
+        transaction.on_commit(_send)
+    except Exception:
+        _send()
 
 
 class PaymentMethod(models.Model):

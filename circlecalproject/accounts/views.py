@@ -267,6 +267,7 @@ def profile_view(request):
 	org_offline_venmo = ''
 	org_offline_zelle = ''
 	can_use_offline_payment_methods = False
+	owner_receives_staff_booking_push_notifications_enabled = True
 	stripe_connected_account_url = None
 	stripe_express_dashboard_url = None
 	try:
@@ -275,6 +276,7 @@ def profile_view(request):
 			settings_obj, _ = OrgSettings.objects.get_or_create(organization=org)
 			org_offline_venmo = (getattr(settings_obj, 'offline_venmo', '') or '').strip()
 			org_offline_zelle = (getattr(settings_obj, 'offline_zelle', '') or '').strip()
+			owner_receives_staff_booking_push_notifications_enabled = bool(getattr(settings_obj, 'owner_receives_staff_booking_push_notifications_enabled', True))
 
 			# Pro/Team gating for offline payment methods (trial/basic blocked)
 			try:
@@ -302,6 +304,7 @@ def profile_view(request):
 		org_offline_venmo = ''
 		org_offline_zelle = ''
 		can_use_offline_payment_methods = False
+		owner_receives_staff_booking_push_notifications_enabled = True
 		stripe_connected_account_url = None
 		stripe_express_dashboard_url = None
 
@@ -370,6 +373,7 @@ def profile_view(request):
 				"org_offline_venmo": org_offline_venmo,
 				"org_offline_zelle": org_offline_zelle,
 				"can_use_offline_payment_methods": can_use_offline_payment_methods,
+				"owner_receives_staff_booking_push_notifications_enabled": owner_receives_staff_booking_push_notifications_enabled,
 				"stripe_connected_account_url": stripe_connected_account_url,
 				"stripe_express_dashboard_url": stripe_express_dashboard_url,
 				"stripe_connect_modal_enabled": stripe_connect_modal_enabled,
@@ -404,6 +408,18 @@ def profile_view(request):
 				org_offline_zelle = (getattr(settings_obj, 'offline_zelle', '') or '').strip()
 		except Exception:
 			# Fail open: do not block profile saving
+			pass
+
+		# Save org-level owner booking push toggle (owner-only).
+		try:
+			if org is not None and is_owner_for_org:
+				from bookings.models import OrgSettings
+				settings_obj, _ = OrgSettings.objects.get_or_create(organization=org)
+				enabled = bool(request.POST.get('owner_receives_staff_booking_push_notifications_enabled'))
+				settings_obj.owner_receives_staff_booking_push_notifications_enabled = enabled
+				settings_obj.save(update_fields=['owner_receives_staff_booking_push_notifications_enabled'])
+				owner_receives_staff_booking_push_notifications_enabled = bool(getattr(settings_obj, 'owner_receives_staff_booking_push_notifications_enabled', True))
+		except Exception:
 			pass
 
 		form = ProfileForm(request.POST, request.FILES, instance=profile)
@@ -491,6 +507,7 @@ def profile_view(request):
 		"org_offline_venmo": org_offline_venmo,
 		"org_offline_zelle": org_offline_zelle,
 		"can_use_offline_payment_methods": can_use_offline_payment_methods,
+		"owner_receives_staff_booking_push_notifications_enabled": owner_receives_staff_booking_push_notifications_enabled,
 		"stripe_connected_account_url": stripe_connected_account_url,
 		"stripe_express_dashboard_url": stripe_express_dashboard_url,
 		"stripe_connect_modal_enabled": stripe_connect_modal_enabled,
