@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django.utils import timezone
 
+from accounts.push import push_enabled
+
 try:
     from rest_framework.exceptions import ValidationError
     from rest_framework.permissions import IsAuthenticated
@@ -14,6 +16,36 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 from accounts.models import PushDevice
+
+
+class PushStatusView(APIView):
+    """Return push registration + server gating status for the authenticated user.
+
+    This is intentionally lightweight and safe to call from the mobile app.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = PushDevice.objects.filter(user=request.user)
+        total = qs.count()
+        active = qs.filter(is_active=True).count()
+        last_seen = None
+        try:
+            last_seen = qs.order_by('-last_seen_at').values_list('last_seen_at', flat=True).first()
+        except Exception:
+            last_seen = None
+
+        return Response(
+            {
+                'ok': True,
+                'push_enabled': bool(push_enabled()),
+                'devices_total': int(total),
+                'devices_active': int(active),
+                'last_seen_at': last_seen,
+                'server_time': timezone.now(),
+            }
+        )
 
 
 class PushTokensView(APIView):

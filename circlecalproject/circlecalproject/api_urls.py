@@ -8,7 +8,7 @@ from .api_orgs import OrgsListView
 from .api_profile import ProfileAvatarUploadView, ProfileView
 from .api_profile import ProfileOverviewView
 from .api_org_settings import OrgOfflinePaymentsView
-from .api_push import PushTokensView
+from .api_push import PushStatusView, PushTokensView
 from .api_services import ServiceDetailView, ServicesListCreateView
 from .api_resources import ResourceDetailView, ResourcesListCreateView
 from .api_team import TeamInviteDetailView, TeamInvitesView, TeamMemberDetailView, TeamMembersView
@@ -35,6 +35,7 @@ urlpatterns = [
     path("profile/avatar/", ProfileAvatarUploadView.as_view(), name="api_profile_avatar"),
 
     path("push/tokens/", PushTokensView.as_view(), name="api_push_tokens"),
+    path("push/status/", PushStatusView.as_view(), name="api_push_status"),
 
     path("mobile/sso-link/", MobileSSOLinkView.as_view(), name="api_mobile_sso_link"),
 
