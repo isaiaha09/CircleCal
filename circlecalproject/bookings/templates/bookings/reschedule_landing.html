@@ -3,10 +3,23 @@
 {% block title %}Reschedule your booking{% endblock %}
 
 {% block content %}
-<div style="max-width:700px;margin:40px auto;padding:20px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-  <h1 style="font-size:1.4rem;margin-bottom:12px;">Reschedule your booking</h1>
-  <p style="color:#333;margin-bottom:18px;">Click the button below to choose a new time for your appointment. Your original booking will be removed automatically when you complete the reschedule.</p>
-  <a href="{{ reschedule_link }}" style="display:inline-block;padding:12px 20px;background:#28a745;color:white;border-radius:6px;text-decoration:none;">Choose a new time</a>
-  <p style="margin-top:16px;color:#666;">If the link doesn't work, please contact the business directly.</p>
+<div class="mx-auto w-full max-w-xl px-4 sm:px-6 py-10 sm:py-14">
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7">
+    <h1 class="text-lg sm:text-xl font-bold text-slate-900">Reschedule your booking</h1>
+    <p class="mt-2 text-sm sm:text-base text-slate-700">
+      Choose a new time for your appointment. Your original booking will be removed automatically when you complete the reschedule.
+    </p>
+
+    <a
+      href="{{ reschedule_link }}"
+      class="mt-5 w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 text-center"
+    >
+      Choose a new time
+    </a>
+
+    <p class="mt-4 text-xs text-slate-500">
+      If the button doesn’t work, please contact the business directly.
+    </p>
+  </div>
 </div>
 {% endblock %}

@@ -1,29 +1,53 @@
 ﻿{% extends "calendar_app/base.html" %}
 
+{% block title %}Confirm cancellation{% endblock %}
+
 {% block content %}
-<div style="max-width:760px;margin:48px auto;padding:0 16px;">
-  <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 6px 20px rgba(18,38,63,0.06);">
-    <div style="display:flex;gap:16px;align-items:flex-start;">
-      <div style="flex:0 0 56px; height:56px; border-radius:8px; background:#fff0f0; display:flex; align-items:center; justify-content:center; font-size:22px; color:#b02a37;">⚠️</div>
-      <div style="flex:1;">
-        <h2 style="margin:0 0 8px 0; font-size:1.25rem;">Confirm cancellation</h2>
-        <p style="margin:0 0 12px;color:#444;">You're about to cancel the appointment for
-          <strong>{{ booking.service.name }}</strong> on
-          <strong>{{ booking.start|date:"D, j M Y" }}</strong> at
-          <strong>{{ booking.start|time:"g:i a" }}</strong>.</p>
+<div class="mx-auto w-full max-w-xl px-4 sm:px-6 py-10 sm:py-14">
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7">
+    <div class="flex flex-col sm:flex-row gap-4">
+      <div class="shrink-0 w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center text-xl text-red-700">⚠️</div>
+
+      <div class="min-w-0">
+        <h1 class="text-lg sm:text-xl font-bold text-slate-900">Confirm cancellation</h1>
+        <p class="mt-2 text-sm sm:text-base text-slate-700">
+          You’re about to cancel the appointment for
+          <span class="font-semibold">{{ booking.service.name }}</span>
+          on <span class="font-semibold">{{ booking.start|date:"D, j M Y" }}</span>
+          at <span class="font-semibold">{{ booking.start|time:"g:i a" }}</span>.
+        </p>
 
         {% if refund_info %}
-          <div style="margin-bottom:12px; padding:10px 12px; border-radius:6px; background:#e9f7ff; color:#055160;">{{ refund_info }}</div>
+          <div class="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            {{ refund_info }}
+          </div>
         {% else %}
-          <div style="margin-bottom:12px; padding:10px 12px; border-radius:6px; background:#fff4e5; color:#7a4b00;">No refund is available for this cancellation.</div>
+          <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            No refund is available for this cancellation.
+          </div>
         {% endif %}
 
-        <form method="post" style="display:flex; gap:10px; align-items:center;">
+        <form method="post" class="mt-5 flex flex-col sm:flex-row gap-3">
           {% csrf_token %}
           <input type="hidden" name="token" value="{{ token }}">
-          <button type="submit" class="btn-sm btn-delete" style="background:#d9534f; color:white; padding:10px 16px; border-radius:6px; border:none;">Proceed with cancellation</button>
-          <a href="{{ booking.get_absolute_url }}" role="button" class="btn-sm btn-view" style="background:#6c757d; color:white; padding:10px 14px; border-radius:6px; text-decoration:none;">Keep appointment</a>
+
+          <button
+            type="submit"
+            class="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+          >
+            Proceed with cancellation
+          </button>
+
+          <a
+            href="{{ booking.get_absolute_url }}"
+            role="button"
+            class="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-slate-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 text-center"
+          >
+            Keep appointment
+          </a>
         </form>
+
+        <p class="mt-4 text-xs text-slate-500">If you didn’t request this, you can safely close this page.</p>
       </div>
     </div>
   </div>
