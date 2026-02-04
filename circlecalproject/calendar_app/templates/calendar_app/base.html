@@ -582,8 +582,10 @@
               - Use full-width layout and tighter padding
             */
                         body[data-cc-app="1"] {
-                                background: transparent !important;
-                                background-color: transparent !important;
+                                /* Keep this painted so iOS WebView swipe-back doesn't flash black */
+                                background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 55%, #ffffff 100%) !important;
+                                background-attachment: fixed !important;
+                                background-color: #ffffff !important;
                         }
             body[data-cc-app="1"]::before,
             body[data-cc-app="1"]::after {
