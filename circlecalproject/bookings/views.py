@@ -1573,13 +1573,10 @@ def cancel_booking(request, booking_id):
         except Exception:
             pass
 
-
-
-        # Send cancellation email (include refund_info in context) and then delete
+        # Pass refund eligibility info to the post-delete signal so it can include
+        # the refund banner in the single client cancellation email.
         try:
-            from .emails import send_booking_cancellation
-            # send_booking_cancellation will return False on failure but we don't block
-            send_booking_cancellation(booking, refund_info=refund_info)
+            setattr(booking, '_refund_info', refund_info)
         except Exception:
             pass
 

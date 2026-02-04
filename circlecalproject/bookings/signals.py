@@ -640,10 +640,12 @@ def send_cancellation_email(sender, instance, **kwargs):
 
     # Always notify internal recipients (owner/managers, and assignees when assigned).
     try:
-        transaction.on_commit(lambda: send_internal_booking_cancellation_notification(instance))
+        refund_info = getattr(instance, '_refund_info', None)
+        transaction.on_commit(lambda: send_internal_booking_cancellation_notification(instance, refund_info=refund_info))
     except Exception:
         try:
-            send_internal_booking_cancellation_notification(instance)
+            refund_info = getattr(instance, '_refund_info', None)
+            send_internal_booking_cancellation_notification(instance, refund_info=refund_info)
         except Exception:
             pass
 
@@ -651,11 +653,13 @@ def send_cancellation_email(sender, instance, **kwargs):
     if instance.client_email:
         try:
             # Schedule sending after transaction commit to ensure deletion persisted
-            transaction.on_commit(lambda: send_booking_cancellation(instance))
+            refund_info = getattr(instance, '_refund_info', None)
+            transaction.on_commit(lambda: send_booking_cancellation(instance, refund_info=refund_info))
         except Exception:
             # Fallback to immediate send if on_commit unavailable
             try:
-                send_booking_cancellation(instance)
+                refund_info = getattr(instance, '_refund_info', None)
+                send_booking_cancellation(instance, refund_info=refund_info)
             except Exception:
                 pass
 
