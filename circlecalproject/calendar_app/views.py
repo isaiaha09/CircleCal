@@ -33,6 +33,8 @@ from django.db.models import Count
 from django.core.mail import send_mail, EmailMultiAlternatives
 from django.template.loader import render_to_string
 from calendar_app.forms import ContactForm
+from django.urls import reverse
+from urllib.parse import urlencode
 
 
 def _unique_resource_slug_for_org(org: Organization, base_slug: str, exclude_id: int = None) -> str:
@@ -48,20 +50,54 @@ def _unique_resource_slug_for_org(org: Organization, base_slug: str, exclude_id:
     return slug_candidate
 
 
+def _is_cc_app_request(request) -> bool:
+    try:
+        if request.GET.get('cc_app') == '1':
+            return True
+    except Exception:
+        pass
+    try:
+        if request.COOKIES.get('cc_app') == '1':
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _redirect_pricing_cc_gate(request, *, org_slug: str, gate: str, message: str):
+    """Redirect to pricing page with a gate hint for the mobile app.
+
+    In app-mode the mobile client blocks billing/pricing pages in the WebView. We still
+    want to communicate *why* the navigation was blocked (feature gate) without leaving
+    a Django messages banner queued up for the next page.
+    """
+    try:
+        base = reverse('calendar_app:pricing_page', kwargs={'org_slug': org_slug})
+        qs = urlencode({'cc_app': '1', 'cc_gate': gate, 'cc_gate_msg': message})
+        return redirect(f'{base}?{qs}')
+    except Exception:
+        return redirect('calendar_app:pricing_page', org_slug=org_slug)
+
+
 @login_required
 @require_http_methods(['GET', 'POST'])
 @require_roles(['owner', 'admin', 'manager'])
 def resources_page(request, org_slug):
     """Owner-facing management for facility resources (cages/rooms/etc)."""
     org = request.organization
+    gate_msg = 'Resources are available on the Team plan only.'
     try:
         from billing.utils import can_use_resources
         if not can_use_resources(org):
-            messages.error(request, 'Resources are available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='resources', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
         # If billing is unavailable, fail closed (do not expose Team-only feature)
-        messages.error(request, 'Resources are available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='resources', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
     resources = list(FacilityResource.objects.filter(organization=org).order_by('name', 'id'))
 
@@ -130,13 +166,18 @@ def resources_page(request, org_slug):
 @require_roles(['owner', 'admin', 'manager'])
 def edit_resource(request, org_slug, resource_id):
     org = request.organization
+    gate_msg = 'Resources are available on the Team plan only.'
     try:
         from billing.utils import can_use_resources
         if not can_use_resources(org):
-            messages.error(request, 'Resources are available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='resources', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
-        messages.error(request, 'Resources are available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='resources', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
     resource = get_object_or_404(FacilityResource, id=resource_id, organization=org)
 
@@ -196,13 +237,18 @@ def edit_resource(request, org_slug, resource_id):
 @require_roles(['owner', 'admin', 'manager'])
 def toggle_resource_active(request, org_slug, resource_id):
     org = request.organization
+    gate_msg = 'Resources are available on the Team plan only.'
     try:
         from billing.utils import can_use_resources
         if not can_use_resources(org):
-            messages.error(request, 'Resources are available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='resources', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
-        messages.error(request, 'Resources are available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='resources', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
     resource = get_object_or_404(FacilityResource, id=resource_id, organization=org)
     current = bool(getattr(resource, 'is_active', True))
@@ -5092,15 +5138,20 @@ def edit_service(request, org_slug, service_id):
 
 def team_dashboard(request, org_slug):
     org = request.organization
+    gate_msg = 'Staff portal is available on the Team plan only.'
 
     # Team plan required
     try:
         from billing.utils import can_add_staff
         if not can_add_staff(org):
-            messages.error(request, 'Staff portal is available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
-        messages.error(request, 'Staff portal is available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     # Only owners and admins can view/manage team
@@ -5117,15 +5168,20 @@ def team_dashboard(request, org_slug):
 
 def invite_member(request, org_slug):
     org = request.organization
+    gate_msg = 'Staff portal is available on the Team plan only.'
 
     # Team plan required
     try:
         from billing.utils import can_add_staff
         if not can_add_staff(org):
-            messages.error(request, 'Staff portal is available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
-        messages.error(request, 'Staff portal is available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     if not user_has_role(request.user, org, ["owner", "admin"]):
@@ -5202,15 +5258,20 @@ def invite_member(request, org_slug):
 
 def remove_member(request, org_slug, member_id):
     org = request.organization
+    gate_msg = 'Staff portal is available on the Team plan only.'
 
     # Team plan required
     try:
         from billing.utils import can_add_staff
         if not can_add_staff(org):
-            messages.error(request, 'Staff portal is available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
-        messages.error(request, 'Staff portal is available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     if not user_has_role(request.user, org, ["owner", "admin"]):
@@ -5227,15 +5288,20 @@ def remove_member(request, org_slug, member_id):
 
 def update_member_role(request, org_slug, member_id):
     org = request.organization
+    gate_msg = 'Staff portal is available on the Team plan only.'
 
     # Team plan required
     try:
         from billing.utils import can_add_staff
         if not can_add_staff(org):
-            messages.error(request, 'Staff portal is available on the Team plan only.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=org.slug)
     except Exception:
-        messages.error(request, 'Staff portal is available on the Team plan only.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=org.slug, gate='staff', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=org.slug)
 
     if not user_has_role(request.user, org, ["owner", "admin"]):
@@ -5260,14 +5326,20 @@ def update_member_role(request, org_slug, member_id):
 def accept_invite(request, token):
     invite = get_object_or_404(Invite, token=token)
 
+    gate_msg = 'This business is not on the Team plan. Staff invites are disabled.'
+
     # Team plan required
     try:
         from billing.utils import can_add_staff
         if not can_add_staff(invite.organization):
-            messages.error(request, 'This business is not on the Team plan. Staff invites are disabled.')
+            if _is_cc_app_request(request):
+                return _redirect_pricing_cc_gate(request, org_slug=invite.organization.slug, gate='staff_invites', message=gate_msg)
+            messages.error(request, gate_msg)
             return redirect('calendar_app:pricing_page', org_slug=invite.organization.slug)
     except Exception:
-        messages.error(request, 'This business is not on the Team plan. Staff invites are disabled.')
+        if _is_cc_app_request(request):
+            return _redirect_pricing_cc_gate(request, org_slug=invite.organization.slug, gate='staff_invites', message=gate_msg)
+        messages.error(request, gate_msg)
         return redirect('calendar_app:pricing_page', org_slug=invite.organization.slug)
 
     # If user is already authenticated, just create the membership and redirect
