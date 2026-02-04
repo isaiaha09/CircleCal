@@ -29,6 +29,22 @@
       padding: 8px;
     }
   }
+
+  /*
+    App WebView: <main> has fixed padding in cc_app mode.
+    vw-based widths can overflow that padded content box and look shifted right.
+    Clamp the calendar to the container width in app mode only.
+  */
+  body[data-cc-app="1"] .calendar-container {
+    width: 100% !important;
+    max-width: 900px;
+    box-sizing: border-box;
+  }
+  @media (max-width: 767px) {
+    body[data-cc-app="1"] .calendar-container {
+      max-width: 100% !important;
+    }
+  }
   @media (min-width: 768px) {
     .calendar-container { margin: 40px auto; padding: 12px; }
   }
