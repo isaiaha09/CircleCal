@@ -134,6 +134,16 @@ class BookingsListView(APIView):
         # Exclude internal per-date override markers (not real client bookings).
         qs = qs.exclude(service__isnull=True, client_name__startswith="scope:")
 
+        q = (request.query_params.get("q") or "").strip()
+        if q:
+            # Lightweight keyword search for the mobile app.
+            qs = qs.filter(
+                Q(title__icontains=q)
+                | Q(client_name__icontains=q)
+                | Q(client_email__icontains=q)
+                | Q(service__name__icontains=q)
+            )
+
         # Staff users default to seeing their own assignments + unassigned bookings.
         if membership.role == "staff":
             qs = qs.filter(Q(assigned_user__isnull=True) | Q(assigned_user=request.user))
