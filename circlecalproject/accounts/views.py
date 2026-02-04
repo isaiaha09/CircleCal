@@ -201,6 +201,16 @@ def profile_view(request):
 	from .models import Profile
 	profile, _ = Profile.objects.get_or_create(user=user)
 
+	# Whether the account has 2FA configured (i.e., at least one confirmed OTP device).
+	# Note: request.user.is_verified reflects whether the current session completed OTP,
+	# which is not the same as 2FA being enabled on the account.
+	two_factor_enabled = False
+	try:
+		from django_otp import devices_for_user as _devices_for_user
+		two_factor_enabled = any(True for _d in _devices_for_user(user, confirmed=True))
+	except Exception:
+		two_factor_enabled = False
+
 	# Used to keep onboarding resume behavior consistent: if the user has no org yet,
 	# we want post-login redirect to return them to Choose Business rather than Profile.
 	try:
@@ -350,6 +360,7 @@ def profile_view(request):
 			return render(request, "accounts/profile.html", {
 				"form": form,
 				"user": user,
+				"two_factor_enabled": two_factor_enabled,
 				"activities": activities,
 				"subscription": sub,
 				"organization": org2,
@@ -470,6 +481,7 @@ def profile_view(request):
 	resp = render(request, "accounts/profile.html", {
 		"form": form,
 		"user": user,
+		"two_factor_enabled": two_factor_enabled,
 		"activities": activities,
 		"subscription": sub,
 		"organization": org,
