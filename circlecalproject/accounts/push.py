@@ -43,6 +43,22 @@ def send_expo_push(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
         logger.info("Expo push send failed (network): %s", exc)
         return None
 
+    # Expo may return non-2xx for malformed payloads or auth issues.
+    try:
+        if not (200 <= int(getattr(resp, "status_code", 0) or 0) < 300):
+            body_preview = None
+            try:
+                body_preview = (resp.text or "")[:800]
+            except Exception:
+                body_preview = None
+            logger.info(
+                "Expo push send failed (http) status=%s body=%s",
+                getattr(resp, "status_code", "?"),
+                body_preview,
+            )
+    except Exception:
+        pass
+
     try:
         data = resp.json()
     except Exception:
@@ -104,8 +120,20 @@ def send_push_to_user(*, user, title: str, body: str, data: dict[str, Any] | Non
                         continue
                     details = r.get("details") or {}
                     err = details.get("error") if isinstance(details, dict) else None
-                    if err in {"DeviceNotRegistered", "InvalidCredentials"}:
+
+                    # IMPORTANT:
+                    # - DeviceNotRegistered => token truly dead; deactivate it.
+                    # - InvalidCredentials => server-side APNS/FCM credentials issue; do NOT deactivate tokens.
+                    if err == "DeviceNotRegistered":
                         dead_tokens.append(tokens[idx])
+
+                    if err:
+                        logger.info(
+                            "Expo push error user_id=%s platform_count=%s error=%s",
+                            getattr(user, "id", None),
+                            len(tokens),
+                            err,
+                        )
                 except Exception:
                     continue
 
