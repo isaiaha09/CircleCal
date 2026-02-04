@@ -8,6 +8,7 @@ from .models import LoginActivity, Membership, Invite, MobileSSOToken
 from billing.models import Subscription
 from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_http_methods
 from django.contrib.auth import logout
 from django.urls import reverse
 from two_factor.views import LoginView as TwoFactorLoginView
@@ -21,14 +22,25 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.csrf import csrf_exempt
+from django.middleware.csrf import get_token
+
+try:
+	from django_otp import devices_for_user
+	from django_otp import login as otp_login
+except Exception:  # pragma: no cover
+	devices_for_user = None  # type: ignore[assignment]
+	otp_login = None  # type: ignore[assignment]
 
 # Create your views here.
 
 
-@require_GET
+@require_http_methods(["GET", "POST"])
 def mobile_sso_consume_view(request, token: str):
-	"""Consume a one-time token and establish a session for WebView usage."""
+	"""Consume a one-time token and establish a session for WebView usage.
+
+	If the user has 2FA enabled (confirmed OTP devices), require a TOTP code
+	inside the WebView before establishing the session.
+	"""
 	def _return_to_app(reason: str) -> HttpResponse:
 		# The OS auth-session browser may not show/copy full URLs. Give the user a
 		# single tap escape hatch back into the native app.
@@ -63,7 +75,9 @@ def mobile_sso_consume_view(request, token: str):
 </html>"""
 		return HttpResponse(html, content_type='text/html', status=200)
 
-	next_url = (request.GET.get('next') or '/').strip() or '/'
+	# Determine the target URL. For POST, keep the original next from session.
+	default_next = (request.GET.get('next') or '/').strip() or '/'
+	next_url = default_next
 	if not url_has_allowed_host_and_scheme(
 		next_url,
 		allowed_hosts={request.get_host()},
@@ -71,6 +85,118 @@ def mobile_sso_consume_view(request, token: str):
 	):
 		next_url = '/'
 
+	# If this is a POST (2FA submission), we expect the session to have pending info.
+	if request.method == 'POST':
+		pending_user_id = request.session.get('cc_mobile_sso_pending_user_id')
+		pending_next = request.session.get('cc_mobile_sso_pending_next')
+		pending_attempts = int(request.session.get('cc_mobile_sso_pending_attempts') or 0)
+		if not pending_user_id:
+			return _return_to_app('sso_expired')
+		try:
+			next_url = str(pending_next or '/').strip() or '/'
+		except Exception:
+			next_url = '/'
+		# Basic attempt limiting to reduce brute-force on a consumed one-time token.
+		pending_attempts += 1
+		request.session['cc_mobile_sso_pending_attempts'] = pending_attempts
+		if pending_attempts > 8:
+			# Clear pending state and force a fresh SSO link.
+			for k in ['cc_mobile_sso_pending_user_id', 'cc_mobile_sso_pending_next', 'cc_mobile_sso_pending_attempts', 'cc_mobile_sso_pending_backend']:
+				try:
+					del request.session[k]
+				except Exception:
+					pass
+			return _return_to_app('too_many_attempts')
+		try:
+			User = get_user_model()
+			user = User.objects.filter(id=int(pending_user_id)).first()
+		except Exception:
+			user = None
+		if user is None:
+			return _return_to_app('sso_expired')
+		code = (request.POST.get('otp') or request.POST.get('code') or '').strip().replace(' ', '')
+		if not code:
+			error_msg = 'Enter the 6-digit code from your authenticator app.'
+		else:
+			error_msg = None
+			device = None
+			verified = False
+			try:
+				if devices_for_user is not None:
+					for d in devices_for_user(user, confirmed=True):
+						try:
+							if d.verify_token(code):
+								device = d
+								verified = True
+								break
+						except Exception:
+							continue
+			except Exception:
+			verified = False
+		
+		if error_msg or not verified:
+			if not error_msg:
+				error_msg = 'That code was invalid. Try again.'
+			csrf = get_token(request)
+			html = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+	<meta charset=\"utf-8\" />
+	<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+	<title>Two-factor verification</title>
+	<style>
+		body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:24px;background:#f8fafc;color:#0f172a;}}
+		.card{{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;}}
+		h1{{font-size:18px;margin:0 0 8px;}}
+		p{{margin:0 0 12px;color:#334155;line-height:1.4;}}
+		.err{{margin:10px 0 12px;padding:10px 12px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-weight:700;}}
+		label{{display:block;font-size:12px;color:#64748b;font-weight:800;margin-top:10px;margin-bottom:6px;}}
+		input{{width:100%;font-size:18px;padding:12px 12px;border-radius:12px;border:1px solid #cbd5e1;letter-spacing:0.2em;}}
+		button{{margin-top:12px;width:100%;background:#2563eb;color:#fff;border:0;padding:12px 14px;border-radius:12px;font-weight:900;font-size:14px;}}
+		.muted{{margin-top:10px;font-size:12px;color:#64748b;}}
+	</style>
+</head>
+<body>
+	<div class=\"card\">
+		<h1>Two-factor verification</h1>
+		<p>Enter the code from your authenticator app to continue.</p>
+		<div class=\"err\">{error_msg}</div>
+		<form method=\"POST\">
+			<input type=\"hidden\" name=\"csrfmiddlewaretoken\" value=\"{csrf}\" />
+			<label for=\"otp\">Authentication code</label>
+			<input id=\"otp\" name=\"otp\" inputmode=\"numeric\" autocomplete=\"one-time-code\" placeholder=\"123456\" />
+			<button type=\"submit\">Verify</button>
+		</form>
+		<div class=\"muted\">If you don’t have access to your authenticator, use a backup code on the website.</div>
+	</div>
+</body>
+</html>"""
+			return HttpResponse(html, content_type='text/html', status=200)
+
+		# Verified: establish the session and mark OTP verified.
+		backend = str(request.session.get('cc_mobile_sso_pending_backend') or 'django.contrib.auth.backends.ModelBackend')
+		login(request, user, backend=backend)
+		try:
+			if otp_login is not None and device is not None:
+				otp_login(request, device)
+		except Exception:
+			pass
+		for k in ['cc_mobile_sso_pending_user_id', 'cc_mobile_sso_pending_next', 'cc_mobile_sso_pending_attempts', 'cc_mobile_sso_pending_backend']:
+			try:
+				del request.session[k]
+			except Exception:
+				pass
+		# In app-mode, prefer session cookies that expire when the browser closes.
+		try:
+			ua = (request.META.get('HTTP_USER_AGENT') or '')
+			is_app_ua = 'CircleCalApp' in ua
+			if is_app_ua:
+				request.session.set_expiry(0)
+		except Exception:
+			pass
+		return redirect(next_url)
+
+	# GET: consume token and decide whether 2FA is required.
 	now = timezone.now()
 	with transaction.atomic():
 		tok = (
@@ -81,8 +207,18 @@ def mobile_sso_consume_view(request, token: str):
 		)
 		if tok is None:
 			return _return_to_app('sso_expired')
+		# Mark used immediately to prevent the token being replayed in another browser.
 		tok.used_at = now
 		tok.save(update_fields=['used_at'])
+
+	user = getattr(tok, 'user', None)
+	# If user has 2FA devices, prompt for OTP inside the WebView.
+	try:
+		has_2fa = False
+		if devices_for_user is not None and user is not None:
+			has_2fa = any(True for _d in devices_for_user(user, confirmed=True))
+	except Exception:
+		has_2fa = False
 
 	backend = 'django.contrib.auth.backends.ModelBackend'
 	try:
@@ -90,6 +226,47 @@ def mobile_sso_consume_view(request, token: str):
 	except Exception:
 		backend = 'django.contrib.auth.backends.ModelBackend'
 
+	if has_2fa and user is not None:
+		request.session['cc_mobile_sso_pending_user_id'] = int(getattr(user, 'id', 0) or 0)
+		request.session['cc_mobile_sso_pending_next'] = next_url
+		request.session['cc_mobile_sso_pending_attempts'] = 0
+		request.session['cc_mobile_sso_pending_backend'] = backend
+		csrf = get_token(request)
+		html = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+	<meta charset=\"utf-8\" />
+	<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+	<title>Two-factor verification</title>
+	<style>
+		body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:24px;background:#f8fafc;color:#0f172a;}}
+		.card{{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;}}
+		h1{{font-size:18px;margin:0 0 8px;}}
+		p{{margin:0 0 12px;color:#334155;line-height:1.4;}}
+		label{{display:block;font-size:12px;color:#64748b;font-weight:800;margin-top:10px;margin-bottom:6px;}}
+		input{{width:100%;font-size:18px;padding:12px 12px;border-radius:12px;border:1px solid #cbd5e1;letter-spacing:0.2em;}}
+		button{{margin-top:12px;width:100%;background:#2563eb;color:#fff;border:0;padding:12px 14px;border-radius:12px;font-weight:900;font-size:14px;}}
+		.muted{{margin-top:10px;font-size:12px;color:#64748b;}}
+	</style>
+</head>
+<body>
+	<div class=\"card\">
+		<h1>Two-factor verification</h1>
+		<p>Enter the code from your authenticator app to continue.</p>
+		<form method=\"POST\">
+			<input type=\"hidden\" name=\"csrfmiddlewaretoken\" value=\"{csrf}\" />
+			<label for=\"otp\">Authentication code</label>
+			<input id=\"otp\" name=\"otp\" inputmode=\"numeric\" autocomplete=\"one-time-code\" placeholder=\"123456\" />
+			<button type=\"submit\">Verify</button>
+		</form>
+		<div class=\"muted\">If you don’t have access to your authenticator, use a backup code on the website.</div>
+	</div>
+	<script>try{document.getElementById('otp').focus();}catch(e){}</script>
+</body>
+</html>"""
+		return HttpResponse(html, content_type='text/html', status=200)
+
+	# No 2FA required: establish session immediately.
 	login(request, tok.user, backend=backend)
 	# In app-mode, prefer session cookies that expire when the browser closes.
 	# This reduces "sticky" sign-in when the user cancels onboarding.
