@@ -581,6 +581,10 @@
               - Hide web chrome so the native shell can own navigation
               - Use full-width layout and tighter padding
             */
+                        body[data-cc-app="1"] {
+                                background: transparent !important;
+                                background-color: transparent !important;
+                        }
             body[data-cc-app="1"]::before,
             body[data-cc-app="1"]::after {
                 display: none !important;
@@ -595,6 +599,8 @@
                 max-width: 100% !important;
                 width: 100% !important;
                 padding: 14px 14px 18px 14px !important;
+                background: transparent !important;
+                background-color: transparent !important;
             }
 
             /*
@@ -622,7 +628,7 @@
 {% if request.GET.embed == '1' or request.custom_domain_organization %}
 <body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="1" data-cc-app="{% if cc_app_mode %}1{% else %}0{% endif %}">
 {% else %}
-<body class="bg-blue-50  text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="0" data-cc-app="{% if cc_app_mode %}1{% else %}0{% endif %}">
+<body class="{% if cc_app_mode %}bg-transparent{% else %}bg-blue-50{% endif %} text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="0" data-cc-app="{% if cc_app_mode %}1{% else %}0{% endif %}">
 {% endif %}
 
     {% if cc_app_param %}
