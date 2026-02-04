@@ -3,7 +3,7 @@ import stripe
 from stripe import InvalidRequestError
 from django.conf import settings
 from django.utils import timezone
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse, HttpResponseRedirect
 from django.shortcuts import redirect, get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -72,6 +72,34 @@ def _sync_connect_status(org):
         return True
     except Exception:
         return False
+
+
+def _redirect_to_app(deep_link: str):
+    """Redirect to the native app deep link (circlecal://...).
+
+    Django's built-in redirect() / HttpResponseRedirect validates URL schemes and
+    can raise DisallowedRedirect for non-http(s) protocols. For Stripe Connect
+    completion we *must* redirect to the custom scheme so Expo's auth-session
+    browser closes and the user returns to the app.
+    """
+    if not deep_link:
+        return HttpResponseBadRequest('Missing deep link')
+
+    # Prefer a proper redirect response but explicitly allow the circlecal scheme.
+    try:
+        base_schemes = list(getattr(HttpResponseRedirect, 'allowed_schemes', ['http', 'https']))
+        if 'circlecal' not in base_schemes:
+            base_schemes.append('circlecal')
+
+        class _AppSchemeRedirect(HttpResponseRedirect):
+            allowed_schemes = base_schemes
+
+        return _AppSchemeRedirect(deep_link)
+    except Exception:
+        # Fallback: set Location header manually to avoid scheme validation.
+        resp = HttpResponse('', status=302)
+        resp['Location'] = deep_link
+        return resp
 
 
 @require_http_methods(["GET"])
@@ -184,7 +212,7 @@ def stripe_connect_refresh(request, org_slug):
     # deep-link back into the app to close the OS auth-session browser.
     # This must work whether or not cookies were shared (authenticated or not).
     if is_app and sig_ok:
-        return redirect('circlecal://stripe-return?status=refresh')
+        return _redirect_to_app('circlecal://stripe-return?status=refresh')
 
     if not getattr(request.user, 'is_authenticated', False):
         return redirect_to_login(request.get_full_path())
@@ -207,8 +235,8 @@ def stripe_connect_return(request, org_slug):
     if is_app and sig_ok:
         ok = _sync_connect_status(org)
         if ok and getattr(org, 'stripe_connect_charges_enabled', False):
-            return redirect('circlecal://stripe-return?status=connected')
-        return redirect('circlecal://stripe-return?status=pending')
+            return _redirect_to_app('circlecal://stripe-return?status=connected')
+        return _redirect_to_app('circlecal://stripe-return?status=pending')
 
     if not getattr(request.user, 'is_authenticated', False):
         return redirect_to_login(request.get_full_path())
@@ -246,7 +274,7 @@ def stripe_connect_return(request, org_slug):
                     request.session.pop('cc_app_stripe_connect', None)
                 except Exception:
                     pass
-                return redirect('circlecal://stripe-return?status=connected')
+                return _redirect_to_app('circlecal://stripe-return?status=connected')
         except Exception:
             pass
 
@@ -267,7 +295,7 @@ def stripe_express_return_to_app(request):
 
     # Always prefer deep-linking back into the app.
     try:
-        return redirect('circlecal://stripe-return?status=express_done')
+        return _redirect_to_app('circlecal://stripe-return?status=express_done')
     except Exception:
         # Safe fallback for environments that don't allow custom schemes.
         return redirect('accounts:profile')
