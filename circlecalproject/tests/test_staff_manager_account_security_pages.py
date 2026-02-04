@@ -50,3 +50,23 @@ class StaffManagerSecurityPagesTests(TestCase):
 
     def test_manager_can_access_password_change_and_2fa_on_team_plan(self):
         self._assert_can_access_security_pages(self.manager)
+
+
+class PasswordChangeFlowTests(TestCase):
+    def test_password_change_done_page_renders(self):
+        User = get_user_model()
+        user = User.objects.create_user(username='u1', email='u1@example.com', password='oldpass123')
+        self.client.force_login(user)
+
+        resp = self.client.post(
+            reverse('accounts:password_change'),
+            data={
+                'old_password': 'oldpass123',
+                'new_password1': 'newpass12345',
+                'new_password2': 'newpass12345',
+            },
+            HTTP_HOST='127.0.0.1',
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('Password Updated', resp.content.decode('utf-8'))
