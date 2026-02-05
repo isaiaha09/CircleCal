@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db.models import Q
+from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
@@ -374,3 +375,193 @@ class BookingsAuditListView(APIView):
             )
 
         return Response({"org": {"id": org.id, "slug": org.slug, "name": org.name}, "total": total, "page": page, "per_page": per_page, "items": items})
+
+
+class BookingsAuditExportView(APIView):
+    """Export selected audit entries as PDF (JWT-auth).
+
+    GET query params:
+    - org: required (slug or id)
+    - ids: required comma-separated list of AuditBooking ids
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _parse_ids(self, raw: str | None) -> list[int]:
+        if not raw:
+            return []
+        out: list[int] = []
+        for part in str(raw).split(","):
+            p = part.strip()
+            if not p:
+                continue
+            try:
+                out.append(int(p))
+            except Exception:
+                continue
+        # Deduplicate while preserving order.
+        seen: set[int] = set()
+        deduped: list[int] = []
+        for i in out:
+            if i in seen:
+                continue
+            seen.add(i)
+            deduped.append(i)
+        return deduped
+
+    def get(self, request):
+        org_param = request.query_params.get("org")
+        org, _membership = _get_org_and_membership(user=request.user, org_param=org_param)
+
+        ids = self._parse_ids(request.query_params.get("ids"))
+        if not ids:
+            raise ValidationError({"ids": "This query param is required (comma-separated audit ids)."})
+
+        qs = (
+            AuditBooking.objects.filter(organization=org, id__in=ids)
+            .select_related("service")
+            .order_by("-created_at")
+        )
+
+        export: list[dict] = []
+        try:
+            org_tz_name = getattr(org, "timezone", None) or "UTC"
+            org_tz = ZoneInfo(org_tz_name)
+        except Exception:
+            org_tz = ZoneInfo("UTC")
+
+        def _fmt(dt):
+            if not dt:
+                return None
+            try:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                return dt.astimezone(org_tz).strftime("%b %d, %Y %I:%M %p")
+            except Exception:
+                try:
+                    return dt.isoformat()
+                except Exception:
+                    return str(dt)
+
+        for a in qs:
+            snap = a.booking_snapshot if isinstance(a.booking_snapshot, dict) else {}
+            booking_ref = None
+            try:
+                booking_ref = snap.get("public_ref")
+            except Exception:
+                booking_ref = None
+            booking_ref = booking_ref or getattr(a, "public_ref", None) or a.booking_id
+
+            display_event = a.event_type or ""
+            try:
+                if a.event_type == AuditBooking.EVENT_DELETED and a.start and (a.start < timezone.now()):
+                    display_event = "successful"
+            except Exception:
+                pass
+
+            non_refunded = False
+            try:
+                if a.event_type == AuditBooking.EVENT_CANCELLED and a.service and a.start and a.created_at:
+                    hrs = (a.start - a.created_at).total_seconds() / 3600.0
+                    if getattr(a.service, "refunds_allowed", False):
+                        cutoff = float(getattr(a.service, "refund_cutoff_hours", 0) or 0)
+                        refundable = hrs >= cutoff
+                    else:
+                        refundable = False
+                    non_refunded = not refundable
+            except Exception:
+                non_refunded = False
+
+            svc = a.service
+            export.append(
+                {
+                    "id": a.id,
+                    "booking_id": a.booking_id,
+                    "booking_ref": booking_ref,
+                    "event_type": a.event_type,
+                    "display_event": display_event,
+                    "service": svc.name if svc else None,
+                    "service_price": float(svc.price) if (svc and getattr(svc, "price", None) is not None) else None,
+                    "business": org.name,
+                    "start": a.start.isoformat() if a.start else None,
+                    "start_display": _fmt(a.start),
+                    "end": a.end.isoformat() if a.end else None,
+                    "end_display": _fmt(a.end),
+                    "client_name": a.client_name,
+                    "client_email": a.client_email,
+                    "non_refunded": non_refunded,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "snapshot": a.booking_snapshot,
+                }
+            )
+
+        # Build a basic PDF (best effort) so mobile can download/share.
+        try:
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.pagesizes import letter
+            from io import BytesIO
+
+            packet = BytesIO()
+            c = canvas.Canvas(packet, pagesize=letter)
+            width, height = letter
+            y = height - 40
+            line_h = 14
+
+            c.setFont("Helvetica-Bold", 14)
+            c.drawCentredString(width / 2.0, y, f"Audit export for {org.name}")
+            y -= line_h * 2
+
+            c.setFont("Helvetica", 11)
+            c.drawString(40, y, f"Selected entries: {len(export)}")
+            y -= line_h * 1.5
+
+            for item in export:
+                if y < 60:
+                    c.showPage()
+                    c.setFont("Helvetica", 11)
+                    y = height - 40
+
+                ev = (item.get("display_event") or item.get("event_type") or "").capitalize()
+                bid = item.get("booking_ref") or item.get("booking_id") or "-"
+                c.drawString(40, y, f"Event: {ev}  ID: {bid}")
+                y -= line_h
+                c.drawString(60, y, f"Service: {item.get('service') or '-'}")
+                y -= line_h
+                c.drawString(60, y, f"Client: {item.get('client_name') or '-'} <{item.get('client_email') or '-'}>")
+                y -= line_h
+                price = item.get("service_price")
+                if price is not None:
+                    try:
+                        c.drawString(60, y, f"Charge: ${float(price):.2f}")
+                    except Exception:
+                        c.drawString(60, y, f"Charge: {price}")
+                    y -= line_h
+
+                try:
+                    if (item.get("event_type") or "").lower() == AuditBooking.EVENT_CANCELLED and item.get("non_refunded"):
+                        c.drawString(60, y, "Note: Cancellation charge retained (no refund)")
+                        y -= line_h
+                except Exception:
+                    pass
+
+                start_disp = item.get("start_display") or item.get("start") or "-"
+                end_disp = item.get("end_display") or item.get("end") or None
+                if end_disp:
+                    c.drawString(60, y, f"Start: {start_disp}  —  End: {end_disp}")
+                else:
+                    c.drawString(60, y, f"Start: {start_disp}")
+                y -= line_h * 2
+
+            c.save()
+            packet.seek(0)
+
+            resp = HttpResponse(packet.read(), content_type="application/pdf")
+            resp["Content-Disposition"] = 'attachment; filename="audit_export.pdf"'
+            return resp
+        except Exception as e:
+            # Missing reportlab: return JSON so the caller can at least debug.
+            if isinstance(e, (ImportError, ModuleNotFoundError)):
+                return Response({"items": export}, status=200)
+            if getattr(settings, "DEBUG", False):
+                raise
+            return Response({"detail": "PDF generation failed."}, status=500)

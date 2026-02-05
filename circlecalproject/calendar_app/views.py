@@ -8899,16 +8899,42 @@ def bookings_audit_undo(request, org_slug):
 @login_required
 @require_roles(['owner', 'admin', 'manager', 'staff'])
 def bookings_audit_export(request, org_slug):
-    """Export selected audit entries. Accepts POST with {'ids': [1,2,3]}
+    """Export selected audit entries.
+
+    Accepts:
+    - POST JSON: {'ids': [1,2,3]}
+    - GET query param: ?ids=1,2,3
 
     Attempts to produce a PDF if reportlab is available; otherwise falls back to JSON.
     """
     org = request.organization
+    ids = []
+    if request.method == 'GET':
+        try:
+            raw = (request.GET.get('ids') or '').strip()
+            parts = [p.strip() for p in raw.split(',') if p.strip()]
+            for p in parts:
+                try:
+                    ids.append(int(p))
+                except Exception:
+                    continue
+        except Exception:
+            ids = []
+    else:
+        try:
+            payload = json.loads(request.body.decode('utf-8'))
+            ids = payload.get('ids', [])
+        except Exception:
+            return HttpResponseBadRequest('Invalid JSON')
+
+    # Normalize ids and validate
     try:
-        payload = json.loads(request.body.decode('utf-8'))
-        ids = payload.get('ids', [])
+        ids = [int(x) for x in (ids or []) if str(x).strip().isdigit()]
     except Exception:
-        return HttpResponseBadRequest('Invalid JSON')
+        ids = []
+
+    if not ids:
+        return HttpResponseBadRequest('No valid ids provided')
 
     qs = AuditBooking.objects.filter(organization=org, id__in=ids).order_by('-created_at')
     export = []
