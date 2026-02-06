@@ -4,8 +4,14 @@ Hi {{ name }},
 
 Thanks for your message — we received it and will be in touch soon.
 
+{% if ticket_id %}
+Ticket: {{ ticket_id }}
+{% endif %}
+
 Your message:
 {{ message }}
+
+If you need to add details, reply to this email and we will see it.
 
 — The CircleCal Team
 

@@ -2847,11 +2847,20 @@ def contact(request):
             # If email is configured, attempt to send. If not, still accept the
             # submission to avoid breaking UX in local/dev environments.
             try:
+                # Generate a short support ticket ID for threading/search.
+                try:
+                    import secrets
+                    _alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+                    ticket_id = 'CC-' + ''.join(secrets.choice(_alphabet) for _ in range(8))
+                except Exception:
+                    ticket_id = None
+
                 # Prefer an explicit contact recipient address if configured.
                 to_addr = getattr(settings, 'CONTACT_RECIPIENT', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', None) or getattr(settings, 'SERVER_EMAIL', None) or None
                 if to_addr:
                     # Render templated HTML and text for admin notification
                     context = {
+                        'ticket_id': ticket_id,
                         'business_name': business_name,
                         'name': name,
                         'email': email,
@@ -2863,8 +2872,9 @@ def contact(request):
                     text_content = render_to_string('calendar_app/emails/contact_admin_email.txt', context)
 
                     from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None) or None
+                    support_reply_to = getattr(settings, 'SUPPORT_EMAIL', None) or None
                     msg = EmailMultiAlternatives(
-                        subject=f"[CircleCal Contact] {final_subject}",
+                        subject=(f"[CircleCal {ticket_id}] {final_subject}" if ticket_id else f"[CircleCal Contact] {final_subject}"),
                         body=text_content,
                         from_email=from_email,
                         to=[to_addr],
@@ -2876,18 +2886,23 @@ def contact(request):
                     # Send a confirmation email back to the user (plain + html)
                     try:
                         user_ctx = {
+                            'ticket_id': ticket_id,
                             'name': name,
                             'message': message,
                             'site_url': getattr(settings, 'SITE_URL', ''),
+                            'support_email': support_reply_to or 'support@circlecal.app',
                         }
                         user_html = render_to_string('calendar_app/emails/contact_user_confirmation_email.html', user_ctx)
                         user_text = render_to_string('calendar_app/emails/contact_user_confirmation_email.txt', user_ctx)
                         user_msg = EmailMultiAlternatives(
-                            subject='Thanks for contacting CircleCal',
+                            subject=(f"We received your message ({ticket_id})" if ticket_id else 'Thanks for contacting CircleCal'),
                             body=user_text,
                             from_email=from_email,
                             to=[email],
                         )
+                        # Route replies to the support inbox (even if From is noreply@...).
+                        if support_reply_to:
+                            user_msg.reply_to = [support_reply_to]
                         user_msg.attach_alternative(user_html, 'text/html')
                         user_msg.send(fail_silently=True)
                     except Exception:

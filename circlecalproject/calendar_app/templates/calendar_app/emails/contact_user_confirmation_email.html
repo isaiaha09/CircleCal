@@ -23,10 +23,14 @@
             <p class="lead">Hi {{ name }},</p>
             <p class="muted">Thanks for reaching out — we received your message and will get back to you as soon as we can.</p>
 
+            {% if ticket_id %}
+            <p style="margin-top:12px;"><strong>Ticket:</strong> {{ ticket_id }}</p>
+            {% endif %}
+
             <p style="margin-top:12px;"><strong>Your message:</strong></p>
             <div style="background:#f8fafc;padding:12px;border-radius:6px;white-space:pre-wrap;">{{ message }}</div>
 
-            <p style="margin-top:16px;">If you need to update your message, reply to this email and we will see it (your reply will go to your inbox contact; use the thread to provide more details).</p>
+            <p style="margin-top:16px;">If you need to add details, reply to this email. Your reply will go to our support inbox{% if ticket_id %} (ticket {{ ticket_id }}){% endif %}.</p>
 
             <p class="muted" style="margin-top:18px;">— The CircleCal Team</p>
         </div>

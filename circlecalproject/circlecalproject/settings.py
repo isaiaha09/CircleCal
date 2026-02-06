@@ -315,6 +315,10 @@ EMAIL_TIMEOUT = 10
 
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'CircleCal <noreply@circlecal.app>')
 
+# Where user replies to automated support confirmations should go.
+# Example: SUPPORT_EMAIL='CircleCal Support <support@circlecal.app>'
+SUPPORT_EMAIL = os.getenv('SUPPORT_EMAIL')
+
 # Email address to receive site contact form submissions. Configure via env:
 # CONTACT_RECIPIENT=contactcirclecal@gmail.com
 CONTACT_RECIPIENT = os.getenv('CONTACT_RECIPIENT')

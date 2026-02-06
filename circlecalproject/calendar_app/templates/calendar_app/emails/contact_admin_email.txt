@@ -1,5 +1,9 @@
 New contact form submission
 
+{% if ticket_id %}
+Ticket: {{ ticket_id }}
+{% endif %}
+
 Business: {{ business_name|default:'(none provided)' }}
 Name: {{ name }}
 Email: {{ email }}

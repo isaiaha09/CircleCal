@@ -24,6 +24,13 @@
         <div class="content">
             <p class="muted">A user submitted the contact form on {{ site_url }}. Details below.</p>
 
+            {% if ticket_id %}
+            <div class="field">
+                <div class="label">Ticket</div>
+                <div class="value">{{ ticket_id }}</div>
+            </div>
+            {% endif %}
+
             <div class="field">
                 <div class="label">Business</div>
                 <div class="value">{{ business_name|default:'(none provided)' }}</div>
