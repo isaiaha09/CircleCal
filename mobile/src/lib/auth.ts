@@ -4,6 +4,8 @@ const ACCESS_TOKEN_KEY = 'cc_access_token';
 const REFRESH_TOKEN_KEY = 'cc_refresh_token';
 const ACTIVE_ORG_SLUG_KEY = 'cc_active_org_slug';
 const PUSH_TOKEN_KEY = 'cc_push_token';
+const POST_SIGNOUT_MESSAGE_KEY = 'cc_post_signout_message';
+const POST_STRIPE_MESSAGE_KEY = 'cc_post_stripe_message';
 
 export async function getAccessToken(): Promise<string | null> {
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
@@ -55,4 +57,28 @@ export async function setActiveOrgSlug(slug: string): Promise<void> {
 
 export async function clearActiveOrgSlug(): Promise<void> {
   await SecureStore.deleteItemAsync(ACTIVE_ORG_SLUG_KEY);
+}
+
+export async function getPostSignOutMessage(): Promise<string | null> {
+  return SecureStore.getItemAsync(POST_SIGNOUT_MESSAGE_KEY);
+}
+
+export async function setPostSignOutMessage(message: string): Promise<void> {
+  await SecureStore.setItemAsync(POST_SIGNOUT_MESSAGE_KEY, message);
+}
+
+export async function clearPostSignOutMessage(): Promise<void> {
+  await SecureStore.deleteItemAsync(POST_SIGNOUT_MESSAGE_KEY);
+}
+
+export async function getPostStripeMessage(): Promise<string | null> {
+  return SecureStore.getItemAsync(POST_STRIPE_MESSAGE_KEY);
+}
+
+export async function setPostStripeMessage(message: string): Promise<void> {
+  await SecureStore.setItemAsync(POST_STRIPE_MESSAGE_KEY, message);
+}
+
+export async function clearPostStripeMessage(): Promise<void> {
+  await SecureStore.deleteItemAsync(POST_STRIPE_MESSAGE_KEY);
 }

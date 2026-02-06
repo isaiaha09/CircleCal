@@ -13,10 +13,11 @@ import {
 import type { ApiError, FacilityResourceListItem } from '../lib/api';
 import { apiCreateResource, apiGetOrgs, apiGetResources, apiUpdateResource } from '../lib/api';
 import { canManageBilling, canManageResources, humanRole, normalizeOrgRole } from '../lib/permissions';
+import { contactSupport } from '../lib/support';
 
 type Props = {
   orgSlug: string;
-  onOpenPricing: (args: { orgSlug: string }) => void;
+  onOpenPlans: (args: { orgSlug: string }) => void;
 };
 
 function errorMessage(e: unknown, fallback: string): string {
@@ -30,7 +31,7 @@ function errorMessage(e: unknown, fallback: string): string {
   );
 }
 
-export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
+export function ResourcesScreen({ orgSlug, onOpenPlans }: Props) {
   const [resources, setResources] = useState<FacilityResourceListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [roleLoading, setRoleLoading] = useState(true);
@@ -153,8 +154,8 @@ export function ResourcesScreen({ orgSlug, onOpenPricing }: Props) {
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
           {canSeePricing ? (
-            <Pressable style={styles.primaryBtn} onPress={() => onOpenPricing({ orgSlug })}>
-              <Text style={styles.primaryBtnText}>View plans</Text>
+            <Pressable style={styles.primaryBtn} onPress={() => contactSupport()}>
+              <Text style={styles.primaryBtnText}>Contact support</Text>
             </Pressable>
           ) : null}
         </View>

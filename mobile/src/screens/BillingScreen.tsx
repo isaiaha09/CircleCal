@@ -1,344 +1,47 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { ApiError, BillingPlan, BillingSummary, OrgListItem } from '../lib/api';
-import { apiCreateBillingCheckoutSession, apiCreateBillingPortalSession, apiGetBillingPlans, apiGetBillingSummary, apiGetOrgs } from '../lib/api';
-import { canManageBilling, humanRole, normalizeOrgRole } from '../lib/permissions';
+import { contactSupport } from '../lib/support';
 
 type Props = {
   orgSlug: string;
 };
 
-function safeString(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (v == null) return '';
-  return String(v);
-}
-
-function formatDateMaybe(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
-
-function formatMoney(price: string): string {
-  // Server returns strings like "19.99"; keep it simple.
-  const n = Number(price);
-  if (!Number.isFinite(n)) return `$${price}`;
-  return `$${n.toFixed(2)}`;
-}
-
-export function BillingScreen({ orgSlug }: Props) {
-  const [summary, setSummary] = useState<BillingSummary | null>(null);
-  const [plans, setPlans] = useState<BillingPlan[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'portal' | `checkout:${number}` | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [role, setRole] = useState<string>('');
-  const [roleLoading, setRoleLoading] = useState(true);
-
-  const currentSlug = (summary?.plan?.slug || 'basic').toLowerCase();
-
-  const title = useMemo(() => {
-    if (!summary?.org?.name) return 'Billing';
-    return `Billing · ${summary.org.name}`;
-  }, [summary?.org?.name]);
-
-  const allowed = useMemo(() => canManageBilling(role), [role]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        setRoleLoading(true);
-        const orgsResp = await apiGetOrgs();
-        const org = (orgsResp.orgs ?? []).find((o: OrgListItem) => o.slug === orgSlug);
-        const nextRole = normalizeOrgRole(org?.role);
-        if (cancelled) return;
-        setRole(nextRole);
-        if (!canManageBilling(nextRole)) {
-          setSummary(null);
-          setPlans([]);
-          setError(`Billing is restricted to Owners only (you are ${humanRole(nextRole)}).`);
-          return;
-        }
-
-        const [s, p] = await Promise.all([apiGetBillingSummary({ org: orgSlug }), apiGetBillingPlans({ org: orgSlug })]);
-        if (cancelled) return;
-        setSummary(s);
-        setPlans(p.plans ?? []);
-      } catch (e) {
-        const err = e as Partial<ApiError>;
-        const body = err.body as any;
-        const msg =
-          (typeof body?.detail === 'string' && body.detail) ||
-          (typeof err.message === 'string' && err.message) ||
-          'Failed to load billing.';
-        if (!cancelled) setError(msg);
-      } finally {
-        if (!cancelled) {
-          setRoleLoading(false);
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [orgSlug]);
-
-  async function openPortal() {
-    setBusy('portal');
-    setError(null);
-    try {
-      const resp = await apiCreateBillingPortalSession({ org: orgSlug });
-      const url = safeString(resp.url);
-      if (!url) throw new Error('No portal URL returned.');
-      await Linking.openURL(url);
-    } catch (e) {
-      const err = e as Partial<ApiError>;
-      const body = err.body as any;
-      const msg =
-        (typeof body?.detail === 'string' && body.detail) ||
-        (typeof err.message === 'string' && err.message) ||
-        'Could not open billing portal.';
-      setError(msg);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function checkout(planId: number) {
-    setBusy(`checkout:${planId}`);
-    setError(null);
-    try {
-      const resp = await apiCreateBillingCheckoutSession({ org: orgSlug, planId });
-      const url = safeString(resp.url);
-      if (!url) throw new Error('No checkout URL returned.');
-      await Linking.openURL(url);
-    } catch (e) {
-      const err = e as Partial<ApiError>;
-      const body = err.body as any;
-      const msg =
-        (typeof body?.detail === 'string' && body.detail) ||
-        (typeof err.message === 'string' && err.message) ||
-        'Could not start checkout.';
-      setError(msg);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (loading || roleLoading) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  if (!allowed) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Billing</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardText}>{error || `Billing is restricted to Owners/GMs.`}</Text>
-        </View>
-      </View>
-    );
-  }
+export function BillingScreen(_props: Props) {
+  const platformLabel = useMemo(() => (Platform.OS === 'ios' ? 'iOS' : 'Android'), []);
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>{title}</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>Billing changes unavailable</Text>
+      <Text style={styles.body}>Billing changes aren’t available in the {platformLabel} app.</Text>
 
-      {error ? (
-        <View style={[styles.card, { borderColor: '#fecaca' }]}>
-          <Text style={[styles.cardText, { color: '#991b1b' }]}>{error}</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Current plan</Text>
-
-        <Text style={styles.cardText}>
-          {summary?.plan?.name || summary?.plan?.slug || 'Basic'}
-          {summary?.plan?.billing_period ? ` · ${summary.plan.billing_period}` : ''}
-          {summary?.plan?.price ? ` · ${formatMoney(summary.plan.price)}` : ''}
-        </Text>
-
-        <Text style={styles.meta}>
-          Status: {summary?.subscription?.status || '—'}
-          {summary?.subscription?.cancel_at_period_end ? ' (cancels at period end)' : ''}
-        </Text>
-        <Text style={styles.meta}>Trial ends: {formatDateMaybe(summary?.subscription?.trial_end ?? null)}</Text>
-        <Text style={styles.meta}>Renews/ends: {formatDateMaybe(summary?.subscription?.current_period_end ?? null)}</Text>
-
-        <View style={styles.row}>
-          <Pressable style={styles.primaryBtn} onPress={openPortal} disabled={busy !== null}>
-            <Text style={styles.primaryBtnText}>{busy === 'portal' ? 'Opening…' : 'Open billing portal'}</Text>
-          </Pressable>
-        </View>
-
-        <Text style={[styles.meta, { marginTop: 10 }]}>
-          Services: {summary?.usage?.active_services_count ?? 0} · Team members: {summary?.usage?.active_members_count ?? 0}
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Payment methods</Text>
-        {summary?.payment_methods?.length ? (
-          summary.payment_methods.map((pm) => (
-            <View key={pm.id} style={styles.pmRow}>
-              <Text style={styles.cardText}>
-                {pm.brand ? pm.brand.toUpperCase() : 'CARD'} •••• {pm.last4 || '—'}
-              </Text>
-              <Text style={styles.meta}>
-                {pm.exp_month && pm.exp_year ? `Exp ${pm.exp_month}/${pm.exp_year}` : 'Exp —'}
-                {pm.is_default ? ' · Default' : ''}
-              </Text>
-            </View>
-          ))
-        ) : (
-          <Text style={styles.cardText}>No saved payment methods yet.</Text>
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Plans</Text>
-        {plans.length === 0 ? (
-          <Text style={styles.cardText}>No plans available.</Text>
-        ) : (
-          plans.map((p) => {
-            const isCurrent = String(p.slug).toLowerCase() === currentSlug;
-            return (
-              <View key={p.id} style={[styles.planRow, isCurrent ? styles.planRowActive : null]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.planName}>
-                    {p.name} · {p.billing_period} · {formatMoney(p.price)}
-                  </Text>
-                  {p.description ? <Text style={styles.meta}>{p.description}</Text> : null}
-                </View>
-
-                {isCurrent ? (
-                  <View style={styles.currentPill}>
-                    <Text style={styles.currentPillText}>Current plan</Text>
-                  </View>
-                ) : (
-                  <Pressable
-                    style={[styles.secondaryBtn, busy ? styles.secondaryBtnDisabled : null]}
-                    disabled={busy !== null}
-                    onPress={() => checkout(p.id)}
-                  >
-                    <Text style={styles.secondaryBtnText}>
-                      {busy === `checkout:${p.id}` ? 'Starting…' : 'Choose'}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-            );
-          })
-        )}
-      </View>
-    </ScrollView>
+      <Pressable
+        style={styles.secondaryBtn}
+        onPress={() => {
+          contactSupport();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Contact support"
+      >
+        <Text style={styles.secondaryBtnText}>Contact support</Text>
+      </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 18,
-    backgroundColor: '#fff',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  card: {
-    marginTop: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-  },
-  cardTitle: {
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 6,
-  },
-  cardText: {
-    color: '#111827',
-  },
-  meta: {
-    marginTop: 4,
-    color: '#6b7280',
-  },
-  row: {
-    marginTop: 10,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  primaryBtn: {
-    backgroundColor: '#2563eb',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  primaryBtnText: {
-    color: '#fff',
-    fontWeight: '800',
-  },
+  container: { flex: 1, padding: 16, justifyContent: 'center' },
+  title: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  body: { color: '#444' },
   secondaryBtn: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
     backgroundColor: '#fff',
     alignSelf: 'flex-start',
   },
-  secondaryBtnDisabled: {
-    opacity: 0.6,
-  },
-  secondaryBtnText: {
-    color: '#111827',
-    fontWeight: '700',
-  },
-  pmRow: {
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  planRow: {
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-  },
-  planRowActive: {
-    backgroundColor: '#eff6ff',
-  },
-  planName: {
-    fontWeight: '800',
-    color: '#111827',
-  },
-  currentPill: {
-    backgroundColor: '#111827',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-  },
-  currentPillText: {
-    color: '#fff',
-    fontWeight: '800',
-  },
+  secondaryBtnText: { fontWeight: '700', color: '#0f172a' },
 });

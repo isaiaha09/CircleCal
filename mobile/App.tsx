@@ -1,11 +1,12 @@
-import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
+import { LinearGradient } from 'expo-linear-gradient';
 
-import { getAccessToken } from './src/lib/auth';
+import { getAccessToken, setPostStripeMessage } from './src/lib/auth';
 import { apiGetOrgs } from './src/lib/api';
 import { normalizeOrgRole } from './src/lib/permissions';
 import { WebAppScreen, webPathFromPushData } from './src/screens/WebAppScreen';
@@ -16,7 +17,7 @@ import { BookingsScreen } from './src/screens/BookingsScreen';
 import { BusinessesScreen } from './src/screens/BusinessesScreen';
 import { BillingScreen } from './src/screens/BillingScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
-import { PricingScreen } from './src/screens/PricingScreen';
+import { PlansScreen } from './src/screens/PlansScreen';
 import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { ResourcesScreen } from './src/screens/ResourcesScreen';
@@ -27,32 +28,30 @@ import { ServicesScreen } from './src/screens/ServicesScreen.tsx';
 import { SignInChoiceScreen } from './src/screens/SignInChoiceScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
+import { NotificationsScreen } from './src/screens/NotificationsScreen';
+import { navigationRef, type RootStackParamList } from './src/lib/navigation';
+import * as WebBrowser from 'expo-web-browser';
+import { API_BASE_URL } from './src/config';
+import { addInboxNotification } from './src/lib/notificationStore';
+import { registerPushTokenIfAlreadyPermitted } from './src/lib/push';
 
-type RootStackParamList = {
-  Welcome: undefined;
-  SignInChoice: undefined;
-  SignInOwner: undefined;
-  SignInStaff: undefined;
-  WebApp: { initialPath?: string } | undefined;
-  Home: undefined;
-  BookingDetail: { orgSlug: string; bookingId: number };
-  BookingAudit: { orgSlug: string };
-  Calendar: { orgSlug: string };
-  Schedule: { orgSlug: string };
-  Portal: { title: string };
-  Bookings: { orgSlug: string };
-  Billing: { orgSlug: string };
-  Pricing: { orgSlug: string };
-  Resources: { orgSlug: string };
-  Staff: { orgSlug: string };
-  Businesses: undefined;
-  Profile: { forceName?: boolean } | undefined;
-  Services: { orgSlug: string };
-  ServiceEdit: { orgSlug: string; serviceId: number };
-};
+WebBrowser.maybeCompleteAuthSession();
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+const NAV_THEME = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: 'transparent',
+  },
+};
+
+const APP_BG_GRADIENT = {
+  colors: ['#dbeafe', '#e0e7ff', '#ffffff'] as const,
+  start: { x: 0, y: 0 } as const,
+  end: { x: 1, y: 1 } as const,
+};
 
 function StaffRestrictedScreen(props: {
   orgSlug?: string;
@@ -130,7 +129,7 @@ function RequireNonStaffOrgRole(props: {
         orgSlug={orgSlug}
         title={props.title}
         onGoBookings={(slug) => navigation.reset({ index: 0, routes: [{ name: 'Bookings', params: { orgSlug: slug } }] })}
-        onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })}
       />
     );
   }
@@ -184,7 +183,7 @@ function RequireOwnerOrgRole(props: {
         onGoBookings={(slug) =>
           navigation.reset({ index: 0, routes: [{ name: 'Bookings', params: { orgSlug: slug } }] })
         }
-        onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })}
       />
     );
   }
@@ -237,7 +236,7 @@ function RequireOwnerOrAdminOrgRole(props: {
         onGoBookings={(slug) =>
           navigation.reset({ index: 0, routes: [{ name: 'Bookings', params: { orgSlug: slug } }] })
         }
-        onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })}
       />
     );
   }
@@ -289,7 +288,7 @@ function RequireOwnerAnywhere(props: {
     return (
       <StaffRestrictedScreen
         title={props.title ?? 'Businesses'}
-        onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            onGoHome={() => navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })}
       />
     );
   }
@@ -304,9 +303,76 @@ export default function App() {
     | { name: 'WebApp'; params?: { initialPath?: string } }
     | null
   >(null);
+  const [pendingResetRoute, setPendingResetRoute] = useState<
+    | { name: keyof RootStackParamList; params?: any }
+    | null
+  >(null);
+
+  async function handleStripeReturnUrl(url: string) {
+    if (!url) return;
+    if (!url.toLowerCase().startsWith('circlecal://stripe-return')) return;
+
+    let status = '';
+    let msg = 'Stripe setup complete.';
+    try {
+      const u = new URL(url);
+      status = u.searchParams.get('status') || '';
+      if (status === 'connected') msg = 'Stripe is connected and ready for payments.';
+      else if (status === 'express_done') msg = 'Stripe Express setup complete.';
+    } catch {
+      // ignore
+    }
+
+    // Bring the user back to the main in-app WebApp (bottom-nav) experience.
+    // If they're not natively signed in, prefer the native sign-in screen rather
+    // than showing the web login page inside the WebView.
+    let target: { name: keyof RootStackParamList; params?: any } = {
+      name: 'WebApp',
+      params: { initialPath: '/post-login/?cc_app=1&cc_after=stripe' },
+    };
+    try {
+      const token = await getAccessToken();
+      // If we have native API tokens, use the normal SSO-based WebApp entry.
+      // If not, route to the native owner sign-in. (Stripe Connect is an owner flow.)
+      target = token
+        ? { name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1&cc_after=stripe' } }
+        : { name: 'SignInOwner' };
+
+      // If the user is going to the native sign-in screen, make the banner explicit.
+      if (!token) {
+        if (status === 'connected') msg = 'Stripe setup complete — sign in to continue to your dashboard.';
+        else if (status === 'express_done') msg = 'Stripe Express setup complete — sign in to continue to your dashboard.';
+        else msg = 'Stripe setup complete — sign in to continue to your dashboard.';
+      }
+    } catch {
+      target = { name: 'SignInOwner' };
+      msg = 'Stripe setup complete — sign in to continue to your dashboard.';
+    }
+
+    try {
+      await setPostStripeMessage(msg);
+    } catch {
+      // ignore
+    }
+
+    if (navigationRef.isReady()) {
+      navigationRef.reset({ index: 0, routes: [target as any] });
+    } else {
+      setPendingResetRoute(target);
+    }
+  }
 
   function handleNotificationOpen(response: Notifications.NotificationResponse) {
     const data = (response?.notification?.request?.content?.data ?? {}) as any;
+    try {
+      const n = response?.notification;
+      const id = String(n?.request?.identifier || Date.now());
+      const title = String(n?.request?.content?.title || 'Notification');
+      const body = String(n?.request?.content?.body || '');
+      addInboxNotification({ id, title, body, receivedAt: new Date().toISOString(), data }).catch(() => undefined);
+    } catch {
+      // ignore
+    }
     const orgSlug = typeof data.orgSlug === 'string' ? data.orgSlug : null;
     const open = typeof data.open === 'string' ? data.open : null;
     const kind = typeof data.kind === 'string' ? data.kind : null;
@@ -335,6 +401,11 @@ export default function App() {
     (async () => {
       try {
         const token = await getAccessToken();
+        // Best-effort: if the user is already signed in and has granted OS permissions,
+        // register the device for push without prompting.
+        if (token) {
+          registerPushTokenIfAlreadyPermitted().catch(() => undefined);
+        }
         if (!cancelled) setInitialRouteName(token ? 'WebApp' : 'Welcome');
       } finally {
         if (!cancelled) setReady(true);
@@ -346,8 +417,41 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Stripe return deep link: always bounce user to the native dashboard with a success banner.
+    let sub: any = null;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        if (!cancelled && initialUrl) await handleStripeReturnUrl(initialUrl);
+      } catch {
+        // ignore
+      }
+    })();
+
+    try {
+      sub = Linking.addEventListener('url', (evt: any) => {
+        if (evt?.url) handleStripeReturnUrl(String(evt.url)).catch(() => undefined);
+      });
+    } catch {
+      sub = null;
+    }
+
+    return () => {
+      cancelled = true;
+      try {
+        sub?.remove?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     // Handle taps while app is backgrounded, and on cold start.
     let subscription: Notifications.Subscription | null = null;
+    let receivedSub: Notifications.Subscription | null = null;
     let cancelled = false;
 
     (async () => {
@@ -367,29 +471,106 @@ export default function App() {
       subscription = null;
     }
 
+    // When a push arrives while the app is foregrounded, store it in the in-app inbox.
+    try {
+      receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+        try {
+          const id = String(notification?.request?.identifier || Date.now());
+          const title = String(notification?.request?.content?.title || 'Notification');
+          const body = String(notification?.request?.content?.body || '');
+          const data = (notification?.request?.content?.data ?? {}) as any;
+          addInboxNotification({ id, title, body, receivedAt: new Date().toISOString(), data }).catch(() => undefined);
+        } catch {
+          // ignore
+        }
+      });
+    } catch {
+      receivedSub = null;
+    }
+
     return () => {
       cancelled = true;
       if (subscription) subscription.remove();
+      if (receivedSub) receivedSub.remove();
     };
   }, []);
 
   if (!ready) return null;
 
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      onReady={() => {
-        if (pendingNav) {
-          navigationRef.navigate(pendingNav.name, pendingNav.params as any);
-          setPendingNav(null);
-        }
-      }}
-    >
-      <Stack.Navigator initialRouteName={initialRouteName}>
+    <LinearGradient colors={APP_BG_GRADIENT.colors} start={APP_BG_GRADIENT.start} end={APP_BG_GRADIENT.end} style={{ flex: 1 }}>
+      <NavigationContainer
+        theme={NAV_THEME}
+        ref={navigationRef}
+        onReady={() => {
+          if (pendingResetRoute) {
+            navigationRef.reset({ index: 0, routes: [pendingResetRoute as any] });
+            setPendingResetRoute(null);
+            return;
+          }
+          if (pendingNav) {
+            navigationRef.navigate(pendingNav.name, pendingNav.params as any);
+            setPendingNav(null);
+          }
+        }}
+      >
+        <Stack.Navigator
+          initialRouteName={initialRouteName}
+          screenOptions={{
+            contentStyle: { backgroundColor: 'transparent' },
+            headerStyle: { backgroundColor: '#fff' },
+            headerShadowVisible: false,
+          }}
+        >
         <Stack.Screen name="Welcome" options={{ headerShown: false }}>
           {({ navigation }) => (
-            <WelcomeScreen onPressSignIn={() => navigation.navigate('SignInChoice')} />
+            <WelcomeScreen
+              onPressSignIn={() => navigation.navigate('SignInChoice')}
+              onPressCreateAccount={() =>
+                (async () => {
+                  try {
+                    WebBrowser.dismissBrowser();
+                  } catch {
+                    // ignore
+                  }
+                  const ts = Date.now();
+                  try {
+                    const startUrl = `${API_BASE_URL}/signup/?cc_app=1&cc_ts=${ts}`;
+                    // Use a broad return URL so the auth session closes for *any* app deep link,
+                    // including circlecal://stripe-return.
+                    const returnUrl = 'circlecal://';
+                    const res = await WebBrowser.openAuthSessionAsync(startUrl, returnUrl, {
+                      createTask: true,
+                      preferEphemeralSession: true,
+                    });
+
+                    // Important: openAuthSessionAsync returns the final URL in the promise result;
+                    // it does not always trigger Linking events. Handle stripe-return here.
+                    try {
+                      if (res?.type === 'success' && typeof res?.url === 'string') {
+                        await handleStripeReturnUrl(String(res.url));
+                      }
+                    } catch {
+                      // ignore
+                    }
+                  } catch {
+                    // Fallback
+                    WebBrowser.openBrowserAsync(`${API_BASE_URL}/signup/?cc_app=1&cc_ts=${ts}`, { createTask: true }).catch(() => undefined);
+                  }
+                })()
+              }
+            />
           )}
+        </Stack.Screen>
+
+        <Stack.Screen
+          name="Notifications"
+          options={{
+            title: 'Notifications',
+            headerBackTitle: 'Back',
+          }}
+        >
+          {({ navigation }) => <NotificationsScreen navigation={navigation} />}
         </Stack.Screen>
         <Stack.Screen name="SignInChoice" options={{ title: 'Sign in' }}>
           {({ navigation }) => (
@@ -404,7 +585,7 @@ export default function App() {
             <SignInScreen
               mode="owner"
               onSignedIn={() =>
-                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/' } }] })
+                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })
               }
             />
           )}
@@ -414,7 +595,7 @@ export default function App() {
             <SignInScreen
               mode="staff"
               onSignedIn={() =>
-                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/' } }] })
+                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })
               }
             />
           )}
@@ -424,6 +605,7 @@ export default function App() {
           {({ navigation, route }) => (
             <WebAppScreen
               initialPath={route.params?.initialPath}
+              skipSso={route.params?.skipSso}
               onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
             />
           )}
@@ -447,7 +629,7 @@ export default function App() {
               onOpenPortal={({ title }: { title: string }) => navigation.navigate('Portal', { title })}
               onOpenBookings={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Bookings', { orgSlug })}
               onOpenBilling={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Billing', { orgSlug })}
-              onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+              onOpenPlans={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Plans', { orgSlug })}
               onOpenResources={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Resources', { orgSlug })}
               onOpenStaff={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Staff', { orgSlug })}
               onOpenBusinesses={() => navigation.navigate('Businesses')}
@@ -521,11 +703,11 @@ export default function App() {
           )}
         </Stack.Screen>
 
-        <Stack.Screen name="Pricing" options={{ title: 'Pricing' }}>
+        <Stack.Screen name="Plans" options={{ title: 'Plans' }}>
           {({ route, navigation }) => (
-            <RequireOwnerOrgRole orgSlug={route.params.orgSlug} title="Pricing" navigation={navigation}>
-              <PricingScreen orgSlug={route.params.orgSlug} />
-            </RequireOwnerOrgRole>
+            <RequireOwnerOrAdminOrgRole orgSlug={route.params.orgSlug} title="Plans" navigation={navigation}>
+              <PlansScreen orgSlug={route.params.orgSlug} />
+            </RequireOwnerOrAdminOrgRole>
           )}
         </Stack.Screen>
 
@@ -534,7 +716,7 @@ export default function App() {
             <RequireNonStaffOrgRole orgSlug={route.params.orgSlug} title="Resources" navigation={navigation}>
               <ResourcesScreen
                 orgSlug={route.params.orgSlug}
-                onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+                onOpenPlans={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Plans', { orgSlug })}
               />
             </RequireNonStaffOrgRole>
           )}
@@ -545,7 +727,7 @@ export default function App() {
             <RequireOwnerOrAdminOrgRole orgSlug={route.params.orgSlug} title="Staff" navigation={navigation}>
               <StaffScreen
                 orgSlug={route.params.orgSlug}
-                onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+                onOpenPlans={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Plans', { orgSlug })}
               />
             </RequireOwnerOrAdminOrgRole>
           )}
@@ -570,11 +752,11 @@ export default function App() {
               onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
               forceNameCompletion={!!route.params?.forceName}
               onRequiredProfileCompleted={() =>
-                navigation.reset({ index: 0, routes: [{ name: 'Home' }] })
+                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })
               }
               onOpenBusinesses={() => navigation.navigate('Businesses')}
               onOpenBilling={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Billing', { orgSlug })}
-              onOpenPricing={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Pricing', { orgSlug })}
+              onOpenPlans={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Plans', { orgSlug })}
             />
           )}
         </Stack.Screen>
@@ -603,8 +785,9 @@ export default function App() {
             </RequireNonStaffOrgRole>
           )}
         </Stack.Screen>
-      </Stack.Navigator>
-      <StatusBar style="auto" />
-    </NavigationContainer>
+        </Stack.Navigator>
+        <StatusBar style="auto" />
+      </NavigationContainer>
+    </LinearGradient>
   );
 }

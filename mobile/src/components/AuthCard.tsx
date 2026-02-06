@@ -6,19 +6,20 @@ import { theme } from '../ui/theme';
 type Props = {
   title: string;
   subtitle?: string;
+  titleColor?: string;
   children: React.ReactNode;
 };
 
-export function AuthCard({ title, subtitle, children }: Props) {
+export function AuthCard({ title, subtitle, titleColor, children }: Props) {
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <Image
-          source={require('../../assets/icon.png')}
+          source={require('../../assets/cc-auth-logo.png')}
           style={styles.logo}
           resizeMode="contain"
         />
-        <Text style={styles.title}>{title}</Text>
+        <Text style={[styles.title, titleColor ? { color: titleColor } : null]}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
       <View style={styles.content}>{children}</View>
@@ -43,7 +44,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     alignItems: 'center',
   },
-  logo: { width: 56, height: 56, marginBottom: 10 },
+  logo: { width: 72, height: 72, marginBottom: 10 },
   title: { fontSize: 22, fontWeight: '800', color: theme.colors.text },
   subtitle: { marginTop: 6, fontSize: 13, color: theme.colors.muted, textAlign: 'center' },
   content: { padding: 22, paddingTop: 10 },

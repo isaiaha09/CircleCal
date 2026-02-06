@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { AuthCard } from '../components/AuthCard';
 import { theme } from '../ui/theme';
@@ -12,33 +13,41 @@ type Props = {
 
 export function SignInChoiceScreen({ onSelectOwner, onSelectStaff }: Props) {
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        <AuthCard title="Sign in" subtitle="Choose the account type you use for CircleCal.">
-          <Pressable style={styles.primaryBtn} onPress={onSelectOwner}>
-            <Text style={styles.primaryBtnText}>Business Owner</Text>
-          </Pressable>
+    <LinearGradient
+      colors={['#dbeafe', '#e0e7ff', '#ffffff']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.gradient}
+    >
+      <SafeAreaView style={styles.safeTransparent}>
+        <View style={styles.container}>
+          <AuthCard title="Sign in" subtitle="Choose the account type you use for CircleCal.">
+            <Pressable style={styles.primaryBtn} onPress={onSelectOwner}>
+              <Text style={styles.primaryBtnText}>Business Owner</Text>
+            </Pressable>
 
-          <Pressable style={styles.secondaryBtn} onPress={onSelectStaff}>
-            <Text style={styles.secondaryBtnText}>Staff | Manager | GM</Text>
-          </Pressable>
+            <Pressable style={styles.secondaryBtn} onPress={onSelectStaff}>
+              <Text style={styles.secondaryBtnText}>Staff | Manager | GM</Text>
+            </Pressable>
 
-          <Text style={styles.hint}>You can switch accounts later.</Text>
-        </AuthCard>
-      </View>
-    </SafeAreaView>
+            <Text style={styles.hint}>You can switch accounts later.</Text>
+          </AuthCard>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: theme.colors.bg },
+  gradient: { flex: 1 },
+  safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   container: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
     paddingVertical: 24,
-    backgroundColor: theme.colors.bg,
+    backgroundColor: 'transparent',
   },
   primaryBtn: {
     backgroundColor: theme.colors.primaryDark,

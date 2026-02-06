@@ -168,6 +168,19 @@ export async function apiRegisterPushToken(args: { token: string; platform?: str
   });
 }
 
+export type ApiPushStatus = {
+  ok: boolean;
+  push_enabled: boolean;
+  devices_total: number;
+  devices_active: number;
+  last_seen_at: string | null;
+  server_time: string;
+};
+
+export async function apiGetPushStatus(): Promise<ApiPushStatus> {
+  return apiGet('/api/v1/push/status/');
+}
+
 export async function apiGetMobileSsoLink(args?: { next?: string }): Promise<{ url: string; expires_in: number }> {
   const next = (args?.next ?? '/').trim() || '/';
   // Use GET so we can pass `next` easily; endpoint also supports POST.
@@ -471,6 +484,7 @@ export async function apiGetBookings(params: {
   from?: string;
   to?: string;
   limit?: number;
+  q?: string;
 }): Promise<{
   org: { id: number; slug: string; name: string };
   from: string | null;
@@ -483,6 +497,7 @@ export async function apiGetBookings(params: {
   if (params.from) usp.set('from', params.from);
   if (params.to) usp.set('to', params.to);
   if (typeof params.limit === 'number') usp.set('limit', String(params.limit));
+  if (params.q) usp.set('q', params.q);
   return apiGet(`/api/v1/bookings/?${usp.toString()}`);
 }
 
@@ -636,21 +651,6 @@ export async function apiGetBillingPlans(params: { org: string }): Promise<{
   const usp = new URLSearchParams();
   usp.set('org', params.org);
   return apiGet(`/api/v1/billing/plans/?${usp.toString()}`);
-}
-
-export async function apiCreateBillingPortalSession(params: { org: string }): Promise<{ url: string }> {
-  const usp = new URLSearchParams();
-  usp.set('org', params.org);
-  return apiPost(`/api/v1/billing/portal/?${usp.toString()}`, {});
-}
-
-export async function apiCreateBillingCheckoutSession(params: {
-  org: string;
-  planId: number;
-}): Promise<{ url: string }> {
-  const usp = new URLSearchParams();
-  usp.set('org', params.org);
-  return apiPost(`/api/v1/billing/checkout/?${usp.toString()}`, { plan_id: params.planId });
 }
 
 export async function apiCreateStripeExpressDashboardLink(params: { org: string }): Promise<{ url: string }> {

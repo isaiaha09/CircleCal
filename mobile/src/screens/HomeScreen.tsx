@@ -5,9 +5,17 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { ApiError, BillingSummary } from '../lib/api';
 import type { BookingListItem, OrgListItem } from '../lib/api';
 import { apiGet, apiGetBillingSummary, apiGetBookings, apiGetOrgs, apiGetProfileOverview } from '../lib/api';
-import { clearActiveOrgSlug, getActiveOrgSlug, setActiveOrgSlug, signOut } from '../lib/auth';
+import {
+  clearActiveOrgSlug,
+  clearPostStripeMessage,
+  getActiveOrgSlug,
+  getPostStripeMessage,
+  setActiveOrgSlug,
+  signOut,
+} from '../lib/auth';
 import { canManageBilling, canManageResources, canManageServices, canManageStaff, normalizeOrgRole } from '../lib/permissions';
 import { unregisterPushTokenBestEffort } from '../lib/push';
+import { showPlanGatedAlert } from '../lib/support';
 
 type Props = {
   onSignedOut: () => void;
@@ -18,7 +26,7 @@ type Props = {
   onOpenPortal: (args: { title: string }) => void;
   onOpenBookings: (args: { orgSlug: string }) => void;
   onOpenBilling: (args: { orgSlug: string }) => void;
-  onOpenPricing: (args: { orgSlug: string }) => void;
+  onOpenPlans: (args: { orgSlug: string }) => void;
   onOpenResources: (args: { orgSlug: string }) => void;
   onOpenStaff: (args: { orgSlug: string }) => void;
   onOpenBusinesses: () => void;
@@ -59,13 +67,16 @@ export function HomeScreen({
   onOpenPortal,
   onOpenBookings,
   onOpenBilling,
-  onOpenPricing,
+  onOpenPlans,
   onOpenResources,
   onOpenStaff,
   onOpenBusinesses,
   onOpenProfile,
   onOpenServices,
 }: Props) {
+
+  const [stripeFlash, setStripeFlash] = useState<string | null>(null);
+
   const [me, setMe] = useState<{ username: string; email: string } | null>(null);
   const [orgs, setOrgs] = useState<OrgListItem[]>([]);
   const [activeOrg, setActiveOrg] = useState<OrgListItem | null>(null);
@@ -85,7 +96,6 @@ export function HomeScreen({
 
   const activeRole = useMemo(() => normalizeOrgRole(activeOrg?.role), [activeOrg?.role]);
   const allowBilling = useMemo(() => canManageBilling(activeRole), [activeRole]);
-  const allowPricing = allowBilling;
   const allowStaff = useMemo(() => canManageStaff(activeRole), [activeRole]);
   const allowResourcesByRole = useMemo(() => canManageResources(activeRole), [activeRole]);
   const allowServicesByRole = useMemo(() => canManageServices(activeRole), [activeRole]);
@@ -197,6 +207,18 @@ export function HomeScreen({
       let cancelled = false;
       (async () => {
         if (loading) return;
+
+        // One-time Stripe return banner (set by the global deep-link handler).
+        try {
+          const msg = await getPostStripeMessage();
+          if (!cancelled && msg) {
+            setStripeFlash(msg);
+            await clearPostStripeMessage();
+            setTimeout(() => setStripeFlash(null), 8000);
+          }
+        } catch {
+          // ignore
+        }
         try {
           // Re-check on focus in case user updated their name on Profile.
           if (activeOrg?.role) {
@@ -244,6 +266,7 @@ export function HomeScreen({
 
   const header = (
     <>
+      {stripeFlash ? <Text style={styles.successBanner}>{stripeFlash}</Text> : null}
       <Text style={styles.title}>Dashboard</Text>
       <Text style={styles.subtitle}>{activeOrg ? activeOrg.name : 'Select a business'}</Text>
 
@@ -362,6 +385,27 @@ export function HomeScreen({
         ) : null}
 
         <Pressable
+          style={[styles.portalTile, (!activeOrg || !allowBilling) ? styles.portalTileDisabled : null]}
+          disabled={!activeOrg || !allowBilling}
+          onPress={() => {
+            if (!activeOrg) return;
+            if (!allowBilling) {
+              showPlanGatedAlert({
+                title: 'Plans unavailable',
+                message: 'Plans are restricted to Owners/GMs in this app.',
+              });
+              return;
+            }
+            onOpenPlans({ orgSlug: activeOrg.slug });
+          }}
+        >
+          <Text style={[styles.portalTitle, (!activeOrg || !allowBilling) ? styles.portalTitleDisabled : null]}>Plans</Text>
+          <Text style={[styles.portalSubtitle, (!activeOrg || !allowBilling) ? styles.portalSubtitleDisabled : null]}>
+            {!activeOrg ? 'Select a business first' : 'Read-only plan details'}
+          </Text>
+        </Pressable>
+
+        <Pressable
           style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
           disabled={!activeOrg}
           onPress={() => (activeOrg ? onOpenBookings({ orgSlug: activeOrg.slug }) : null)}
@@ -392,7 +436,7 @@ export function HomeScreen({
 
         {(() => {
           const allowed = !!activeOrg && !!billingSummary?.features?.can_use_resources;
-          const disabled = !activeOrg || loadingPlan || !allowResourcesByRole || (!allowBilling ? false : !allowed);
+          const disabled = !activeOrg || loadingPlan || !allowResourcesByRole;
           const subtitle = !activeOrg
             ? 'Select a business first'
             : loadingPlan
@@ -400,13 +444,24 @@ export function HomeScreen({
               : !allowResourcesByRole
                 ? 'Owner/GM/Manager only'
                 : allowBilling
-                  ? (allowed ? 'Manage space and capacity' : 'Team plan only')
+                  ? (allowed ? 'Manage space and capacity' : 'Unavailable in this app')
                   : 'Manage space and capacity';
           return (
             <Pressable
               style={[styles.portalTile, disabled ? styles.portalTileDisabled : null]}
               disabled={disabled}
-                onPress={() => (activeOrg ? onOpenResources({ orgSlug: activeOrg.slug }) : null)}
+              onPress={() => {
+                if (!activeOrg) return;
+                if (!allowResourcesByRole) return;
+                if (allowBilling && !allowed) {
+                  showPlanGatedAlert({
+                    title: 'Resources unavailable',
+                    message: 'Resources aren’t available for your plan in this app.',
+                  });
+                  return;
+                }
+                onOpenResources({ orgSlug: activeOrg.slug });
+              }}
             >
               <Text style={[styles.portalTitle, disabled ? styles.portalTitleDisabled : null]}>Resources</Text>
               <Text style={[styles.portalSubtitle, disabled ? styles.portalSubtitleDisabled : null]}>
@@ -416,18 +471,6 @@ export function HomeScreen({
           );
         })()}
 
-        {allowPricing ? (
-          <Pressable
-            style={[styles.portalTile, !activeOrg ? styles.portalTileDisabled : null]}
-            disabled={!activeOrg}
-            onPress={() => (activeOrg ? onOpenPricing({ orgSlug: activeOrg.slug }) : null)}
-          >
-            <Text style={[styles.portalTitle, !activeOrg ? styles.portalTitleDisabled : null]}>Pricing</Text>
-            <Text style={[styles.portalSubtitle, !activeOrg ? styles.portalSubtitleDisabled : null]}>
-              {!activeOrg ? 'Select a business first' : 'Plans & upgrades'}
-            </Text>
-          </Pressable>
-        ) : null}
 
         <Pressable style={styles.portalTile} onPress={onOpenProfile}>
           <Text style={styles.portalTitle}>Profile</Text>
@@ -548,6 +591,18 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 8,
     color: '#6b7280',
+  },
+  successBanner: {
+    marginBottom: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    color: '#065f46',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   sectionTitle: {
     marginTop: 16,

@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -21,10 +22,11 @@ import {
   apiUpdateTeamMember,
 } from '../lib/api';
 import { canManageBilling, canManageStaff, humanRole, normalizeOrgRole } from '../lib/permissions';
+import { contactSupport } from '../lib/support';
 
 type Props = {
   orgSlug: string;
-  onOpenPricing: (args: { orgSlug: string }) => void;
+  onOpenPlans: (args: { orgSlug: string }) => void;
 };
 
 function humanName(m: TeamMember): string {
@@ -49,7 +51,8 @@ function errorMessage(e: unknown, fallback: string): string {
   );
 }
 
-export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
+export function StaffScreen({ orgSlug, onOpenPlans }: Props) {
+
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -228,8 +231,8 @@ export function StaffScreen({ orgSlug, onOpenPricing }: Props) {
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
           {canSeePricing ? (
-            <Pressable style={styles.primaryBtn} onPress={() => onOpenPricing({ orgSlug })}>
-              <Text style={styles.primaryBtnText}>View plans</Text>
+            <Pressable style={styles.primaryBtn} onPress={() => contactSupport()}>
+              <Text style={styles.primaryBtnText}>Contact support</Text>
             </Pressable>
           ) : null}
         </View>

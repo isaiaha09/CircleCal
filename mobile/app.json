@@ -4,7 +4,7 @@
     "slug": "circlecal",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/appicon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "scheme": "circlecal",
@@ -15,10 +15,19 @@
     },
     "ios": {
       "bundleIdentifier": "app.circlecal.mobile",
-      "supportsTablet": true
+      "buildNumber": "1",
+      "icon": "./assets/appicon.png",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "CircleCal needs camera access to let you take a profile picture.",
+        "NSPhotoLibraryUsageDescription": "CircleCal needs photo library access to let you choose and upload a profile picture.",
+        "NSPhotoLibraryAddUsageDescription": "CircleCal needs photo library access to save or upload images you choose.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "app.circlecal.mobile",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -30,7 +39,11 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiBaseUrl": "https://circlecal.app"
-    }
+      "apiBaseUrl": "https://circlecal.app",
+      "eas": {
+        "projectId": "395d51e7-e2d3-4775-9404-12e4ecb9bedc"
+      }
+    },
+    "owner": "ia09"
   }
 }

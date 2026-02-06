@@ -26,10 +26,34 @@ function getProjectId(): string | undefined {
   );
 }
 
-export async function getExpoPushTokenIfPermitted(): Promise<string | null> {
-  if (!Device.isDevice) return null;
+function isExpoGo(): boolean {
+  try {
+    const anyConstants = Constants as any;
+    return String(anyConstants?.appOwnership || '').toLowerCase() === 'expo';
+  } catch {
+    return false;
+  }
+}
 
-  // Android requires a channel for notifications to show.
+function isProjectIdRequired(): boolean {
+  // In Expo Go, projectId can be omitted; in dev-client/standalone it is required.
+  return !isExpoGo();
+}
+
+function formatErr(e: unknown): string {
+  try {
+    if (!e) return '';
+    if (typeof e === 'string') return e;
+    const anyE = e as any;
+    return String(anyE?.message || anyE?.toString?.() || '');
+  } catch {
+    return '';
+  }
+}
+
+async function _getExpoPushTokenDetailed(opts: { prompt: boolean }): Promise<{ token: string | null; permStatus: string; error?: string }> {
+  if (!Device.isDevice) return { token: null, permStatus: 'not_device' };
+
   if (Platform.OS === 'android') {
     try {
       await Notifications.setNotificationChannelAsync('default', {
@@ -42,24 +66,79 @@ export async function getExpoPushTokenIfPermitted(): Promise<string | null> {
   }
 
   const existing = await Notifications.getPermissionsAsync();
-  let finalStatus = existing.status;
+  let finalStatus = String((existing as any)?.status || '');
 
-  if (finalStatus !== 'granted') {
-    const requested = await Notifications.requestPermissionsAsync();
-    finalStatus = requested.status;
+  if (finalStatus !== 'granted' && opts.prompt) {
+    try {
+      const requested = await Notifications.requestPermissionsAsync();
+      finalStatus = String((requested as any)?.status || '');
+    } catch {
+      // ignore
+    }
   }
 
-  if (finalStatus !== 'granted') return null;
+  if (finalStatus !== 'granted') {
+    return { token: null, permStatus: finalStatus || 'denied' };
+  }
 
   try {
     const projectId = getProjectId();
+    if (!projectId && isProjectIdRequired()) {
+      return {
+        token: null,
+        permStatus: finalStatus,
+        error: 'Missing EAS projectId (expo.extra.eas.projectId). Rebuild app after setting it in app.json.',
+      };
+    }
     const resp = projectId
       ? await Notifications.getExpoPushTokenAsync({ projectId })
       : await Notifications.getExpoPushTokenAsync();
+    return { token: resp?.data || null, permStatus: finalStatus };
+  } catch (e) {
+    return { token: null, permStatus: finalStatus, error: formatErr(e) || 'Unknown error' };
+  }
+}
 
-    return resp?.data || null;
+export async function getExpoPushTokenIfPermitted(): Promise<string | null> {
+  const r = await _getExpoPushTokenDetailed({ prompt: true });
+  return r.token;
+}
+
+export async function getExpoPushTokenIfAlreadyGranted(): Promise<string | null> {
+  const r = await _getExpoPushTokenDetailed({ prompt: false });
+  return r.token;
+}
+
+export type PushRegisterResult =
+  | { status: 'registered' }
+  | { status: 'not_device' }
+  | { status: 'permission_denied' }
+  | { status: 'token_unavailable' }
+  | { status: 'missing_project_id' }
+  | { status: 'token_error'; message: string }
+  | { status: 'api_failed' };
+
+export async function registerPushTokenWithResult(): Promise<PushRegisterResult> {
+  if (!Device.isDevice) return { status: 'not_device' };
+
+  const projectId = getProjectId();
+  if (!projectId && isProjectIdRequired()) {
+    return { status: 'missing_project_id' };
+  }
+
+  const res = await _getExpoPushTokenDetailed({ prompt: true });
+  if (!res.token) {
+    if (res.permStatus !== 'granted') return { status: 'permission_denied' };
+    if (res.error) return { status: 'token_error', message: res.error };
+    return { status: 'token_unavailable' };
+  }
+
+  try {
+    await apiRegisterPushToken({ token: res.token, platform: Platform.OS });
+    await setStoredPushToken(res.token);
+    return { status: 'registered' };
   } catch {
-    return null;
+    return { status: 'api_failed' };
   }
 }
 
@@ -72,6 +151,18 @@ export async function registerPushTokenIfPossible(): Promise<void> {
     await setStoredPushToken(token);
   } catch {
     // Best-effort: do not block app usage.
+  }
+}
+
+export async function registerPushTokenIfAlreadyPermitted(): Promise<void> {
+  const token = await getExpoPushTokenIfAlreadyGranted();
+  if (!token) return;
+
+  try {
+    await apiRegisterPushToken({ token, platform: Platform.OS });
+    await setStoredPushToken(token);
+  } catch {
+    // Best-effort.
   }
 }
 

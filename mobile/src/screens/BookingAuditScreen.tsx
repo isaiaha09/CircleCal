@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
 import type { ApiError, BookingAuditItem } from '../lib/api';
-import { apiGetBookingAudit } from '../lib/api';
+import { apiGetBookingAudit, apiGetMobileSsoLink } from '../lib/api';
 
 type Props = {
   orgSlug: string;
@@ -28,6 +29,7 @@ export function BookingAuditScreen({ orgSlug }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState<number | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const [selected, setSelected] = useState<BookingAuditItem | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -91,6 +93,46 @@ export function BookingAuditScreen({ orgSlug }: Props) {
     }
   }
 
+  async function handleExportPdf() {
+    if (exportingPdf) return;
+    if (!items.length) {
+      Alert.alert('Nothing to export', 'No audit entries are loaded yet.');
+      return;
+    }
+
+    const ids = items
+      .map((x) => x.id)
+      .filter((x) => typeof x === 'number' && Number.isFinite(x))
+      .slice(0, 200);
+
+    if (!ids.length) {
+      Alert.alert('Nothing to export', 'No valid audit IDs were found.');
+      return;
+    }
+
+    try {
+      setExportingPdf(true);
+      // Use a one-time SSO link so the system browser can download the PDF.
+      // This avoids WebView download -> blob: URLs (which RN WebView can't open).
+      const safeSlug = encodeURIComponent(orgSlug);
+      const safeIds = encodeURIComponent(ids.join(','));
+      const nextPath = `/bus/${safeSlug}/bookings/audit/export/?ids=${safeIds}`;
+      const resp = await apiGetMobileSsoLink({ next: nextPath });
+      // Prefer the real external browser for downloads.
+      // `openBrowserAsync` uses an in-app browser which can break file downloads (blob: URLs).
+      try {
+        await Linking.openURL(resp.url);
+      } catch {
+        await WebBrowser.openBrowserAsync(resp.url);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not open export.';
+      Alert.alert('Export failed', msg);
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   useEffect(() => {
     loadFirstPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,8 +175,22 @@ export function BookingAuditScreen({ orgSlug }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Cancelled / Deleted</Text>
-        <Text style={styles.subtitle}>Recent booking changes for this business.</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>Cancelled / Deleted</Text>
+            <Text style={styles.subtitle}>Recent booking changes for this business.</Text>
+          </View>
+          <Pressable
+            onPress={() => void handleExportPdf()}
+            disabled={loading || !items.length || exportingPdf}
+            style={[styles.secondaryBtn, (loading || !items.length || exportingPdf) ? { opacity: 0.7 } : null]}
+          >
+            <View style={styles.secondaryBtnRow}>
+              {exportingPdf ? <ActivityIndicator size="small" color="#ffffff" style={styles.secondaryBtnSpinner} /> : null}
+              <Text style={styles.secondaryBtnText}>{exportingPdf ? 'Preparing…' : 'Export PDF'}</Text>
+            </View>
+          </Pressable>
+        </View>
       </View>
 
       {loading ? (
@@ -298,6 +354,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
+  },
+  secondaryBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  secondaryBtnSpinner: {
+    marginRight: 8,
   },
   secondaryBtnText: {
     color: 'white',

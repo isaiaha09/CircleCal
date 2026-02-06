@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,12 +14,14 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 
 import { API_BASE_URL } from '../config';
 import type { ApiError, ApiProfileOverviewResponse, BillingSummary, OrgOfflinePaymentsResponse } from '../lib/api';
 import {
   apiCreateStripeExpressDashboardLink,
   apiGetBillingSummary,
+  apiGetMobileSsoLink,
   apiGetOrgOfflinePayments,
   apiGetProfileOverview,
   apiPatch,
@@ -27,12 +30,13 @@ import {
 } from '../lib/api';
 import { clearActiveOrgSlug, getActiveOrgSlug, signOut } from '../lib/auth';
 import { canManageBilling, humanRole, normalizeOrgRole } from '../lib/permissions';
+import { contactSupport } from '../lib/support';
 
 type Props = {
   onSignedOut: () => void;
   onOpenBusinesses?: () => void;
   onOpenBilling?: (args: { orgSlug: string }) => void;
-  onOpenPricing?: (args: { orgSlug: string }) => void;
+  onOpenPlans?: (args: { orgSlug: string }) => void;
   forceNameCompletion?: boolean;
   onRequiredProfileCompleted?: () => void;
 };
@@ -41,10 +45,12 @@ export function ProfileScreen({
   onSignedOut,
   onOpenBusinesses,
   onOpenBilling,
-  onOpenPricing,
+  onOpenPlans,
   forceNameCompletion,
   onRequiredProfileCompleted,
 }: Props) {
+  const [stripeFlash, setStripeFlash] = useState<string | null>(null);
+
   const [resp, setResp] = useState<ApiProfileOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,48 +91,58 @@ export function ProfileScreen({
   const [offlineVenmo, setOfflineVenmo] = useState('');
   const [offlineZelle, setOfflineZelle] = useState('');
 
+  async function reloadProfileAndOrgPanels() {
+    try {
+      const orgSlug = await getActiveOrgSlug();
+      setActiveOrgSlug(orgSlug);
+
+      const next = await apiGetProfileOverview({ org: orgSlug });
+      setResp(next);
+      setUsername(next.user.username ?? '');
+      setEmail(next.user.email ?? '');
+      setFirstName((next.user as any).first_name ?? '');
+      setLastName((next.user as any).last_name ?? '');
+      setDisplayName(next.profile.display_name ?? '');
+      setTimezone(next.profile.timezone ?? 'UTC');
+      setEmailAlerts(!!next.profile.email_alerts);
+      setBookingReminders(!!next.profile.booking_reminders);
+
+      if (orgSlug) {
+        setLoadingOrg(true);
+        try {
+          const [bs, op] = await Promise.all([
+            apiGetBillingSummary({ org: orgSlug }).catch(() => null),
+            apiGetOrgOfflinePayments({ org: orgSlug }).catch(() => null),
+          ]);
+          setBillingSummary(bs);
+          setOfflinePayments(op);
+          if (op) {
+            setOfflineVenmo(op.offline_venmo ?? '');
+            setOfflineZelle(op.offline_zelle ?? '');
+          } else if (next.org_overview?.offline_payment) {
+            setOfflineVenmo(next.org_overview.offline_payment.offline_venmo ?? '');
+            setOfflineZelle(next.org_overview.offline_payment.offline_zelle ?? '');
+          }
+        } finally {
+          setLoadingOrg(false);
+        }
+      }
+    } catch (e) {
+      const err = e as Partial<ApiError>;
+      const body = err.body as any;
+      const msg =
+        (typeof body?.detail === 'string' && body.detail) ||
+        (typeof err.message === 'string' && err.message) ||
+        'Failed to load profile.';
+      setError(msg);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const orgSlug = await getActiveOrgSlug();
-        if (cancelled) return;
-        setActiveOrgSlug(orgSlug);
-
-        const next = await apiGetProfileOverview({ org: orgSlug });
-        if (cancelled) return;
-        setResp(next);
-        setUsername(next.user.username ?? '');
-        setEmail(next.user.email ?? '');
-        setFirstName((next.user as any).first_name ?? '');
-        setLastName((next.user as any).last_name ?? '');
-        setDisplayName(next.profile.display_name ?? '');
-        setTimezone(next.profile.timezone ?? 'UTC');
-        setEmailAlerts(!!next.profile.email_alerts);
-        setBookingReminders(!!next.profile.booking_reminders);
-
-        // Optional org-scoped panels
-        if (orgSlug) {
-          setLoadingOrg(true);
-          try {
-            const [bs, op] = await Promise.all([
-              apiGetBillingSummary({ org: orgSlug }).catch(() => null),
-              apiGetOrgOfflinePayments({ org: orgSlug }).catch(() => null),
-            ]);
-            if (cancelled) return;
-            setBillingSummary(bs);
-            setOfflinePayments(op);
-            if (op) {
-              setOfflineVenmo(op.offline_venmo ?? '');
-              setOfflineZelle(op.offline_zelle ?? '');
-            } else if (next.org_overview?.offline_payment) {
-              setOfflineVenmo(next.org_overview.offline_payment.offline_venmo ?? '');
-              setOfflineZelle(next.org_overview.offline_payment.offline_zelle ?? '');
-            }
-          } finally {
-            if (!cancelled) setLoadingOrg(false);
-          }
-        }
+        await reloadProfileAndOrgPanels();
       } catch (e) {
         const err = e as Partial<ApiError>;
         const body = err.body as any;
@@ -290,16 +306,72 @@ export function ProfileScreen({
 
   async function openUrl(url: string) {
     try {
+      // Stripe: open in an auth-session style in-app browser so it can deep-link
+      // back into the app and automatically close.
+      let isStripe = false;
+      try {
+        const u = new URL(url);
+        isStripe = u.hostname === 'stripe.com' || u.hostname.endsWith('.stripe.com');
+      } catch {
+        isStripe = false;
+      }
+
+      if (isStripe) {
+        const returnUrl = 'circlecal://stripe-return';
+        const res: any = await WebBrowser.openAuthSessionAsync(url, returnUrl);
+        if (res?.type === 'success' && typeof res?.url === 'string' && res.url.startsWith(returnUrl)) {
+          let msg = 'Returned from Stripe.';
+          try {
+            const u = new URL(res.url);
+            const status = u.searchParams.get('status') || '';
+            if (status === 'connected') {
+              msg = 'Stripe is connected and ready for payments.';
+            } else if (status === 'express_done') {
+              msg = 'Stripe Express setup complete.';
+            }
+          } catch {
+            // ignore
+          }
+          setStripeFlash(msg);
+          setTimeout(() => setStripeFlash(null), 8000);
+          reloadProfileAndOrgPanels().catch(() => undefined);
+        }
+        return;
+      }
+
       await Linking.openURL(url);
     } catch {
       Alert.alert('Could not open link', url);
     }
   }
 
+  async function openWebPathWithSso(path: string) {
+    try {
+      const nextPath = (path && path.trim()) || '/';
+      const resp = await apiGetMobileSsoLink({ next: nextPath });
+      // Prefer the real external browser so the session cookie persists reliably
+      // and form-based flows (like 2FA disable) work as expected.
+      try {
+        await Linking.openURL(resp.url);
+      } catch {
+        await WebBrowser.openBrowserAsync(resp.url);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Could not open link', msg || 'Please try again.');
+    }
+  }
+              <>
+                <Text style={styles.cardText}>Offline payments aren’t available for your plan in this app.</Text>
+                <Pressable style={styles.secondaryBtnSmall} onPress={() => contactSupport()}>
+                  <Text style={styles.secondaryBtnText}>Contact support</Text>
+                </Pressable>
+              </>
   const canEditOffline = !!(offlinePayments?.can_edit || resp?.org_overview?.offline_payment?.can_edit);
   const stripeConnected = !!resp?.org_overview?.stripe?.connect_account_id;
   const activeOrgRole = normalizeOrgRole(resp?.org_overview?.membership?.role);
   const canAccessBilling = canManageBilling(activeOrgRole);
+  const billingUiEnabled = false;
 
   async function handleOpenStripeExpressDashboard() {
     if (!activeOrgSlug) return;
@@ -326,6 +398,8 @@ export function ProfileScreen({
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Profile</Text>
       <Text style={styles.subtitle}>Update your personal info and settings</Text>
+
+      {stripeFlash ? <Text style={styles.successBanner}>{stripeFlash}</Text> : null}
 
       <View style={styles.card}>
         {loading ? (
@@ -433,7 +507,7 @@ export function ProfileScreen({
         <Pressable style={styles.secondaryBtn} onPress={() => openUrl(`${API_BASE_URL}/accounts/password_change/`)}>
           <Text style={styles.secondaryBtnText}>Change password</Text>
         </Pressable>
-        <Pressable style={styles.secondaryBtn} onPress={() => openUrl(`${API_BASE_URL}/accounts/two_factor/`)}>
+        <Pressable style={styles.secondaryBtn} onPress={() => void openWebPathWithSso('/accounts/two_factor/')}>
           <Text style={styles.secondaryBtnText}>Two-factor authentication (2FA)</Text>
         </Pressable>
         <Pressable style={[styles.secondaryBtn, { borderColor: '#fecaca' }]} onPress={() => openUrl(`${API_BASE_URL}/accounts/delete/`)}>
@@ -487,7 +561,7 @@ export function ProfileScreen({
         ) : null}
       </View>
 
-      {canAccessBilling ? (
+      {canAccessBilling && billingUiEnabled ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Billing</Text>
           {loadingOrg ? <ActivityIndicator /> : billingSummary ? (
@@ -503,9 +577,9 @@ export function ProfileScreen({
                     <Text style={styles.secondaryBtnText}>Open billing</Text>
                   </Pressable>
                 ) : null}
-                {onOpenPricing && activeOrgSlug ? (
-                  <Pressable style={styles.secondaryBtnSmall} onPress={() => onOpenPricing({ orgSlug: activeOrgSlug })}>
-                    <Text style={styles.secondaryBtnText}>View pricing</Text>
+                {onOpenPlans && activeOrgSlug ? (
+                  <Pressable style={styles.secondaryBtnSmall} onPress={() => onOpenPlans({ orgSlug: activeOrgSlug })}>
+                    <Text style={styles.secondaryBtnText}>View plans</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -516,7 +590,7 @@ export function ProfileScreen({
         </View>
       ) : null}
 
-      {canAccessBilling ? (
+      {canAccessBilling && billingUiEnabled ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Stripe account</Text>
           {stripeConnected ? (
@@ -579,6 +653,19 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 8,
     color: '#6b7280',
+  },
+  successBanner: {
+    marginTop: 10,
+    marginBottom: 2,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    color: '#065f46',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   card: {
     marginTop: 16,
