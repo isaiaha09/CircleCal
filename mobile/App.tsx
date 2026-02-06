@@ -1,10 +1,11 @@
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Linking, Pressable, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as SplashScreen from 'expo-splash-screen';
 
 import { getAccessToken, setPostStripeMessage } from './src/lib/auth';
 import { apiGetOrgs } from './src/lib/api';
@@ -36,6 +37,10 @@ import { addInboxNotification } from './src/lib/notificationStore';
 import { registerPushTokenIfAlreadyPermitted } from './src/lib/push';
 
 WebBrowser.maybeCompleteAuthSession();
+
+// Prevent the native splash from auto-hiding before JS finishes bootstrapping.
+// This avoids a brief blank screen on cold start.
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -299,6 +304,7 @@ function RequireOwnerAnywhere(props: {
 export default function App() {
   const [initialRouteName, setInitialRouteName] = useState<keyof RootStackParamList>('Welcome');
   const [ready, setReady] = useState(false);
+  const [rootLayoutDone, setRootLayoutDone] = useState(false);
   const [pendingNav, setPendingNav] = useState<
     | { name: 'WebApp'; params?: { initialPath?: string } }
     | null
@@ -416,6 +422,16 @@ export default function App() {
     };
   }, []);
 
+  const onRootLayout = useCallback(() => {
+    setRootLayoutDone(true);
+  }, []);
+
+  useEffect(() => {
+    if (ready && rootLayoutDone) {
+      SplashScreen.hideAsync().catch(() => undefined);
+    }
+  }, [ready, rootLayoutDone]);
+
   useEffect(() => {
     // Stripe return deep link: always bounce user to the native dashboard with a success banner.
     let sub: any = null;
@@ -495,25 +511,42 @@ export default function App() {
     };
   }, []);
 
-  if (!ready) return null;
-
   return (
-    <LinearGradient colors={APP_BG_GRADIENT.colors} start={APP_BG_GRADIENT.start} end={APP_BG_GRADIENT.end} style={{ flex: 1 }}>
-      <NavigationContainer
-        theme={NAV_THEME}
-        ref={navigationRef}
-        onReady={() => {
-          if (pendingResetRoute) {
-            navigationRef.reset({ index: 0, routes: [pendingResetRoute as any] });
-            setPendingResetRoute(null);
-            return;
-          }
-          if (pendingNav) {
-            navigationRef.navigate(pendingNav.name, pendingNav.params as any);
-            setPendingNav(null);
-          }
-        }}
-      >
+    <LinearGradient
+      colors={APP_BG_GRADIENT.colors}
+      start={APP_BG_GRADIENT.start}
+      end={APP_BG_GRADIENT.end}
+      style={{ flex: 1 }}
+      onLayout={onRootLayout}
+    >
+      {!ready ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <Image
+            source={require('./assets/cc-auth-logo.png')}
+            style={{ width: 120, height: 120, marginBottom: 16 }}
+            resizeMode="contain"
+          />
+          <ActivityIndicator />
+          <Text style={{ marginTop: 12, color: '#475569' }}>Loading…</Text>
+        </View>
+      ) : null}
+
+      {ready ? (
+        <NavigationContainer
+          theme={NAV_THEME}
+          ref={navigationRef}
+          onReady={() => {
+            if (pendingResetRoute) {
+              navigationRef.reset({ index: 0, routes: [pendingResetRoute as any] });
+              setPendingResetRoute(null);
+              return;
+            }
+            if (pendingNav) {
+              navigationRef.navigate(pendingNav.name, pendingNav.params as any);
+              setPendingNav(null);
+            }
+          }}
+        >
         <Stack.Navigator
           initialRouteName={initialRouteName}
           screenOptions={{
@@ -787,7 +820,8 @@ export default function App() {
         </Stack.Screen>
         </Stack.Navigator>
         <StatusBar style="auto" />
-      </NavigationContainer>
+        </NavigationContainer>
+      ) : null}
     </LinearGradient>
   );
 }
