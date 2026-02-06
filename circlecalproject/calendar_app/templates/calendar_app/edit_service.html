@@ -152,39 +152,48 @@
     #svcAvailEditor .svc-add-range {
       margin-top: 8px !important;
     }
-    /* Service availability (mobile): use grid so time fields never touch */
+    /* Service availability (mobile): even Start/End, Remove directly below */
     #svcAvailEditor .svc-range-row {
       display: grid !important;
       grid-template-columns: 1fr 1fr;
-      gap: 10px !important;
+      gap: 8px !important;
       align-items: center;
+      width: 100%;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
       min-width: 0;
       width: 100%;
+      max-width: none;
       margin-right: 0 !important;
       display: block;
     }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end {
-      max-width: none !important;
       width: 100%;
-      padding: 6px 8px;
-      font-size: 0.9rem;
+      max-width: none !important;
+      height: 34px;
+      padding: 5px 6px;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
     }
     #svcAvailEditor .svc-range-row button {
-      flex: 1 1 100%;
+      grid-column: 1 / -1;
+      width: 100%;
+      margin-top: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 8px 10px;
-      margin-top: 6px;
+      height: 34px;
+      padding: 4px 8px;
       border: 1px solid var(--danger-600);
       border-radius: 10px;
       background: var(--danger-600);
       color: #ffffff;
       text-align: center;
-      font-size: 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
     }
     #svcAvailEditor .custom-time-picker {
       min-width: 240px;
@@ -276,8 +285,8 @@
   #svcAvailEditor .time-input-container {
     position: relative;
     display: inline-block;
-    width: 140px;
-    max-width: 140px;
+    width: 120px;
+    max-width: 120px;
   }
   /* Border around each time range row (Start/End/Remove) */
   #svcAvailEditor .svc-range-row {
@@ -429,32 +438,43 @@
     #svcAvailEditor .svc-range-row {
       display: grid !important;
       grid-template-columns: 1fr 1fr;
-      gap: 10px !important;
+      gap: 8px !important;
       align-items: center;
+      width: 100%;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
       min-width: 0;
       width: 100%;
+      max-width: none;
       margin-right: 0 !important;
     }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end {
       width: 100%;
       max-width: none !important;
+      height: 34px;
+      padding: 5px 6px;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
     }
     #svcAvailEditor .svc-range-row button {
       grid-column: 1 / -1;
+      width: 100%;
+      margin-top: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 8px 10px;
-      margin-top: 6px;
+      height: 34px;
+      padding: 4px 8px;
       border: 1px solid var(--danger-600);
       border-radius: 10px;
       background: var(--danger-600);
       color: #ffffff;
       text-align: center;
-      font-size: 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
     }
 
     #svcAvailEditor .custom-time-picker {
@@ -482,9 +502,9 @@
 
   /* Extra-small mobile: 320px wide devices */
   @media (max-width: 360px) {
-    #svcAvailEditor .svc-range-row {
-      gap: 8px;
-    }
+    #svcAvailEditor .svc-range-row { gap: 6px !important; }
+    #svcAvailEditor input.range-start,
+    #svcAvailEditor input.range-end { font-size: 0.74rem; }
     #svcAvailEditor .range-start,
     #svcAvailEditor .range-end {
       font-size: 10px;

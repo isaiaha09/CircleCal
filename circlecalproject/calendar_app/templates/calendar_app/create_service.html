@@ -74,7 +74,7 @@
   #svcAvailEditor .cc-svc-day-locked .svc-day-editor * { pointer-events: none; }
   #svcAvailEditor .cc-svc-day-locked .svc-day-editor { cursor: not-allowed; }
 
-  #svcAvailEditor .time-input-container { position: relative; display: inline-block; width: 140px; max-width: 140px; }
+  #svcAvailEditor .time-input-container { position: relative; display: inline-block; width: 120px; max-width: 120px; }
   #svcAvailEditor .svc-range-row { border: none; border-radius: 0; padding: 0; background: transparent; display: flex; align-items: center; gap: 0; }
   /* Spacing between Start / End / Remove without using flex gap */
   #svcAvailEditor .svc-range-row .time-input-container { margin-right: 10px; }
@@ -150,11 +150,14 @@
     #svcAvailEditor .svc-range-row {
       display: grid !important;
       grid-template-columns: 1fr 1fr;
-      gap: 10px !important;
+      gap: 8px !important;
       align-items: center;
+      width: 100%;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
       min-width: 0;
+      width: 132px;
+      max-width: none;
       width: 100%;
       margin-right: 0 !important;
     }
@@ -162,20 +165,29 @@
     #svcAvailEditor input.range-end {
       width: 100%;
       max-width: none !important;
+      height: 34px;
+      padding: 5px 6px;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
     }
     #svcAvailEditor .svc-range-row button {
       grid-column: 1 / -1;
+      width: 100%;
+      margin-top: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 8px 10px;
-      margin-top: 6px;
+      height: 34px;
+      padding: 4px 8px;
       border: 1px solid var(--danger-600);
       border-radius: 10px;
       background: var(--danger-600);
       color: #ffffff;
       text-align: center;
-      font-size: 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
     }
 
     #svcAvailEditor .custom-time-picker {
