@@ -280,6 +280,13 @@
     align-items: center;
     gap: 10px;
   }
+  /* Fallback spacing for browsers that don't support flex gap (older iOS Safari/WebViews)
+     or when the page is shown in a wide "desktop" viewport where mobile media rules don't apply. */
+  #svcAvailEditor .svc-range-row .time-input-container { margin-right: 10px; }
+  #svcAvailEditor .svc-range-row .time-input-container:last-of-type { margin-right: 0; }
+  @supports (gap: 10px) {
+    #svcAvailEditor .svc-range-row .time-input-container { margin-right: 0; }
+  }
   #svcAvailEditor .svc-range-row .cc-field {
     border: 1px solid var(--gray-900);
   }
