@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from django.urls import reverse_lazy
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -82,16 +83,17 @@ LOGOUT_REDIRECT_URL = '/'
 
 # Application definition
 
-# Optionally include the AdminLTE theme packages when available.
-# In CI/build environments these packages may not be installed; avoid
+# Optionally include the Unfold admin UI theme package when available.
+# This project has migrated off AdminLTE; do not fall back to it.
+# In CI/build environments this package may not be installed; avoid
 # failing import errors by checking availability at runtime.
 import importlib
-_adminlte_apps = []
+_admin_theme_apps = []
 try:
-    if importlib.util.find_spec('adminlte3') is not None:
-        _adminlte_apps = ['adminlte3', 'adminlte3_theme']
+    if importlib.util.find_spec('unfold') is not None:
+        _admin_theme_apps = ['unfold']
 except Exception:
-    _adminlte_apps = []
+    _admin_theme_apps = []
 
 _storages_apps = []
 try:
@@ -121,8 +123,8 @@ except Exception:
     pass
 
 INSTALLED_APPS = [
-    # Admin LTE theme (only if installed)
-    *_adminlte_apps,
+    # Admin UI theme (only if installed)
+    *_admin_theme_apps,
     # Optional storage backends (e.g., Google Cloud Storage via django-storages)
     *_storages_apps,
     # Optional CORS + API libs (used by mobile/web clients)
@@ -139,7 +141,7 @@ INSTALLED_APPS = [
     'django_otp.plugins.otp_static',
     'django_otp.plugins.otp_totp',
     # Ensure our templates override third-party ones by placing local app first
-    'calendar_app',
+    'calendar_app.apps.CalendarAppConfig',
     'two_factor',
     # Security
     'axes',
@@ -162,6 +164,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'calendar_app.middleware.AdminUndoContextMiddleware',
     'axes.middleware.AxesMiddleware',  # Rate limiting after auth
     'django_otp.middleware.OTPMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -200,6 +203,91 @@ if 'rest_framework' in _api_apps:
     }
 
 ROOT_URLCONF = 'circlecalproject.urls'
+
+
+# --- Unfold admin configuration ---
+# Keep this minimal: just expose custom admin pages in the sidebar.
+# All models remain accessible via the "All applications" drawer.
+UNFOLD = {
+    "SITE_TITLE": "CircleCal Database",
+    "SITE_HEADER": "CircleCal Database",
+    "SITE_ICON": {
+        "light": "/static/icons/circlecalicon.png",
+        "dark": "/static/icons/circlecalicon.png",
+    },
+    "COLORS": {
+        # Global neutrals (used for most of the UI backgrounds/borders/text).
+        # This is what changes the *overall* look of the admin.
+        # Keep this neutral so the layout stays clean/white.
+        "base": {
+            "50": "#FFFFFF",
+            "100": "#F5F5F5",
+            "200": "#E5E5E5",
+            "300": "#D4D4D4",
+            "400": "#A3A3A3",
+            "500": "#737373",
+            "600": "#525252",
+            "700": "#404040",
+            "800": "#262626",
+            "900": "#171717",
+            "950": "#000000",
+        },
+        # Brand primary: CircleCal blue. Accents remain neutral (black/white)
+        # via Unfold's default base/font palettes.
+        "primary": {
+            "50": "#EEF1FF",
+            "100": "#DDE3FF",
+            "200": "#B8C3FF",
+            "300": "#8FA1FF",
+            "400": "#5E74FF",
+            "500": "#2C45FF",
+            "600": "#2236CC",
+            "700": "#1F2AA6",
+            "800": "#121A66",
+            "900": "#0A0A2E",
+            "950": "#050516",
+        },
+    },
+    "STYLES": [
+        "/static/css/unfold_circlecal.css",
+    ],
+    "SIDEBAR": {
+        "show_search": True,
+        "command_search": True,
+        "show_all_applications": True,
+        "navigation": [
+            {
+                "title": "Insights",
+                "items": [
+                    {
+                        "title": "Admin home",
+                        "icon": "home",
+                        "link": lambda request: reverse_lazy("admin:index"),
+                    },
+                    {
+                        "title": "Dashboard",
+                        "icon": "dashboard",
+                        "link": lambda request: reverse_lazy("admin_dashboard"),
+                    },
+                    {
+                        "title": "Analytics",
+                        "icon": "insights",
+                        "link": lambda request: reverse_lazy("admin_analytics"),
+                    },
+                    {
+                        "title": "Undo history",
+                        "icon": "history",
+                        "link": lambda request: reverse_lazy("admin_undo_history"),
+                    },
+                ],
+            }
+        ],
+    },
+    "COMMAND": {
+        "search_models": True,
+        "show_history": True,
+    },
+}
 
 TEMPLATES = [
     {
@@ -279,8 +367,7 @@ STATICFILES_DIRS = [
 ]
 
 # Also include the project's `staticfiles/` directory (often used as
-# collectstatic output or local assets). This ensures AdminLTE and other
-# pre-built assets placed in `staticfiles/` are served in development.
+# collectstatic output or local assets).
 
 
 # Directory where `collectstatic` will gather files for production/static serving.

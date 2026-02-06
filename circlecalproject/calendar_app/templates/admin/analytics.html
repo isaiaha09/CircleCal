@@ -1,0 +1,39 @@
+{% extends "admin/base_site.html" %}
+
+{% load unfold %}
+
+{% block content %}
+    {% component "unfold/components/title.html" %}
+        Analytics
+    {% endcomponent %}
+
+    <div class="grid gap-4 mt-6 lg:grid-cols-2">
+        {% component "unfold/components/card.html" with title="Bookings per day (last 30 days)" %}
+            {% component "unfold/components/chart/line.html" with data=bookings_per_day.data options=bookings_per_day.options height=220 %}{% endcomponent %}
+        {% endcomponent %}
+
+        {% component "unfold/components/card.html" with title="Payment status mix (last 30 days)" %}
+            {% component "unfold/components/chart/bar.html" with data=payment_status.data options=payment_status.options height=220 %}{% endcomponent %}
+        {% endcomponent %}
+    </div>
+
+    <div class="mt-6">
+        {% component "unfold/components/card.html" with title="Top organizations by bookings (last 30 days)" %}
+            {% component "unfold/components/table.html" with table=top_orgs_table card_included=1 striped=1 %}{% endcomponent %}
+        {% endcomponent %}
+    </div>
+
+    <div class="grid gap-4 mt-6 lg:grid-cols-3">
+        {% component "unfold/components/card.html" with title="Top services (30d)" %}
+            {% component "unfold/components/table.html" with table=top_services_table card_included=1 striped=1 %}{% endcomponent %}
+        {% endcomponent %}
+
+        {% component "unfold/components/card.html" with title="Top resources (30d)" %}
+            {% component "unfold/components/table.html" with table=top_resources_table card_included=1 striped=1 %}{% endcomponent %}
+        {% endcomponent %}
+
+        {% component "unfold/components/card.html" with title="Top staff (30d)" %}
+            {% component "unfold/components/table.html" with table=top_staff_table card_included=1 striped=1 %}{% endcomponent %}
+        {% endcomponent %}
+    </div>
+{% endblock %}

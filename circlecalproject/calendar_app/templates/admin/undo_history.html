@@ -1,0 +1,60 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="flex flex-col gap-6">
+    <div class="flex items-center gap-3">
+        <h1 class="text-xl font-semibold text-base-900 dark:text-base-100">{% translate "Undo history" %}</h1>
+        <div class="ml-auto text-sm text-font-subtle-light dark:text-font-subtle-dark">
+            Showing last {{ limit }} actions
+        </div>
+    </div>
+
+    <div class="text-sm text-font-subtle-light dark:text-font-subtle-dark">
+        Undo supports <strong>creates</strong> (undo = delete) and <strong>deletes</strong> (undo = restore) when a snapshot was captured.
+        Edits/changes can’t be undone safely without full versioning.
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full border border-base-200 rounded-default overflow-hidden dark:border-base-800">
+            <thead class="bg-base-50 dark:bg-base-900">
+                <tr>
+                    <th class="text-left p-3 text-sm font-semibold text-base-900 dark:text-base-100">Time</th>
+                    <th class="text-left p-3 text-sm font-semibold text-base-900 dark:text-base-100">Type</th>
+                    <th class="text-left p-3 text-sm font-semibold text-base-900 dark:text-base-100">Object</th>
+                    <th class="text-left p-3 text-sm font-semibold text-base-900 dark:text-base-100">Undo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                    <tr class="border-t border-base-200 dark:border-base-800">
+                        <td class="p-3 text-sm text-font-default-light dark:text-font-default-dark whitespace-nowrap">{{ r.action_time }}</td>
+                        <td class="p-3 text-sm text-font-default-light dark:text-font-default-dark">{{ r.content_type|capfirst }}</td>
+                        <td class="p-3 text-sm text-font-default-light dark:text-font-default-dark">
+                            {{ r.object_repr }}
+                        </td>
+                        <td class="p-3 text-sm">
+                            {% if r.can_undo %}
+                                <form method="post" action="{% url 'admin_undo_logentry' r.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="border border-base-400/20 bg-white font-medium px-3 py-1 rounded-default text-sm text-base-900 dark:bg-base-800 dark:text-base-100">
+                                        {% translate 'Undo' %}
+                                    </button>
+                                </form>
+                            {% else %}
+                                <span class="text-font-subtle-light dark:text-font-subtle-dark">{{ r.reason|default:"—" }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="p-6 text-sm text-font-subtle-light dark:text-font-subtle-dark">
+                            No recent actions found.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

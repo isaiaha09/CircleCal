@@ -1,0 +1,25 @@
+{% extends "admin/base_site.html" %}
+
+{% load unfold %}
+
+{% block content %}
+    {% component "unfold/components/title.html" %}
+        Dashboard
+    {% endcomponent %}
+
+    <div class="grid gap-4 mt-6 md:grid-cols-2 xl:grid-cols-4">
+        {% for kpi in kpis %}
+            {% component "unfold/components/card.html" with title=kpi.label icon=kpi.icon icon_class="circlecal-kpi-icon" class="min-h-[120px] circlecal-kpi-card" %}
+                <div class="text-3xl font-semibold text-font-important-light dark:text-font-important-dark">
+                    {{ kpi.value }}
+                </div>
+            {% endcomponent %}
+        {% endfor %}
+    </div>
+
+    <div class="mt-6">
+        {% component "unfold/components/card.html" with title="Recent bookings" %}
+            {% component "unfold/components/table.html" with table=recent_bookings_table card_included=1 striped=1 %}{% endcomponent %}
+        {% endcomponent %}
+    </div>
+{% endblock %}

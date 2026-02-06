@@ -1,6 +1,9 @@
 Django==5.2.8
 cloudinary==1.44.1
 
+# Admin UI theme
+django-unfold==0.78.1
+
 # Auth / security
 # (axes + 2FA)
 django-axes==8.0.0

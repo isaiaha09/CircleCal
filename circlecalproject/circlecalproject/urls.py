@@ -22,6 +22,13 @@ from django.urls import re_path
 from django.views.generic.base import RedirectView
 from django.contrib.auth import views as auth_views
 from calendar_app import pwa_views
+from calendar_app import admin_pages
+from calendar_app import admin_undo
+
+# Admin branding (applies to Django admin + Unfold context variables).
+admin.site.site_header = "CircleCal Database"
+admin.site.site_title = "CircleCal Database"
+admin.site.index_title = "Site administration"
 try:
     # Import module to access urlpatterns directly for namespacing
     from two_factor import urls as two_factor_urls
@@ -82,6 +89,26 @@ urlpatterns = [
 
     # Admin (optionally obscured via settings.ADMIN_PATH)
     path(f"{getattr(settings, 'ADMIN_PATH', 'admin')}/pin/", include('calendar_app.urls_admin_pin')),
+    path(
+        f"{getattr(settings, 'ADMIN_PATH', 'admin')}/dashboard/",
+        admin.site.admin_view(admin_pages.admin_dashboard),
+        name="admin_dashboard",
+    ),
+    path(
+        f"{getattr(settings, 'ADMIN_PATH', 'admin')}/analytics/",
+        admin.site.admin_view(admin_pages.admin_analytics),
+        name="admin_analytics",
+    ),
+    path(
+        f"{getattr(settings, 'ADMIN_PATH', 'admin')}/undo/<int:logentry_id>/",
+        admin.site.admin_view(admin_undo.admin_undo_logentry),
+        name="admin_undo_logentry",
+    ),
+    path(
+        f"{getattr(settings, 'ADMIN_PATH', 'admin')}/undo/",
+        admin.site.admin_view(admin_undo.admin_undo_history),
+        name="admin_undo_history",
+    ),
     path(f"{getattr(settings, 'ADMIN_PATH', 'admin')}/", admin.site.urls),
     # Organization-scoped booking endpoints (API first so they take precedence)
     path('', include('bookings.urls')),

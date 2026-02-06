@@ -60,6 +60,47 @@ class AppModeMiddleware:
         return response
 
 
+class AdminUndoContextMiddleware:
+    """Enable admin undo snapshot capture only for admin requests.
+
+    We keep this lightweight: it only toggles a threadlocal flag consumed by
+    calendar_app.admin_undo signal handlers.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        from django.conf import settings
+        try:
+            from .admin_undo import set_request_context
+        except Exception:
+            set_request_context = None
+
+        admin_prefix = f"/{getattr(settings, 'ADMIN_PATH', 'admin')}/"
+        enabled = False
+        try:
+            enabled = bool(request.path.startswith(admin_prefix)) and bool(getattr(request, 'user', None)) and request.user.is_authenticated and request.user.is_staff
+        except Exception:
+            enabled = False
+
+        if set_request_context:
+            try:
+                set_request_context(request, enabled=enabled)
+            except Exception:
+                pass
+
+        response = self.get_response(request)
+
+        if set_request_context:
+            try:
+                set_request_context(request, enabled=False)
+            except Exception:
+                pass
+
+        return response
+
+
 class CustomDomainMiddleware:
     """Support verified per-business custom domains (e.g. booking.example.com).
 
