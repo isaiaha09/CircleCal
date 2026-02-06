@@ -436,7 +436,7 @@
   #svcAvailEditor .time-picker-btn.cancel:hover { background: var(--gray-300); }
 
   /* Mobile: keep time range rows + picker fully within container */
-  @media (max-width: 640px) {
+  @media (max-width: 640px), (hover: none) and (pointer: coarse) {
     #svcAvailEditor .svc-range-row {
       display: grid !important;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -456,9 +456,14 @@
     #svcAvailEditor input.range-end {
       width: 100%;
       max-width: none !important;
-      height: 30px;
-      padding: 4px 6px;
-      font-size: 0.74rem;
+      box-sizing: border-box;
+      -webkit-appearance: none;
+      appearance: none;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      height: 30px !important;
+      padding: 4px 6px !important;
+      font-size: 0.74rem !important;
       font-variant-numeric: tabular-nums;
     }
     #svcAvailEditor .svc-range-row button {
