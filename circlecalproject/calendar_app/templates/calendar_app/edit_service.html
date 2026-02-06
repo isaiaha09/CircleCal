@@ -51,45 +51,73 @@
       font-size: 0.85rem;
     }
 
-    /* Stack top/bottom action bars and shrink buttons */
+    /* Keep Cancel (left) + Save/View (right) on one line, like desktop */
     .cc-page .svc-actionbar,
     .cc-page .svc-actionbar-bottom {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 10px;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: nowrap;
+      gap: 8px;
     }
-    .cc-page .svc-actionbar a,
-    .cc-page .svc-actionbar-bottom a {
-      text-align: center;
+    .cc-page .svc-actionbar > a,
+    .cc-page .svc-actionbar-bottom > a {
+      flex: 0 0 auto;
+      text-align: left;
+      white-space: nowrap;
+      font-size: 0.8rem;
     }
     .cc-page .svc-actionbar-actions,
     .cc-page .svc-actionbar-actions-bottom {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 10px;
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: nowrap;
+      gap: 6px;
     }
+    /* Ensure order: Save then View */
+    .cc-page .svc-actionbar .svc-save-btn { order: 0; }
+    .cc-page .svc-actionbar #svc-view-btn { order: 1; }
 
-    /* Mobile-only: swap Cancel and View public page positions (above title). */
-    .cc-page .svc-actionbar > a {
-      order: 2;
-    }
-    .cc-page .svc-actionbar .svc-actionbar-actions {
-      order: 1;
-    }
-    .cc-page .svc-actionbar #svc-view-btn {
-      order: 0;
-    }
-    .cc-page .svc-actionbar .svc-save-btn {
-      order: 1;
-    }
+    /* Smaller buttons on mobile, but still inline */
     .cc-page .svc-save-btn,
     .cc-page #svc-view-btn,
     .cc-page #svc-view-btn-bottom {
-      width: 100%;
+      width: auto;
+      white-space: nowrap;
       margin-left: 0 !important;
-      padding: 9px 12px !important;
-      font-size: 0.85rem !important;
+      padding: 6px 8px !important;
+      font-size: 0.78rem !important;
       justify-content: center;
+    }
+    /* Reduce the Tailwind ml-3 spacing between Save and View */
+    .cc-page #svc-view-btn,
+    .cc-page #svc-view-btn-bottom {
+      margin-left: 6px !important;
+    }
+
+    /* Extra-tight for very narrow devices */
+    @media (max-width: 360px) {
+      .cc-page .svc-actionbar,
+      .cc-page .svc-actionbar-bottom {
+        gap: 6px;
+      }
+      .cc-page .svc-actionbar > a,
+      .cc-page .svc-actionbar-bottom > a {
+        font-size: 0.78rem;
+      }
+      .cc-page .svc-save-btn,
+      .cc-page #svc-view-btn,
+      .cc-page #svc-view-btn-bottom {
+        padding: 5px 7px !important;
+        font-size: 0.74rem !important;
+      }
+      .cc-page #svc-view-btn,
+      .cc-page #svc-view-btn-bottom {
+        margin-left: 5px !important;
+      }
     }
 
     /* Stack 2-col grids vertically on mobile */
@@ -126,7 +154,14 @@
     }
     #svcAvailEditor .svc-range-row {
       flex-wrap: wrap;
-      gap: 8px !important;
+      /* Avoid relying on flex gap (some mobile WebViews don't support it) */
+      gap: 0 !important;
+    }
+    #svcAvailEditor .svc-range-row .time-input-container {
+      margin-right: 10px;
+    }
+    #svcAvailEditor .svc-range-row .time-input-container:last-of-type {
+      margin-right: 0;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
       flex: 1 1 calc(50% - 6px);

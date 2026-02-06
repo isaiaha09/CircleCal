@@ -147,11 +147,16 @@
   @media (max-width: 640px) {
     #svcAvailEditor .svc-range-row {
       flex-wrap: wrap;
-      gap: 10px;
+      /* Avoid relying on flex gap (some mobile WebViews don't support it) */
+      gap: 0;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
       flex: 1 1 calc(50% - 10px);
       min-width: 0;
+      margin-right: 10px;
+    }
+    #svcAvailEditor .svc-range-row .time-input-container:last-of-type {
+      margin-right: 0;
     }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end {
@@ -234,7 +239,7 @@
 
   <div class="grid md:grid-cols-3 gap-8">
     <!-- Form -->
-    <div class="md:col-span-2 bg-white border rounded-xl shadow-sm p-8 cc-form">
+    <div class="md:col-span-2 bg-white border rounded-xl shadow-sm p-4 sm:p-8 cc-form">
             <script>
               function slugify(str){
                 return str.toString().trim().toLowerCase()
@@ -1529,7 +1534,7 @@
 
     <!-- Guidance Sidebar -->
     <div class="space-y-6">
-      <div class="bg-white border rounded-xl shadow-sm p-6">
+      <div class="bg-white border rounded-xl shadow-sm p-4 sm:p-6">
         <h2 class="text-sm font-semibold mb-3">Best Practices</h2>
         <ul class="space-y-3 text-sm text-gray-600">
           <li class="flex items-start"><span class="text-green-500 mr-2">✓</span> Include length in the name.</li>
@@ -1539,7 +1544,7 @@
         </ul>
       </div>
       {% if not can_use_pro_team %}
-      <div class="bg-blue-50 border border-blue-200 rounded-xl p-6 text-sm text-blue-700">
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 sm:p-6 text-sm text-blue-700">
         Upgrade to Pro or higher for advanced booking logic.
       </div>
       {% endif %}
