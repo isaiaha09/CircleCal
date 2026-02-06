@@ -1880,6 +1880,15 @@
             row.style.alignItems = 'center';
             row.style.gap = '10px';
 
+            function _ccOpenSvcPicker(inputEl, containerEl){
+              try {
+                document.querySelectorAll('#svcAvailEditor .custom-time-picker').forEach(p => p.remove());
+                const picker = createCustomTimePicker(inputEl);
+                picker.classList.add('active');
+                containerEl.appendChild(picker);
+              } catch (err) { /* ignore */ }
+            }
+
             const startContainer = document.createElement('div');
             startContainer.className = 'time-input-container';
             const start = document.createElement('input');
@@ -1918,22 +1927,46 @@
             start.addEventListener('click', function(e){
               e.preventDefault();
               e.stopPropagation();
-              try {
-                document.querySelectorAll('#svcAvailEditor .custom-time-picker').forEach(p => p.remove());
-                const picker = createCustomTimePicker(start);
-                picker.classList.add('active');
-                startContainer.appendChild(picker);
-              } catch (err) { /* ignore */ }
+              _ccOpenSvcPicker(start, startContainer);
+            });
+            start.addEventListener('pointerdown', function(e){
+              try { e.preventDefault(); } catch (_) {}
+              e.stopPropagation();
+              _ccOpenSvcPicker(start, startContainer);
+            });
+            // Mobile Safari/WebViews: prevent the native time picker from opening.
+            start.addEventListener('touchstart', function(e){
+              try { e.preventDefault(); } catch (_) {}
+              e.stopPropagation();
+              _ccOpenSvcPicker(start, startContainer);
+            }, { passive: false });
+            start.addEventListener('focus', function(){
+              try{
+                const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (isTouch) start.blur();
+              }catch(_){ }
             });
             end.addEventListener('click', function(e){
               e.preventDefault();
               e.stopPropagation();
-              try {
-                document.querySelectorAll('#svcAvailEditor .custom-time-picker').forEach(p => p.remove());
-                const picker = createCustomTimePicker(end);
-                picker.classList.add('active');
-                endContainer.appendChild(picker);
-              } catch (err) { /* ignore */ }
+              _ccOpenSvcPicker(end, endContainer);
+            });
+            end.addEventListener('pointerdown', function(e){
+              try { e.preventDefault(); } catch (_) {}
+              e.stopPropagation();
+              _ccOpenSvcPicker(end, endContainer);
+            });
+            // Mobile Safari/WebViews: prevent the native time picker from opening.
+            end.addEventListener('touchstart', function(e){
+              try { e.preventDefault(); } catch (_) {}
+              e.stopPropagation();
+              _ccOpenSvcPicker(end, endContainer);
+            }, { passive: false });
+            end.addEventListener('focus', function(){
+              try{
+                const isTouch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+                if (isTouch) end.blur();
+              }catch(_){ }
             });
             remove.addEventListener('click', function(){
               try{ onRemove(row); }catch(e){}
