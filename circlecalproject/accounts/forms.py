@@ -58,7 +58,7 @@ def _tz_choices():
     return [(tz, tz) for tz in ordered]
 
 class ProfileForm(forms.ModelForm):
-    avatar = forms.ImageField(required=False)
+    avatar = forms.ImageField(required=False, widget=forms.FileInput)
     timezone = forms.ChoiceField(choices=_tz_choices(), required=False)
 
     class Meta:
@@ -74,10 +74,18 @@ class ProfileForm(forms.ModelForm):
         # supported (no streaming), so we must not attempt PIL/Image.open().
         uploaded = self.files.get("avatar")
         if not uploaded:
-            # ClearableFileInput uses False to indicate clear.
-            if avatar is False:
-                return None
-            return avatar
+            # When we render a plain file input (not ClearableFileInput), Django
+            # won't generate the usual '<field>-clear' sentinel. We support
+            # clearing via an explicit checkbox named 'avatar-clear'.
+            try:
+                avatar_cleared = str(self.data.get("avatar-clear", "")).lower() in ("1", "true", "on", "yes")
+            except Exception:
+                avatar_cleared = False
+            if avatar_cleared:
+                # FileField.save_form_data treats False as "clear".
+                return False
+            # No upload + not clearing => leave existing avatar unchanged.
+            return None
 
         # From here on, we know there's a new uploaded file.
         avatar = uploaded
@@ -240,11 +248,38 @@ class ProfileForm(forms.ModelForm):
 
     def save(self, commit=True):
         instance = super().save(commit=False)
+
+        avatar_cleared = False
+        avatar_uploaded = False
         try:
-            avatar_changed = "avatar" in getattr(self, "changed_data", [])
             # ClearableFileInput uses '<fieldname>-clear'
             avatar_cleared = str(self.data.get("avatar-clear", "")).lower() in ("1", "true", "on", "yes")
             avatar_uploaded = bool(self.files.get("avatar"))
+        except Exception:
+            avatar_cleared = False
+            avatar_uploaded = False
+
+        old_avatar = None
+        old_avatar_name = ""
+        try:
+            if getattr(instance, "pk", None):
+                old = Profile.objects.filter(pk=instance.pk).only("avatar").first()
+                if old is not None and getattr(old, "avatar", None):
+                    old_avatar = old.avatar
+                    old_avatar_name = getattr(old.avatar, "name", "") or ""
+        except Exception:
+            old_avatar = None
+            old_avatar_name = ""
+
+        new_avatar_name = ""
+        try:
+            if getattr(instance, "avatar", None):
+                new_avatar_name = getattr(instance.avatar, "name", "") or ""
+        except Exception:
+            new_avatar_name = ""
+
+        try:
+            avatar_changed = "avatar" in getattr(self, "changed_data", [])
             if avatar_changed or avatar_cleared or avatar_uploaded:
                 instance.avatar_updated_at = timezone.now()
         except Exception:
@@ -256,6 +291,20 @@ class ProfileForm(forms.ModelForm):
                 self.save_m2m()
             except Exception:
                 pass
+
+            # IMPORTANT: clearing a FileField does not automatically delete the
+            # old blob/object. Explicitly delete it after a successful save.
+            try:
+                if avatar_cleared and old_avatar:
+                    old_avatar.delete(save=False)
+                # If a new avatar is uploaded under a different name/extension,
+                # clean up the old file as well.
+                elif avatar_uploaded and old_avatar and old_avatar_name and (old_avatar_name != new_avatar_name):
+                    old_avatar.delete(save=False)
+            except Exception:
+                # Never block profile save on storage delete failures.
+                pass
+
         return instance
 
 from django.contrib.auth.forms import PasswordResetForm

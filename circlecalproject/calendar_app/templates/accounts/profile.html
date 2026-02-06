@@ -372,7 +372,30 @@
         {% endif %}
       </div>
       <span class="text-sm font-medium text-blue-800">Profile Picture</span>
-      <span id="avatar-filename" class="text-xs text-gray-400 mt-1" {% if user.profile.avatar %}{% endif %}></span>
+
+      <div class="mt-3 w-full flex flex-col items-center gap-2">
+        <div class="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <label for="id_avatar" class="btn-ghost inline-flex items-center gap-2">Choose File</label>
+          <span id="cc-avatar-inline-filename" class="text-sm text-gray-700 break-all"
+                data-fullname="{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% endif %}">
+            {% if user.profile.avatar %}{{ user.profile.avatar.name }}{% else %}No file selected{% endif %}
+          </span>
+          {% if user.profile.avatar %}
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" name="avatar-clear" id="id_avatar_clear" />
+              <span class="font-medium">Remove photo</span>
+            </label>
+          {% endif %}
+        </div>
+
+        {% if form.avatar.errors %}
+          <div class="text-xs text-red-700 mt-1">{{ form.avatar.errors }}</div>
+        {% endif %}
+        <p class="text-xs text-gray-500">JPG, PNG, or WebP up to 5MB. Images are automatically resized for avatars. Explicit images are not allowed.</p>
+      </div>
+
+      {# Render the actual file input once (hidden); the label above triggers it. #}
+      <div class="hidden">{{ form.avatar }}</div>
     </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       {% if user_org_role == 'staff' %}
@@ -444,19 +467,7 @@
         </div>
       </div>
     </div>
-    <div class="col-span-2 mt-4">
-      <label class="block text-sm font-semibold text-blue-800 mb-2">Profile Picture</label>
-      <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-3">
-        <span class="text-sm text-gray-600">Change:</span>
-        <label for="id_avatar" class="btn-ghost inline-flex items-center gap-2">Choose File</label>
-        <span id="cc-current-filename" data-fullname="{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% endif %}" class="text-sm text-gray-700 break-all">{% if user.profile.avatar %}{{ user.profile.avatar.name }}{% else %}No file selected{% endif %}</span>
-        <div class="ml-0 sm:ml-3 clearable-file-inline">{{ form.avatar }}</div>
-      </div>
-      {% if form.avatar.errors %}
-        <div class="text-xs text-red-700 mt-1">{{ form.avatar.errors }}</div>
-      {% endif %}
-      <p class="text-xs text-gray-500 mt-1">JPG, PNG, or WebP up to 5MB. Images are automatically resized for avatars. Explicit images are not allowed.</p>
-    </div>
+    {# Profile picture controls moved under the avatar preview for a cleaner UI. #}
     <div class="mt-6 flex justify-end">
       <button id="save-btn" type="submit" class="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-700">Save Changes</button>
     </div>
@@ -886,12 +897,9 @@
 {% block extra_head %}
   <link rel="stylesheet" href="{% static 'vendor/cropperjs/1.5.13/cropper.min.css' %}" />
   <style>
-    /* Ensure the clear anchor inherits muted color if we don't override via JS */
-    .clearable-file-input a { color: inherit; }
     /* Style file input: hide real input and use labeled button */
     input[type=file] { display: none; }
     label[for="id_avatar"] { cursor: pointer; }
-    #cc-current-filename { color: #334155; }
     /* Profile page UI polish */
     .btn-primary { background: linear-gradient(90deg,#2563eb,#4f46e5); color: white; padding: .45rem .9rem; border-radius: .5rem; display:inline-block; min-width:10rem; text-align:center; transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease; }
     .btn-ghost { background: transparent; border: 1px solid #e5e7eb; padding: .4rem .6rem; border-radius: .5rem; transition: background 120ms ease, border-color 120ms ease; }
@@ -931,8 +939,7 @@
     .profile-preferences input[type=checkbox]:checked::after { transform: translateX(20px); }
 
     /* Avatar clear toggle to match preference toggles and sit inline */
-    .clearable-file-inline .clearable-file-input { display: inline-flex; align-items: center; gap: .5rem; }
-    .clearable-file-inline .clearable-file-input input[type=checkbox] {
+    input#id_avatar_clear {
       -webkit-appearance: none;
       -moz-appearance: none;
       appearance: none;
@@ -945,7 +952,7 @@
       outline: none;
       transition: background 150ms ease-in-out;
     }
-    .clearable-file-inline .clearable-file-input input[type=checkbox]::after {
+    input#id_avatar_clear::after {
       content: '';
       position: absolute;
       top: 3px;
@@ -957,9 +964,8 @@
       box-shadow: 0 1px 2px rgba(16,24,40,0.06);
       transition: transform 150ms ease-in-out;
     }
-    .clearable-file-inline .clearable-file-input input[type=checkbox]:checked { background: linear-gradient(90deg,#34d399,#10b981); }
-    .clearable-file-inline .clearable-file-input input[type=checkbox]:checked::after { transform: translateX(20px); }
-    .clearable-file-inline .clearable-file-input a { display: none; }
+    input#id_avatar_clear:checked { background: linear-gradient(90deg,#34d399,#10b981); }
+    input#id_avatar_clear:checked::after { transform: translateX(20px); }
 
     /* Slightly stronger section shadows for polish */
     .shadow-lg { box-shadow: 0 8px 20px rgba(2,6,23,0.06); }
@@ -1099,137 +1105,20 @@
       const form = document.getElementById('profile-form');
       const saveBtn = document.getElementById('save-btn');
       const avatarPreview = document.getElementById('avatar-preview');
-      // prefer compact filename element; fallback to legacy id
-      const avatarFilenameEl = document.getElementById('avatar-filename') || document.getElementById('cc-current-filename');
+      const clearToggle = document.getElementById('id_avatar_clear');
+      const filenameEl = document.getElementById('cc-avatar-inline-filename');
 
-      // Normalize any server-rendered path to basename by reading the data-fullname attribute
-      if (avatarFilenameEl) {
-        const dataFull = avatarFilenameEl.dataset && avatarFilenameEl.dataset.fullname;
-        let basename = '';
-        if (dataFull) {
-          const txt = dataFull.trim();
-          const lastSlash = Math.max(txt.lastIndexOf('/'), txt.lastIndexOf('\\'));
-          basename = lastSlash !== -1 ? txt.slice(lastSlash + 1) : txt;
-          avatarFilenameEl.textContent = basename;
-        } else if (avatarFilenameEl.textContent) {
-          const txt2 = avatarFilenameEl.textContent.trim();
-          const lastSlash2 = Math.max(txt2.lastIndexOf('/'), txt2.lastIndexOf('\\'));
-          basename = lastSlash2 !== -1 ? txt2.slice(lastSlash2 + 1) : txt2;
-          avatarFilenameEl.textContent = basename;
+      // Normalize any server-rendered path to basename by reading the data-fullname attribute.
+      if (filenameEl) {
+        const dataFull = filenameEl.dataset && filenameEl.dataset.fullname;
+        const raw = (dataFull || filenameEl.textContent || '').trim();
+        if (!raw) {
+          filenameEl.textContent = 'No file selected';
+        } else {
+          const lastSlash = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'));
+          filenameEl.textContent = lastSlash !== -1 ? raw.slice(lastSlash + 1) : raw;
         }
-        // Also update the ClearableFileInput "Currently" anchor text if present
-        if (basename) {
-          try {
-            const clearable = fileInput.closest('.clearable-file-input');
-            if (clearable) {
-              const anchor = clearable.querySelector('a');
-              if (anchor) anchor.textContent = basename;
-            }
-          } catch (e) {}
-            // Extra Save buttons (outside the form) should submit the main profile form
-            try {
-              const extraSaveBtns = document.querySelectorAll('.save-profile-btn');
-              if (extraSaveBtns.length) {
-                extraSaveBtns.forEach(btn => {
-                  btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    if (!form) return;
-                    // disable all save buttons to prevent double submits
-                    document.querySelectorAll('.save-profile-btn, #save-btn').forEach(b => { try { b.disabled = true; } catch (err) {} });
-                    const mainSave = document.getElementById('save-btn');
-                    if (mainSave) mainSave.textContent = 'Saving...';
-                    form.submit();
-                  });
-                });
-              }
-            } catch (e) {}
-        }
-        // Mirror filename into our compact display
-        try {
-          const cc = document.getElementById('cc-current-filename');
-          if (cc) cc.textContent = basename || (avatarFilenameEl.textContent || 'No file selected');
-        } catch (e) {}
-
-          // Force-replace ClearableFileInput anchor with a grey basename span
-          (function fixClearableDisplay() {
-            try {
-              document.querySelectorAll('.clearable-file-input').forEach(span => {
-                // If we've already inserted our replacement, skip
-                if (span.querySelector('.cc-basename')) return;
-                // Determine basename from data attribute if available, else from anchor text
-                let basename = '';
-                const anchor = span.querySelector('a');
-                if (anchor && anchor.textContent) {
-                  const txt = anchor.textContent.trim();
-                  const lastSlash = Math.max(txt.lastIndexOf('/'), txt.lastIndexOf('\\'));
-                  basename = lastSlash !== -1 ? txt.slice(lastSlash + 1) : txt;
-                  // remove the anchor so path disappears entirely
-                  anchor.remove();
-                } else if (avatarFilenameEl && avatarFilenameEl.textContent) {
-                  basename = avatarFilenameEl.textContent.trim();
-                } else {
-                  // fallback to profile_pic.jpg
-                  basename = 'profile_pic.jpg';
-                }
-
-                // Create replacement span and insert before the clear checkbox if present
-                const repl = document.createElement('span');
-                repl.className = 'cc-basename text-xs';
-                repl.textContent = basename;
-                repl.style.color = '#94a3b8';
-                repl.style.marginLeft = '4px';
-                // Find checkbox or other control to insert before, otherwise append
-                const checkbox = span.querySelector('input[type=checkbox], input[type=radio]');
-                if (checkbox) {
-                  span.insertBefore(repl, checkbox);
-                } else {
-                  span.appendChild(repl);
-                }
-              });
-            } catch (e) {}
-          })();
       }
-      // Robustly update ClearableFileInput anchors so they show only the basename and are greyed,
-      // while preserving the Clear checkbox functionality. Uses MutationObserver as a fallback.
-      (function updateClearableAnchors() {
-        function setAnchorText(a) {
-          if (!a) return;
-          const txt = (a.textContent || '').trim();
-          let bn = txt;
-          // If anchor contains a path, extract basename
-          const lastSlash = Math.max(txt.lastIndexOf('/'), txt.lastIndexOf('\\'));
-          if (lastSlash !== -1) bn = txt.slice(lastSlash + 1);
-          // If anchor is an href to media, prefer basename from href
-          try {
-            if (a.href) {
-              const hrefParts = a.getAttribute('href').split('/');
-              const last = hrefParts[hrefParts.length-1];
-              if (last) bn = last;
-            }
-          } catch (e) {}
-          a.textContent = bn;
-          a.style.color = '#94a3b8';
-        }
-
-        function walkAndUpdate() {
-          document.querySelectorAll('.clearable-file-input').forEach(span => {
-            const a = span.querySelector('a');
-            if (a) setAnchorText(a);
-          });
-        }
-
-        walkAndUpdate();
-        // run again shortly after load in case widget renders later
-        setTimeout(walkAndUpdate, 150);
-
-        // Observe DOM changes to update anchors injected later
-        try {
-          const mo = new MutationObserver(() => {
-            walkAndUpdate();
-          });
-          mo.observe(document.body, { childList: true, subtree: true });
-        } catch (e) {}
-      })();
         // Attach handlers for extra Save buttons even if avatar input isn't present
         try {
           const extraSaveBtns = document.querySelectorAll('.save-profile-btn');
@@ -1278,6 +1167,9 @@
       fileInput.addEventListener('change', function(e) {
         const originalFile = e.target.files && e.target.files[0];
         if (!originalFile) return;
+
+        // Choosing a new file should un-check the clear toggle.
+        try { if (clearToggle) clearToggle.checked = false; } catch (e) {}
         // Rename the selected file immediately to profile_pic.jpg so the input shows the desired name
         try {
           const dtReplace = new DataTransfer();
@@ -1291,21 +1183,12 @@
         if (!file) return;
         // Update visible filename caption (show basename only)
         let newBasename = '';
-        if (avatarFilenameEl) {
+        if (filenameEl) {
           const name = file.name || '';
           const lastSlash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
           newBasename = lastSlash !== -1 ? name.slice(lastSlash + 1) : name;
-          avatarFilenameEl.textContent = newBasename;
-        try { const cc2 = document.getElementById('cc-current-filename'); if (cc2) cc2.textContent = newBasename || 'No file selected'; } catch (e) {}
+          filenameEl.textContent = newBasename || 'No file selected';
         }
-        // Update the widget's "Currently:" anchor text
-        try {
-          const clearable = fileInput.closest('.clearable-file-input');
-          if (clearable) {
-            const anchor = clearable.querySelector('a');
-            if (anchor && newBasename) anchor.textContent = newBasename;
-          }
-        } catch (e) {}
         const url = URL.createObjectURL(file);
         imgEl.src = url;
         openModal();
@@ -1368,19 +1251,11 @@
           dt.items.add(file);
           fileInput.files = dt.files;
           // Update visible filename caption after crop (basename) and widget anchor
-          if (avatarFilenameEl) {
+          if (filenameEl) {
             const name2 = file.name || '';
             const lastSlash2 = Math.max(name2.lastIndexOf('/'), name2.lastIndexOf('\\'));
             const bn = lastSlash2 !== -1 ? name2.slice(lastSlash2 + 1) : name2;
-            avatarFilenameEl.textContent = bn;
-            try {
-              const clearable2 = fileInput.closest('.clearable-file-input');
-              if (clearable2) {
-                const anchor2 = clearable2.querySelector('a');
-                if (anchor2) anchor2.textContent = bn;
-              }
-            } catch (e) {}
-            try { const cc3 = document.getElementById('cc-current-filename'); if (cc3) cc3.textContent = bn || 'No file selected'; } catch (e) {}
+            filenameEl.textContent = bn || 'No file selected';
           }
           // Update on-page preview immediately
           try {
