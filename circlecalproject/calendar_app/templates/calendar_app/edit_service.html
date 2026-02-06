@@ -152,18 +152,18 @@
     #svcAvailEditor .svc-add-range {
       margin-top: 8px !important;
     }
+    /* Service availability (mobile): use grid so time fields never touch */
     #svcAvailEditor .svc-range-row {
-      flex-wrap: wrap;
-      /* Avoid relying on flex gap (some mobile WebViews don't support it) */
-      gap: 0 !important;
+      display: grid !important;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px !important;
+      align-items: center;
     }
-    /* Deterministic spacing between start/end on mobile (iOS Safari can be finicky) */
-    #svcAvailEditor .svc-range-row .time-input-container { margin-right: 0; }
-    #svcAvailEditor .svc-range-row > .time-input-container:first-child { margin-right: 10px !important; }
-    #svcAvailEditor .svc-range-row > input.range-start { margin-right: 10px !important; }
     #svcAvailEditor .svc-range-row .time-input-container {
-      flex: 1 1 calc(50% - 6px);
       min-width: 0;
+      width: 100%;
+      margin-right: 0 !important;
+      display: block;
     }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end {
@@ -282,8 +282,8 @@
     background: transparent;
     display: flex;
     align-items: center;
-    /* Avoid relying on flex gap; some mobile browsers/WebViews treat it inconsistently */
-    gap: 0 !important;
+    /* Keep desktop spacing deterministic (mobile overrides use grid + gap) */
+    gap: 0;
   }
   /* Spacing between Start / End / Remove without using flex gap */
   #svcAvailEditor .svc-range-row .time-input-container { margin-right: 0; }
