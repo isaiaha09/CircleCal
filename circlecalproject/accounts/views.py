@@ -25,6 +25,13 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.core import signing
 from django.views.decorators.csrf import csrf_exempt
 
+try:
+	from django_otp import devices_for_user
+	from django_otp import login as otp_login
+except Exception:  # pragma: no cover
+	devices_for_user = None
+	otp_login = None
+
 # Create your views here.
 
 
@@ -116,6 +123,26 @@ def mobile_sso_consume_view(request, token: str):
 		backend = 'django.contrib.auth.backends.ModelBackend'
 
 	login(request, user, backend=backend)
+
+	# Mobile SSO establishes a web session for an already-authenticated mobile user.
+	# Many django-two-factor management views (disable 2FA, backup tokens) require an
+	# OTP-verified session (request.user.is_verified()). Mark the session verified
+	# best-effort so those pages work inside the app WebView.
+	try:
+		ua = (request.META.get('HTTP_USER_AGENT') or '')
+		is_app_ua = 'CircleCalApp' in ua
+		cc_app_param = (request.GET.get('cc_app') == '1')
+		is_cc_app_flow = bool(is_app_ua or cc_app_param or request.session.get('cc_app_flow'))
+		if is_cc_app_flow and devices_for_user and otp_login:
+			dev = None
+			try:
+				dev = next(devices_for_user(user, confirmed=True), None)
+			except Exception:
+				dev = None
+			if dev is not None:
+				otp_login(request, dev)
+	except Exception:
+		pass
 	# In app-mode, prefer session cookies that expire when the browser closes.
 	# This reduces "sticky" sign-in when the user cancels onboarding.
 	try:
