@@ -273,7 +273,12 @@
   .member-chip .member-chip-remove:hover { background:rgba(11,92,255,0.08); }
 
   /* Service availability: match Calendar default availability time picker UI */
-  #svcAvailEditor .time-input-container { position: relative; display: inline-block; }
+  #svcAvailEditor .time-input-container {
+    position: relative;
+    display: inline-block;
+    width: 140px;
+    max-width: 140px;
+  }
   /* Border around each time range row (Start/End/Remove) */
   #svcAvailEditor .svc-range-row {
     border: none;
@@ -1888,9 +1893,6 @@
           function buildRangeRow(startVal, endVal, onChange, onRemove, disabled, dayIdx){
             const row = document.createElement('div');
             row.className = 'svc-range-row';
-            row.style.display = 'flex';
-            row.style.alignItems = 'center';
-            row.style.gap = '10px';
 
             function _ccOpenSvcPicker(inputEl, containerEl){
               try {
@@ -1908,7 +1910,6 @@
             start.value = startVal || '';
             start.className = 'cc-field range-start';
             try{ start.dataset.day = String(dayIdx); }catch(e){}
-            start.style.maxWidth = '140px';
             start.readOnly = true;
             start.style.cursor = 'pointer';
             startContainer.appendChild(start);
@@ -1920,7 +1921,6 @@
             end.value = endVal || '';
             end.className = 'cc-field range-end';
             try{ end.dataset.day = String(dayIdx); }catch(e){}
-            end.style.maxWidth = '140px';
             end.readOnly = true;
             end.style.cursor = 'pointer';
             endContainer.appendChild(end);
