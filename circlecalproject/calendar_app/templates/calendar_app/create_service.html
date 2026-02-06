@@ -75,13 +75,9 @@
   #svcAvailEditor .cc-svc-day-locked .svc-day-editor { cursor: not-allowed; }
 
   #svcAvailEditor .time-input-container { position: relative; display: inline-block; }
-  #svcAvailEditor .svc-range-row { border: none; border-radius: 0; padding: 0; background: transparent; display: flex; align-items: center; gap: 10px; }
-  /* Fallback spacing for browsers that don't support flex gap (older iOS Safari/WebViews). */
+  #svcAvailEditor .svc-range-row { border: none; border-radius: 0; padding: 0; background: transparent; display: flex; align-items: center; gap: 0 !important; }
+  /* Spacing between Start / End / Remove without using flex gap */
   #svcAvailEditor .svc-range-row .time-input-container { margin-right: 10px; }
-  #svcAvailEditor .svc-range-row .time-input-container:last-of-type { margin-right: 0; }
-  @supports (gap: 10px) {
-    #svcAvailEditor .svc-range-row .time-input-container { margin-right: 0; }
-  }
   #svcAvailEditor .svc-range-row .cc-field { border: 1px solid var(--gray-900); }
   #svcAvailEditor .range-start,
   #svcAvailEditor .range-end { text-align: center; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--gray-900); background: white; font-weight: 600; min-width: 0; }

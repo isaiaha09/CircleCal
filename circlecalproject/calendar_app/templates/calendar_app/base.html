@@ -142,18 +142,28 @@
                     display: inline-flex;
                     align-items: center;
                     gap: 8px;
-                    padding: 0.5rem 0.9rem;
+                    padding: 0.5rem 0.9rem !important;
                     border-radius: 0.5rem;
-                    background: #ef4444; /* red-500 */
-                    color: #ffffff;
+                    background: #ffffff !important;
+                    color: #dc2626 !important; /* red-600 */
                     text-decoration: none;
-                    border: none;
+                    border: 2px solid #dc2626 !important; /* red-600 */
                     font-weight: 600;
-                    box-shadow: 0 6px 18px rgba(239,68,68,0.08);
+                    box-shadow: none;
+                    transition: transform 120ms ease;
+                    will-change: transform;
+                    cursor: pointer;
+                    box-sizing: border-box;
+                    appearance: none;
+                    -webkit-appearance: none;
                 }
-                .twofactor-disable-btn:hover { background: #dc2626; }
+                .twofactor-disable-btn:hover { transform: scale(1.03); }
                 @media (max-width:640px) {
-                    .twofactor-disable-btn { width:100%; justify-content:center; }
+                    .twofactor-disable-btn {
+                        width: 100%;
+                        justify-content: center;
+                        border-color: #dc2626 !important;
+                    }
                 }
 
                 /* Extra spacing for pages where 2FA is being disabled */
@@ -162,6 +172,27 @@
                 }
                 @media (max-width:640px) {
                     .twofactor-disable-page { padding: 1.25rem; }
+                }
+
+                /* Disable confirmation checkbox: keep text + checkbox aligned and spaced */
+                .twofactor-disable-page label {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                }
+                .twofactor-disable-page label input[type="checkbox"] {
+                    margin: 0;
+                }
+                @media (max-width:640px) {
+                    .twofactor-disable-page label {
+                        width: 100%;
+                        justify-content: center;
+                    }
+                }
+                /* Fallback if checkbox isn't inside the label */
+                .twofactor-disable-page input[type="checkbox"] {
+                    vertical-align: middle;
+                    margin-left: 0.5rem;
                 }
 
                 /* Make the numeric generator/token input clearly visible (not blend into white) */

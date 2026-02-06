@@ -176,10 +176,16 @@
     }
     #svcAvailEditor .svc-range-row button {
       flex: 1 1 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       padding: 8px 10px;
-      border: 1px solid var(--gray-300);
+      margin-top: 6px;
+      border: 1px solid var(--danger-600);
       border-radius: 10px;
-      background: var(--gray-50);
+      background: var(--danger-600);
+      color: #ffffff;
+      text-align: center;
       font-size: 0.85rem;
     }
     #svcAvailEditor .custom-time-picker {
@@ -278,15 +284,11 @@
     background: transparent;
     display: flex;
     align-items: center;
-    gap: 10px;
+    /* Avoid relying on flex gap; some mobile browsers/WebViews treat it inconsistently */
+    gap: 0 !important;
   }
-  /* Fallback spacing for browsers that don't support flex gap (older iOS Safari/WebViews)
-     or when the page is shown in a wide "desktop" viewport where mobile media rules don't apply. */
+  /* Spacing between Start / End / Remove without using flex gap */
   #svcAvailEditor .svc-range-row .time-input-container { margin-right: 10px; }
-  #svcAvailEditor .svc-range-row .time-input-container:last-of-type { margin-right: 0; }
-  @supports (gap: 10px) {
-    #svcAvailEditor .svc-range-row .time-input-container { margin-right: 0; }
-  }
   #svcAvailEditor .svc-range-row .cc-field {
     border: 1px solid var(--gray-900);
   }
