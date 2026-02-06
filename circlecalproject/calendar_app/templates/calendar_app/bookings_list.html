@@ -1835,6 +1835,14 @@ if (exportAuditBtn) {
     const ids = Array.from(document.querySelectorAll('#auditTableBody .auditRowCb:checked')).filter(cb => cb.closest('tr') && cb.closest('tr').style.display !== 'none').map(cb => Number(cb.value));
     if (!ids.length) { alert('No audit rows selected to export'); return; }
     try {
+      // In mobile app WebView mode, avoid fetch->blob downloads.
+      // RN WebView cannot open blob: URLs, and downloads are more reliable in the system browser.
+      const isCcAppMode = !!(document.body && (document.body.getAttribute('data-cc-app') === '1' || (document.body.dataset && document.body.dataset.ccApp === '1')));
+      if (isCcAppMode) {
+        const safeIds = encodeURIComponent(ids.join(','));
+        window.location.href = `/bus/${orgSlug}/bookings/audit/export/?ids=${safeIds}`;
+        return;
+      }
       const resp = await fetch(`/bus/${orgSlug}/bookings/audit/export/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },

@@ -8244,6 +8244,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const ids = Array.from(document.querySelectorAll('.auditRowCbInline:checked')).map(cb => Number(cb.value));
             if (!ids.length) { alert('No audit rows selected'); return; }
             try {
+                // In mobile app WebView mode, avoid fetch->blob downloads.
+                // RN WebView cannot open blob: URLs.
+                const isCcAppMode = !!(document.body && (document.body.getAttribute('data-cc-app') === '1' || (document.body.dataset && document.body.dataset.ccApp === '1')));
+                if (isCcAppMode) {
+                    const safeIds = encodeURIComponent(ids.join(','));
+                    window.location.href = `/bus/{{ organization.slug }}/bookings/audit/export/?ids=${safeIds}`;
+                    return;
+                }
                 const resp = await fetch(`/bus/{{ organization.slug }}/bookings/audit/export/`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
