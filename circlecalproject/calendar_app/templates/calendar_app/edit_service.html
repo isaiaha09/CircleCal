@@ -439,24 +439,26 @@
   @media (max-width: 640px) {
     #svcAvailEditor .svc-range-row {
       display: grid !important;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px !important;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      column-gap: 10px !important;
+      row-gap: 8px !important;
       align-items: center;
       width: 100%;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
       min-width: 0;
       width: 100%;
-      max-width: none;
+      max-width: 150px;
+      justify-self: start;
       margin-right: 0 !important;
     }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end {
       width: 100%;
       max-width: none !important;
-      height: 34px;
-      padding: 5px 6px;
-      font-size: 0.78rem;
+      height: 30px;
+      padding: 4px 6px;
+      font-size: 0.74rem;
       font-variant-numeric: tabular-nums;
     }
     #svcAvailEditor .svc-range-row button {
@@ -466,14 +468,14 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      height: 34px;
+      height: 32px;
       padding: 4px 8px;
       border: 1px solid var(--danger-600);
       border-radius: 10px;
       background: var(--danger-600);
       color: #ffffff;
       text-align: center;
-      font-size: 0.78rem;
+      font-size: 0.74rem;
       font-weight: 700;
       line-height: 1;
       white-space: nowrap;
@@ -504,7 +506,10 @@
 
   /* Extra-small mobile: 320px wide devices */
   @media (max-width: 360px) {
-    #svcAvailEditor .svc-range-row { gap: 6px !important; }
+    #svcAvailEditor .svc-range-row {
+      column-gap: 8px !important;
+      row-gap: 8px !important;
+    }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end { font-size: 0.74rem; }
     #svcAvailEditor .range-start,
