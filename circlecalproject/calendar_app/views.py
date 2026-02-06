@@ -35,6 +35,7 @@ from django.template.loader import render_to_string
 from calendar_app.forms import ContactForm
 from django.urls import reverse
 from urllib.parse import urlencode
+from django.views.decorators.cache import never_cache
 
 
 def _unique_resource_slug_for_org(org: Organization, base_slug: str, exclude_id: int = None) -> str:
@@ -5910,6 +5911,7 @@ def services_page(request, org_slug):
 @login_required
 @require_http_methods(['GET', 'POST'])
 @require_roles(['owner', 'admin', 'manager'])
+@never_cache
 def create_service(request, org_slug):
     """
     Simple create-service form for coaches with refund fields.
@@ -6126,7 +6128,7 @@ def create_service(request, org_slug):
         except Exception:
             pass
 
-        return render(request, "calendar_app/create_service.html", {
+        resp = render(request, "calendar_app/create_service.html", {
             "org": org,
             "is_team_plan": is_team_plan,
             "can_use_pro_team": can_use_pro_team,
@@ -6146,6 +6148,12 @@ def create_service(request, org_slug):
             "service_availability_fully_blocked": service_availability_fully_blocked,
             "service_availability_fully_blocked_reason": service_availability_fully_blocked_reason,
         })
+        try:
+            resp['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            resp['Pragma'] = 'no-cache'
+        except Exception:
+            pass
+        return resp
 
     if request.method == "POST":
         # Plan enforcement: Basic only allows 1 active service
@@ -6591,6 +6599,7 @@ def create_service(request, org_slug):
 @login_required
 @require_http_methods(['GET', 'POST'])
 @require_roles(['owner', 'admin', 'manager'])
+@never_cache
 def edit_service(request, org_slug, service_id):
     """
     Edit an existing service, including refund fields.
@@ -7881,7 +7890,7 @@ def edit_service(request, org_slug, service_id):
         except Exception:
             members_with_any_availability_ids = []
 
-    return render(request, "calendar_app/edit_service.html", {
+    resp = render(request, "calendar_app/edit_service.html", {
         "org": org,
         "service": service,
         "weekly_edit_rows": weekly_edit_rows,
@@ -7918,6 +7927,12 @@ def edit_service(request, org_slug, service_id):
         'schedule_compat_services_preview': schedule_compat_services_preview,
         'schedule_compat_services_more': schedule_compat_services_more,
     })
+    try:
+        resp['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp['Pragma'] = 'no-cache'
+    except Exception:
+        pass
+    return resp
 
 
 @login_required
