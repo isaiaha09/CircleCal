@@ -1740,6 +1740,25 @@ function setAuditDeleteLoading(isLoading, label){
   }catch(e){}
 }
 
+function setAuditExportLoading(isLoading, label){
+  try{
+    const btn = document.getElementById('exportAuditBtn');
+    if (!btn) return;
+    if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent || 'Export (PDF)';
+
+    if (isLoading){
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      const text = String(label || 'Preparing...');
+      btn.innerHTML = `<span class="btn-loading-spinner"></span>${text}`;
+    } else {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+      btn.textContent = btn.dataset.originalText || 'Export (PDF)';
+    }
+  }catch(e){}
+}
+
 // Bookings select-all and select-by-status handlers
 const bookingsSelectAll = document.getElementById('bookingsSelectAll');
 if (bookingsSelectAll) {
@@ -1835,6 +1854,7 @@ if (exportAuditBtn) {
     const ids = Array.from(document.querySelectorAll('#auditTableBody .auditRowCb:checked')).filter(cb => cb.closest('tr') && cb.closest('tr').style.display !== 'none').map(cb => Number(cb.value));
     if (!ids.length) { alert('No audit rows selected to export'); return; }
     try {
+      setAuditExportLoading(true, 'Preparing...');
       // In mobile app WebView mode, avoid fetch->blob downloads.
       // RN WebView cannot open blob: URLs, and downloads are more reliable in the system browser.
       const isCcAppMode = !!(document.body && (document.body.getAttribute('data-cc-app') === '1' || (document.body.dataset && document.body.dataset.ccApp === '1')));
@@ -1861,6 +1881,7 @@ if (exportAuditBtn) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) { console.error(e); alert('Export error'); }
+    finally { setAuditExportLoading(false); }
   });
 
   const deleteAuditBtn = document.getElementById('deleteAuditBtn');

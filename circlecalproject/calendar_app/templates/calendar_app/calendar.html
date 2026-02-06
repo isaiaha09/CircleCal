@@ -2611,6 +2611,20 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
     #bookingsScrollWrapper.cc-visible-all { max-height: none !important; }
     #bookingsInlineSection .inline-audit-wrapper { --bookings-visible-rows: var(--bookings-visible, var(--bookings-visible-default)); max-height: calc(var(--bookings-row-height) * var(--bookings-visible-rows)); overflow:auto; margin-top:8px; }
     #bookingsInlineSection .inline-audit-wrapper.cc-visible-all { max-height: none !important; }
+        /* Inline audit export loading spinner */
+        .btn-sm.is-loading { opacity: .85; cursor: wait; }
+        .btn-loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.55);
+            border-top-color: rgba(255,255,255,1);
+            border-radius: 9999px;
+            animation: ccSpin .8s linear infinite;
+            vertical-align: -2px;
+            margin-right: 8px;
+        }
+        @keyframes ccSpin { to { transform: rotate(360deg); } }
     </style>
     <div id="bookingsScrollWrapper">
     <table style="width:100%; border-collapse:collapse;">
@@ -8240,10 +8254,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const exportAuditInlineBtn = document.getElementById('exportAuditInlineBtn');
     if (exportAuditInlineBtn) {
+        function setAuditInlineExportLoading(isLoading, label){
+            try{
+                const btn = document.getElementById('exportAuditInlineBtn');
+                if (!btn) return;
+                if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent || 'Export Selected (PDF)';
+                if (isLoading){
+                    btn.disabled = true;
+                    btn.classList.add('is-loading');
+                    const text = String(label || 'Preparing...');
+                    btn.innerHTML = `<span class="btn-loading-spinner"></span>${text}`;
+                } else {
+                    btn.disabled = false;
+                    btn.classList.remove('is-loading');
+                    btn.textContent = btn.dataset.originalText || 'Export Selected (PDF)';
+                }
+            }catch(e){}
+        }
         exportAuditInlineBtn.addEventListener('click', async () => {
             const ids = Array.from(document.querySelectorAll('.auditRowCbInline:checked')).map(cb => Number(cb.value));
             if (!ids.length) { alert('No audit rows selected'); return; }
             try {
+                setAuditInlineExportLoading(true, 'Preparing...');
                 // In mobile app WebView mode, avoid fetch->blob downloads.
                 // RN WebView cannot open blob: URLs.
                 const isCcAppMode = !!(document.body && (document.body.getAttribute('data-cc-app') === '1' || (document.body.dataset && document.body.dataset.ccApp === '1')));
@@ -8265,6 +8297,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (contentType === 'application/pdf') a.download = 'audit_export.pdf'; else a.download = 'audit_export.json';
                 document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
             } catch (e) { console.error(e); alert('Export error'); }
+            finally { setAuditInlineExportLoading(false); }
         });
         const deleteAuditInlineBtn = document.getElementById('deleteAuditInlineBtn');
         if (deleteAuditInlineBtn){
