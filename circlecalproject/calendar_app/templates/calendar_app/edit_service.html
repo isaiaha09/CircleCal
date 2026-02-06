@@ -422,22 +422,34 @@
   /* Mobile: keep time range rows + picker fully within container */
   @media (max-width: 640px) {
     #svcAvailEditor .svc-range-row {
-      flex-wrap: wrap;
-      gap: 10px;
+      display: grid !important;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px !important;
+      align-items: center;
     }
     #svcAvailEditor .svc-range-row .time-input-container {
-      flex: 1 1 calc(50% - 10px);
       min-width: 0;
+      width: 100%;
+      margin-right: 0 !important;
     }
     #svcAvailEditor input.range-start,
     #svcAvailEditor input.range-end {
       width: 100%;
-      max-width: none;
+      max-width: none !important;
     }
     #svcAvailEditor .svc-range-row button {
-      flex: 1 1 100%;
-      text-align: left;
-      padding: 6px 0;
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 10px;
+      margin-top: 6px;
+      border: 1px solid var(--danger-600);
+      border-radius: 10px;
+      background: var(--danger-600);
+      color: #ffffff;
+      text-align: center;
+      font-size: 0.85rem;
     }
 
     #svcAvailEditor .custom-time-picker {
