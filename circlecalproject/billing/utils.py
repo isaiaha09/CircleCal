@@ -10,6 +10,55 @@ MULTIPLE_SERVICE_PLANS = {PRO_SLUG, TEAM_SLUG}
 MULTI_STAFF_PLANS = {TEAM_SLUG}
 
 
+def _is_stripe_managed_subscription(sub: Subscription | None) -> bool:
+    return bool(sub and getattr(sub, "stripe_subscription_id", None))
+
+
+def _can_use_pro_team_features_not_trial(org: Organization) -> bool:
+    """Feature gate for Embed Widget + Custom Domains.
+
+    Business intent (per UI copy): requires an active Pro/Team plan (not trial).
+
+    Practical nuance:
+    - For Stripe-managed subscriptions, we enforce "not trial" and "active".
+    - For manually-administered subscriptions (no Stripe subscription id), treat
+      Pro/Team as eligible even if status wasn't perfectly updated in admin.
+    """
+
+    sub = get_subscription(org)
+    slug = get_plan_slug(org)
+    if slug not in {PRO_SLUG, TEAM_SLUG}:
+        return False
+    if sub is None:
+        return False
+
+    status = (getattr(sub, "status", "") or "").lower()
+    stripe_managed = _is_stripe_managed_subscription(sub)
+
+    if stripe_managed:
+        # Stripe trials should not unlock these features.
+        if status == "trialing":
+            return False
+        try:
+            return bool(sub.is_active())
+        except Exception:
+            return True
+
+    # Manual/admin-assigned plan (no Stripe subscription id).
+    # Allow Pro/Team even if admin left status as trialing.
+    if status in {"canceled", "expired"}:
+        return False
+    return True
+
+
+def can_use_embed_widget(org: Organization) -> bool:
+    return _can_use_pro_team_features_not_trial(org)
+
+
+def can_use_custom_domain(org: Organization) -> bool:
+    return _can_use_pro_team_features_not_trial(org)
+
+
 def can_use_offline_payment_methods(org: Organization) -> bool:
     """Allow offering offline payment instructions (cash/Venmo/Zelle) to clients.
 

@@ -25,6 +25,7 @@ except Exception:  # pragma: no cover
 @admin.register(Business)
 class OrganizationAdmin(BaseAdmin):
     list_display = (
+        "billing_warning",
         "name",
         "slug",
         "owner",
@@ -128,6 +129,34 @@ class OrganizationAdmin(BaseAdmin):
         return f"{plan} • {status} • {active}"
 
     ops_subscription.short_description = "Subscription"
+
+    @admin.display(description="Billing")
+    def billing_warning(self, obj: Business) -> str:
+        """Flags manual/comped Pro/Team orgs (no Stripe subscription id).
+
+        This is intentionally a lightweight warning to help ops avoid accidentally
+        granting paid-tier access without Stripe Billing being set up.
+        """
+        try:
+            sub = getattr(obj, "subscription", None)
+        except Exception:
+            sub = None
+
+        if not sub:
+            return ""
+
+        try:
+            slug = (getattr(getattr(sub, "plan", None), "slug", "") or "").lower()
+        except Exception:
+            slug = ""
+
+        if slug not in {"pro", "team"}:
+            return ""
+
+        stripe_sub_id = (getattr(sub, "stripe_subscription_id", None) or "").strip()
+        if stripe_sub_id:
+            return "Stripe"
+        return "Manual (no Stripe sub)"
 
     def ops_stripe_connect(self, obj: Business) -> str:
         acct = (getattr(obj, "stripe_connect_account_id", None) or "").strip()

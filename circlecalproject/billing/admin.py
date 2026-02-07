@@ -99,10 +99,22 @@ class SubscriptionAdmin(admin.ModelAdmin):
         "status",
         "start_date",
         "end_date",
+        "billing_link",
         "stripe_subscription_id",
     )
     list_filter = ("status",)
     search_fields = ("organization__name", "plan__name", "stripe_subscription_id")
+
+    @admin.display(description="Billing")
+    def billing_link(self, obj: Subscription) -> str:
+        stripe_sub_id = (getattr(obj, "stripe_subscription_id", None) or "").strip()
+        if stripe_sub_id:
+            return "Stripe"
+
+        slug = (getattr(getattr(obj, "plan", None), "slug", "") or "").lower()
+        if slug in {"pro", "team"}:
+            return "Manual (no Stripe sub)"
+        return ""
 
 
 @admin.register(SubscriptionChange)

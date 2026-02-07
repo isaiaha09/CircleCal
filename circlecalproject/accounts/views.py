@@ -254,18 +254,9 @@ def profile_view(request):
 		items = list(membership_qs)
 		for m in items:
 			org_obj = getattr(m, 'organization', None)
-			eligible = False
 			try:
-				from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
-				sub = get_subscription(org_obj)
-				plan_slug = get_plan_slug(org_obj)
-				is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
-				is_active = True
-				try:
-					is_active = bool(sub and callable(getattr(sub, 'is_active', None)) and sub.is_active())
-				except Exception:
-					is_active = True
-				eligible = bool((plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing) and (sub is not None) and is_active)
+				from billing.utils import can_use_custom_domain
+				eligible = bool(can_use_custom_domain(org_obj))
 			except Exception:
 				eligible = False
 

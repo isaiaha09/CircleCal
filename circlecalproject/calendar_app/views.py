@@ -4575,11 +4575,10 @@ def org_custom_domain_settings(request, org_slug):
     can_use = False
     is_trialing = False
     try:
-        from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
+        from billing.utils import can_use_custom_domain, get_subscription
         sub = get_subscription(org)
         is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
-        plan_slug = get_plan_slug(org)
-        can_use = bool((plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing) and (sub is not None))
+        can_use = bool(can_use_custom_domain(org))
     except Exception:
         can_use = False
 
@@ -5868,17 +5867,8 @@ def services_page(request, org_slug):
     embed_widget_available = False
     embed_services_embed_src = None
     try:
-        from billing.utils import get_plan_slug, get_subscription, PRO_SLUG, TEAM_SLUG
-        sub = get_subscription(org)
-        plan_slug = get_plan_slug(org)
-        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
-        is_active = True
-        try:
-            is_active = bool(sub and callable(getattr(sub, 'is_active', None)) and sub.is_active())
-        except Exception:
-            is_active = True
-
-        embed_widget_available = bool((plan_slug in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing) and (sub is not None) and is_active)
+        from billing.utils import can_use_embed_widget
+        embed_widget_available = bool(can_use_embed_widget(org))
     except Exception:
         embed_widget_available = False
 

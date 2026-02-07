@@ -7,6 +7,17 @@ body {
   background: #ffffff !important;
 }
 
+/* Let the browser pick appropriate native control colors for the active theme.
+   This is important for <select> dropdown option menus, which are often OS-rendered.
+*/
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 html.dark body {
   background: #000000 !important;
 }
@@ -110,6 +121,36 @@ html:not(.dark) #nav-sidebar-apps ol.flex.flex-col > li > a.active {
 html.dark body,
 html.dark body * {
   color: #ffffff !important;
+}
+
+/* ---- Dropdown/readability fixes (native selects + Select2) ----
+   The global "force all text" rule can make option text invisible when the OS renders
+   the dropdown menu with a light background. Use system colors so contrast is correct
+   in BOTH light and dark modes.
+*/
+
+/* Native selects (including <option> and <optgroup> menus). */
+html body select,
+html body select option,
+html body select optgroup {
+  background-color: Field !important;
+  color: FieldText !important;
+}
+
+/* Select2 (if enabled on any admin forms/filters). */
+html body .select2-container--default .select2-selection--single,
+html body .select2-container--default .select2-selection--multiple,
+html body .select2-dropdown,
+html body .select2-results__option,
+html body .select2-search__field,
+html body .select2-selection__rendered {
+  background-color: Field !important;
+  color: FieldText !important;
+}
+
+html body .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
+  background-color: Highlight !important;
+  color: HighlightText !important;
 }
 
 /* Sidebar “Insights” hover: force CircleCal primary on hover, including nested icon/text. */

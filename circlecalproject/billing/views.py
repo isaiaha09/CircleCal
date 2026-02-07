@@ -442,6 +442,7 @@ def create_checkout_session(request, org_slug, plan_id):
     # Ensure Stripe customer exists
     if not org.stripe_customer_id:
         customer = stripe.Customer.create(
+            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
             email=request.user.email,
             metadata={"organization_id": str(org.id)}
         )
@@ -957,6 +958,7 @@ def create_embedded_subscription(request, org_slug, plan_id):
     # Ensure customer exists
     if not org.stripe_customer_id:
         customer = stripe.Customer.create(
+            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
             email=request.user.email,
             metadata={"organization_id": str(org.id)}
         )
@@ -2167,7 +2169,11 @@ def create_setup_intent(request, org_slug):
 
     if not org.stripe_customer_id:
         # Create customer if still missing
-        customer = stripe.Customer.create(email=request.user.email, metadata={"organization_id": str(org.id)})
+        customer = stripe.Customer.create(
+            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
+            email=request.user.email,
+            metadata={"organization_id": str(org.id)},
+        )
         org.stripe_customer_id = customer.id
         org.save()
     intent = stripe.SetupIntent.create(customer=org.stripe_customer_id, payment_method_types=["card"])
