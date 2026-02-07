@@ -239,6 +239,12 @@
                             margin-right: auto !important;
                         }
 
+                        /* In the native app, make the field a bit narrower (still centered). */
+                        body[data-cc-app="1"] #ccScopeMenuRoot,
+                        body[data-cc-app="1"] #ccSharedSignatureSummary {
+                            width: min(380px, 88vw) !important;
+                        }
+
                         /* ccScopeMenuRoot is inline-block in markup; make it block so it truly centers */
                         #ccScopeMenuRoot {
                             display: block !important;
