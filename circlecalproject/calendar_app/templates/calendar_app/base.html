@@ -584,6 +584,33 @@
                 transform: translate3d(0, 0, 0);
             }
 
+            /* Header breakpoint override
+               Use 1200px as the switch point for hamburger vs desktop nav.
+               Implemented in plain CSS so it works even if Tailwind's build
+               doesn't include arbitrary breakpoint variants. */
+            #mobileMenuBtn {
+                display: none;
+            }
+            .cc-desktop-nav {
+                display: none;
+            }
+            @media (max-width: 1200px) {
+                #mobileMenuBtn {
+                    display: inline-flex;
+                }
+                .cc-desktop-nav {
+                    display: none;
+                }
+            }
+            @media (min-width: 1201px) {
+                #mobileMenuBtn {
+                    display: none;
+                }
+                .cc-desktop-nav {
+                    display: flex;
+                }
+            }
+
             /* Prevent background scroll on iOS while menu open (JS sets fixed positioning). */
             body.mobile-menu-open {
                 overflow: hidden;
@@ -695,7 +722,7 @@
                 </a>
 
                 <!-- Mobile Menu Button -->
-                <button id="mobileMenuBtn" class="md:hidden ml-auto text-gray-700 focus:outline-none" aria-label="Toggle menu" aria-expanded="false" aria-controls="mobileMenu">
+                <button id="mobileMenuBtn" class="ml-auto text-gray-700 focus:outline-none" aria-label="Toggle menu" aria-expanded="false" aria-controls="mobileMenu">
                     <span class="relative block w-8 h-8">
                         <svg id="mobileMenuIconHamburger" class="absolute inset-0 w-8 h-8 transition-all duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
@@ -711,7 +738,7 @@
                     {% if request.organization %}
                         {# If the current user's role for this org is staff/manager, show a restricted navbar #}
                         {% if user_org_role == 'staff' or user_org_role == 'manager' %}
-                            <nav class="hidden md:flex items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
+                            <nav class="cc-desktop-nav items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                     {% csrf_token %}
@@ -719,7 +746,7 @@
                                 </form>
                             </nav>
                         {% else %}
-                            <nav class="hidden md:flex items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
+                                                        <nav class="cc-desktop-nav items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
                                 <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
                                 <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 {% if user_org_role == 'owner' %}
@@ -738,7 +765,7 @@
                             </nav>
                         {% endif %}
                     {% else %}
-                        <nav class="hidden md:flex items-center justify-end ml-auto space-x-5 text-lg lg:text-xl">
+                        <nav class="cc-desktop-nav items-center justify-end ml-auto space-x-5 text-lg lg:text-xl">
                             <a href="{% url 'calendar_app:choose_business' %}" class="text-blue-600 font-medium">Create Business</a>
                             <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                 {% csrf_token %}
@@ -747,7 +774,7 @@
                         </nav>
                     {% endif %}
                 {% else %}
-                    <nav class="hidden md:flex items-center justify-end ml-auto space-x-5 text-lg lg:text-xl">
+                    <nav class="cc-desktop-nav items-center justify-end ml-auto space-x-5 text-lg lg:text-xl">
                         <a href="{% url 'calendar_app:about' %}" class="text-gray-700 hover:text-blue-600">About</a>
                         <a href="{% url 'accounts:login' %}" class="text-gray-700 hover:text-blue-600">Login</a>
                         <a href="{% url 'accounts:reactivate' %}" class="text-gray-700 hover:text-blue-600">Reactivate</a>
@@ -760,7 +787,7 @@
     </header>
 
     <!-- Mobile Navigation (slides in below header; header stays clickable) -->
-    <div id="mobileMenu" class="hidden md:hidden fixed left-0 right-0 bottom-0 z-40 pointer-events-none" style="top: var(--cc-header-h, 72px); display: none; pointer-events: none;">
+    <div id="mobileMenu" class="hidden fixed left-0 right-0 bottom-0 z-40 pointer-events-none" style="top: var(--cc-header-h, 72px); display: none; pointer-events: none;">
         <div id="mobileMenuPanel" class="absolute inset-0 bg-white transform translate-x-full transition-transform duration-200 ease-in-out overflow-y-auto pointer-events-none" style="pointer-events: none;">
             <div class="max-w-7xl mx-auto px-6 py-6 h-full">
                 

@@ -102,11 +102,43 @@ def _parse_hex_color(value: str) -> Tuple[int, int, int]:
     raise argparse.ArgumentTypeError(f"Invalid color '{value}'")
 
 
-def _contain_on_canvas(img: Image.Image, target_w: int, target_h: int, bg_rgb: Tuple[int, int, int]) -> Image.Image:
+def _crop_top(img: Image.Image, *, crop_top_px: int = 0, crop_top_ratio: float = 0.0) -> Image.Image:
+    if crop_top_px < 0:
+        crop_top_px = 0
+    if crop_top_ratio < 0:
+        crop_top_ratio = 0.0
+
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return img
+
+    px = crop_top_px
+    if crop_top_ratio:
+        px = max(px, int(round(h * float(crop_top_ratio))))
+
+    # Keep at least 1px height.
+    px = min(max(0, int(px)), max(0, h - 1))
+    if px <= 0:
+        return img
+    return img.crop((0, px, w, h))
+
+
+def _contain_on_canvas(
+    img: Image.Image,
+    target_w: int,
+    target_h: int,
+    bg_rgb: Tuple[int, int, int],
+    *,
+    crop_top_px: int = 0,
+    crop_top_ratio: float = 0.0,
+) -> Image.Image:
     # Normalize orientation from EXIF and ensure RGB output (App Store accepts PNG/JPG; avoid alpha).
     img = ImageOps.exif_transpose(img)
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGBA")
+
+    # Optional: crop out the iOS status bar / top chrome.
+    img = _crop_top(img, crop_top_px=crop_top_px, crop_top_ratio=crop_top_ratio)
 
     # Scale to fit within target without cropping.
     src_w, src_h = img.size
@@ -138,6 +170,8 @@ def _write_outputs(
     targets: Sequence[TargetSize],
     index: int,
     bg_rgb: Tuple[int, int, int],
+    crop_top_px: int,
+    crop_top_ratio: float,
 ) -> None:
     stem = _safe_stem(src_file.name)
 
@@ -147,7 +181,14 @@ def _write_outputs(
             device_dir.mkdir(parents=True, exist_ok=True)
             out_name = f"{index:02d}_{stem}_{t.name}.png"
             out_path = device_dir / out_name
-            out_img = _contain_on_canvas(im, t.width, t.height, bg_rgb)
+            out_img = _contain_on_canvas(
+                im,
+                t.width,
+                t.height,
+                bg_rgb,
+                crop_top_px=crop_top_px,
+                crop_top_ratio=crop_top_ratio,
+            )
             out_img.save(out_path, format="PNG", optimize=True)
 
 
@@ -167,6 +208,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="#000000",
         help="Background color used for padding (default: #000000)",
     )
+    parser.add_argument(
+        "--crop-top-px",
+        type=int,
+        default=0,
+        help="Crop this many pixels off the top before resizing (default: 0)",
+    )
+    parser.add_argument(
+        "--crop-top-ratio",
+        type=float,
+        default=0.0,
+        help="Crop this fraction of the image height off the top before resizing (default: 0.0)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -180,10 +233,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     targets = IPHONE_ACCEPTED if args.device == "iphone" else IPAD_ACCEPTED
 
+    if args.crop_top_px and args.crop_top_ratio:
+        print("Use only one of --crop-top-px or --crop-top-ratio (not both)", file=sys.stderr)
+        return 2
+
     print(f"Found {len(input_files)} image(s). Generating {len(targets)} size(s) per image...")
     for idx, f in enumerate(input_files, start=1):
         try:
-            _write_outputs(f, out_dir, args.device, targets, idx, args.bg)
+            _write_outputs(
+                f,
+                out_dir,
+                args.device,
+                targets,
+                idx,
+                args.bg,
+                int(args.crop_top_px or 0),
+                float(args.crop_top_ratio or 0.0),
+            )
             print(f"OK  {f}")
         except Exception as exc:
             print(f"FAIL {f} :: {exc}", file=sys.stderr)

@@ -181,7 +181,8 @@
     #svcAvailEditor .svc-range-row button {
       grid-column: 1 / -1;
       width: 100%;
-      margin-top: 6px;
+      margin-top: 2px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -436,7 +437,7 @@
   #svcAvailEditor .time-picker-btn.cancel:hover { background: var(--gray-300); }
 
   /* Mobile: keep time range rows + picker fully within container */
-  @media (max-width: 640px), (hover: none) and (pointer: coarse) {
+  @media (max-width: 640px) {
     #svcAvailEditor .svc-range-row {
       display: grid !important;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
