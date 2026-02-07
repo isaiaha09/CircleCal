@@ -52,6 +52,9 @@ node_modules/
 # Test cache
 .pytest_cache/
 
+# Local policy/schema inspection outputs
+scripts/_db_schema_for_policy.json
+
 # OS artifacts
 .DS_Store
 Thumbs.db

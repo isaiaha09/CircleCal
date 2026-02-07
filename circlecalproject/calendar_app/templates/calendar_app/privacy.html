@@ -25,7 +25,10 @@
                 <li><strong>Billing information:</strong> subscription billing is processed by Stripe. CircleCal stores and uses limited billing metadata such as Stripe customer/subscription identifiers, invoice identifiers, plan status, and non-sensitive payment method metadata (e.g., brand and last4). CircleCal does not store full card numbers.</li>
                 <li><strong>Client payment tracking (if enabled by a business):</strong> payment method selection (e.g., offline vs Stripe), payment status, and Stripe Checkout session identifiers associated with a booking.</li>
                 <li><strong>Push notifications (mobile app):</strong> if you enable notifications, we collect and store your Expo push token, device platform (iOS/Android), and last-seen timestamp so we can deliver notifications you request.</li>
-                <li><strong>Technical and security information:</strong> IP address, browser/app user agent, and logs needed to operate, debug, and secure the Service (including login activity and abuse prevention/rate-limiting signals).</li>
+                <li><strong>Authentication and session data:</strong> security-related cookies and/or server-side session data used to keep you signed in and protect the Service (for example, session identifiers and CSRF/security tokens).</li>
+                <li><strong>Invites and account links:</strong> if you invite staff/managers or use certain sign-in flows, we may generate temporary tokens and store related metadata (such as the invited email address and token status) to complete the invitation or authentication flow.</li>
+                <li><strong>Technical and security information:</strong> IP address, browser/app user agent, and logs needed to operate, debug, and secure the Service (including login activity, fraud/abuse prevention, and rate-limiting). These logs may include request metadata such as timestamps, request paths, and limited request parameters associated with failed login attempts or abuse prevention events. We aim to avoid storing sensitive values (such as passwords) in these logs.</li>
+                <li><strong>Audit and administrative records:</strong> to support security and troubleshooting (and certain admin features like undo/restore), we may retain audit logs and snapshots of changes made to records (for example, booking history events and administrative actions).</li>
             </ul>
         </section>
 
@@ -59,7 +62,8 @@
 
         <section>
             <h2 class="text-xl font-semibold mb-2">6. Data Retention</h2>
-            <p>We retain information for as long as needed to provide the Service and for legitimate business purposes such as security, dispute resolution, and compliance. Businesses may also retain booking records for their own operational needs.</p>
+            <p>We retain information for as long as needed to provide the Service and for legitimate business purposes such as security, dispute resolution, troubleshooting, restoring data, and compliance. Businesses may also retain booking records for their own operational needs.</p>
+            <p class="mt-2">Even after you delete or change information, we may retain certain information for a limited period in backups, security logs, and audit records, as permitted by law.</p>
         </section>
 
         <section>
