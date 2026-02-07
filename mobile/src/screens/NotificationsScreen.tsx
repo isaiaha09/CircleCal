@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View, FlatList } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View, FlatList, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 
@@ -13,7 +13,7 @@ import {
 import { theme } from '../ui/theme';
 import { webPathFromPushData } from './WebAppScreen';
 import { apiGetPushStatus, type ApiPushStatus } from '../lib/api';
-import { registerPushTokenWithResult } from '../lib/push';
+import { registerPushTokenWithResult, unregisterPushTokenBestEffort } from '../lib/push';
 
 type Props = {
   navigation: any;
@@ -35,6 +35,15 @@ export function NotificationsScreen({ navigation }: Props) {
   const [pushStatusLoading, setPushStatusLoading] = useState(false);
   const [pushHint, setPushHint] = useState<string | null>(null);
   const [permStatus, setPermStatus] = useState<string>('');
+  const [pushBusy, setPushBusy] = useState(false);
+
+  const permGranted = useMemo(() => (permStatus || '').toLowerCase() === 'granted', [permStatus]);
+  const permDenied = useMemo(() => (permStatus || '').toLowerCase() === 'denied', [permStatus]);
+  const deviceConnected = useMemo(() => {
+    const n = Number(pushStatus?.devices_active ?? 0);
+    return Number.isFinite(n) && n > 0;
+  }, [pushStatus]);
+  const pushSwitchValue = permGranted && deviceConnected;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,7 +129,6 @@ export function NotificationsScreen({ navigation }: Props) {
   }
 
   if (!hasAny) {
-    const permDenied = (permStatus || '').toLowerCase() === 'denied';
     return (
       <View style={styles.center}>
         <Ionicons name="notifications-outline" size={30} color={theme.colors.muted} />
@@ -128,62 +136,47 @@ export function NotificationsScreen({ navigation }: Props) {
         <Text style={styles.muted}>When you get a push, it will show here.</Text>
 
         <View style={styles.pushCard}>
-          <Text style={styles.pushTitle}>Push setup</Text>
-          <Text style={styles.pushRow}>
-            OS permission: <Text style={styles.pushMono}>{permStatus || 'unknown'}</Text>
-          </Text>
-          <Text style={styles.pushRow}>
-            Backend devices:{' '}
-            <Text style={styles.pushMono}>
-              {pushStatus ? `${pushStatus.devices_active}/${pushStatus.devices_total}` : 'unknown'}
-            </Text>
-          </Text>
-          <Text style={styles.pushRow}>
-            Server push enabled:{' '}
-            <Text style={styles.pushMono}>{pushStatus ? String(pushStatus.push_enabled) : 'unknown'}</Text>
-          </Text>
-          {pushHint ? <Text style={styles.pushHint}>{pushHint}</Text> : null}
+          <Text style={styles.pushTitle}>Push notifications</Text>
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 }}>
-            <Pressable
-              hitSlop={8}
-              onPress={() => {
-                setPushHint('Refreshing…');
-                refreshPushStatus().then(() => setPushHint(null)).catch(() => setPushHint('Refresh failed.'));
-              }}
-              style={[styles.pushBtn, { backgroundColor: '#eff6ff' }]}
-              accessibilityRole="button"
-              accessibilityLabel="Refresh push status"
-            >
-              <Text style={[styles.pushBtnText, { color: theme.colors.primaryDark }]}>
-                {pushStatusLoading ? 'Refreshing…' : 'Refresh'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              hitSlop={8}
-              onPress={() => {
+          <View style={styles.pushToggleRow}>
+            <Text style={styles.pushRowText}>Enable push notifications</Text>
+            <Switch
+              value={pushSwitchValue}
+              onValueChange={(next) => {
                 (async () => {
-                  setPushHint('Registering…');
-                  const res = await registerPushTokenWithResult();
-                  if (res.status === 'registered') setPushHint('Registered device token with server.');
-                  else if (res.status === 'permission_denied') setPushHint('Notifications permission is not granted. Enable it in iOS Settings.');
-                  else if (res.status === 'missing_project_id') setPushHint('Push token failed: missing EAS projectId. Add expo.extra.eas.projectId in app.json and rebuild via EAS.');
-                  else if (res.status === 'token_error') setPushHint(`Push token error: ${res.message || 'unknown error'}`);
-                  else if (res.status === 'not_device') setPushHint('Push tokens require a real device (not a simulator).');
-                  else if (res.status === 'token_unavailable') setPushHint('Could not obtain an Expo push token.');
-                  else setPushHint('Token registration failed. Try again in a moment.');
-                  await refreshPushStatus();
+                  if (pushBusy) return;
+                  setPushBusy(true);
+                  setPushHint(null);
+                  try {
+                    if (next) {
+                      setPushHint('Enabling…');
+                      const res = await registerPushTokenWithResult();
+                      if (res.status === 'registered') setPushHint('Enabled.');
+                      else if (res.status === 'permission_denied') setPushHint('Turn on notifications in Settings.');
+                      else if (res.status === 'missing_project_id') setPushHint('Notifications aren’t available in this build yet.');
+                      else if (res.status === 'not_device') setPushHint('Push notifications require a real device.');
+                      else setPushHint('Could not enable. Please try again.');
+                    } else {
+                      setPushHint('Turning off…');
+                      await unregisterPushTokenBestEffort();
+                      setPushHint('Off for this device.');
+                    }
+                    await refreshPushStatus();
+                  } finally {
+                    setPushBusy(false);
+                  }
                 })().catch(() => undefined);
               }}
-              style={[styles.pushBtn, { backgroundColor: theme.colors.primaryDark }]}
-              accessibilityRole="button"
-              accessibilityLabel="Register push token"
-            >
-              <Text style={[styles.pushBtnText, { color: '#fff' }]}>Register</Text>
-            </Pressable>
+              disabled={pushStatusLoading || pushBusy}
+            />
+          </View>
 
-            {permDenied ? (
+          <Text style={styles.pushSubtle}>Get booking reminders and updates.</Text>
+
+          {pushHint ? <Text style={styles.pushHint}>{pushHint}</Text> : null}
+
+          {permDenied ? (
+            <View style={{ marginTop: 10, width: '100%' }}>
               <Pressable
                 hitSlop={8}
                 onPress={() => {
@@ -194,14 +187,14 @@ export function NotificationsScreen({ navigation }: Props) {
                     setPushHint('Could not open Settings.');
                   }
                 }}
-                style={[styles.pushBtn, { backgroundColor: '#111827' }]}
+                style={[styles.pushBtn, { backgroundColor: '#111827', alignSelf: 'flex-start' }]}
                 accessibilityRole="button"
                 accessibilityLabel="Open notification settings"
               >
                 <Text style={[styles.pushBtnText, { color: '#fff' }]}>Open Settings</Text>
               </Pressable>
-            ) : null}
-          </View>
+            </View>
+          ) : null}
         </View>
       </View>
     );
@@ -276,8 +269,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   pushTitle: { fontSize: 14, fontWeight: '900', color: '#111827', marginBottom: 8 },
-  pushRow: { fontSize: 12, fontWeight: '700', color: theme.colors.muted, marginTop: 3 },
-  pushMono: { fontWeight: '900', color: '#111827' },
+  pushToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  pushRowText: { flex: 1, fontSize: 13, fontWeight: '900', color: '#111827' },
+  pushSubtle: { marginTop: 6, fontSize: 12, fontWeight: '700', color: theme.colors.muted },
   pushHint: { marginTop: 8, fontSize: 12, fontWeight: '800', color: theme.colors.primaryDark },
   pushBtn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginRight: 10, marginBottom: 10 },
   pushBtnText: { fontSize: 13, fontWeight: '900' },
