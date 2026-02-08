@@ -12,6 +12,165 @@ from django.urls import reverse
 from bookings.models import build_offline_payment_instructions, filter_offline_payment_instructions_for_method
 
 
+def _abs_url(url: str) -> str:
+    """Return an absolute URL suitable for email HTML."""
+    try:
+        u = (url or '').strip()
+    except Exception:
+        return ''
+    if not u:
+        return ''
+    if u.startswith('http://') or u.startswith('https://'):
+        return u
+    if u.startswith('//'):
+        # Protocol-relative: default to https for email
+        return 'https:' + u
+    base = (getattr(settings, 'SITE_URL', '') or 'https://circlecal.app').rstrip('/')
+    if u.startswith('/'):
+        return base + u
+    return base + '/' + u
+
+
+def _user_display_name(user) -> str:
+    """Best-effort display name for client-facing messages."""
+    if not user:
+        return ''
+    try:
+        profile = getattr(user, 'profile', None)
+        if profile and getattr(profile, 'display_name', None):
+            return str(profile.display_name).strip()
+    except Exception:
+        pass
+    try:
+        full = (f"{(getattr(user, 'first_name', '') or '').strip()} {(getattr(user, 'last_name', '') or '').strip()}").strip()
+        if full:
+            return full
+    except Exception:
+        pass
+    try:
+        return (getattr(user, 'email', '') or '').strip()
+    except Exception:
+        return ''
+
+
+def _user_avatar_url(user) -> str:
+    if not user:
+        return ''
+    try:
+        profile = getattr(user, 'profile', None)
+    except Exception:
+        profile = None
+    if not profile:
+        return ''
+    try:
+        avatar = getattr(profile, 'avatar', None)
+        if not avatar:
+            return ''
+        url = getattr(avatar, 'url', '')
+        return _abs_url(url)
+    except Exception:
+        return ''
+
+
+def _build_booking_people_context(booking) -> dict:
+    """Build context for owner/staff profile pictures for client-facing emails.
+
+    Rules:
+    - Owner card included only when owner has an avatar
+    - Staff cards only when org is on Team plan and staff has avatar
+    - Staff derived from service assignments + booking.assigned_user
+    """
+    try:
+        org = getattr(booking, 'organization', None)
+    except Exception:
+        org = None
+
+    owner_card = None
+    try:
+        owner = getattr(org, 'owner', None)
+        owner_avatar = _user_avatar_url(owner)
+        if owner_avatar:
+            owner_card = {
+                'name': _user_display_name(owner) or (getattr(org, 'name', '') or 'Owner'),
+                'avatar_url': owner_avatar,
+                'role': 'Owner',
+            }
+    except Exception:
+        owner_card = None
+
+    staff_cards: list[dict] = []
+    try:
+        from billing.utils import can_add_staff
+        is_team_plan = bool(org and can_add_staff(org))
+    except Exception:
+        is_team_plan = False
+
+    if not is_team_plan:
+        return {'owner_card': owner_card, 'staff_cards': staff_cards}
+
+    staff_users = []
+    try:
+        service_id = getattr(booking, 'service_id', None)
+    except Exception:
+        service_id = None
+
+    # Staff assigned to the service (Team plan)
+    if service_id is not None:
+        try:
+            from bookings.models import ServiceAssignment
+            qs = (
+                ServiceAssignment.objects
+                .filter(service_id=service_id, membership__is_active=True)
+                .select_related('membership__user', 'membership__user__profile')
+            )
+            for row in qs:
+                try:
+                    u = row.membership.user
+                except Exception:
+                    u = None
+                if u:
+                    staff_users.append(u)
+        except Exception:
+            pass
+
+    # Booking assignment (when present)
+    try:
+        u = getattr(booking, 'assigned_user', None)
+        if u:
+            staff_users.append(u)
+    except Exception:
+        pass
+
+    # Dedupe + remove owner
+    owner_id = None
+    try:
+        owner_id = getattr(getattr(org, 'owner', None), 'id', None)
+    except Exception:
+        owner_id = None
+
+    seen_ids = set()
+    uniq_users = []
+    for u in staff_users:
+        try:
+            uid = getattr(u, 'id', None)
+        except Exception:
+            uid = None
+        if uid is None or uid == owner_id:
+            continue
+        if uid in seen_ids:
+            continue
+        seen_ids.add(uid)
+        uniq_users.append(u)
+
+    for u in uniq_users:
+        avatar = _user_avatar_url(u)
+        if not avatar:
+            continue
+        staff_cards.append({'name': _user_display_name(u) or 'Team member', 'avatar_url': avatar, 'role': ''})
+
+    return {'owner_card': owner_card, 'staff_cards': staff_cards}
+
+
 def _dedupe_emails(emails):
     """Return a stable, de-duped list of non-empty emails."""
     seen = set()
@@ -241,6 +400,12 @@ def send_booking_confirmation(booking):
         'outlook_web_url': '',
     }
 
+    # Owner/staff profile pictures (client-facing)
+    try:
+        context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
+
     # Add a Google Calendar quick-link (TEMPLATE action)
     try:
         dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
@@ -405,6 +570,11 @@ def send_booking_cancellation(booking, refund_info=None):
         'refund_info': refund_info,
         'reschedule_url': reschedule_url,
     }
+
+    try:
+        context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
     
     logger = logging.getLogger(__name__)
     subject = f"Booking Cancelled - {booking.organization.name}"
@@ -458,6 +628,11 @@ def send_internal_booking_cancellation_notification(booking, refund_info=None):
         'reschedule_url': reschedule_url,
     }
 
+    try:
+        context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
+
     logger = logging.getLogger(__name__)
     subject = f"Booking Cancelled - {booking.organization.name}"
     html_content = render_to_string('bookings/emails/booking_cancellation.html', context)
@@ -479,6 +654,11 @@ def send_booking_reminder(booking):
         'booking': booking,
         'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
     }
+
+    try:
+        context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
     
     logger = logging.getLogger(__name__)
     subject = f"Reminder: Upcoming Booking - {booking.organization.name}"
@@ -514,6 +694,11 @@ def send_internal_booking_reminder_notification(booking):
         'booking': booking,
         'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
     }
+
+    try:
+        context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
     logger = logging.getLogger(__name__)
     subject = f"Reminder: Upcoming Booking - {booking.organization.name}"
     html_content = render_to_string('bookings/emails/booking_reminder.html', context)
@@ -649,6 +834,11 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
         'old_booking_display': old_booking_display,
     }
 
+    try:
+        context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
+
     # Compute organization-localized display strings for start/end and duration
     try:
         org_tz_name = getattr(booking.organization, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC'))
@@ -679,6 +869,33 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
         'end_display': end_display,
         'duration_minutes': duration_minutes,
     })
+
+    # Add calendar quick-links (Outlook Web + Google) like confirmation email
+    try:
+        dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
+        g_params = {
+            'text': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
+            'dates': f"{dtstart}/{dtend}",
+            'details': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
+            'location': getattr(booking.organization, 'name', ''),
+        }
+        context['google_calendar_url'] = gcal_base + '&' + urlencode(g_params)
+
+        outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
+        outlook_params = {
+            'rru': 'addevent',
+            'subject': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
+            'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'body': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
+            'location': getattr(booking.organization, 'name', ''),
+        }
+        context['outlook_web_url'] = outlook_base + '?' + urlencode(outlook_params)
+    except Exception:
+        context['google_calendar_url'] = ''
+        context['outlook_web_url'] = ''
 
     # If we couldn't determine a friendly old booking id earlier, try audit snapshots
     if not old_booking_display and old_booking_id:

@@ -73,6 +73,35 @@
                 </div>
             </div>
 
+            {% if owner_card or staff_cards %}
+            <div class="booking-details">
+                <h2>Who you'll be meeting</h2>
+                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse;">
+                    {% if owner_card %}
+                    <tr>
+                        <td style="width:56px; padding:6px 0; vertical-align:top;">
+                            <img src="{{ owner_card.avatar_url }}" alt="{{ owner_card.name|default:'Owner' }}" width="44" height="44" style="display:block; border-radius:9999px; object-fit:cover;" />
+                        </td>
+                        <td style="padding:6px 0; vertical-align:middle;">
+                            <div style="font-weight:600; color:#333;">{{ owner_card.name|default:booking.organization.name }}</div>
+                            <div style="font-size:12px; color:#666;">Owner</div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% for staff in staff_cards %}
+                    <tr>
+                        <td style="width:56px; padding:6px 0; vertical-align:top;">
+                            <img src="{{ staff.avatar_url }}" alt="{{ staff.name|default:'Team member' }}" width="44" height="44" style="display:block; border-radius:9999px; object-fit:cover;" />
+                        </td>
+                        <td style="padding:6px 0; vertical-align:middle;">
+                            <div style="font-weight:600; color:#333;">{{ staff.name|default:'Team member' }}</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+            {% endif %}
+
             {% if old_booking_id %}
             <p style="margin-top:8px;">Your previous booking has been removed and recorded in our audit log.</p>
             {% endif %}
@@ -87,9 +116,19 @@
             <p>
                 <a href="{{ reschedule_url }}" class="button" style="background-color:#28a745; color:#ffffff !important;">Reschedule this booking</a>
             </p>
+            {% endif %}
+
+            {% if outlook_web_url %}
+            <p>
+                <a href="{{ outlook_web_url }}" class="button" style="background-color:#0069d9; color:#ffffff !important;">Add to Outlook</a>
+            </p>
+            {% endif %}
+            {% if google_calendar_url %}
+            <p>
+                <a href="{{ google_calendar_url }}" class="button" style="background-color:#34a853; color:#ffffff !important;">Add to Google Calendar</a>
+            </p>
             <p style="margin-top: 8px;">Thanks,<br>
             <strong>{{ booking.organization.name }} Team</strong></p>
-            {% endif %}
         </div>
         <div class="footer">
             <p>This is an automated notification from CircleCal.</p>
