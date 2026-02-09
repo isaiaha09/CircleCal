@@ -16,6 +16,24 @@ from .emails import send_booking_confirmation, send_booking_cancellation, send_i
 _BOOKING_PUSH_MANAGEMENT_ROLES = ('owner', 'admin', 'manager')
 
 
+def _booking_has_ended(booking: Booking) -> bool:
+    """Return True if the booking is already in the past (ended).
+
+    We use `end` rather than `start` so in-progress bookings can still be
+    cancelled with notifications.
+    """
+    try:
+        end_dt = getattr(booking, 'end', None) or getattr(booking, 'start', None)
+        if not end_dt:
+            return False
+        now = timezone.now()
+        if timezone.is_naive(end_dt):
+            end_dt = make_aware(end_dt, timezone.get_current_timezone())
+        return end_dt <= now
+    except Exception:
+        return False
+
+
 @receiver(post_save, sender=Organization)
 def create_org_settings(sender, instance, created, **kwargs):
     if created:
@@ -585,6 +603,12 @@ def send_cancellation_email(sender, instance, **kwargs):
     if not org_id or not Organization.objects.filter(id=org_id).exists():
         return
     if instance.is_blocking:
+        return
+
+    # Product rule: do not notify anyone when deleting a booking that already
+    # happened. These are typically cleanup/audit actions and should not create
+    # noisy "cancelled" notifications.
+    if _booking_has_ended(instance):
         return
 
     # Push notification (no clients). Staff only when involved; management always.
