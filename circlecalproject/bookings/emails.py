@@ -556,6 +556,19 @@ def send_booking_cancellation(booking, refund_info=None):
     """Send booking cancellation email to client. Accept optional refund_info string."""
     if not booking.client_email:
         return False
+
+    # Defense in depth: never send cancellation emails for bookings that already ended.
+    # Past bookings are typically audit/cleanup actions and should not notify clients.
+    try:
+        end_dt = getattr(booking, 'end', None) or getattr(booking, 'start', None)
+        if end_dt:
+            if timezone.is_naive(end_dt):
+                end_dt = timezone.make_aware(end_dt, timezone.get_current_timezone())
+            if end_dt <= timezone.now():
+                return False
+    except Exception:
+        # Fail open: if we can't determine time, preserve existing behavior.
+        pass
     
     signer = TimestampSigner()
     token = signer.sign(str(booking.id))
