@@ -3,7 +3,7 @@
     "name": "CircleCal",
     "slug": "circlecal",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/appicon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -44,6 +44,9 @@
         "projectId": "395d51e7-e2d3-4775-9404-12e4ecb9bedc"
       }
     },
-    "owner": "ia09"
+    "owner": "ia09",
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
