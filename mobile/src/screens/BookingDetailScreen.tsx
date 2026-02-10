@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import type { ApiError, BookingListItem } from '../lib/api';
 import { apiCancelBooking, apiDeleteBooking, apiGetBookingDetail } from '../lib/api';
+import { emitBookingsChanged } from '../lib/bookingsSync';
 import { normalizeOrgRole } from '../lib/permissions';
 
 type Props = {
@@ -101,6 +102,7 @@ export function BookingDetailScreen({ orgSlug, bookingId }: Props) {
                               try {
                                 setBusyAction('cancel');
                                 await apiCancelBooking({ org: orgSlug, bookingId });
+                                emitBookingsChanged(orgSlug);
                                 Alert.alert('Cancelled', 'Booking cancelled.');
                                 navigation.goBack();
                               } catch (e) {
@@ -141,6 +143,7 @@ export function BookingDetailScreen({ orgSlug, bookingId }: Props) {
                               try {
                                 setBusyAction('delete');
                                 await apiDeleteBooking({ org: orgSlug, bookingId });
+                                emitBookingsChanged(orgSlug);
                                 Alert.alert('Deleted', 'Booking deleted.');
                                 navigation.goBack();
                               } catch (e) {

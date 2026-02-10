@@ -16,6 +16,7 @@ import {
 import { canManageBilling, canManageResources, canManageServices, canManageStaff, normalizeOrgRole } from '../lib/permissions';
 import { unregisterPushTokenBestEffort } from '../lib/push';
 import { showPlanGatedAlert } from '../lib/support';
+import { onBookingsChanged } from '../lib/bookingsSync';
 
 type Props = {
   onSignedOut: () => void;
@@ -201,6 +202,15 @@ export function HomeScreen({
     };
   }, []);
 
+  useEffect(() => {
+    return onBookingsChanged(({ orgSlug: changedOrgSlug }) => {
+      if (!activeOrg?.slug) return;
+      if (changedOrgSlug && changedOrgSlug !== activeOrg.slug) return;
+      loadBookings(activeOrg.slug);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrg?.slug]);
+
   // When returning from other screens (like Businesses), refresh selected org and bookings.
   useFocusEffect(
     React.useCallback(() => {
@@ -230,9 +240,9 @@ export function HomeScreen({
             }
           }
 
-          // Always refresh plan gates on focus (e.g., after upgrading in Stripe).
+          // Refresh bookings + plan gates on focus (e.g., after cancelling a booking or upgrading in Stripe).
           if (activeOrg?.slug) {
-            await loadPlan(activeOrg.slug);
+            await Promise.all([loadBookings(activeOrg.slug), loadPlan(activeOrg.slug)]);
           }
 
           const storedSlug = await getActiveOrgSlug();

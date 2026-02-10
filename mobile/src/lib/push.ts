@@ -26,6 +26,15 @@ function getProjectId(): string | undefined {
   );
 }
 
+function allowExpoGoPush(): boolean {
+  try {
+    const anyConstants = Constants as any;
+    return Boolean(anyConstants?.expoConfig?.extra?.allowExpoGoPush);
+  } catch {
+    return false;
+  }
+}
+
 function isExpoGo(): boolean {
   try {
     const anyConstants = Constants as any;
@@ -111,6 +120,7 @@ export async function getExpoPushTokenIfAlreadyGranted(): Promise<string | null>
 
 export type PushRegisterResult =
   | { status: 'registered' }
+  | { status: 'expo_go_disabled' }
   | { status: 'not_device' }
   | { status: 'permission_denied' }
   | { status: 'token_unavailable' }
@@ -119,6 +129,12 @@ export type PushRegisterResult =
   | { status: 'api_failed' };
 
 export async function registerPushTokenWithResult(): Promise<PushRegisterResult> {
+  if (isExpoGo() && !allowExpoGoPush()) {
+    // If a token was previously registered for this user/device, remove it so
+    // they don't keep receiving pushes while testing in Expo Go.
+    await unregisterPushTokenBestEffort();
+    return { status: 'expo_go_disabled' };
+  }
   if (!Device.isDevice) return { status: 'not_device' };
 
   const projectId = getProjectId();
@@ -143,6 +159,10 @@ export async function registerPushTokenWithResult(): Promise<PushRegisterResult>
 }
 
 export async function registerPushTokenIfPossible(): Promise<void> {
+  if (isExpoGo() && !allowExpoGoPush()) {
+    await unregisterPushTokenBestEffort();
+    return;
+  }
   const token = await getExpoPushTokenIfPermitted();
   if (!token) return;
 
@@ -155,6 +175,10 @@ export async function registerPushTokenIfPossible(): Promise<void> {
 }
 
 export async function registerPushTokenIfAlreadyPermitted(): Promise<void> {
+  if (isExpoGo() && !allowExpoGoPush()) {
+    await unregisterPushTokenBestEffort();
+    return;
+  }
   const token = await getExpoPushTokenIfAlreadyGranted();
   if (!token) return;
 

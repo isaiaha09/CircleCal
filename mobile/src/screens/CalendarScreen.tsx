@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
+import { useFocusEffect } from '@react-navigation/native';
 
 import type { ApiError, BookingListItem } from '../lib/api';
 import { apiGetBookings } from '../lib/api';
+import { onBookingsChanged } from '../lib/bookingsSync';
 
 type Props = {
   orgSlug: string;
@@ -56,6 +58,7 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [bookingsByDay, setBookingsByDay] = useState<Record<string, BookingListItem[]>>({});
   const [activeMonthAnchor, setActiveMonthAnchor] = useState<string>(monthAnchorForDate(today));
+  const didFirstFocus = useRef(false);
 
   async function loadMonth(anchor: string) {
     setLoading(true);
@@ -94,6 +97,27 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
 
   useEffect(() => {
     loadMonth(activeMonthAnchor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgSlug, activeMonthAnchor]);
+
+  // Refresh when returning to this screen (e.g., after cancelling/deleting a booking).
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!didFirstFocus.current) {
+        didFirstFocus.current = true;
+        return () => undefined;
+      }
+      loadMonth(activeMonthAnchor);
+      return () => undefined;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgSlug, activeMonthAnchor])
+  );
+
+  useEffect(() => {
+    return onBookingsChanged(({ orgSlug: changedOrgSlug }) => {
+      if (changedOrgSlug && changedOrgSlug !== orgSlug) return;
+      loadMonth(activeMonthAnchor);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug, activeMonthAnchor]);
 
@@ -156,19 +180,41 @@ export function CalendarScreen({ orgSlug, onOpenBooking }: Props) {
             onDayPress={onDayPress}
             onMonthChange={onMonthChange}
             markedDates={markedDates}
-            theme={{
+            theme={({
               todayTextColor: '#2563eb',
               arrowColor: '#111827',
               textDayFontWeight: '600',
               textMonthFontWeight: '800',
               textDayHeaderFontWeight: '700',
-            }}
+              // Center the month/year header ("showing calendar for" dropdown area).
+              'stylesheet.calendar.header': {
+                header: {
+                  paddingLeft: 0,
+                  paddingRight: 0,
+                },
+                monthText: {
+                  flex: 1,
+                  textAlign: 'center',
+                },
+              },
+            } as any)}
           />
         </View>
 
         <View style={styles.agendaHeader}>
           <Text style={styles.sectionTitle}>Agenda</Text>
-          <Text style={styles.sectionSubtitle}>{selected}</Text>
+          <View style={styles.agendaRight}>
+            <Text style={styles.sectionSubtitle}>{selected}</Text>
+            <Pressable
+              style={[styles.refreshBtn, loading ? styles.refreshBtnDisabled : null]}
+              disabled={loading}
+              onPress={() => loadMonth(activeMonthAnchor)}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh agenda"
+            >
+              <Text style={styles.refreshBtnText}>{loading ? 'Refreshing…' : 'Refresh'}</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -234,6 +280,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
   },
+  agendaRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '900',
@@ -242,6 +293,19 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     color: '#6b7280',
     fontWeight: '600',
+  },
+  refreshBtn: {
+    backgroundColor: '#111827',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  refreshBtnDisabled: {
+    opacity: 0.6,
+  },
+  refreshBtnText: {
+    color: '#fff',
+    fontWeight: '800',
   },
   card: {
     marginTop: 12,

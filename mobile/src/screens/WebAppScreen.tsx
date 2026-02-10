@@ -326,6 +326,7 @@ function buildBillingSummaryFetchJs(orgSlug: string): string {
 export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const drawerWidth = Math.max(280, Math.min(520, Math.round(windowWidth * 0.9)));
   const webviewRef = useRef<WebView>(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const moreAnim = useRef(new Animated.Value(0)).current;
@@ -1383,15 +1384,12 @@ export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
                       <Ionicons name="close" size={22} color={theme.colors.muted} />
                     </Pressable>
                   </View>
-                  <Text style={styles.drawerDate}>{formatLongDate(new Date())}</Text>
-                </View>
 
-                <View style={styles.drawerSection}>
                   <Pressable
-                    style={styles.planBanner}
+                    style={[styles.planBanner, { marginTop: 12 }]}
                     onPress={showHowToPayPopup}
                     accessibilityRole="button"
-                    accessibilityLabel="Plan and trial information"
+                    accessibilityLabel="Plan and trial"
                   >
                     <View style={styles.planBannerLeft}>
                       <Text style={styles.planBannerTitle}>{billingDisplay.title}</Text>

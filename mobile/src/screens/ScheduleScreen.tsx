@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import type { ApiError, BookingListItem } from '../lib/api';
 import { apiGetBookings } from '../lib/api';
+import { onBookingsChanged } from '../lib/bookingsSync';
 
 type Props = {
   orgSlug: string;
@@ -54,8 +56,19 @@ export function ScheduleScreen({ orgSlug, onOpenBooking }: Props) {
     }
   }
 
+  useFocusEffect(
+    React.useCallback(() => {
+      load();
+      return () => undefined;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgSlug])
+  );
+
   useEffect(() => {
-    load();
+    return onBookingsChanged(({ orgSlug: changedOrgSlug }) => {
+      if (changedOrgSlug && changedOrgSlug !== orgSlug) return;
+      load();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug]);
 

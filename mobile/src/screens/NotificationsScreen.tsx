@@ -152,6 +152,7 @@ export function NotificationsScreen({ navigation }: Props) {
                       setPushHint('Enabling…');
                       const res = await registerPushTokenWithResult();
                       if (res.status === 'registered') setPushHint('Enabled.');
+                      else if (res.status === 'expo_go_disabled') setPushHint('Push is disabled in Expo Go. Test in TestFlight.');
                       else if (res.status === 'permission_denied') setPushHint('Turn on notifications in Settings.');
                       else if (res.status === 'missing_project_id') setPushHint('Notifications aren’t available in this build yet.');
                       else if (res.status === 'not_device') setPushHint('Push notifications require a real device.');

@@ -11,6 +11,13 @@
     "preview": {
       "distribution": "internal"
     },
+    "playInternal": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
     "production": {
       "autoIncrement": true
     }
