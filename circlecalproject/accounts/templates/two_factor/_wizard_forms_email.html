@@ -1,11 +1,11 @@
 <div>
   {{ wizard.management_form }}
-  {% if wizard.form.non_field_errors %}
-    <ul class="errorlist">
-      <li>We couldn’t log you in. Please try again.</li>
-    </ul>
-  {% endif %}
   {% for field in wizard.form.visible_fields %}
+    {% if forloop.first and wizard.form.non_field_errors %}
+      <ul class="errorlist">
+        <li>Sign-in failed. Please check your details and try again.</li>
+      </ul>
+    {% endif %}
     <div class="form-row">
       {% if field.name == 'username' %}
         <label for="{{ field.id_for_label }}">Email</label>
