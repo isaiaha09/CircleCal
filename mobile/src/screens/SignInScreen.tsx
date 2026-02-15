@@ -198,15 +198,8 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
       }
 
       if (status === 401) {
-        if (otpRequired) {
-          setError('Incorrect 2FA code. Please try again.');
-        } else {
-          setError(
-            mode === 'owner'
-              ? 'Incorrect username or password. Please try again.'
-              : 'Incorrect email or password. Please try again.'
-          );
-        }
+        // Keep this generic so it works for both password + 2FA steps.
+        setError('Sign-in failed. Please check your details and try again.');
         return;
       }
 
@@ -242,6 +235,16 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
             subtitle="Log in to continue"
           >
             {stripeMessage ? <Text style={styles.successText}>{stripeMessage}</Text> : null}
+
+            {/*
+              Keep errors above the active input so they remain visible when the keyboard is open.
+              - Before OTP is required, show above username/email.
+              - After OTP is required, show above the OTP input.
+            */}
+            {!otpRequired && error ? (
+              <Text style={[styles.errorText, { marginTop: 0, marginBottom: 12 }]}>{error}</Text>
+            ) : null}
+
             <TextInput
               value={identifier}
               onChangeText={setIdentifier}
@@ -268,20 +271,25 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
             />
 
             {otpRequired ? (
-              <TextInput
-                value={otpCode}
-                onChangeText={setOtpCode}
-                placeholder="2FA code"
-                keyboardType={Platform.OS === 'ios' ? 'number-pad' : 'numeric'}
-                textContentType="oneTimeCode"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-                returnKeyType="go"
-                onSubmitEditing={() => {
-                  if (!disabled) handleSignIn();
-                }}
-              />
+              <>
+                {error ? (
+                  <Text style={[styles.errorText, { marginTop: 0, marginBottom: 12 }]}>{error}</Text>
+                ) : null}
+                <TextInput
+                  value={otpCode}
+                  onChangeText={setOtpCode}
+                  placeholder="2FA code"
+                  keyboardType={Platform.OS === 'ios' ? 'number-pad' : 'numeric'}
+                  textContentType="oneTimeCode"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (!disabled) handleSignIn();
+                  }}
+                />
+              </>
             ) : null}
 
             <Pressable
@@ -308,8 +316,6 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
                 <Text style={styles.link}>Use a different account</Text>
               </Pressable>
             ) : null}
-
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
             <View style={styles.linkRow}>
               <Pressable
