@@ -1,4 +1,5 @@
 import os
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,9 +22,46 @@ class RenderApiError(RuntimeError):
         self.payload = payload
 
 
+def _env_first(*names: str) -> str:
+    for name in names:
+        try:
+            val = (os.getenv(name) or '').strip()
+        except Exception:
+            val = ''
+        if val:
+            return val
+    return ''
+
+
+def _normalize_api_key(api_key: str) -> str:
+    api_key = (api_key or '').strip()
+    # Some env var UIs accidentally add newlines.
+    api_key = api_key.replace('\r', '').replace('\n', '').strip()
+
+    def _strip_wrapping_quotes(val: str) -> str:
+        val = (val or '').strip()
+        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+            return val[1:-1].strip()
+        return val
+
+    # Common misconfig: wrapping the token in quotes in env vars.
+    api_key = _strip_wrapping_quotes(api_key)
+
+    # Common misconfig: pasting the key with a 'Bearer ' prefix.
+    # Our requests add 'Authorization: Bearer <key>', so a prefixed value becomes
+    # 'Bearer Bearer ...' and yields 401.
+    if api_key.lower().startswith('bearer '):
+        api_key = api_key.split(None, 1)[1].strip()
+
+    # Handle keys that were quoted *around* the Bearer prefix (e.g. "'Bearer abc'").
+    api_key = _strip_wrapping_quotes(api_key)
+    return api_key
+
+
 def get_render_config() -> RenderApiConfig | None:
-    api_key = (os.getenv("RENDER_API_KEY") or "").strip()
-    service_id = (os.getenv("RENDER_SERVICE_ID") or "").strip()
+    # Support a few common env var names to reduce deployment foot-guns.
+    api_key = _normalize_api_key(_env_first('RENDER_API_KEY', 'RENDER_API_TOKEN', 'RENDER_TOKEN'))
+    service_id = _env_first('RENDER_SERVICE_ID', 'RENDER_WEB_SERVICE_ID')
     if not api_key or not service_id:
         return None
     return RenderApiConfig(api_key=api_key, service_id=service_id)
@@ -68,6 +106,63 @@ def list_custom_domains(cfg: RenderApiConfig) -> list[dict[str, Any]]:
 def retrieve_service(cfg: RenderApiConfig) -> dict[str, Any]:
     payload = _request(cfg, "GET", f"/services/{cfg.service_id}")
     return payload if isinstance(payload, dict) else {}
+
+
+def log_auth_diagnostics(cfg: RenderApiConfig) -> None:
+    """Logs-only check to distinguish missing/invalid auth from other failures.
+
+    Never raises; never logs the API key.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        _request(cfg, 'GET', '/users')
+        logger.info('Render API auth check OK (service_id=%s)', cfg.service_id)
+        try:
+            print(f'CC_RENDER_AUTH_CHECK ok service_id={cfg.service_id}')
+        except Exception:
+            pass
+    except RenderApiError as exc:
+        try:
+            logger.warning(
+                'Render API auth check failed (status=%s, service_id=%s, payload=%s)',
+                getattr(exc, 'status_code', None),
+                cfg.service_id,
+                getattr(exc, 'payload', None),
+            )
+        except Exception:
+            pass
+        try:
+            status = getattr(exc, 'status_code', None)
+            payload = getattr(exc, 'payload', None)
+            print(f'CC_RENDER_AUTH_CHECK fail status={status} service_id={cfg.service_id} payload={payload!r}')
+        except Exception:
+            pass
+    except Exception as exc:
+        try:
+            logger.warning('Render API auth check failed unexpectedly (service_id=%s, err=%s)', cfg.service_id, exc)
+        except Exception:
+            pass
+        try:
+            print(f'CC_RENDER_AUTH_CHECK error service_id={cfg.service_id} err={exc!r}')
+        except Exception:
+            pass
+
+
+def log_config_presence() -> None:
+    """Logs-only: indicate whether Render env vars look present (never logs values)."""
+    try:
+        api_key_raw = _env_first('RENDER_API_KEY', 'RENDER_API_TOKEN', 'RENDER_TOKEN')
+        service_id_raw = _env_first('RENDER_SERVICE_ID', 'RENDER_WEB_SERVICE_ID')
+        api_key_norm = _normalize_api_key(api_key_raw)
+        service_id = (service_id_raw or '').strip()
+        print(
+            'CC_RENDER_CONFIG_PRESENT '
+            f'api_key_present={bool(api_key_raw)} api_key_len={len(api_key_norm)} '
+            f'service_id_present={bool(service_id_raw)} service_id_len={len(service_id)}'
+        )
+    except Exception:
+        # Never break the request if logging fails.
+        pass
 
 
 def create_custom_domain(cfg: RenderApiConfig, domain_name: str) -> Any:

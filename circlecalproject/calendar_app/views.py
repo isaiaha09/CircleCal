@@ -4572,7 +4572,7 @@ def org_refund_settings(request, org_slug):
 
 
 @require_http_methods(["GET", "POST"])
-@require_roles(["owner", "admin"])
+@require_roles(["owner"])
 def org_custom_domain_settings(request, org_slug):
     """Allow Pro/Team orgs to verify and use a custom booking domain."""
     org = get_object_or_404(Organization, slug=org_slug)
@@ -4598,8 +4598,8 @@ def org_custom_domain_settings(request, org_slug):
         ensure_custom_domain_attached,
         get_render_config,
         delete_custom_domain,
-        list_custom_domains,
-        retrieve_service,
+        log_auth_diagnostics,
+        log_config_presence,
     )
 
     def _normalize_domain(raw: str) -> str:
@@ -4797,16 +4797,51 @@ def org_custom_domain_settings(request, org_slug):
                 cfg = get_render_config()
                 if cfg:
                     try:
+                        # Logs-only: helps distinguish invalid creds (401) from other failures.
+                        log_auth_diagnostics(cfg)
                         ensure_custom_domain_attached(cfg, domain)
                         messages.success(request, 'Domain verified! HTTPS is now being provisioned for this domain (this can take a few minutes).')
                     except RenderApiError as exc:
                         # Keep CircleCal verification successful even if Render API fails.
                         messages.success(request, 'Domain verified!')
-                        messages.warning(request, f'Automatic HTTPS provisioning could not be started: {exc}')
+                        try:
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                'Render auto-attach failed for custom domain %s (status=%s, payload=%s)',
+                                domain,
+                                getattr(exc, 'status_code', None),
+                                getattr(exc, 'payload', None),
+                            )
+                        except Exception:
+                            pass
+
+                        # Also print a single line to stdout so it shows up in Render logs
+                        # even if Python logging isn't configured.
+                        try:
+                            print(
+                                'CC_RENDER_AUTO_ATTACH_FAIL '
+                                f'domain={domain} status={getattr(exc, "status_code", None)} '
+                                f'payload={getattr(exc, "payload", None)!r}'
+                            )
+                        except Exception:
+                            pass
+
+                        # Keep the UI provider-agnostic.
+                        # (Auth failures here commonly mean server configuration is wrong.)
+                        messages.warning(
+                            request,
+                            'Automatic HTTPS provisioning could not be started due to a server configuration issue. Please contact support.',
+                        )
                     except Exception:
                         messages.success(request, 'Domain verified!')
                         messages.warning(request, 'Automatic HTTPS provisioning could not be started due to an unexpected error.')
                 else:
+                    # Logs-only: helps detect missing env vars in production.
+                    try:
+                        log_config_presence()
+                    except Exception:
+                        pass
                     messages.success(request, 'Domain verified!')
                     messages.warning(
                         request,
@@ -4840,33 +4875,6 @@ def org_custom_domain_settings(request, org_slug):
             messages.success(request, 'Custom domain removed.')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
-        if action == 'test_render_api':
-            if not getattr(request.user, 'is_staff', False):
-                messages.error(request, 'Not allowed.')
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-            cfg = get_render_config()
-            if not cfg:
-                messages.error(request, 'Render auto-attach is not configured in this environment.')
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            try:
-                service = retrieve_service(cfg)
-                service_name = (service.get('name') or '').strip() if isinstance(service, dict) else ''
-                if service_name:
-                    messages.success(request, f'Render API connection OK. Service: {service_name}')
-                else:
-                    messages.success(request, 'Render API connection OK.')
-            except RenderApiError as exc:
-                if exc.status_code in (401, 403):
-                    messages.error(request, 'Render API connection failed: invalid API key or insufficient permissions.')
-                elif exc.status_code == 404:
-                    messages.error(request, 'Render API connection failed: service not found (check RENDER_SERVICE_ID).')
-                else:
-                    messages.error(request, f'Render API connection failed: {exc}')
-            except Exception:
-                messages.error(request, 'Render API connection failed due to an unexpected error.')
-
-            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
     txt_name = None
     txt_value = None
@@ -4887,12 +4895,9 @@ def org_custom_domain_settings(request, org_slug):
             cname_host = None
 
     render_enabled = False
-    render_verification_status = None
-    show_internal_provisioning = False
     try:
         cfg = get_render_config()
         render_enabled = bool(cfg)
-        show_internal_provisioning = bool(getattr(request.user, 'is_staff', False))
 
         # Prefer an explicit CNAME target for customer setup instructions.
         # This keeps the UI provider-agnostic (customers don't need Render).
@@ -4910,65 +4915,12 @@ def org_custom_domain_settings(request, org_slug):
         except Exception:
             pass
 
-        if cfg:
-            try:
-                # Best-effort: find the service's default onrender.com hostname so we can
-                # show a concrete CNAME target in the UI.
-                service = retrieve_service(cfg)
-
-                def _find_onrender_hostname(obj):
-                    try:
-                        import re
-                        from urllib.parse import urlparse
-
-                        if isinstance(obj, str):
-                            s = obj.strip()
-                            if not s:
-                                return None
-                            # Accept either a URL or a bare hostname.
-                            if '://' in s:
-                                host = (urlparse(s).hostname or '').strip()
-                            else:
-                                host = s
-                            if host.endswith('.onrender.com'):
-                                return host
-                            # Sometimes Render returns full URLs inside longer strings.
-                            m = re.search(r"([a-z0-9-]+\.[a-z0-9-]+\.onrender\.com)", s, re.IGNORECASE)
-                            return m.group(1).lower() if m else None
-                        if isinstance(obj, dict):
-                            for v in obj.values():
-                                found = _find_onrender_hostname(v)
-                                if found:
-                                    return found
-                        if isinstance(obj, list):
-                            for v in obj:
-                                found = _find_onrender_hostname(v)
-                                if found:
-                                    return found
-                        return None
-                    except Exception:
-                        return None
-
-                cname_target = _find_onrender_hostname(service)
-            except Exception:
-                cname_target = None
-
         # Final fallback so the UI always shows something concrete.
         if not cname_target:
             cname_target = 'circlecalbookingcalendarapp.onrender.com'
-        if cfg and getattr(org, 'custom_domain', None):
-            target = (org.custom_domain or '').strip().lower()
-            for row in list_custom_domains(cfg):
-                cd = (row or {}).get('customDomain') if isinstance(row, dict) else None
-                if not isinstance(cd, dict):
-                    continue
-                if (cd.get('name') or '').strip().lower() == target:
-                    render_verification_status = cd.get('verificationStatus')
-                    break
     except Exception:
         # Render API is optional; keep the page working even if it errors.
         render_enabled = bool(get_render_config())
-        show_internal_provisioning = bool(getattr(request.user, 'is_staff', False))
 
     # Pre-fill split inputs for the form.
     custom_domain_prefix = _DEFAULT_CUSTOM_DOMAIN_PREFIX
@@ -4995,13 +4947,11 @@ def org_custom_domain_settings(request, org_slug):
         'txt_name_host': txt_name_host,
         'txt_value': txt_value,
         'render_enabled': render_enabled,
-        'render_verification_status': render_verification_status,
         'is_owner': is_owner,
         'custom_domain_prefix': custom_domain_prefix,
         'custom_domain_root': custom_domain_root,
         'cname_host': cname_host,
         'cname_target': cname_target,
-        'show_internal_provisioning': show_internal_provisioning,
     })
 
 
