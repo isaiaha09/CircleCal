@@ -4609,6 +4609,69 @@ def org_custom_domain_settings(request, org_slug):
         d = d.split(':', 1)[0].strip()
         return d.lower()
 
+    _ALLOWED_CUSTOM_DOMAIN_PREFIXES = {
+        'booking',
+        'schedule',
+        'appointment',
+        'lesson',
+        'session',
+        'meeting',
+        'call',
+    }
+
+    _DEFAULT_CUSTOM_DOMAIN_PREFIX = 'booking'
+
+    def _is_valid_hostname(hostname: str) -> bool:
+        """Validate a DNS hostname (ASCII only).
+
+        We intentionally keep this strict: only letters, digits, and hyphens in
+        labels; labels must not start/end with hyphens.
+        """
+        try:
+            import re
+
+            h = (hostname or '').strip().lower()
+            if not h or len(h) > 253:
+                return False
+            if h.endswith('.'):
+                h = h[:-1]
+            if not h or '..' in h:
+                return False
+
+            labels = h.split('.')
+            if len(labels) < 2:
+                return False
+            label_re = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$', re.IGNORECASE)
+            for lb in labels:
+                if not lb or len(lb) > 63:
+                    return False
+                if not label_re.match(lb):
+                    return False
+            return True
+        except Exception:
+            return False
+
+    def _validate_custom_domain(domain: str) -> tuple[bool, str]:
+        d = (domain or '').strip().lower().rstrip('.')
+        if not d:
+            return False, 'Enter a domain like booking.yoursite.com'
+        if not _is_valid_hostname(d):
+            return False, 'Enter a valid domain like booking.yoursite.com'
+
+        parts = d.split('.')
+        prefix = parts[0]
+        remainder = '.'.join(parts[1:])
+
+        if prefix not in _ALLOWED_CUSTOM_DOMAIN_PREFIXES:
+            allowed = ', '.join([f"{p}." for p in sorted(_ALLOWED_CUSTOM_DOMAIN_PREFIXES)])
+            return False, f"Custom domain must start with one of: {allowed}"
+
+        # Block apex domains and two-label domains like booking.com.
+        if '.' not in remainder:
+            return False, 'Custom domain must be a subdomain like booking.yoursite.com (apex/root domains are not allowed).'
+
+        return True, ''
+
     def _check_txt(domain: str, token: str) -> bool:
         try:
             import dns.resolver
@@ -4639,9 +4702,28 @@ def org_custom_domain_settings(request, org_slug):
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
         if action == 'set_domain':
-            new_domain = _normalize_domain(request.POST.get('custom_domain'))
+            # UI supports either:
+            # - legacy single input: custom_domain=booking.yoursite.com
+            # - new split inputs: custom_domain_prefix=booking, custom_domain_root=yoursite.com
+            raw_prefix = (request.POST.get('custom_domain_prefix') or '').strip().lower()
+            raw_root = (request.POST.get('custom_domain_root') or '').strip()
+            legacy_full = (request.POST.get('custom_domain') or '').strip()
+
+            if raw_root:
+                # Normalize root similarly to full domain (strip scheme/paths/ports)
+                root = _normalize_domain(raw_root).lstrip('.')
+                prefix = raw_prefix or _DEFAULT_CUSTOM_DOMAIN_PREFIX
+                new_domain = f"{prefix}.{root}" if root else ''
+            else:
+                new_domain = _normalize_domain(legacy_full)
+
             if not new_domain:
                 messages.error(request, 'Enter a domain like booking.yoursite.com')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+            ok, err = _validate_custom_domain(new_domain)
+            if not ok:
+                messages.error(request, err)
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
             org.custom_domain = new_domain
@@ -4766,6 +4848,23 @@ def org_custom_domain_settings(request, org_slug):
         # Render API is optional; keep the page working even if it errors.
         render_enabled = bool(get_render_config())
 
+    # Pre-fill split inputs for the form.
+    custom_domain_prefix = _DEFAULT_CUSTOM_DOMAIN_PREFIX
+    custom_domain_root = ''
+    try:
+        current = (getattr(org, 'custom_domain', None) or '').strip().lower().rstrip('.')
+        if current and '.' in current:
+            p, r = current.split('.', 1)
+            if p in _ALLOWED_CUSTOM_DOMAIN_PREFIXES:
+                custom_domain_prefix = p
+                custom_domain_root = r
+            else:
+                # If an older/invalid prefix is stored, don't preselect it.
+                custom_domain_root = r
+    except Exception:
+        custom_domain_prefix = _DEFAULT_CUSTOM_DOMAIN_PREFIX
+        custom_domain_root = ''
+
     return render(request, 'calendar_app/org_custom_domain_settings.html', {
         'org': org,
         'can_use_custom_domain': can_use,
@@ -4775,6 +4874,8 @@ def org_custom_domain_settings(request, org_slug):
         'render_enabled': render_enabled,
         'render_verification_status': render_verification_status,
         'is_owner': is_owner,
+        'custom_domain_prefix': custom_domain_prefix,
+        'custom_domain_root': custom_domain_root,
     })
 
 

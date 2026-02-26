@@ -105,7 +105,23 @@ def ensure_custom_domain_attached(cfg: RenderApiConfig, domain_name: str) -> Non
     try:
         trigger_verify_custom_domain(cfg, domain_name)
     except RenderApiError as exc:
-        # If Render can't find it by name yet, don't fail the whole flow.
+        # Render may not be able to verify by *name* immediately after creation.
+        # If that happens, fall back to resolving the domain's ID via list and
+        # verify using the ID.
         if exc.status_code == 404:
-            return
+            try:
+                rows = list_custom_domains(cfg)
+                target = domain_name.strip().lower()
+                for row in rows:
+                    cd = (row or {}).get("customDomain") if isinstance(row, dict) else None
+                    if not isinstance(cd, dict):
+                        continue
+                    if (cd.get("name") or "").strip().lower() != target:
+                        continue
+                    cd_id = (cd.get("id") or "").strip()
+                    if cd_id:
+                        trigger_verify_custom_domain(cfg, cd_id)
+                    return
+            except Exception:
+                return
         raise

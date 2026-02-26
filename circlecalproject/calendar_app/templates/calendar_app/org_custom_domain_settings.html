@@ -21,6 +21,11 @@
             Use a subdomain like <span class="font-mono">booking.yoursite.com</span>.
             This does <span class="font-semibold">not</span> replace your website — it’s the URL your embedded booking widget loads from so bookings can stay inside your site.
         </p>
+        <p class="text-sm text-gray-600 mt-2">
+            Setup has <span class="font-semibold">two DNS steps</span> at your domain provider:
+            (1) a <span class="font-mono">TXT</span> record to verify ownership (below), and
+            (2) a <span class="font-mono">CNAME</span> (or <span class="font-mono">A</span>) record so <span class="font-mono">booking.yoursite.com</span> actually points to CircleCal.
+        </p>
         <p class="text-sm text-gray-600 mt-2">If you don’t own a domain yet, you’ll need to purchase one before you can set up a custom booking subdomain.</p>
 
         <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
@@ -44,11 +49,27 @@
             <input type="hidden" name="action" value="set_domain" />
             <label class="block text-sm font-semibold text-blue-800">Custom domain</label>
             <div class="flex flex-col sm:flex-row gap-2 mt-2">
-                <input name="custom_domain" value="{{ org.custom_domain|default:'' }}" placeholder="booking.yoursite.com"
-                       class="flex-1 w-full px-4 py-3 text-base rounded-xl border-2 border-blue-400 bg-white text-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-200 focus:border-blue-600"
-                       {% if not can_use_custom_domain %}disabled{% endif %} />
+                <div class="flex flex-col sm:flex-row gap-2 flex-1 min-w-0">
+                    <select name="custom_domain_prefix"
+                            class="w-full sm:w-[9rem] flex-none px-4 py-3 text-base rounded-xl border-2 border-blue-400 bg-white text-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-200 focus:border-blue-600"
+                            {% if not can_use_custom_domain %}disabled{% endif %}>
+                        <option value="booking" {% if custom_domain_prefix == 'booking' %}selected{% endif %}>booking.</option>
+                        <option value="schedule" {% if custom_domain_prefix == 'schedule' %}selected{% endif %}>schedule.</option>
+                        <option value="appointment" {% if custom_domain_prefix == 'appointment' %}selected{% endif %}>appointment.</option>
+                        <option value="lesson" {% if custom_domain_prefix == 'lesson' %}selected{% endif %}>lesson.</option>
+                        <option value="session" {% if custom_domain_prefix == 'session' %}selected{% endif %}>session.</option>
+                        <option value="meeting" {% if custom_domain_prefix == 'meeting' %}selected{% endif %}>meeting.</option>
+                        <option value="call" {% if custom_domain_prefix == 'call' %}selected{% endif %}>call.</option>
+                    </select>
+                    <input name="custom_domain_root"
+                           value="{{ custom_domain_root|default:'' }}"
+                           placeholder="yoursite.com"
+                              class="flex-1 min-w-0 w-full px-4 py-3 text-base rounded-xl border-2 border-blue-400 bg-white text-blue-900 focus:outline-none focus:ring-4 focus:ring-blue-200 focus:border-blue-600"
+                           {% if not can_use_custom_domain %}disabled{% endif %} />
+                </div>
                 <button type="submit" class="bg-blue-600 text-white font-semibold px-4 py-3 rounded-xl hover:bg-blue-700" {% if not can_use_custom_domain %}disabled{% endif %}>Save</button>
             </div>
+            <p class="text-xs text-gray-500 mt-2">Example: <span class="font-mono">booking.yoursite.com</span> (apex/root domains are not allowed).</p>
         </form>
 
         {% if org.custom_domain %}
@@ -79,6 +100,13 @@
                         <input type="hidden" name="action" value="verify_domain" />
                         <button type="submit" class="bg-blue-600 text-white font-semibold px-4 py-3 rounded-xl hover:bg-blue-700" {% if not can_use_custom_domain %}disabled{% endif %}>Verify</button>
                     </form>
+
+                    <div class="mt-4 pt-4 border-t border-blue-100 text-sm text-blue-900">
+                        <div class="font-semibold">Next: point the subdomain to CircleCal</div>
+                        <div class="text-blue-800 mt-1">
+                            In your DNS provider, create a <span class="font-mono">CNAME</span> for <span class="font-mono">{{ org.custom_domain }}</span> pointing to your CircleCal hosting target (shown by your hosting provider, e.g. Render). Without this, the domain will not load even after TXT verification.
+                        </div>
+                    </div>
                 </div>
             {% endif %}
 
