@@ -4673,25 +4673,52 @@ def org_custom_domain_settings(request, org_slug):
         return True, ''
 
     def _check_txt(domain: str, token: str) -> bool:
+        """Check TXT record _circlecal-verify.<domain> contains token.
+
+        Uses the system resolver first, then falls back to public resolvers.
+        """
         try:
             import dns.resolver
 
             qname = f"_circlecal-verify.{domain}."
-            answers = dns.resolver.resolve(qname, 'TXT')
-            for rdata in answers:
+            resolver = dns.resolver.Resolver(configure=True)
+
+            def _matches(answers) -> bool:
+                for rdata in answers:
+                    try:
+                        # dnspython may expose bytes in rdata.strings
+                        parts = getattr(rdata, 'strings', None)
+                        if parts:
+                            value = b''.join(parts).decode('utf-8', errors='ignore')
+                        else:
+                            value = str(rdata).strip('"')
+                        if token and token in (value or ''):
+                            return True
+                    except Exception:
+                        continue
+                return False
+
+            # Try: system DNS, then Cloudflare+Google.
+            for nameservers in (None, ['1.1.1.1', '8.8.8.8']):
                 try:
-                    # dnspython may expose bytes in rdata.strings
-                    parts = getattr(rdata, 'strings', None)
-                    if parts:
-                        value = b''.join(parts).decode('utf-8', errors='ignore')
-                    else:
-                        value = str(rdata).strip('"')
-                    if token and token in value:
+                    if nameservers is not None:
+                        resolver.nameservers = nameservers
+                    answers = resolver.resolve(qname, 'TXT', lifetime=5)
+                    if _matches(answers):
                         return True
+                except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.resolver.Timeout):
+                    continue
                 except Exception:
                     continue
+
             return False
         except Exception:
+            try:
+                import logging
+
+                logging.getLogger(__name__).exception('Custom domain TXT verification failed unexpectedly')
+            except Exception:
+                pass
             return False
 
     if request.method == "POST":
@@ -4748,6 +4775,18 @@ def org_custom_domain_settings(request, org_slug):
             token = (org.custom_domain_verification_token or '').strip()
             if not domain or not token:
                 messages.error(request, 'Set a domain first.')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+            # TXT verification requires dnspython in the runtime environment.
+            # If it's missing, fail with a clear message (otherwise users see a
+            # confusing "TXT record not found" error even when DNS is correct).
+            try:
+                import dns.resolver  # noqa: F401
+            except Exception:
+                messages.error(
+                    request,
+                    'DNS verification is temporarily unavailable on the server. Please contact support if this persists.',
+                )
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
             ok = _check_txt(domain, token)
@@ -4826,15 +4865,69 @@ def org_custom_domain_settings(request, org_slug):
 
     txt_name = None
     txt_value = None
+    txt_name_host = None
+    cname_host = None
+    cname_target = None
     if getattr(org, 'custom_domain', None) and getattr(org, 'custom_domain_verification_token', None):
         txt_name = f"_circlecal-verify.{org.custom_domain}"
         txt_value = org.custom_domain_verification_token
+        try:
+            cd = (org.custom_domain or '').strip().lower().rstrip('.')
+            if cd and '.' in cd:
+                p = cd.split('.', 1)[0]
+                cname_host = p
+                txt_name_host = f"_circlecal-verify.{p}"
+        except Exception:
+            txt_name_host = None
+            cname_host = None
 
     render_enabled = False
     render_verification_status = None
     try:
         cfg = get_render_config()
         render_enabled = bool(cfg)
+        if cfg:
+            try:
+                # Best-effort: find the service's default onrender.com hostname so we can
+                # show a concrete CNAME target in the UI.
+                service = retrieve_service(cfg)
+
+                def _find_onrender_hostname(obj):
+                    try:
+                        import re
+                        from urllib.parse import urlparse
+
+                        if isinstance(obj, str):
+                            s = obj.strip()
+                            if not s:
+                                return None
+                            # Accept either a URL or a bare hostname.
+                            if '://' in s:
+                                host = (urlparse(s).hostname or '').strip()
+                            else:
+                                host = s
+                            if host.endswith('.onrender.com'):
+                                return host
+                            # Sometimes Render returns full URLs inside longer strings.
+                            m = re.search(r"([a-z0-9-]+\.[a-z0-9-]+\.onrender\.com)", s, re.IGNORECASE)
+                            return m.group(1).lower() if m else None
+                        if isinstance(obj, dict):
+                            for v in obj.values():
+                                found = _find_onrender_hostname(v)
+                                if found:
+                                    return found
+                        if isinstance(obj, list):
+                            for v in obj:
+                                found = _find_onrender_hostname(v)
+                                if found:
+                                    return found
+                        return None
+                    except Exception:
+                        return None
+
+                cname_target = _find_onrender_hostname(service)
+            except Exception:
+                cname_target = None
         if cfg and getattr(org, 'custom_domain', None):
             target = (org.custom_domain or '').strip().lower()
             for row in list_custom_domains(cfg):
@@ -4870,12 +4963,15 @@ def org_custom_domain_settings(request, org_slug):
         'can_use_custom_domain': can_use,
         'is_trialing': is_trialing,
         'txt_name': txt_name,
+        'txt_name_host': txt_name_host,
         'txt_value': txt_value,
         'render_enabled': render_enabled,
         'render_verification_status': render_verification_status,
         'is_owner': is_owner,
         'custom_domain_prefix': custom_domain_prefix,
         'custom_domain_root': custom_domain_root,
+        'cname_host': cname_host,
+        'cname_target': cname_target,
     })
 
 
