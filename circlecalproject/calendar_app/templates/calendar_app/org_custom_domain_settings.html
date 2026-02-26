@@ -125,10 +125,15 @@
                                 <span class="text-gray-600">(some providers want the full name: <span class="font-mono">{{ org.custom_domain }}</span>)</span>
                             </div>
                             <div class="mt-1"><span class="font-semibold">Value/Target:</span>
-                                <span class="font-mono">{% if cname_target %}{{ cname_target }}{% else %}circlecalbookingcalendarapp.onrender.com{% endif %}</span>
-                              
+                                <span class="font-mono">{{ cname_target }}</span>
+                                <span class="text-gray-600">(CircleCal’s hosting target; customers don’t need any hosting account)</span>
                             </div>
-                        
+                            <div class="mt-2 text-gray-600">
+                                Do <span class="font-semibold">not</span> point your CNAME to <span class="font-mono">circlecal.app</span> — that can show a Cloudflare error page.
+                            </div>
+                            <div class="mt-2 text-gray-600">
+                                After DNS changes, HTTPS can take a few minutes to provision. If you see an SSL/Cloudflare page, wait and refresh.
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -142,7 +147,7 @@
         {% endif %}
     </div>
 
-    {% if render_enabled and is_owner %}
+    {% if show_internal_provisioning %}
         <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-lg">
             <h2 class="text-lg font-bold text-blue-700">Internal domain provisioning</h2>
             <p class="text-sm text-gray-600 mt-1">

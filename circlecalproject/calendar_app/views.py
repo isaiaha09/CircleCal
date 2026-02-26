@@ -4798,16 +4798,21 @@ def org_custom_domain_settings(request, org_slug):
                 if cfg:
                     try:
                         ensure_custom_domain_attached(cfg, domain)
-                        messages.success(request, 'Domain verified! Render is now provisioning HTTPS for this domain.')
+                        messages.success(request, 'Domain verified! HTTPS is now being provisioned for this domain (this can take a few minutes).')
                     except RenderApiError as exc:
                         # Keep CircleCal verification successful even if Render API fails.
                         messages.success(request, 'Domain verified!')
-                        messages.warning(request, f'Render domain auto-attach failed: {exc}')
+                        messages.warning(request, f'Automatic HTTPS provisioning could not be started: {exc}')
                     except Exception:
                         messages.success(request, 'Domain verified!')
-                        messages.warning(request, 'Render domain auto-attach failed due to an unexpected error.')
+                        messages.warning(request, 'Automatic HTTPS provisioning could not be started due to an unexpected error.')
                 else:
                     messages.success(request, 'Domain verified!')
+                    messages.warning(
+                        request,
+                        'Next step: CircleCal will now provision HTTPS for this domain. '
+                        'If it does not start working within 10–20 minutes, contact support.',
+                    )
             else:
                 messages.error(request, 'TXT record not found yet. DNS can take a few minutes to propagate.')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
@@ -4836,8 +4841,8 @@ def org_custom_domain_settings(request, org_slug):
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
         if action == 'test_render_api':
-            if not is_owner:
-                messages.error(request, 'Only the business owner can test the Render API connection.')
+            if not getattr(request.user, 'is_staff', False):
+                messages.error(request, 'Not allowed.')
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
             cfg = get_render_config()
             if not cfg:
@@ -4883,9 +4888,28 @@ def org_custom_domain_settings(request, org_slug):
 
     render_enabled = False
     render_verification_status = None
+    show_internal_provisioning = False
     try:
         cfg = get_render_config()
         render_enabled = bool(cfg)
+        show_internal_provisioning = bool(cfg) and bool(getattr(request.user, 'is_staff', False))
+
+        # Prefer an explicit CNAME target for customer setup instructions.
+        # This keeps the UI provider-agnostic (customers don't need Render).
+        try:
+            import os
+            from urllib.parse import urlparse
+
+            raw = (os.getenv('CUSTOM_DOMAIN_CNAME_TARGET') or '').strip()
+            if raw:
+                if '://' in raw:
+                    host = (urlparse(raw).hostname or '').strip()
+                else:
+                    host = raw
+                cname_target = host.lower() if host else cname_target
+        except Exception:
+            pass
+
         if cfg:
             try:
                 # Best-effort: find the service's default onrender.com hostname so we can
@@ -4928,6 +4952,10 @@ def org_custom_domain_settings(request, org_slug):
                 cname_target = _find_onrender_hostname(service)
             except Exception:
                 cname_target = None
+
+        # Final fallback so the UI always shows something concrete.
+        if not cname_target:
+            cname_target = 'circlecalbookingcalendarapp.onrender.com'
         if cfg and getattr(org, 'custom_domain', None):
             target = (org.custom_domain or '').strip().lower()
             for row in list_custom_domains(cfg):
@@ -4972,6 +5000,7 @@ def org_custom_domain_settings(request, org_slug):
         'custom_domain_root': custom_domain_root,
         'cname_host': cname_host,
         'cname_target': cname_target,
+        'show_internal_provisioning': show_internal_provisioning,
     })
 
 
