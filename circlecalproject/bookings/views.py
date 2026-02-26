@@ -129,6 +129,25 @@ def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
     return True, 'ok'
 
 
+def _embed_unavailable_public_message(reason: str) -> str:
+    """Return a safe, user-facing message for why an embed is unavailable.
+
+    Important: this page is public (served inside an iframe on third-party sites),
+    so we avoid revealing sensitive entitlement details (e.g. whether a key was
+    close to correct) beyond what is necessary.
+    """
+    r = (reason or '').strip().lower()
+    if r in {'plan_required', 'no_subscription', 'subscription_inactive'}:
+        return "Embeds require an active Pro or Team subscription."
+    if r in {'trial_not_eligible'}:
+        return "Embeds aren’t available during a trial. Activate a paid Pro or Team subscription to enable embeds."
+    if r in {'embed_disabled'}:
+        return "Embeds are not enabled for this account."
+    if r in {'missing_key', 'invalid_key'}:
+        return "This embed link is invalid or has been rotated. Please copy the embed code again from CircleCal."
+    return "This booking widget isn’t available right now."
+
+
 def _can_use_per_date_overrides(org: Organization) -> bool:
     """Per-date overrides are available on Pro/Team only (not Trial/Basic)."""
     try:
@@ -2785,7 +2804,16 @@ def public_org_page(request, org_slug):
     if is_embed:
         ok, _reason = _validate_embed_access(request, org)
         if not ok:
-            resp = render(request, 'public/embed_unavailable.html', {"org": org, "is_embed": True, "embed_breakout": True})
+            resp = render(
+                request,
+                'public/embed_unavailable.html',
+                {
+                    "org": org,
+                    "is_embed": True,
+                    "embed_breakout": True,
+                    "embed_unavailable_message": _embed_unavailable_public_message(_reason),
+                },
+            )
             try:
                 resp.xframe_options_exempt = True
             except Exception:
@@ -2979,7 +3007,15 @@ def public_service_page(request, org_slug, service_slug):
     if is_embed:
         ok, _reason = _validate_embed_access(request, org)
         if not ok:
-            resp = render(request, 'public/embed_unavailable.html', {"org": org, "is_embed": True})
+            resp = render(
+                request,
+                'public/embed_unavailable.html',
+                {
+                    "org": org,
+                    "is_embed": True,
+                    "embed_unavailable_message": _embed_unavailable_public_message(_reason),
+                },
+            )
             try:
                 resp.xframe_options_exempt = True
             except Exception:
