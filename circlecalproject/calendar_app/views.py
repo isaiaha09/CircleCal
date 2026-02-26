@@ -4313,11 +4313,16 @@ def edit_business(request, org_slug):
         # Fail closed if billing is unavailable.
         can_change_identity = False
 
-    # Slug can only be changed before any bookings exist.
+    # Slug can only be changed before any real appointments exist.
+    # Note: we store availability overrides/blocks as Booking rows with
+    # `is_blocking=True`. Those should NOT lock the public business slug.
     has_any_bookings = False
     try:
         from bookings.models import Booking
-        has_any_bookings = Booking.objects.filter(organization=org).only('id').exists()
+        has_any_bookings = Booking.objects.filter(
+            organization=org,
+            is_blocking=False,
+        ).only('id').exists()
     except Exception:
         has_any_bookings = False
     can_change_slug = can_change_identity and (not has_any_bookings)
