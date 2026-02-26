@@ -2,6 +2,7 @@ import os
 import logging
 from dataclasses import dataclass
 from typing import Any
+import re
 
 import requests
 
@@ -47,14 +48,25 @@ def _normalize_api_key(api_key: str) -> str:
     # Common misconfig: wrapping the token in quotes in env vars.
     api_key = _strip_wrapping_quotes(api_key)
 
-    # Common misconfig: pasting the key with a 'Bearer ' prefix.
-    # Our requests add 'Authorization: Bearer <key>', so a prefixed value becomes
-    # 'Bearer Bearer ...' and yields 401.
-    if api_key.lower().startswith('bearer '):
-        api_key = api_key.split(None, 1)[1].strip()
+    # Common misconfig: pasting the full header value or even the full header line.
+    # Examples:
+    # - "Bearer <token>"
+    # - "Authorization: Bearer <token>"
+    # - "--header 'Authorization: Bearer <token>'"
+    api_key = api_key.strip()
+    if api_key.lower().startswith('authorization:'):
+        api_key = api_key.split(':', 1)[1].strip()
+
+    bearer_match = re.search(r'(?i)\bbearer\s+(.+)$', api_key)
+    if bearer_match:
+        api_key = bearer_match.group(1).strip()
 
     # Handle keys that were quoted *around* the Bearer prefix (e.g. "'Bearer abc'").
     api_key = _strip_wrapping_quotes(api_key)
+
+    # API keys should not contain whitespace; remove it to tolerate accidental spaces/tabs.
+    # (This avoids 401s caused by copy/paste and env-var UI wrapping.)
+    api_key = ''.join((api_key or '').split())
     return api_key
 
 

@@ -4797,6 +4797,8 @@ def org_custom_domain_settings(request, org_slug):
                 cfg = get_render_config()
                 if cfg:
                     try:
+                        # Logs-only: show whether env vars look present on the running instance.
+                        log_config_presence()
                         # Logs-only: helps distinguish invalid creds (401) from other failures.
                         log_auth_diagnostics(cfg)
                         ensure_custom_domain_attached(cfg, domain)

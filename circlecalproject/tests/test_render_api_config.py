@@ -26,6 +26,28 @@ class TestRenderApiConfig(SimpleTestCase):
             assert cfg is not None
             self.assertEqual(cfg.api_key, "abc123")
 
+    def test_strips_authorization_prefix(self):
+        with patch.dict(
+            os.environ,
+            {"RENDER_API_KEY": "Authorization: Bearer abc123", "RENDER_SERVICE_ID": "srv-123"},
+            clear=True,
+        ):
+            cfg = get_render_config()
+            self.assertIsNotNone(cfg)
+            assert cfg is not None
+            self.assertEqual(cfg.api_key, "abc123")
+
+    def test_removes_whitespace_inside_key(self):
+        with patch.dict(
+            os.environ,
+            {"RENDER_API_KEY": "abc 123\t\n", "RENDER_SERVICE_ID": "srv-123"},
+            clear=True,
+        ):
+            cfg = get_render_config()
+            self.assertIsNotNone(cfg)
+            assert cfg is not None
+            self.assertEqual(cfg.api_key, "abc123")
+
     def test_reads_alternate_env_var_names(self):
         with patch.dict(
             os.environ,
