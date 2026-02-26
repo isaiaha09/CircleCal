@@ -4319,9 +4319,12 @@ def edit_business(request, org_slug):
     has_any_bookings = False
     try:
         from bookings.models import Booking
+        # Keep consistent with the Bookings page (`bookings_list`), which only
+        # treats non-blocking, service-linked rows as real appointments.
         has_any_bookings = Booking.objects.filter(
             organization=org,
             is_blocking=False,
+            service__isnull=False,
         ).only('id').exists()
     except Exception:
         has_any_bookings = False
