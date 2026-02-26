@@ -4811,7 +4811,7 @@ def org_custom_domain_settings(request, org_slug):
                     messages.warning(
                         request,
                         'Next step: CircleCal will now provision HTTPS for this domain. '
-                        'If it does not start working within 10–20 minutes, contact support.',
+                        'If you still see a Cloudflare error page (for example error 1001) or it does not start working within 10–20 minutes, contact support.',
                     )
             else:
                 messages.error(request, 'TXT record not found yet. DNS can take a few minutes to propagate.')
@@ -4846,7 +4846,7 @@ def org_custom_domain_settings(request, org_slug):
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
             cfg = get_render_config()
             if not cfg:
-                messages.error(request, 'Render auto-attach is not configured. Set RENDER_API_KEY and RENDER_SERVICE_ID in your environment.')
+                messages.error(request, 'Render auto-attach is not configured in this environment.')
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
             try:
@@ -4892,7 +4892,7 @@ def org_custom_domain_settings(request, org_slug):
     try:
         cfg = get_render_config()
         render_enabled = bool(cfg)
-        show_internal_provisioning = bool(cfg) and bool(getattr(request.user, 'is_staff', False))
+        show_internal_provisioning = bool(getattr(request.user, 'is_staff', False))
 
         # Prefer an explicit CNAME target for customer setup instructions.
         # This keeps the UI provider-agnostic (customers don't need Render).
@@ -4968,6 +4968,7 @@ def org_custom_domain_settings(request, org_slug):
     except Exception:
         # Render API is optional; keep the page working even if it errors.
         render_enabled = bool(get_render_config())
+        show_internal_provisioning = bool(getattr(request.user, 'is_staff', False))
 
     # Pre-fill split inputs for the form.
     custom_domain_prefix = _DEFAULT_CUSTOM_DOMAIN_PREFIX
