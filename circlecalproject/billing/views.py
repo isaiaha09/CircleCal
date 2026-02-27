@@ -448,23 +448,30 @@ def _ensure_stripe_customer_id(org, user_email: str | None = None):
         return existing
 
     api_key = (getattr(settings, 'STRIPE_SECRET_KEY', None) or '').strip()
-    if not api_key:
-        placeholder = f"cus_local_{getattr(org, 'id', 'unknown')}"
-        org.stripe_customer_id = placeholder
-        try:
-            org.save(update_fields=['stripe_customer_id'])
-        except Exception:
-            org.save()
-        return placeholder
 
-    customer = stripe.Customer.create(
-        name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
-        email=user_email or None,
-        metadata={"organization_id": str(org.id)}
-    )
-    customer_id = customer.get('id') if isinstance(customer, dict) else getattr(customer, 'id', None)
+    customer_id = None
+    try:
+        customer = stripe.Customer.create(
+            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
+            email=user_email or None,
+            metadata={"organization_id": str(org.id)}
+        )
+        customer_id = customer.get('id') if isinstance(customer, dict) else getattr(customer, 'id', None)
+    except Exception as e:
+        # Test/CI fallback: if Stripe auth is unavailable, use a local placeholder.
+        # Keep real errors visible when an API key is configured.
+        if api_key:
+            raise
+        msg = str(e)
+        if ('No API key provided' not in msg) and ('AuthenticationError' not in e.__class__.__name__):
+            raise
+        customer_id = f"cus_local_{getattr(org, 'id', 'unknown')}"
+
     if not customer_id:
-        raise ValueError('Stripe customer creation did not return an id')
+        if not api_key:
+            customer_id = f"cus_local_{getattr(org, 'id', 'unknown')}"
+        else:
+            raise ValueError('Stripe customer creation did not return an id')
 
     org.stripe_customer_id = customer_id
     try:
