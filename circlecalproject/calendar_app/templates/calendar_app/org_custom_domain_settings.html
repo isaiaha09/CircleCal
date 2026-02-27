@@ -11,7 +11,18 @@
     {% if not can_use_custom_domain %}
         <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
             <div class="font-semibold text-blue-900">Upgrade required</div>
-            <div class="text-blue-800 text-sm mt-1">Custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).</div>
+            <div class="text-blue-800 text-sm mt-1">Customer-owned custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).</div>
+        </div>
+    {% endif %}
+
+    {% if can_use_hosted_subdomain and hosted_subdomain_url %}
+        <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mt-4">
+            <h2 class="text-lg font-bold text-blue-700">CircleCal Hosted URL</h2>
+            <p class="text-sm text-gray-600 mt-1">
+                This URL is included with your plan and works without any DNS setup from your side.
+                Use it directly or as the iframe source for embedded booking.
+            </p>
+            <div class="mt-3 font-mono text-xs bg-blue-50 border border-blue-100 rounded-xl p-3 break-all">{{ hosted_subdomain_url }}</div>
         </div>
     {% endif %}
 
@@ -145,7 +156,7 @@
             <form method="post" class="mt-4" onsubmit="return confirm('Remove this custom domain?');">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="remove_domain" />
-                <button type="submit" class="text-red-600 hover:text-red-800 font-semibold text-sm" {% if not can_use_custom_domain %}disabled{% endif %}>Remove custom domain</button>
+                <button type="submit" class="text-red-600 hover:text-red-800 font-semibold text-sm">Remove custom domain</button>
             </form>
         {% endif %}
     </div>

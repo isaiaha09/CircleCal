@@ -711,7 +711,7 @@
                     <button type="button" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Get embed code</button>
                   {% endif %}
 
-                  {% if m.can_use_custom_domain %}
+                  {% if m.can_access_custom_domain_settings %}
                     <a href="{% url 'calendar_app:org_custom_domain_settings' org_slug=m.organization.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Custom domain</a>
                   {% else %}
                     <button type="button" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Custom domain</button>

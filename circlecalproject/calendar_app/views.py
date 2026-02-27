@@ -4580,15 +4580,18 @@ def org_custom_domain_settings(request, org_slug):
     membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
     is_owner = bool((org.owner_id == request.user.id) or (membership and membership.role == 'owner'))
 
-    can_use = False
+    can_use_custom_domain = False
+    can_use_hosted_subdomain = False
     is_trialing = False
     try:
-        from billing.utils import can_use_custom_domain, get_subscription
+        from billing.utils import can_use_custom_domain, can_use_hosted_subdomain, get_subscription
         sub = get_subscription(org)
         is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
-        can_use = bool(can_use_custom_domain(org))
+        can_use_custom_domain = bool(can_use_custom_domain(org))
+        can_use_hosted_subdomain = bool(can_use_hosted_subdomain(org))
     except Exception:
-        can_use = False
+        can_use_custom_domain = False
+        can_use_hosted_subdomain = False
 
     import secrets
     from django.utils import timezone
@@ -4735,7 +4738,7 @@ def org_custom_domain_settings(request, org_slug):
     if request.method == "POST":
         action = (request.POST.get('action') or '').strip()
 
-        if not can_use:
+        if action in {'set_domain', 'verify_domain'} and not can_use_custom_domain:
             messages.error(request, 'Custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
@@ -5030,9 +5033,23 @@ def org_custom_domain_settings(request, org_slug):
         custom_domain_prefix = _DEFAULT_CUSTOM_DOMAIN_PREFIX
         custom_domain_root = ''
 
+    hosted_subdomain = ''
+    hosted_subdomain_url = ''
+    try:
+        import os
+
+        base = (getattr(settings, 'HOSTED_SUBDOMAIN_BASE', '') or os.getenv('HOSTED_SUBDOMAIN_BASE') or '').strip().lower().lstrip('.')
+        if can_use_hosted_subdomain and base:
+            hosted_subdomain = f"{(org.slug or '').strip().lower()}.{base}"
+            hosted_subdomain_url = f"https://{hosted_subdomain}"
+    except Exception:
+        hosted_subdomain = ''
+        hosted_subdomain_url = ''
+
     return render(request, 'calendar_app/org_custom_domain_settings.html', {
         'org': org,
-        'can_use_custom_domain': can_use,
+        'can_use_custom_domain': can_use_custom_domain,
+        'can_use_hosted_subdomain': can_use_hosted_subdomain,
         'is_trialing': is_trialing,
         'txt_name': txt_name,
         'txt_name_host': txt_name_host,
@@ -5043,6 +5060,8 @@ def org_custom_domain_settings(request, org_slug):
         'custom_domain_root': custom_domain_root,
         'cname_host': cname_host,
         'cname_target': cname_target,
+        'hosted_subdomain': hosted_subdomain,
+        'hosted_subdomain_url': hosted_subdomain_url,
     })
 
 

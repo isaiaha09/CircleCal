@@ -256,13 +256,16 @@ def profile_view(request):
 			org_obj = getattr(m, 'organization', None)
 			can_embed = False
 			can_custom_domain = False
+			can_hosted_subdomain = False
 			try:
-				from billing.utils import can_use_custom_domain, can_use_embed_widget
+				from billing.utils import can_use_custom_domain, can_use_embed_widget, can_use_hosted_subdomain
 				can_embed = bool(can_use_embed_widget(org_obj))
 				can_custom_domain = bool(can_use_custom_domain(org_obj))
+				can_hosted_subdomain = bool(can_use_hosted_subdomain(org_obj))
 			except Exception:
 				can_embed = False
 				can_custom_domain = False
+				can_hosted_subdomain = False
 
 			# Used by profile.html to enable/disable buttons.
 			try:
@@ -271,6 +274,14 @@ def profile_view(request):
 				pass
 			try:
 				m.can_use_custom_domain = can_custom_domain
+			except Exception:
+				pass
+			try:
+				m.can_use_hosted_subdomain = can_hosted_subdomain
+			except Exception:
+				pass
+			try:
+				m.can_access_custom_domain_settings = bool(can_custom_domain or can_hosted_subdomain)
 			except Exception:
 				pass
 		return items
