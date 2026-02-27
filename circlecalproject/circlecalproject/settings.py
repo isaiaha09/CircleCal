@@ -51,6 +51,13 @@ EXPO_PUSH_URL = os.getenv('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+# Hosted subdomain support (local dev)
+#
+# In production this is typically set to your real base (e.g. circlecal.app).
+# For local development, default to lvh.me because *.lvh.me resolves to 127.0.0.1.
+# Example local URL: http://testing.lvh.me:8000
+HOSTED_SUBDOMAIN_BASE = (os.getenv('HOSTED_SUBDOMAIN_BASE') or 'lvh.me').strip().lower().lstrip('.')
+
 ALLOWED_HOSTS = [
     '127.0.0.1',
     'localhost',
@@ -61,6 +68,11 @@ ALLOWED_HOSTS = [
     'nonpendant-profligately-tessa.ngrok-free.dev',
 ]
 
+if HOSTED_SUBDOMAIN_BASE:
+    _host_suffix = f'.{HOSTED_SUBDOMAIN_BASE}'
+    if _host_suffix not in [str(h).lower() for h in ALLOWED_HOSTS]:
+        ALLOWED_HOSTS.append(_host_suffix)
+
 CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
     'http://localhost:8000',
@@ -69,6 +81,14 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.ngrok-free.dev',
     'https://*.ngrok.io',
 ]
+
+if HOSTED_SUBDOMAIN_BASE:
+    _http_sub = f'http://*.{HOSTED_SUBDOMAIN_BASE}:8000'
+    _https_sub = f'https://*.{HOSTED_SUBDOMAIN_BASE}'
+    if _http_sub not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_http_sub)
+    if _https_sub not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_https_sub)
 
 LOGIN_REDIRECT_URL = 'calendar_app:post_login'
 LOGOUT_REDIRECT_URL = '/'

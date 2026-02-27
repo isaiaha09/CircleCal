@@ -12,6 +12,11 @@
         <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
             <div class="font-semibold text-blue-900">Upgrade required</div>
             <div class="text-blue-800 text-sm mt-1">Customer-owned custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).</div>
+            {% if can_use_hosted_subdomain %}
+                <div class="mt-3">
+                    <a href="{% url 'billing:embedded_custom_domain_addon_checkout_page' org_slug=org.slug %}" class="inline-flex items-center justify-center bg-blue-600 text-white font-semibold px-4 py-2 rounded-xl hover:bg-blue-700">Purchase custom-domain add-on</a>
+                </div>
+            {% endif %}
         </div>
     {% endif %}
 

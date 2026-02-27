@@ -1,0 +1,132 @@
+{% extends "calendar_app/base.html" %}
+{% block title %}Custom-domain Add-on Checkout{% endblock %}
+
+{% block main_class %}w-full max-w-none px-0 py-0{% endblock %}
+
+{% block content %}
+<div class="w-[95vw] mx-auto py-6 sm:py-10 sm:max-w-3xl">
+  <h1 class="text-3xl font-bold mb-2 text-center sm:text-left">Custom-domain Add-on</h1>
+  <p class="text-sm text-gray-600 mb-6">
+    Purchase the add-on to unlock customer-owned custom domains (for example: <span class="font-mono">booking.yoursite.com</span>).
+  </p>
+
+  {% if already_enabled %}
+    <div class="mb-4 p-3 rounded border-l-4 border-green-300 bg-green-50 text-sm text-green-800">
+      Custom-domain add-on is already enabled for this organization.
+    </div>
+    <a class="text-sm text-blue-600 hover:text-blue-700 font-semibold" href="{% url 'calendar_app:org_custom_domain_settings' organization.slug %}">← Back to custom domain settings</a>
+  {% elif not can_purchase %}
+    <div class="mb-4 p-3 rounded border-l-4 border-yellow-300 bg-yellow-50 text-sm text-yellow-800">
+      Custom-domain add-on requires an active Pro or Team plan.
+    </div>
+    <a class="text-sm text-blue-600 hover:text-blue-700 font-semibold" href="{% url 'calendar_app:org_custom_domain_settings' organization.slug %}">← Back to custom domain settings</a>
+  {% else %}
+    <div class="border rounded-lg p-4 sm:p-6 shadow bg-white">
+      <div id="cc-addon-loading" class="flex items-center gap-2 text-gray-600 mb-4">
+        <svg class="animate-spin h-5 w-5 text-gray-500" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>
+        <span>Loading secure checkout…</span>
+      </div>
+      <div id="cc-addon-checkout"></div>
+      <div id="cc-addon-message" class="mt-4 text-sm text-gray-600"></div>
+    </div>
+
+    <p class="mt-4 text-xs text-gray-500">Secured by Stripe. You will stay on this page to complete payment.</p>
+  {% endif %}
+</div>
+
+{% if can_purchase and not already_enabled %}
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+  (function() {
+    const orgSlug = "{{ organization.slug }}";
+    const publishableKey = "{{ stripe_publishable_key }}";
+    const settingsUrl = "{% url 'calendar_app:org_custom_domain_settings' organization.slug %}";
+
+    function getCookie(name) {
+      let cookieValue = null;
+      if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i].trim();
+          if (cookie.startsWith(name + '=')) {
+            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+            break;
+          }
+        }
+      }
+      return cookieValue;
+    }
+
+    async function init() {
+      const loadingEl = document.getElementById('cc-addon-loading');
+      const msgEl = document.getElementById('cc-addon-message');
+      const mountEl = document.getElementById('cc-addon-checkout');
+
+      try {
+        const stripe = Stripe(publishableKey);
+        const csrftoken = getCookie('csrftoken');
+        const resp = await fetch(`/billing/api/bus/${orgSlug}/embedded/custom-domain-addon/create`, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': csrftoken,
+          },
+          credentials: 'same-origin',
+        });
+
+        let data = null;
+        try {
+          data = await resp.json();
+        } catch (e) {
+          data = null;
+        }
+
+        if (!resp.ok || !data || !data.client_secret) {
+          const err = (data && data.error) ? data.error : 'Unable to initialize checkout.';
+          throw new Error(err);
+        }
+
+        const checkout = await stripe.initEmbeddedCheckout({
+          clientSecret: data.client_secret,
+          onComplete: async function() {
+            const csrftoken = getCookie('csrftoken');
+            let enabled = false;
+            for (let i = 0; i < 5; i++) {
+              try {
+                const syncResp = await fetch(`/billing/api/bus/${orgSlug}/custom-domain-addon/sync`, {
+                  method: 'POST',
+                  headers: {
+                    'X-CSRFToken': csrftoken,
+                  },
+                  credentials: 'same-origin',
+                });
+                if (syncResp.ok) {
+                  const syncData = await syncResp.json().catch(() => ({}));
+                  if (syncData && syncData.enabled === true) {
+                    enabled = true;
+                    break;
+                  }
+                }
+              } catch (e) {
+              }
+              await new Promise(resolve => setTimeout(resolve, 1200));
+            }
+            window.location.href = settingsUrl + (enabled ? '?addon=success' : '?addon=pending');
+          }
+        });
+
+        checkout.mount('#cc-addon-checkout');
+      } catch (e) {
+        if (msgEl) msgEl.textContent = (e && e.message) ? e.message : 'Unable to load checkout.';
+      } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+      }
+    }
+
+    init();
+  })();
+</script>
+{% endif %}
+{% endblock %}

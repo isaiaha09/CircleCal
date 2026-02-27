@@ -5,6 +5,10 @@ app_name = 'billing'
 
 urlpatterns = [
     path("bus/<slug:org_slug>/checkout/<int:plan_id>/", views.create_checkout_session, name="create_checkout_session"),
+    path("bus/<slug:org_slug>/checkout/custom-domain-addon/", views.create_custom_domain_addon_checkout_session, name="create_custom_domain_addon_checkout_session"),
+    path("bus/<slug:org_slug>/embedded/custom-domain-addon/", views.embedded_custom_domain_addon_checkout_page, name="embedded_custom_domain_addon_checkout_page"),
+    path("api/bus/<slug:org_slug>/embedded/custom-domain-addon/create", views.create_embedded_custom_domain_addon_checkout_session, name="create_embedded_custom_domain_addon_checkout_session"),
+    path("api/bus/<slug:org_slug>/custom-domain-addon/sync", views.sync_custom_domain_addon_status, name="sync_custom_domain_addon_status"),
     path("bus/<slug:org_slug>/portal/", views.billing_portal, name="billing_portal"),
     path("webhook/", views.stripe_webhook, name="stripe_webhook"),
     # Embedded Payment Element routes

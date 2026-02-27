@@ -1,4 +1,5 @@
 import stripe
+import os
 # Canonical import for recent stripe versions: import error classes from top-level
 from stripe import InvalidRequestError
 from django.conf import settings
@@ -411,6 +412,23 @@ def _is_app_ua(request) -> bool:
         return False
 
 
+def _stripe_obj_get(obj, key, default=None):
+    """Safely read a key from Stripe objects or plain dicts."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    try:
+        if hasattr(obj, key):
+            return getattr(obj, key)
+    except Exception:
+        pass
+    try:
+        return obj.get(key, default)
+    except Exception:
+        return default
+
+
 def _deny_in_app_billing(request):
     """CircleCal does not expose pricing/billing inside the native mobile app."""
 
@@ -492,6 +510,241 @@ def create_checkout_session(request, org_slug, plan_id):
     session = stripe.checkout.Session.create(**session_kwargs)
 
     return redirect(session.url)
+
+
+@require_http_methods(["GET"])
+def create_custom_domain_addon_checkout_session(request, org_slug):
+    """Redirects to Stripe Checkout for the custom-domain add-on subscription."""
+    import os
+
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    try:
+        from billing.utils import can_use_hosted_subdomain, get_subscription
+
+        if not can_use_hosted_subdomain(org):
+            return HttpResponseBadRequest("Custom-domain add-on requires an active Pro or Team plan.")
+
+        local_sub = get_subscription(org)
+        if local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False):
+            return redirect(reverse('calendar_app:org_custom_domain_settings', kwargs={'org_slug': org.slug}) + '?addon=already_enabled')
+    except Exception:
+        pass
+
+    addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+    if not addon_price_id:
+        return HttpResponseBadRequest("Custom-domain add-on is not configured.")
+
+    # Ensure Stripe customer exists
+    if not org.stripe_customer_id:
+        customer = stripe.Customer.create(
+            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
+            email=request.user.email,
+            metadata={"organization_id": str(org.id)}
+        )
+        org.stripe_customer_id = customer.id
+        org.save()
+
+    success_url = request.build_absolute_uri(
+        reverse("calendar_app:org_custom_domain_settings", kwargs={"org_slug": org.slug})
+    ) + "?addon=success"
+    cancel_url = request.build_absolute_uri(
+        reverse("calendar_app:org_custom_domain_settings", kwargs={"org_slug": org.slug})
+    ) + "?addon=cancel"
+
+    session = stripe.checkout.Session.create(
+        customer=org.stripe_customer_id,
+        mode='subscription',
+        line_items=[{"price": addon_price_id, "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={
+            "organization_id": str(org.id),
+            "purchase_type": "custom_domain_addon",
+        },
+        subscription_data={
+            "metadata": {
+                "organization_id": str(org.id),
+                "purchase_type": "custom_domain_addon",
+            }
+        },
+    )
+
+    return redirect(session.url)
+
+
+@require_http_methods(["GET"])
+def embedded_custom_domain_addon_checkout_page(request, org_slug):
+    """Render embedded Stripe Checkout page for custom-domain add-on purchase."""
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    from billing.utils import can_use_hosted_subdomain, get_subscription
+
+    can_purchase = bool(can_use_hosted_subdomain(org))
+    local_sub = get_subscription(org)
+    already_enabled = bool(local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False))
+
+    return render(request, "billing/embedded_custom_domain_addon_checkout.html", {
+        "organization": org,
+        "stripe_publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
+        "can_purchase": can_purchase,
+        "already_enabled": already_enabled,
+    })
+
+
+@login_required
+@require_POST
+def sync_custom_domain_addon_status(request, org_slug):
+    """Best-effort sync of add-on status from Stripe for immediate UX after checkout.
+
+    Useful in local/dev where webhook delivery may be delayed or unavailable.
+    """
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return JsonResponse({"error": "Billing is not available in app mode."}, status=403)
+
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return JsonResponse({"error": "Only owners can manage billing."}, status=403)
+
+    sub, _ = Subscription.objects.get_or_create(
+        organization=org,
+        defaults={
+            'status': 'active',
+            'active': True,
+        },
+    )
+
+    if not org.stripe_customer_id:
+        sub.custom_domain_addon_enabled = False
+        sub.save(update_fields=['custom_domain_addon_enabled'])
+        return JsonResponse({"enabled": False, "reason": "missing_customer"})
+
+    addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+    enabled = False
+    try:
+        rows = stripe.Subscription.list(customer=org.stripe_customer_id, status='all', limit=100)
+        data = _stripe_obj_get(rows, 'data', []) or []
+        for row in data:
+            meta = _stripe_obj_get(row, 'metadata', {}) or {}
+            purchase_type = (meta.get('purchase_type') or '').strip().lower()
+            status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
+            is_addon = purchase_type == 'custom_domain_addon'
+            if not is_addon and addon_price_id:
+                try:
+                    items_obj = _stripe_obj_get(row, 'items', {}) or {}
+                    items = _stripe_obj_get(items_obj, 'data', []) or []
+                    for item in items:
+                        price = _stripe_obj_get(item, 'price', {}) or {}
+                        pid = (_stripe_obj_get(price, 'id', '') or '').strip()
+                        if pid and pid == addon_price_id:
+                            is_addon = True
+                            break
+                except Exception:
+                    pass
+
+            if is_addon and status in {'active', 'trialing'}:
+                enabled = True
+                break
+    except Exception:
+        return JsonResponse({"error": "sync_failed"}, status=400)
+
+    sub.custom_domain_addon_enabled = enabled
+    sub.save(update_fields=['custom_domain_addon_enabled'])
+    return JsonResponse({"enabled": enabled})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
+    """Create Stripe Embedded Checkout session for custom-domain add-on."""
+    import os
+
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return deny
+
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return err
+
+    try:
+        from billing.utils import can_use_hosted_subdomain, get_subscription
+
+        if not can_use_hosted_subdomain(org):
+            return JsonResponse({"error": "Custom-domain add-on requires an active Pro or Team plan."}, status=400)
+
+        local_sub = get_subscription(org)
+        if local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False):
+            return JsonResponse({"error": "Custom-domain add-on is already enabled."}, status=400)
+    except Exception:
+        return JsonResponse({"error": "Unable to verify subscription eligibility."}, status=400)
+
+    addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+    if not addon_price_id:
+        return JsonResponse({"error": "Custom-domain add-on is not configured."}, status=400)
+
+    if not org.stripe_customer_id:
+        customer = stripe.Customer.create(
+            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
+            email=request.user.email,
+            metadata={"organization_id": str(org.id)}
+        )
+        org.stripe_customer_id = customer.id
+        org.save()
+
+    return_url = request.build_absolute_uri(
+        reverse("calendar_app:org_custom_domain_settings", kwargs={"org_slug": org.slug})
+    ) + "?addon=pending"
+
+    session = stripe.checkout.Session.create(
+        customer=org.stripe_customer_id,
+        mode='subscription',
+        ui_mode='embedded',
+        line_items=[{"price": addon_price_id, "quantity": 1}],
+        return_url=return_url,
+        metadata={
+            "organization_id": str(org.id),
+            "purchase_type": "custom_domain_addon",
+        },
+        subscription_data={
+            "metadata": {
+                "organization_id": str(org.id),
+                "purchase_type": "custom_domain_addon",
+            }
+        },
+    )
+
+    client_secret = None
+    try:
+        client_secret = session.get('client_secret')
+    except Exception:
+        client_secret = getattr(session, 'client_secret', None)
+
+    if not client_secret:
+        return JsonResponse({"error": "Stripe did not return a client_secret for embedded checkout."}, status=400)
+
+    return JsonResponse({"client_secret": client_secret})
 
 
 @login_required
@@ -672,9 +925,26 @@ def stripe_webhook(request):
 
     # 1) Checkout completed -> subscription created
     if event_type == "checkout.session.completed":
-        org_id = data.get("metadata", {}).get("organization_id")
-        plan_id = data.get("metadata", {}).get("plan_id")
+        metadata = data.get("metadata", {}) or {}
+        org_id = metadata.get("organization_id")
+        plan_id = metadata.get("plan_id")
+        purchase_type = (metadata.get("purchase_type") or '').strip().lower()
         subscription_id = data.get("subscription")
+
+        if purchase_type == 'custom_domain_addon' and org_id:
+            try:
+                org = Organization.objects.get(id=org_id)
+                sub, _ = Subscription.objects.get_or_create(
+                    organization=org,
+                    defaults={
+                        'status': 'active',
+                        'active': True,
+                    },
+                )
+                sub.custom_domain_addon_enabled = True
+                sub.save(update_fields=['custom_domain_addon_enabled'])
+            except Exception:
+                pass
 
         if org_id and plan_id:
             org = Organization.objects.get(id=org_id)
@@ -695,81 +965,162 @@ def stripe_webhook(request):
     if event_type == "customer.subscription.created":
         subscription_id = data.get("id")
         meta = data.get("metadata", {}) or {}
+        purchase_type = (meta.get('purchase_type') or '').strip().lower()
+        addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
         org_id = meta.get("organization_id")
         plan_id = meta.get("plan_id")
         customer_id = data.get("customer")
 
-        org = None
-        plan = None
-        try:
-            if org_id:
-                org = Organization.objects.filter(id=org_id).first()
-            if not org and customer_id:
-                org = Organization.objects.filter(stripe_customer_id=customer_id).first()
-        except Exception:
-            org = None
-
-        try:
-            if plan_id:
-                plan = Plan.objects.filter(id=plan_id).first()
-        except Exception:
-            plan = None
-
-        # Best-effort price -> plan mapping if metadata isn't present.
-        if org and not plan:
+        # Add-on subscriptions should not override the main plan subscription id.
+        is_addon_sub = purchase_type == 'custom_domain_addon'
+        if (not is_addon_sub) and addon_price_id:
             try:
                 items = (data.get("items") or {}).get("data") or []
-                price_id = None
-                if items and isinstance(items[0], dict):
-                    price = items[0].get("price") or {}
-                    if isinstance(price, dict):
-                        price_id = price.get("id")
-                if price_id:
-                    plan = Plan.objects.filter(stripe_price_id=price_id).first()
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    price = item.get("price") or {}
+                    pid = (price.get("id") or '').strip() if isinstance(price, dict) else ''
+                    if pid and pid == addon_price_id:
+                        is_addon_sub = True
+                        break
+            except Exception:
+                pass
+
+        if is_addon_sub:
+            try:
+                if org_id:
+                    org = Organization.objects.filter(id=org_id).first()
+                else:
+                    org = Organization.objects.filter(stripe_customer_id=customer_id).first() if customer_id else None
+                if org:
+                    sub, _ = Subscription.objects.get_or_create(
+                        organization=org,
+                        defaults={
+                            'status': 'active',
+                            'active': True,
+                        },
+                    )
+                    sub.custom_domain_addon_enabled = True
+                    sub.save(update_fields=['custom_domain_addon_enabled'])
+            except Exception:
+                pass
+        else:
+            org = None
+            plan = None
+            try:
+                if org_id:
+                    org = Organization.objects.filter(id=org_id).first()
+                if not org and customer_id:
+                    org = Organization.objects.filter(stripe_customer_id=customer_id).first()
+            except Exception:
+                org = None
+
+            try:
+                if plan_id:
+                    plan = Plan.objects.filter(id=plan_id).first()
             except Exception:
                 plan = None
 
-        if org and subscription_id:
-            status = data.get("status") or "active"
-            cancel_at_period_end = bool(data.get("cancel_at_period_end", False))
+            # Best-effort price -> plan mapping if metadata isn't present.
+            if org and not plan:
+                try:
+                    items = (data.get("items") or {}).get("data") or []
+                    price_id = None
+                    if items and isinstance(items[0], dict):
+                        price = items[0].get("price") or {}
+                        if isinstance(price, dict):
+                            price_id = price.get("id")
+                    if price_id:
+                        plan = Plan.objects.filter(stripe_price_id=price_id).first()
+                except Exception:
+                    plan = None
 
-            current_period_end = None
-            try:
-                cpe = data.get("current_period_end")
-                if cpe:
-                    from datetime import datetime
-                    from django.utils import timezone as django_tz
-                    current_period_end = django_tz.make_aware(datetime.fromtimestamp(int(cpe)))
-            except Exception:
+            if org and subscription_id:
+                status = data.get("status") or "active"
+                cancel_at_period_end = bool(data.get("cancel_at_period_end", False))
+
                 current_period_end = None
+                try:
+                    cpe = data.get("current_period_end")
+                    if cpe:
+                        from datetime import datetime
+                        from django.utils import timezone as django_tz
+                        current_period_end = django_tz.make_aware(datetime.fromtimestamp(int(cpe)))
+                except Exception:
+                    current_period_end = None
 
-            trial_end = None
-            try:
-                te = data.get("trial_end")
-                if te:
-                    from datetime import datetime
-                    from django.utils import timezone as django_tz
-                    trial_end = django_tz.make_aware(datetime.fromtimestamp(int(te)))
-            except Exception:
                 trial_end = None
+                try:
+                    te = data.get("trial_end")
+                    if te:
+                        from datetime import datetime
+                        from django.utils import timezone as django_tz
+                        trial_end = django_tz.make_aware(datetime.fromtimestamp(int(te)))
+                except Exception:
+                    trial_end = None
 
-            defaults = {
-                "stripe_subscription_id": subscription_id,
-                "active": (status in ("active", "trialing")),
-                "status": status,
-                "cancel_at_period_end": cancel_at_period_end,
-                "current_period_end": current_period_end,
-                "trial_end": trial_end,
-            }
-            if plan:
-                defaults["plan"] = plan
+                defaults = {
+                    "stripe_subscription_id": subscription_id,
+                    "active": (status in ("active", "trialing")),
+                    "status": status,
+                    "cancel_at_period_end": cancel_at_period_end,
+                    "current_period_end": current_period_end,
+                    "trial_end": trial_end,
+                }
+                if plan:
+                    defaults["plan"] = plan
 
-            Subscription.objects.update_or_create(organization=org, defaults=defaults)
+                Subscription.objects.update_or_create(organization=org, defaults=defaults)
 
     # 2) Subscription updated/canceled
     if event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
         subscription_id = data["id"]
         status = data["status"]  # active, canceled, past_due, etc.
+
+        # If this is the custom-domain add-on subscription, map lifecycle to the add-on flag.
+        try:
+            meta = data.get("metadata", {}) or {}
+            purchase_type = (meta.get('purchase_type') or '').strip().lower()
+            addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+            is_addon_sub = purchase_type == 'custom_domain_addon'
+            if (not is_addon_sub) and addon_price_id:
+                try:
+                    items = (data.get("items") or {}).get("data") or []
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        price = item.get("price") or {}
+                        pid = (price.get("id") or '').strip() if isinstance(price, dict) else ''
+                        if pid and pid == addon_price_id:
+                            is_addon_sub = True
+                            break
+                except Exception:
+                    pass
+
+            if is_addon_sub:
+                org = None
+                org_id = meta.get('organization_id')
+                customer_id = data.get('customer')
+                if org_id:
+                    org = Organization.objects.filter(id=org_id).first()
+                if not org and customer_id:
+                    org = Organization.objects.filter(stripe_customer_id=customer_id).first()
+
+                if org:
+                    sub, _ = Subscription.objects.get_or_create(
+                        organization=org,
+                        defaults={
+                            'status': 'active',
+                            'active': True,
+                        },
+                    )
+                    sub.custom_domain_addon_enabled = bool(status in ('active', 'trialing'))
+                    sub.save(update_fields=['custom_domain_addon_enabled'])
+                # Do not continue into main-plan subscription status handling.
+                return HttpResponse(status=200)
+        except Exception:
+            pass
 
         try:
             sub = Subscription.objects.get(stripe_subscription_id=subscription_id)

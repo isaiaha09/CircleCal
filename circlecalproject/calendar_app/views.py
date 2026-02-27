@@ -4735,6 +4735,31 @@ def org_custom_domain_settings(request, org_slug):
                 pass
             return False
 
+    # Optional return state from custom-domain add-on checkout.
+    try:
+        addon_state = (request.GET.get('addon') or '').strip().lower()
+        if addon_state == 'success':
+            try:
+                from billing.utils import get_subscription
+
+                sub_for_addon = get_subscription(org)
+                addon_enabled_now = bool(sub_for_addon and getattr(sub_for_addon, 'custom_domain_addon_enabled', False))
+            except Exception:
+                addon_enabled_now = False
+
+            if addon_enabled_now:
+                messages.success(request, 'Custom-domain add-on purchase completed. You can now configure a customer-owned domain.')
+            else:
+                messages.warning(request, 'Payment completed, but add-on activation is still syncing. Refresh in a few seconds; if it persists, contact support.')
+        elif addon_state == 'pending':
+            messages.warning(request, 'Payment completed, but add-on activation is still syncing. Refresh in a few seconds; if it persists, contact support.')
+        elif addon_state == 'cancel':
+            messages.info(request, 'Custom-domain add-on checkout was canceled.')
+        elif addon_state == 'already_enabled':
+            messages.info(request, 'Custom-domain add-on is already enabled for this account.')
+    except Exception:
+        pass
+
     if request.method == "POST":
         action = (request.POST.get('action') or '').strip()
 
