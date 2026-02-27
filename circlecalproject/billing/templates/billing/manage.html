@@ -977,6 +977,179 @@
   
 </div>
 
+{% if show_custom_domain_addon_section %}
+<div class="max-w-4xl mx-auto mt-4 md:mt-6">
+  <div class="bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 p-4 md:p-6">
+    <h2 class="text-xl font-semibold mb-2">Custom Domain Add-on</h2>
+    {% if show_custom_domain_addon_cancel %}
+      <p class="text-xs md:text-sm text-gray-600 mb-4">Your custom domain add-on is currently enabled for <strong>{{ org.name }}</strong>.</p>
+    {% else %}
+      <p class="text-xs md:text-sm text-gray-600 mb-4">Your custom domain add-on is currently not active for <strong>{{ org.name }}</strong>. Historical invoice details are shown below.</p>
+    {% endif %}
+    <div class="text-sm text-gray-800 mb-4">
+      <div>
+        <strong>Monthly subscription:</strong>
+        {% if custom_domain_addon_monthly_dollars is not None %}
+          ${{ custom_domain_addon_monthly_dollars|floatformat:2 }}/month
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="mt-1">
+        <strong>Next charge:</strong>
+        {% if custom_domain_addon_next_charge %}
+          {{ custom_domain_addon_next_charge|date:"M j, Y g:i A" }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+    </div>
+
+    {% if custom_domain_addon_discount %}
+      <div class="mb-4 border rounded p-3 bg-gray-50">
+        <div class="text-sm font-semibold text-gray-800 mb-2">Add-on discount</div>
+        <div class="text-sm text-green-700 mb-2">
+          <strong>Currently applied:</strong>
+          {% if custom_domain_addon_discount.percent_off is not None %}
+            {{ custom_domain_addon_discount.percent_off }}% off
+          {% elif custom_domain_addon_discount.amount_off_cents is not None %}
+            -${{ custom_domain_addon_discount.amount_off_cents|floatformat:-2 }}
+          {% else %}
+            Discount applied
+          {% endif %}
+          {% if custom_domain_addon_discount.code %}
+            ({{ custom_domain_addon_discount.code }})
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if custom_domain_addon_invoices %}
+      <div class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-semibold text-gray-800">Add-on invoices</h3>
+          <button id="openAddonFiltersBtn" class="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm">Filters</button>
+        </div>
+
+        <div id="addon-invoice-filters-panel" class="relative hidden w-full mb-3">
+          <div class="bg-white rounded-lg shadow-lg border border-gray-200">
+            <div class="p-3 border-b flex items-center justify-between">
+              <h4 class="text-md font-semibold">Add-on invoice filters</h4>
+              <button id="closeAddonFiltersBtn" class="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <div class="p-3 space-y-3 text-sm text-gray-700">
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-600">Month</label>
+                <select id="addonInvoiceMonthSelect" class="text-sm border rounded px-2 py-1">
+                  <option value="">All months</option>
+                </select>
+              </div>
+
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-600">Sort</label>
+                <select id="addonInvSortSelect" class="text-sm border rounded px-2 py-1">
+                  <option value="latest">Latest</option>
+                  <option value="earliest">Earliest</option>
+                  <option value="lowest">Least expensive</option>
+                  <option value="highest">Most expensive</option>
+                </select>
+              </div>
+
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-600">Card</label>
+                <select id="addonInvCardSelect" class="text-sm border rounded px-2 py-1">
+                  <option value="">All cards</option>
+                </select>
+              </div>
+
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-600">Status</label>
+                <select id="addonInvStatusSelect" class="text-sm border rounded px-2 py-1">
+                  <option value="">All statuses</option>
+                </select>
+              </div>
+
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-600">Show archived</label>
+                <input id="showAddonArchivedToggle" type="checkbox" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <table class="w-full text-sm border" id="customDomainAddonInvoicesTable">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="p-2 text-left">Date</th>
+              <th class="p-2 text-left">Amount</th>
+              <th class="p-2 text-left">Card</th>
+              <th class="p-2 text-left">Status</th>
+              <th class="p-2 text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for inv in custom_domain_addon_invoices %}
+              <tr class="border-t"
+                data-inv-id="{{ inv.raw.id|default:'' }}"
+                data-amount="{{ inv.amount_display_dollars|default:0 }}"
+                data-card="{{ inv.card_last4|default:default_card_last4|default:'' }}"
+                data-status="{{ inv.status|default:'' }}"
+                data-created="{{ inv.created|date:'c' }}"
+                data-pseudo="0"
+                data-hidden="{{ inv.hidden|yesno:'1,0' }}"
+              >
+                <td class="p-2">
+                  {% if inv.created %}
+                    <div>{{ inv.created|date:"M j, Y" }}</div>
+                    <div class="text-xs text-gray-500">{{ inv.created|date:"g:i A" }}</div>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td class="p-2">${{ inv.amount_display_dollars|floatformat:2 }}</td>
+                <td class="p-2">
+                  {% with display_last4=inv.card_last4|default:default_card_last4 %}
+                    {% if display_last4 %}
+                      **** {{ display_last4 }}{% if inv.card_brand %} ({{ inv.card_brand }}){% endif %}
+                    {% else %}
+                      —
+                    {% endif %}
+                  {% endwith %}
+                </td>
+                <td class="p-2">{{ inv.status|default:"—" }}</td>
+                <td class="p-2">
+                  {% if inv.hosted_invoice_url %}
+                    <a href="{{ inv.hosted_invoice_url }}" class="text-indigo-600" target="_blank">View</a>
+                    {% if inv.hidden %}
+                      <button class="text-sm ml-3 unhide-inv-btn text-green-600" data-inv-id="{{ inv.raw.id }}">Unhide</button>
+                    {% else %}
+                      <button class="text-sm ml-3 hide-inv-btn text-gray-600" data-inv-id="{{ inv.raw.id }}">Hide</button>
+                      <button class="text-sm ml-3 void-inv-btn text-red-600" data-inv-id="{{ inv.raw.id }}">Void</button>
+                    {% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            <tr id="addon-no-results-row" class="border-t hidden">
+              <td class="p-6 text-center text-gray-500" colspan="5">No add-on invoices match your filters.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    {% if show_custom_domain_addon_cancel %}
+      <div class="flex items-center gap-3">
+        <button id="cancelCustomDomainAddonBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-red-700 text-white hover:bg-red-800">Cancel Custom Domain Add-on</button>
+        <div id="customDomainAddonCancelStatus" class="text-xs text-gray-600"></div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <script src="https://js.stripe.com/v3/"></script>
 <script>
 (function(){
@@ -1631,6 +1804,216 @@
       setTimeout(() => window.location.reload(), 600);
     } catch (e) {
       showToast('error', 'Failed to reactivate: ' + (e && e.message ? e.message : String(e)), 6500);
+    } finally {
+      hideLoading();
+    }
+  });
+
+  // Custom-domain add-on invoice filters (same functionality pattern as primary invoices)
+  (function initAddonInvoiceFilters(){
+    const table = document.getElementById('customDomainAddonInvoicesTable');
+    if (!table) return;
+
+    const panel = document.getElementById('addon-invoice-filters-panel');
+    const openBtn = document.getElementById('openAddonFiltersBtn');
+    const closeBtn = document.getElementById('closeAddonFiltersBtn');
+    const monthSelect = document.getElementById('addonInvoiceMonthSelect');
+    const sortSelect = document.getElementById('addonInvSortSelect');
+    const cardSelect = document.getElementById('addonInvCardSelect');
+    const statusSelect = document.getElementById('addonInvStatusSelect');
+    const archivedToggle = document.getElementById('showAddonArchivedToggle');
+    const noResults = document.getElementById('addon-no-results-row');
+
+    function collectRows() {
+      return Array.from(table.querySelectorAll('tbody tr')).filter(r => r.id !== 'addon-no-results-row');
+    }
+
+    function rowAmount(row) {
+      const value = row.getAttribute('data-amount') || '0';
+      return parseFloat(String(value).replace(/[^0-9.-]+/g, '')) || 0;
+    }
+
+    function rowCreated(row) {
+      const value = row.getAttribute('data-created');
+      const d = value ? new Date(value) : new Date(0);
+      return d.getTime();
+    }
+
+    function showPanel(){ if (panel) panel.classList.remove('hidden'); }
+    function hidePanel(){ if (panel) panel.classList.add('hidden'); }
+
+    openBtn?.addEventListener('click', function(e){ e.preventDefault(); showPanel(); });
+    closeBtn?.addEventListener('click', function(e){ e.preventDefault(); hidePanel(); });
+
+    document.addEventListener('click', function(e){
+      if (!panel || panel.classList.contains('hidden')) return;
+      const isInside = panel.contains(e.target) || (openBtn && openBtn.contains(e.target));
+      if (!isInside) hidePanel();
+    });
+
+    function populateFilterOptions() {
+      const rows = collectRows();
+      const monthKeys = new Set();
+      const cardVals = new Set();
+      const statusVals = new Set();
+
+      rows.forEach((r) => {
+        const created = r.getAttribute('data-created') || '';
+        if (created) {
+          try {
+            const d = new Date(created);
+            if (!Number.isNaN(d.getTime())) {
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, '0');
+              monthKeys.add(`${y}-${m}`);
+            }
+          } catch (e) {}
+        }
+
+        const card = (r.getAttribute('data-card') || '').trim();
+        if (card) cardVals.add(card);
+
+        const status = (r.getAttribute('data-status') || '').trim().toLowerCase();
+        if (status) statusVals.add(status);
+      });
+
+      if (monthSelect) {
+        const selected = monthSelect.value || '';
+        const months = Array.from(monthKeys).sort().reverse();
+        monthSelect.innerHTML = '<option value="">All months</option>';
+        months.forEach((k) => {
+          const [yy, mm] = k.split('-');
+          const d = new Date(Number(yy), Number(mm) - 1, 1);
+          const label = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(d);
+          const opt = document.createElement('option');
+          opt.value = k;
+          opt.textContent = label;
+          monthSelect.appendChild(opt);
+        });
+        monthSelect.value = months.includes(selected) ? selected : '';
+      }
+
+      if (cardSelect) {
+        const selected = cardSelect.value || '';
+        const cards = Array.from(cardVals).sort();
+        cardSelect.innerHTML = '<option value="">All cards</option>';
+        cards.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c;
+          opt.textContent = `**** ${c}`;
+          cardSelect.appendChild(opt);
+        });
+        cardSelect.value = cards.includes(selected) ? selected : '';
+      }
+
+      if (statusSelect) {
+        const selected = statusSelect.value || '';
+        const statuses = Array.from(statusVals).sort();
+        statusSelect.innerHTML = '<option value="">All statuses</option>';
+        statuses.forEach((s) => {
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+          statusSelect.appendChild(opt);
+        });
+        statusSelect.value = statuses.includes(selected) ? selected : '';
+      }
+    }
+
+    function applyAddonInvoiceFilters() {
+      const rows = collectRows();
+      const month = monthSelect ? (monthSelect.value || '') : '';
+      const sort = sortSelect ? (sortSelect.value || 'latest') : 'latest';
+      const card = cardSelect ? (cardSelect.value || '') : '';
+      const status = statusSelect ? (statusSelect.value || '').toLowerCase() : '';
+      const showArchived = archivedToggle ? !!archivedToggle.checked : false;
+
+      rows.forEach((r) => {
+        const rCard = (r.getAttribute('data-card') || '').trim();
+        const rStatus = (r.getAttribute('data-status') || '').trim().toLowerCase();
+        const rCreated = r.getAttribute('data-created') || '';
+        const rHidden = r.getAttribute('data-hidden') || '0';
+
+        let show = true;
+        if (card) show = show && (rCard === card);
+        if (status) show = show && (rStatus === status);
+
+        if (month) {
+          try {
+            const d = rCreated ? new Date(rCreated) : null;
+            if (d && !Number.isNaN(d.getTime())) {
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, '0');
+              const rowKey = `${y}-${m}`;
+              show = show && (rowKey === month.substring(0, 7));
+            } else {
+              show = false;
+            }
+          } catch (e) {
+            show = false;
+          }
+        }
+
+        if (!showArchived && String(rHidden) === '1') {
+          show = false;
+        }
+
+        r.style.display = show ? '' : 'none';
+      });
+
+      const visible = rows.filter(r => r.style.display !== 'none');
+      if (noResults) {
+        if (visible.length === 0) noResults.classList.remove('hidden');
+        else noResults.classList.add('hidden');
+      }
+
+      let sorted = visible.slice();
+      if (sort === 'lowest') sorted.sort((a, b) => rowAmount(a) - rowAmount(b));
+      else if (sort === 'highest') sorted.sort((a, b) => rowAmount(b) - rowAmount(a));
+      else if (sort === 'earliest') sorted.sort((a, b) => rowCreated(a) - rowCreated(b));
+      else sorted.sort((a, b) => rowCreated(b) - rowCreated(a));
+
+      const tbody = table.querySelector('tbody');
+      sorted.forEach((r) => tbody.appendChild(r));
+      if (noResults) tbody.appendChild(noResults);
+    }
+
+    [monthSelect, sortSelect, cardSelect, statusSelect, archivedToggle].forEach((el) => {
+      if (!el) return;
+      el.addEventListener('change', function(){ applyAddonInvoiceFilters(); });
+    });
+
+    populateFilterOptions();
+    applyAddonInvoiceFilters();
+  })();
+
+  // Cancel custom-domain add-on (only present when enabled)
+  const cancelCustomDomainAddonBtn = document.getElementById('cancelCustomDomainAddonBtn');
+  if (cancelCustomDomainAddonBtn) cancelCustomDomainAddonBtn.addEventListener('click', async () => {
+    if (!confirm('Cancel the Custom Domain add-on? This will disable custom domains for this organization.')) return;
+    const statusEl = document.getElementById('customDomainAddonCancelStatus');
+    if (statusEl) statusEl.textContent = '';
+    showLoading();
+    try {
+      const resp = await fetch(`/billing/api/bus/${orgSlug}/custom-domain-addon/cancel/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken },
+        credentials: 'same-origin',
+      });
+      let data = null;
+      try { data = await resp.json(); } catch (e) { data = null; }
+      if (!resp.ok) {
+        const msg = (data && (data.error || data.message)) ? String(data.error || data.message) : 'Failed to cancel add-on.';
+        if (statusEl) statusEl.textContent = msg;
+        showToast('error', msg, 6500);
+        return;
+      }
+      showToast('success', 'Custom Domain add-on canceled.', 4500);
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      const msg = 'Failed to cancel add-on: ' + (e && e.message ? e.message : String(e));
+      if (statusEl) statusEl.textContent = msg;
+      showToast('error', msg, 6500);
     } finally {
       hideLoading();
     }

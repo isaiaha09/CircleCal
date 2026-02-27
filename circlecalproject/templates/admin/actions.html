@@ -14,7 +14,7 @@
 <div id="changelist-actions" class="actions mx-1 text-white {% if not cl.model_admin.list_fullwidth %}mx-auto{% endif %}" x-bind:style="'width: ' + changeListWidth + 'px'">
     <div class="bg-primary-600 flex flex-col gap-3 mx-3 p-1.5 rounded-default dark:bg-primary-500 sm:flex-row sm:items-center lg:items-center">
         {% block actions %}
-            <div class="group primary flex flex-row gap-2 lg:flex-row"
+              <div class="group primary flex flex-wrap items-center gap-2 lg:flex-row"
                  x-data="{action: '', selectAcross: 0}"
                  x-init="$nextTick(() => { const sel = $el.querySelector('select[name=action]'); if (sel) action = sel.value || ''; })"
                  x-on:change="if ($event.target && $event.target.name === 'action') action = $event.target.value">
@@ -34,8 +34,11 @@
                 {% endblock %}
 
                 {% block actions-submit %}
-                    <button type="submit" x-show="action" class="bg-primary-900 cursor-pointer flex font-medium items-center justify-center px-3 py-1 rounded-default text-sm text-white whitespace-nowrap" title="{% translate "Run the selected action" %}" name="index" value="{{ action_index|default:0 }}">
+                    <button type="submit" class="bg-primary-900 border border-white/30 cursor-pointer inline-flex font-medium items-center justify-center px-3 py-1 rounded-default text-sm text-white whitespace-nowrap" title="{% translate "Run the selected action" %}" name="index" value="{{ action_index|default:0 }}">
                         {% trans "Run" %}
+                    </button>
+                    <button type="submit" class="bg-white/20 border border-white/30 cursor-pointer inline-flex font-medium items-center justify-center px-3 py-1 rounded-default text-sm text-white whitespace-nowrap" title="{% translate "Apply selected action" %}" name="index" value="{{ action_index|default:0 }}">
+                        {% trans "Go" %}
                     </button>
                 {% endblock %}
             </div>
@@ -71,6 +74,12 @@
                     </div>
                 {% endif %}
             {% endblock %}
+
+            <div class="ml-auto flex items-center gap-2">
+                <button type="submit" class="bg-primary-900 border border-white/40 cursor-pointer inline-flex font-medium items-center justify-center px-3 py-1 rounded-default text-sm text-white whitespace-nowrap" title="{% translate "Execute selected action" %}" name="index" value="{{ action_index|default:0 }}">
+                    {% trans "Apply" %}
+                </button>
+            </div>
         {% endblock %}
     </div>
 </div>

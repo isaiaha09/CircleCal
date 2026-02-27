@@ -1,3 +1,5 @@
+import os
+
 from django.contrib import admin
 from billing.models import (
     Plan,
@@ -49,17 +51,21 @@ class UserWithDetailsChoiceField(forms.ModelMultipleChoiceField):
         org_name = org.name if org else 'No business'
         # Determine current plan
         plan_name = 'No subscription'
+        custom_domain_status = 'custom domain-disabled'
         try:
             if org and hasattr(org, 'subscription') and getattr(org.subscription, 'plan', None):
                 plan_name = org.subscription.plan.name
+            if org and hasattr(org, 'subscription') and getattr(org.subscription, 'custom_domain_addon_enabled', False):
+                custom_domain_status = 'custom domain-enabled'
         except Exception:
             plan_name = 'No subscription'
+            custom_domain_status = 'custom domain-disabled'
 
         parts = [username]
         if full:
             parts.append(full)
         parts.append(f"{org_name}")
-        parts.append(f"Plan: {plan_name}")
+        parts.append(f"Plan: {plan_name} — {custom_domain_status}")
         return ' — '.join(parts)
 
 
@@ -158,6 +164,7 @@ class DiscountCodeAdmin(admin.ModelAdmin):
     form = DiscountCodeAdminForm
     readonly_fields = ('created_at',)
     change_form_template = 'admin/billing/discountcode/change_form.html'
+    change_list_template = 'admin/billing/discountcode/change_list.html'
     actions = ('make_active', 'make_inactive')
 
     from django import forms
@@ -191,17 +198,21 @@ class DiscountCodeAdmin(admin.ModelAdmin):
             org_name = org.name if org else 'No business'
             # Determine current plan
             plan_name = 'No subscription'
+            custom_domain_status = 'custom domain-disabled'
             try:
                 if org and hasattr(org, 'subscription') and getattr(org.subscription, 'plan', None):
                     plan_name = org.subscription.plan.name
+                if org and hasattr(org, 'subscription') and getattr(org.subscription, 'custom_domain_addon_enabled', False):
+                    custom_domain_status = 'custom domain-enabled'
             except Exception:
                 plan_name = 'No subscription'
+                custom_domain_status = 'custom domain-disabled'
 
             parts = [username]
             if full:
                 parts.append(full)
             parts.append(f"{org_name}")
-            parts.append(f"Plan: {plan_name}")
+            parts.append(f"Plan: {plan_name} — {custom_domain_status}")
             return ' — '.join(parts)
 
     
@@ -283,7 +294,7 @@ class DiscountCodeAdmin(admin.ModelAdmin):
                     ok, msg = d.apply_to_organization(org, proration_behavior='create_prorations', applied_by=request.user, source_user=u)
                     results.append(f"{d.code} -> {org.slug}: {ok} ({msg})")
         self.message_user(request, "\n".join(results[:20]))
-    apply_to_users_prorate.short_description = 'Apply discounts to selected users (immediate/prorate)'
+    apply_to_users_prorate.short_description = 'PLAN — Apply discounts to selected users (immediate/prorate)'
 
     def apply_to_users_period_end(self, request, queryset):
         """Admin action: apply selected DiscountCodes to their assigned users' organizations at period end (no proration)."""
@@ -300,9 +311,135 @@ class DiscountCodeAdmin(admin.ModelAdmin):
                     ok, msg = d.apply_to_organization(org, proration_behavior='none', applied_by=request.user, source_user=u)
                     results.append(f"{d.code} -> {org.slug}: {ok} ({msg})")
         self.message_user(request, "\n".join(results[:20]))
-    apply_to_users_period_end.short_description = 'Apply discounts to selected users (period end/no proration)'
+    apply_to_users_period_end.short_description = 'PLAN — Apply discounts to selected users (period end/no proration)'
 
-    actions = ('make_active', 'make_inactive', 'create_stripe_resources', 'apply_to_users_prorate', 'apply_to_users_period_end')
+    def _find_custom_domain_addon_subscription_id(self, org):
+        """Return Stripe subscription id for custom-domain add-on for this org, if any."""
+        import stripe
+        from django.conf import settings
+
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+
+        customer_id = getattr(org, 'stripe_customer_id', None)
+        if not customer_id:
+            return None
+
+        addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+        rows = stripe.Subscription.list(customer=customer_id, status='all', limit=100)
+        data = rows.get('data', []) if isinstance(rows, dict) else getattr(rows, 'data', []) or []
+
+        candidate = None
+        for row in data:
+            meta = row.get('metadata', {}) if isinstance(row, dict) else getattr(row, 'metadata', {}) or {}
+            purchase_type = (meta.get('purchase_type') or '').strip().lower() if isinstance(meta, dict) else ''
+            status = (row.get('status') if isinstance(row, dict) else getattr(row, 'status', '')) or ''
+            status = str(status).strip().lower()
+
+            is_addon = purchase_type == 'custom_domain_addon'
+            if not is_addon and addon_price_id:
+                try:
+                    items_obj = row.get('items', {}) if isinstance(row, dict) else getattr(row, 'items', {}) or {}
+                    items = items_obj.get('data', []) if isinstance(items_obj, dict) else getattr(items_obj, 'data', []) or []
+                    for item in items:
+                        price = item.get('price', {}) if isinstance(item, dict) else getattr(item, 'price', {}) or {}
+                        pid = (price.get('id') if isinstance(price, dict) else getattr(price, 'id', '')) or ''
+                        if str(pid).strip() == addon_price_id:
+                            is_addon = True
+                            break
+                except Exception:
+                    pass
+
+            if not is_addon:
+                continue
+
+            sid = (row.get('id') if isinstance(row, dict) else getattr(row, 'id', None))
+            sid = str(sid).strip() if sid else None
+            if not sid:
+                continue
+
+            if candidate is None:
+                candidate = sid
+            if status in {'active', 'trialing', 'past_due', 'unpaid'}:
+                return sid
+
+        return candidate
+
+    def _apply_to_users_custom_domain_addon(self, request, queryset, *, proration_behavior):
+        import stripe
+        from django.conf import settings
+
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        results = []
+
+        for d in queryset:
+            try:
+                d.create_stripe_coupon_and_promotion()
+            except Exception as e:
+                results.append(f"{d.code}: stripe create failed: {e}")
+                continue
+
+            for u in d.users.all():
+                for m in u.memberships.filter(is_active=True):
+                    org = m.organization
+                    try:
+                        addon_sid = self._find_custom_domain_addon_subscription_id(org)
+                    except Exception as e:
+                        results.append(f"{d.code} -> {org.slug}: False (addon lookup failed: {e})")
+                        continue
+
+                    if not addon_sid:
+                        results.append(f"{d.code} -> {org.slug}: False (no custom-domain add-on subscription)")
+                        continue
+
+                    try:
+                        discounts = None
+                        if getattr(d, 'stripe_promotion_code_id', None):
+                            discounts = [{"promotion_code": str(d.stripe_promotion_code_id)}]
+                        elif getattr(d, 'stripe_coupon_id', None):
+                            discounts = [{"coupon": str(d.stripe_coupon_id)}]
+
+                        # Newer Stripe billing modes (e.g., flexible) reject top-level
+                        # `coupon=`. Prefer `discounts=[...]` and fallback for older APIs.
+                        try:
+                            if discounts:
+                                stripe.Subscription.modify(
+                                    addon_sid,
+                                    discounts=discounts,
+                                    proration_behavior=proration_behavior,
+                                )
+                            else:
+                                raise Exception('Missing Stripe coupon/promotion on discount code')
+                        except Exception:
+                            stripe.Subscription.modify(
+                                addon_sid,
+                                coupon=d.stripe_coupon_id,
+                                proration_behavior=proration_behavior,
+                            )
+                        results.append(f"{d.code} -> {org.slug}: True (applied to add-on {addon_sid})")
+                    except Exception as e:
+                        results.append(f"{d.code} -> {org.slug}: False ({e})")
+
+        self.message_user(request, "\n".join(results[:40]) if results else "No users/organizations found for selected discount codes.")
+
+    def apply_to_users_custom_domain_addon_prorate(self, request, queryset):
+        """Admin action: apply selected DiscountCodes to custom-domain add-on subscriptions with proration."""
+        self._apply_to_users_custom_domain_addon(request, queryset, proration_behavior='create_prorations')
+    apply_to_users_custom_domain_addon_prorate.short_description = 'CUSTOM DOMAIN ADD-ON — Apply discounts to selected users (immediate/prorate)'
+
+    def apply_to_users_custom_domain_addon_period_end(self, request, queryset):
+        """Admin action: apply selected DiscountCodes to custom-domain add-on subscriptions at period end (no proration)."""
+        self._apply_to_users_custom_domain_addon(request, queryset, proration_behavior='none')
+    apply_to_users_custom_domain_addon_period_end.short_description = 'CUSTOM DOMAIN ADD-ON — Apply discounts to selected users (period end/no proration)'
+
+    actions = (
+        'make_active',
+        'make_inactive',
+        'create_stripe_resources',
+        'apply_to_users_prorate',
+        'apply_to_users_period_end',
+        'apply_to_users_custom_domain_addon_prorate',
+        'apply_to_users_custom_domain_addon_period_end',
+    )
 
     def deactivate_applied_discounts(self, request, queryset):
         """Admin action: mark AppliedDiscount records as inactive for organizations/users tied to selected DiscountCodes (local only)."""
@@ -357,7 +494,20 @@ class DiscountCodeAdmin(admin.ModelAdmin):
     remove_coupon_and_deactivate.short_description = 'Remove coupon in Stripe and deactivate applied discounts'
 
     # extend actions
-    actions = ('make_active', 'make_inactive', 'create_stripe_resources', 'apply_to_users_prorate', 'apply_to_users_period_end', 'deactivate_applied_discounts', 'remove_coupon_and_deactivate')
+    actions = (
+        'make_active',
+        'make_inactive',
+        'create_stripe_resources',
+        'apply_to_users_prorate',
+        'apply_to_users_period_end',
+        'apply_to_users_custom_domain_addon_prorate',
+        'apply_to_users_custom_domain_addon_period_end',
+        'deactivate_applied_discounts',
+        'remove_coupon_and_deactivate',
+    )
+
+    class Media:
+        js = ('billing/admin_discountcode_actions.js',)
 
 
 @admin.register(AppliedDiscount)

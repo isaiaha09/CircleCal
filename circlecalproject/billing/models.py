@@ -460,11 +460,29 @@ class DiscountCode(models.Model):
             return False, f"No Stripe subscription found for org {org}"
 
         try:
-            stripe.Subscription.modify(
-                sub.stripe_subscription_id,
-                coupon=self.stripe_coupon_id,
-                proration_behavior=proration_behavior,
-            )
+            discounts = None
+            if self.stripe_promotion_code_id:
+                discounts = [{"promotion_code": str(self.stripe_promotion_code_id)}]
+            elif self.stripe_coupon_id:
+                discounts = [{"coupon": str(self.stripe_coupon_id)}]
+
+            # Newer Stripe billing modes (e.g., flexible) reject top-level
+            # `coupon=`. Prefer `discounts=[...]`; fallback keeps older behavior.
+            try:
+                if discounts:
+                    stripe.Subscription.modify(
+                        sub.stripe_subscription_id,
+                        discounts=discounts,
+                        proration_behavior=proration_behavior,
+                    )
+                else:
+                    raise ValueError('Discount has no Stripe coupon/promotion id')
+            except Exception:
+                stripe.Subscription.modify(
+                    sub.stripe_subscription_id,
+                    coupon=self.stripe_coupon_id,
+                    proration_behavior=proration_behavior,
+                )
             # Record local AppliedDiscount audit
             try:
                 AppliedDiscount.objects.create(

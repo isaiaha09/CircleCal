@@ -672,6 +672,93 @@ def sync_custom_domain_addon_status(request, org_slug):
     return JsonResponse({"enabled": enabled})
 
 
+@login_required
+@require_POST
+def cancel_custom_domain_addon_subscription(request, org_slug):
+    """Cancel the custom-domain add-on subscription (if present) and disable it locally."""
+    org = get_object_or_404(Organization, slug=org_slug)
+
+    deny = _deny_in_app_billing(request)
+    if deny:
+        return JsonResponse({"error": "Billing is not available in app mode."}, status=403)
+
+    err = _require_org_owner_or_admin(request, org)
+    if err:
+        return JsonResponse({"error": "Only owners can manage billing."}, status=403)
+
+    sub, _ = Subscription.objects.get_or_create(
+        organization=org,
+        defaults={
+            'status': 'active',
+            'active': True,
+        },
+    )
+
+    # Always disable locally; Stripe cancellation is best-effort.
+    canceled_in_stripe = False
+    canceled_ids = []
+
+    addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+
+    if org.stripe_customer_id:
+        try:
+            rows = stripe.Subscription.list(customer=org.stripe_customer_id, status='all', limit=100)
+            data = _stripe_obj_get(rows, 'data', []) or []
+            for row in data:
+                meta = _stripe_obj_get(row, 'metadata', {}) or {}
+                purchase_type = (meta.get('purchase_type') or '').strip().lower()
+                status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
+
+                is_addon = purchase_type == 'custom_domain_addon'
+                if not is_addon and addon_price_id:
+                    try:
+                        items_obj = _stripe_obj_get(row, 'items', {}) or {}
+                        items = _stripe_obj_get(items_obj, 'data', []) or []
+                        for item in items:
+                            price = _stripe_obj_get(item, 'price', {}) or {}
+                            pid = (_stripe_obj_get(price, 'id', '') or '').strip()
+                            if pid and pid == addon_price_id:
+                                is_addon = True
+                                break
+                    except Exception:
+                        pass
+
+                if not is_addon:
+                    continue
+
+                # Cancel any non-fully-canceled add-on subscriptions.
+                if status in {'canceled', 'incomplete_expired'}:
+                    continue
+
+                sid = (_stripe_obj_get(row, 'id', '') or '').strip()
+                if not sid:
+                    continue
+                try:
+                    stripe.Subscription.delete(sid)
+                    canceled_in_stripe = True
+                    canceled_ids.append(sid)
+                except InvalidRequestError as e:
+                    # Treat missing subscription as already canceled.
+                    if 'No such subscription' in str(e):
+                        canceled_in_stripe = True
+                        canceled_ids.append(sid)
+                    else:
+                        raise
+        except Exception:
+            # If Stripe cancellation fails, still proceed with local disable.
+            canceled_in_stripe = False
+
+    sub.custom_domain_addon_enabled = False
+    sub.save(update_fields=['custom_domain_addon_enabled'])
+
+    return JsonResponse({
+        "status": "ok",
+        "enabled": False,
+        "canceled_in_stripe": bool(canceled_in_stripe),
+        "canceled_ids": canceled_ids,
+    })
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
@@ -2323,6 +2410,312 @@ def manage_billing(request, org_slug):
         except Exception:
             next_billing_iso = None
 
+    # ---- Custom Domain Add-on (separate Stripe subscription) ----
+    # This add-on is purchased as its own Stripe subscription. The main
+    # invoice list above is scoped to the primary subscription, so add-on
+    # invoices would otherwise not appear. When enabled, show its monthly
+    # amount, next charge, and a small invoice table.
+    custom_domain_addon_monthly_dollars = None
+    custom_domain_addon_next_charge = None
+    custom_domain_addon_invoices = []
+    addon_stripe_sub = None
+    custom_domain_addon_discount = None
+    try:
+        # Keep add-on history visible even if currently disabled.
+        # We still gate cancellation controls separately via show_custom_domain_addon_cancel.
+        if org.stripe_customer_id:
+            addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
+
+            try:
+                rows = stripe.Subscription.list(customer=org.stripe_customer_id, status='all', limit=100)
+                data = _stripe_obj_get(rows, 'data', []) or []
+                # Prefer an active/trialing add-on subscription; otherwise fall back to the newest match.
+                candidate = None
+                for row in data:
+                    meta = _stripe_obj_get(row, 'metadata', {}) or {}
+                    purchase_type = (meta.get('purchase_type') or '').strip().lower()
+                    status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
+
+                    is_addon = purchase_type == 'custom_domain_addon'
+                    if not is_addon and addon_price_id:
+                        try:
+                            items_obj = _stripe_obj_get(row, 'items', {}) or {}
+                            items = _stripe_obj_get(items_obj, 'data', []) or []
+                            for item in items:
+                                price = _stripe_obj_get(item, 'price', {}) or {}
+                                pid = (_stripe_obj_get(price, 'id', '') or '').strip()
+                                if pid and pid == addon_price_id:
+                                    is_addon = True
+                                    break
+                        except Exception:
+                            pass
+
+                    if not is_addon:
+                        continue
+
+                    # Keep first match as fallback; prefer active/trialing.
+                    if candidate is None:
+                        candidate = row
+                    if status in {'active', 'trialing'}:
+                        addon_stripe_sub = row
+                        break
+
+                if addon_stripe_sub is None:
+                    addon_stripe_sub = candidate
+            except Exception:
+                addon_stripe_sub = None
+
+            addon_sid = (_stripe_obj_get(addon_stripe_sub, 'id', '') or '').strip() if addon_stripe_sub else None
+
+            # Current add-on discount display. Support both legacy `discount`
+            # and newer `discounts` structures returned by Stripe.
+            try:
+                discount_candidates = []
+
+                discounts_obj = _stripe_obj_get(addon_stripe_sub, 'discounts', {}) or {}
+                if isinstance(discounts_obj, list):
+                    discount_candidates.extend(discounts_obj)
+                else:
+                    discounts_data = _stripe_obj_get(discounts_obj, 'data', []) or []
+                    if discounts_data:
+                        discount_candidates.extend(discounts_data)
+
+                # Some Stripe responses return discounts as IDs only.
+                # Re-fetch with expand so we can render coupon details.
+                try:
+                    need_expand = bool(discount_candidates) and all(isinstance(x, str) for x in discount_candidates)
+                    if need_expand and addon_sid:
+                        expanded_sub = stripe.Subscription.retrieve(
+                            addon_sid,
+                            expand=['discounts', 'discount'],
+                        )
+                        expanded_discounts_obj = _stripe_obj_get(expanded_sub, 'discounts', {}) or {}
+                        expanded_candidates = []
+                        if isinstance(expanded_discounts_obj, list):
+                            expanded_candidates.extend(expanded_discounts_obj)
+                        else:
+                            expanded_data = _stripe_obj_get(expanded_discounts_obj, 'data', []) or []
+                            if expanded_data:
+                                expanded_candidates.extend(expanded_data)
+                        if expanded_candidates:
+                            discount_candidates = expanded_candidates
+                        expanded_legacy = _stripe_obj_get(expanded_sub, 'discount', None)
+                        if expanded_legacy:
+                            discount_candidates.append(expanded_legacy)
+                except Exception:
+                    pass
+
+                legacy_discount = _stripe_obj_get(addon_stripe_sub, 'discount', None)
+                if legacy_discount:
+                    discount_candidates.append(legacy_discount)
+
+                parsed = None
+                for candidate in discount_candidates:
+                    discount_obj = candidate
+                    if isinstance(discount_obj, str):
+                        # ID-only discounts cannot be resolved directly on this
+                        # Stripe SDK version; rely on expanded subscription above.
+                        continue
+
+                    coupon_obj = _stripe_obj_get(discount_obj, 'coupon', None)
+                    if not coupon_obj:
+                        source_obj = _stripe_obj_get(discount_obj, 'source', {}) or {}
+                        source_coupon_id = _stripe_obj_get(source_obj, 'coupon', None)
+                        if source_coupon_id:
+                            coupon_obj = source_coupon_id
+                    if isinstance(coupon_obj, str):
+                        try:
+                            coupon_obj = stripe.Coupon.retrieve(coupon_obj)
+                        except Exception:
+                            coupon_obj = None
+                    coupon_obj = coupon_obj or {}
+
+                    promo_obj = _stripe_obj_get(discount_obj, 'promotion_code', None)
+                    promo_code = None
+                    if isinstance(promo_obj, str):
+                        try:
+                            promo_obj = stripe.PromotionCode.retrieve(promo_obj)
+                        except Exception:
+                            promo_obj = None
+                    if promo_obj:
+                        promo_code = _stripe_obj_get(promo_obj, 'code', None)
+
+                    coupon_id = (_stripe_obj_get(coupon_obj, 'id', '') or '').strip()
+                    percent_off = _stripe_obj_get(coupon_obj, 'percent_off', None)
+                    amount_off = _stripe_obj_get(coupon_obj, 'amount_off', None)
+                    currency = (_stripe_obj_get(coupon_obj, 'currency', '') or 'usd').upper()
+
+                    if coupon_id or percent_off is not None or amount_off is not None:
+                        parsed = {
+                            'code': (promo_code or coupon_id or ''),
+                            'percent_off': (float(percent_off) if percent_off is not None else None),
+                            'amount_off_cents': (int(amount_off) if amount_off is not None else None),
+                            'currency': currency,
+                        }
+                        break
+
+                custom_domain_addon_discount = parsed
+            except Exception:
+                custom_domain_addon_discount = None
+
+            # Monthly amount: sum unit_amount * quantity across line items.
+            try:
+                total_cents = 0
+                items_obj = _stripe_obj_get(addon_stripe_sub, 'items', {}) or {}
+                items = _stripe_obj_get(items_obj, 'data', []) or []
+                for item in items:
+                    qty = _stripe_obj_get(item, 'quantity', 1) or 1
+                    price = _stripe_obj_get(item, 'price', {}) or {}
+                    unit = _stripe_obj_get(price, 'unit_amount', None)
+                    if unit is None:
+                        # Some Stripe objects use unit_amount_decimal
+                        unit = _stripe_obj_get(price, 'unit_amount_decimal', None)
+                        try:
+                            unit = int(float(unit)) if unit is not None else None
+                        except Exception:
+                            unit = None
+                    if unit is not None:
+                        try:
+                            total_cents += int(unit) * int(qty)
+                        except Exception:
+                            pass
+                if total_cents:
+                    custom_domain_addon_monthly_dollars = total_cents / 100.0
+            except Exception:
+                custom_domain_addon_monthly_dollars = None
+
+            # Next charge date: prefer upcoming invoice preview, else subscription current_period_end.
+            try:
+                billing_date = None
+                if addon_sid:
+                    try:
+                        ui = stripe_invoice_upcoming(customer=org.stripe_customer_id, subscription=addon_sid)
+                    except Exception:
+                        ui = None
+                    if ui:
+                        billing_timestamp = ui.get('period_end') or ui.get('created')
+                        if billing_timestamp:
+                            try:
+                                from datetime import datetime, timezone as dt_tz
+                                billing_utc = datetime.fromtimestamp(int(billing_timestamp), tz=dt_tz.utc)
+                                billing_date = timezone.localtime(billing_utc)
+                            except Exception:
+                                billing_date = None
+                if not billing_date:
+                    cpe = _stripe_obj_get(addon_stripe_sub, 'current_period_end', None)
+                    if cpe:
+                        try:
+                            from datetime import datetime, timezone as dt_tz
+                            cpe_utc = datetime.fromtimestamp(int(cpe), tz=dt_tz.utc)
+                            billing_date = timezone.localtime(cpe_utc)
+                        except Exception:
+                            billing_date = None
+                custom_domain_addon_next_charge = billing_date
+            except Exception:
+                custom_domain_addon_next_charge = None
+
+            # Invoices for the add-on subscription.
+            try:
+                if addon_sid:
+                    invs = stripe.Invoice.list(subscription=addon_sid, limit=10)
+                    raw_invoices = invs.get('data', [])
+                    from datetime import datetime, timezone as dt_tz
+                    for i in raw_invoices:
+                        amount_display = i.get('amount_paid') if i.get('amount_paid', 0) else i.get('amount_due', 0)
+                        created_ts = i.get('created')
+                        created_dt = None
+                        try:
+                            if created_ts:
+                                created_utc = datetime.fromtimestamp(int(created_ts), tz=dt_tz.utc)
+                                created_dt = timezone.localtime(created_utc)
+                        except Exception:
+                            created_dt = None
+                        custom_domain_addon_invoices.append({
+                            'created': created_dt,
+                            'amount_display_dollars': (amount_display / 100.0),
+                            'status': i.get('status'),
+                            'hosted_invoice_url': i.get('hosted_invoice_url'),
+                            'card_brand': None,
+                            'card_last4': None,
+                            'raw': i,
+                            'hidden': False,
+                        })
+
+                    # Enrich add-on invoices with card details where available.
+                    for idx, entry in enumerate(custom_domain_addon_invoices):
+                        raw = entry.get('raw')
+                        try:
+                            card_brand = None
+                            card_last4 = None
+
+                            pi = raw.get('payment_intent') if isinstance(raw, dict) else None
+                            if pi:
+                                try:
+                                    pi_obj = stripe.PaymentIntent.retrieve(pi) if isinstance(pi, str) else pi
+                                    charges = pi_obj.get('charges', {}).get('data', [])
+                                    if charges:
+                                        ch = charges[0]
+                                        pm_card = ch.get('payment_method_details', {}).get('card', {})
+                                        card_brand = pm_card.get('brand')
+                                        card_last4 = pm_card.get('last4')
+                                except Exception:
+                                    pass
+
+                            if not card_last4:
+                                charge_id = raw.get('charge') if isinstance(raw, dict) else None
+                                if charge_id:
+                                    try:
+                                        ch = stripe.Charge.retrieve(charge_id)
+                                        pm_card = ch.get('payment_method_details', {}).get('card', {})
+                                        card_brand = pm_card.get('brand')
+                                        card_last4 = pm_card.get('last4')
+                                    except Exception:
+                                        pass
+
+                            if card_brand:
+                                custom_domain_addon_invoices[idx]['card_brand'] = card_brand
+                            if card_last4:
+                                custom_domain_addon_invoices[idx]['card_last4'] = card_last4
+                        except Exception:
+                            continue
+
+                    # Annotate hidden flag from local invoice metadata so
+                    # View/Hide/Void/Unhide behavior matches the primary table.
+                    try:
+                        addon_ids = [
+                            (inv.get('raw') or {}).get('id')
+                            for inv in custom_domain_addon_invoices
+                            if (inv.get('raw') or {}).get('id')
+                        ]
+                        hidden_addon_ids = set(
+                            InvoiceMeta.objects.filter(
+                                organization=org,
+                                hidden=True,
+                                stripe_invoice_id__in=addon_ids,
+                            ).values_list('stripe_invoice_id', flat=True)
+                        )
+                        for inv in custom_domain_addon_invoices:
+                            inv_id = (inv.get('raw') or {}).get('id')
+                            inv['hidden'] = bool(inv_id and inv_id in hidden_addon_ids)
+                    except Exception:
+                        pass
+            except Exception:
+                custom_domain_addon_invoices = []
+    except Exception:
+        custom_domain_addon_monthly_dollars = None
+        custom_domain_addon_next_charge = None
+        custom_domain_addon_invoices = []
+        custom_domain_addon_discount = None
+
+    show_custom_domain_addon_cancel = bool(subscription and getattr(subscription, 'custom_domain_addon_enabled', False))
+    show_custom_domain_addon_section = bool(
+        show_custom_domain_addon_cancel
+        or custom_domain_addon_invoices
+        or custom_domain_addon_monthly_dollars is not None
+        or custom_domain_addon_next_charge is not None
+        or addon_stripe_sub is not None
+    )
+
     # --- Detect locally applied discount (AppliedDiscount) for display ---
     applied_discount = None
     try:
@@ -2465,6 +2858,12 @@ def manage_billing(request, org_slug):
     return render(request, "billing/manage.html", {
         "org": org,
         "subscription": subscription,
+        "show_custom_domain_addon_cancel": show_custom_domain_addon_cancel,
+        "show_custom_domain_addon_section": show_custom_domain_addon_section,
+        "custom_domain_addon_monthly_dollars": custom_domain_addon_monthly_dollars,
+        "custom_domain_addon_next_charge": custom_domain_addon_next_charge,
+        "custom_domain_addon_invoices": custom_domain_addon_invoices,
+        "custom_domain_addon_discount": custom_domain_addon_discount,
         "plans": plans,
         "scheduled_plan": (subscription.scheduled_plan if subscription and getattr(subscription, 'scheduled_plan', None) else None),
         "scheduled_change_is_downgrade": scheduled_change_is_downgrade,
