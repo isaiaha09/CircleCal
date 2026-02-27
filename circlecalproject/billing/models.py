@@ -107,6 +107,12 @@ class Subscription(models.Model):
     current_period_end = models.DateTimeField(null=True, blank=True)
     trial_end = models.DateTimeField(null=True, blank=True)
 
+    # Add-ons
+    # Customer-owned custom domains (via an edge provider like Cloudflare for SaaS).
+    # This is intentionally separate from plan tier so Pro/Team can include hosted
+    # CircleCal subdomains while charging extra for customer-owned domains.
+    custom_domain_addon_enabled = models.BooleanField(default=False)
+
     def is_active(self):
         # Prefer explicit active flag if maintained by webhook; fallback to status/end_date
         if self.active:

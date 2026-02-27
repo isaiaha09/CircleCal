@@ -4574,7 +4574,7 @@ def org_refund_settings(request, org_slug):
 @require_http_methods(["GET", "POST"])
 @require_roles(["owner"])
 def org_custom_domain_settings(request, org_slug):
-    """Allow Pro/Team orgs to verify and use a custom booking domain."""
+    """Allow eligible orgs to verify and use a customer-owned booking domain."""
     org = get_object_or_404(Organization, slug=org_slug)
 
     membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
@@ -4600,6 +4600,17 @@ def org_custom_domain_settings(request, org_slug):
         delete_custom_domain,
         log_auth_diagnostics,
         log_config_presence,
+    )
+
+    from calendar_app.cloudflare_api import (
+        CloudflareApiError,
+        delete_custom_hostname,
+        ensure_custom_hostname,
+        ensure_fallback_origin,
+        find_custom_hostname_id_by_hostname,
+        get_cloudflare_config,
+        log_api_check as log_cf_api_check,
+        log_config_presence as log_cf_config_presence,
     )
 
     def _normalize_domain(raw: str) -> str:
@@ -4725,7 +4736,7 @@ def org_custom_domain_settings(request, org_slug):
         action = (request.POST.get('action') or '').strip()
 
         if not can_use:
-            messages.error(request, 'Custom domains require an active Pro or Team plan (not trial).')
+            messages.error(request, 'Custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
         if action == 'set_domain':
@@ -4794,43 +4805,55 @@ def org_custom_domain_settings(request, org_slug):
                 org.custom_domain_verified = True
                 org.custom_domain_verified_at = timezone.now()
                 org.save(update_fields=['custom_domain_verified', 'custom_domain_verified_at'])
-                cfg = get_render_config()
-                if cfg:
+
+                # Prefer Cloudflare for SaaS / Custom Hostnames when configured.
+                cf_cfg = get_cloudflare_config()
+                if cf_cfg:
                     try:
-                        # Logs-only: show whether env vars look present on the running instance.
-                        log_config_presence()
-                        # Logs-only: helps distinguish invalid creds (401) from other failures.
-                        log_auth_diagnostics(cfg)
-                        ensure_custom_domain_attached(cfg, domain)
-                        messages.success(request, 'Domain verified! HTTPS is now being provisioned for this domain (this can take a few minutes).')
-                    except RenderApiError as exc:
-                        # Keep CircleCal verification successful even if Render API fails.
+                        log_cf_config_presence()
+                        log_cf_api_check(cf_cfg)
+
+                        # If configured, ensure the zone fallback origin is set (idempotent).
+                        if cf_cfg.fallback_origin:
+                            ensure_fallback_origin(cf_cfg, cf_cfg.fallback_origin)
+
+                        cf_id = ensure_custom_hostname(
+                            cf_cfg,
+                            domain,
+                            custom_metadata={
+                                'org_id': str(org.id),
+                                'org_slug': str(org.slug),
+                            },
+                        )
+                        if cf_id and getattr(org, 'custom_domain_cloudflare_id', None) != cf_id:
+                            org.custom_domain_cloudflare_id = cf_id
+                            org.save(update_fields=['custom_domain_cloudflare_id'])
+
+                        messages.success(
+                            request,
+                            'Domain verified! HTTPS is now being provisioned for this domain (this can take a few minutes).',
+                        )
+                    except CloudflareApiError as exc:
                         messages.success(request, 'Domain verified!')
                         try:
                             import logging
 
                             logging.getLogger(__name__).warning(
-                                'Render auto-attach failed for custom domain %s (status=%s, payload=%s)',
+                                'Cloudflare custom hostname provisioning failed for %s (status=%s, payload=%s)',
                                 domain,
                                 getattr(exc, 'status_code', None),
                                 getattr(exc, 'payload', None),
                             )
                         except Exception:
                             pass
-
-                        # Also print a single line to stdout so it shows up in Render logs
-                        # even if Python logging isn't configured.
                         try:
                             print(
-                                'CC_RENDER_AUTO_ATTACH_FAIL '
+                                'CC_CLOUDFLARE_CUSTOM_HOSTNAME_FAIL '
                                 f'domain={domain} status={getattr(exc, "status_code", None)} '
                                 f'payload={getattr(exc, "payload", None)!r}'
                             )
                         except Exception:
                             pass
-
-                        # Keep the UI provider-agnostic.
-                        # (Auth failures here commonly mean server configuration is wrong.)
                         messages.warning(
                             request,
                             'Automatic HTTPS provisioning could not be started due to a server configuration issue. Please contact support.',
@@ -4839,40 +4862,106 @@ def org_custom_domain_settings(request, org_slug):
                         messages.success(request, 'Domain verified!')
                         messages.warning(request, 'Automatic HTTPS provisioning could not be started due to an unexpected error.')
                 else:
-                    # Logs-only: helps detect missing env vars in production.
-                    try:
-                        log_config_presence()
-                    except Exception:
-                        pass
-                    messages.success(request, 'Domain verified!')
-                    messages.warning(
-                        request,
-                        'Next step: CircleCal will now provision HTTPS for this domain. '
-                        'If you still see a Cloudflare error page (for example error 1001) or it does not start working within 10–20 minutes, contact support.',
-                    )
+                    # Fallback: legacy Render integration (optional)
+                    cfg = get_render_config()
+                    if cfg:
+                        try:
+                            # Logs-only: show whether env vars look present on the running instance.
+                            log_config_presence()
+                            # Logs-only: helps distinguish invalid creds (401) from other failures.
+                            log_auth_diagnostics(cfg)
+                            ensure_custom_domain_attached(cfg, domain)
+                            messages.success(request, 'Domain verified! HTTPS is now being provisioned for this domain (this can take a few minutes).')
+                        except RenderApiError as exc:
+                            # Keep CircleCal verification successful even if provider API fails.
+                            messages.success(request, 'Domain verified!')
+                            try:
+                                import logging
+
+                                logging.getLogger(__name__).warning(
+                                    'Render auto-attach failed for custom domain %s (status=%s, payload=%s)',
+                                    domain,
+                                    getattr(exc, 'status_code', None),
+                                    getattr(exc, 'payload', None),
+                                )
+                            except Exception:
+                                pass
+
+                            try:
+                                print(
+                                    'CC_RENDER_AUTO_ATTACH_FAIL '
+                                    f'domain={domain} status={getattr(exc, "status_code", None)} '
+                                    f'payload={getattr(exc, "payload", None)!r}'
+                                )
+                            except Exception:
+                                pass
+
+                            messages.warning(
+                                request,
+                                'Automatic HTTPS provisioning could not be started due to a server configuration issue. Please contact support.',
+                            )
+                        except Exception:
+                            messages.success(request, 'Domain verified!')
+                            messages.warning(request, 'Automatic HTTPS provisioning could not be started due to an unexpected error.')
+                    else:
+                        # Logs-only: helps detect missing env vars in production.
+                        try:
+                            log_config_presence()
+                            log_cf_config_presence()
+                        except Exception:
+                            pass
+                        messages.success(request, 'Domain verified!')
+                        messages.warning(
+                            request,
+                            'Next step: CircleCal will now provision HTTPS for this domain. '
+                            'If it does not start working within 10–20 minutes, contact support.',
+                        )
             else:
                 messages.error(request, 'TXT record not found yet. DNS can take a few minutes to propagate.')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
         if action == 'remove_domain':
             prev_domain = (org.custom_domain or '').strip().lower()
-            cfg = get_render_config()
-            if cfg and prev_domain:
-                try:
-                    delete_custom_domain(cfg, prev_domain)
-                except Exception:
-                    # Don't block removal if Render cleanup fails.
-                    pass
+
+            # Best-effort provider cleanup (do not block removal).
+            try:
+                cf_cfg = get_cloudflare_config()
+                if cf_cfg and prev_domain:
+                    try:
+                        cid = (getattr(org, 'custom_domain_cloudflare_id', None) or '').strip() or None
+                        if not cid:
+                            cid = find_custom_hostname_id_by_hostname(cf_cfg, prev_domain)
+                        if cid:
+                            delete_custom_hostname(cf_cfg, cid)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                cfg = get_render_config()
+                if cfg and prev_domain:
+                    try:
+                        delete_custom_domain(cfg, prev_domain)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             org.custom_domain = None
             org.custom_domain_verified = False
             org.custom_domain_verified_at = None
             org.custom_domain_verification_token = None
+            try:
+                org.custom_domain_cloudflare_id = None
+            except Exception:
+                pass
             org.save(update_fields=[
                 'custom_domain',
                 'custom_domain_verified',
                 'custom_domain_verified_at',
                 'custom_domain_verification_token',
+                'custom_domain_cloudflare_id',
             ])
             messages.success(request, 'Custom domain removed.')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)

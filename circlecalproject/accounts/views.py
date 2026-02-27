@@ -254,19 +254,23 @@ def profile_view(request):
 		items = list(membership_qs)
 		for m in items:
 			org_obj = getattr(m, 'organization', None)
+			can_embed = False
+			can_custom_domain = False
 			try:
-				from billing.utils import can_use_custom_domain
-				eligible = bool(can_use_custom_domain(org_obj))
+				from billing.utils import can_use_custom_domain, can_use_embed_widget
+				can_embed = bool(can_use_embed_widget(org_obj))
+				can_custom_domain = bool(can_use_custom_domain(org_obj))
 			except Exception:
-				eligible = False
+				can_embed = False
+				can_custom_domain = False
 
 			# Used by profile.html to enable/disable buttons.
 			try:
-				m.can_use_embed_widget = eligible
+				m.can_use_embed_widget = can_embed
 			except Exception:
 				pass
 			try:
-				m.can_use_custom_domain = eligible
+				m.can_use_custom_domain = can_custom_domain
 			except Exception:
 				pass
 		return items

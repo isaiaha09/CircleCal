@@ -183,6 +183,116 @@ class CustomDomainMiddleware:
         return self.get_response(request)
 
 
+class HostedSubdomainMiddleware:
+    """Support CircleCal-hosted subdomains (e.g. <orgslug>.<base_domain>).
+
+    This is intended to scale via wildcard DNS/cert and is distinct from
+    customer-owned custom domains.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @staticmethod
+    def _raw_host_without_port(request):
+        try:
+            raw = (request.META.get('HTTP_HOST') or request.META.get('SERVER_NAME') or '').strip()
+        except Exception:
+            raw = ''
+        if not raw:
+            return ''
+        return raw.split(':', 1)[0].lower()
+
+    @staticmethod
+    def _ensure_allowed_host_suffix(base_domain: str):
+        """Best-effort: add .<base_domain> to settings.ALLOWED_HOSTS if needed."""
+        base_domain = (base_domain or '').strip().lower().lstrip('.')
+        if not base_domain:
+            return
+        suffix = f'.{base_domain}'
+        try:
+            allowed = getattr(settings, 'ALLOWED_HOSTS', [])
+            if '*' in (allowed or []):
+                return
+            if isinstance(allowed, tuple):
+                allowed = list(allowed)
+            if not isinstance(allowed, list):
+                return
+            allowed_lc = [str(h).lower() for h in allowed]
+            if suffix not in allowed_lc:
+                allowed.append(suffix)
+                settings.ALLOWED_HOSTS = allowed
+        except Exception:
+            return
+
+    def __call__(self, request):
+        request.hosted_subdomain_organization = None
+
+        base = (getattr(settings, 'HOSTED_SUBDOMAIN_BASE', '') or os.getenv('HOSTED_SUBDOMAIN_BASE') or '').strip().lower().lstrip('.')
+        if not base:
+            return self.get_response(request)
+
+        host = self._raw_host_without_port(request)
+        if not host:
+            return self.get_response(request)
+
+        if host in {'testserver', 'localhost', '127.0.0.1', '[::1]'}:
+            return self.get_response(request)
+
+        suffix = f'.{base}'
+        if not host.endswith(suffix):
+            return self.get_response(request)
+
+        sub_label = host[: -len(suffix)].strip('.').lower()
+        # Only single-label subdomains are supported for wildcard certs.
+        if not sub_label or '.' in sub_label:
+            return self.get_response(request)
+
+        # Avoid collisions with common reserved hostnames.
+        if sub_label in {'www', 'api', 'static', 'media', 'admin'}:
+            return self.get_response(request)
+
+        org = None
+        try:
+            org = Organization.objects.filter(slug__iexact=sub_label).first()
+        except Exception:
+            org = None
+
+        if not org:
+            return self.get_response(request)
+
+        # Only Pro/Team should get the hosted-subdomain experience.
+        try:
+            from billing.utils import can_use_hosted_subdomain
+            eligible = bool(can_use_hosted_subdomain(org))
+        except Exception:
+            eligible = False
+
+        if not eligible:
+            # If a non-eligible org is hit by subdomain, send users to canonical.
+            try:
+                if (request.path or '/') == '/' and request.method in ('GET', 'HEAD'):
+                    canonical = (getattr(settings, 'CANONICAL_HOST', '') or '').strip().lower()
+                    if canonical:
+                        from django.urls import reverse
+                        return HttpResponsePermanentRedirect(f'https://{canonical}{reverse("bookings:public_org_page", args=[org.slug])}')
+            except Exception:
+                pass
+            return self.get_response(request)
+
+        request.hosted_subdomain_organization = org
+        self._ensure_allowed_host_suffix(base)
+
+        try:
+            if (request.path or '/') == '/':
+                from django.urls import reverse
+                return redirect(reverse('bookings:public_org_page', args=[org.slug]))
+        except Exception:
+            pass
+
+        return self.get_response(request)
+
+
 class CanonicalHostRedirectMiddleware:
     """Redirect requests to the canonical host (e.g. force circlecal.app).
 
@@ -216,6 +326,10 @@ class CanonicalHostRedirectMiddleware:
 
         # Do not interfere with verified custom domains.
         if getattr(request, 'custom_domain_organization', None) is not None:
+            return self.get_response(request)
+
+        # Do not interfere with hosted subdomains.
+        if getattr(request, 'hosted_subdomain_organization', None) is not None:
             return self.get_response(request)
 
         host = self._raw_host_without_port(request)

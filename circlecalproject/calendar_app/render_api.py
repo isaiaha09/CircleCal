@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 import re
+import hashlib
 
 import requests
 
@@ -167,9 +168,18 @@ def log_config_presence() -> None:
         service_id_raw = _env_first('RENDER_SERVICE_ID', 'RENDER_WEB_SERVICE_ID')
         api_key_norm = _normalize_api_key(api_key_raw)
         service_id = (service_id_raw or '').strip()
+
+        # Non-reversible fingerprint so we can confirm which key is in use after rotation
+        # without ever printing the secret.
+        api_fp = ''
+        try:
+            if api_key_norm:
+                api_fp = hashlib.sha256(api_key_norm.encode('utf-8')).hexdigest()[:12]
+        except Exception:
+            api_fp = ''
         print(
             'CC_RENDER_CONFIG_PRESENT '
-            f'api_key_present={bool(api_key_raw)} api_key_len={len(api_key_norm)} '
+            f'api_key_present={bool(api_key_raw)} api_key_len={len(api_key_norm)} api_key_fp={api_fp} '
             f'service_id_present={bool(service_id_raw)} service_id_len={len(service_id)}'
         )
     except Exception:

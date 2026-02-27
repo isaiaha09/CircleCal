@@ -64,6 +64,10 @@ class Business(models.Model):
     custom_domain_verification_token = models.CharField(max_length=64, blank=True, null=True)
     custom_domain_verified = models.BooleanField(default=False)
     custom_domain_verified_at = models.DateTimeField(null=True, blank=True)
+
+    # Cloudflare for SaaS / Custom Hostnames integration (optional).
+    # When present, this stores the Cloudflare custom hostname id.
+    custom_domain_cloudflare_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
     # Timezone for the organization (e.g., 'America/Los_Angeles', 'America/New_York')
     # Defaults to 'UTC' if not set - organizations should update this to their local timezone
     timezone = models.CharField(max_length=63, default='UTC', help_text="Business's timezone (e.g., America/Los_Angeles)")

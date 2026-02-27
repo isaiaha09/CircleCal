@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from accounts.models import Business
 from billing.models import Plan, Subscription
-from billing.utils import can_use_custom_domain, can_use_embed_widget
+from billing.utils import can_use_custom_domain, can_use_embed_widget, can_use_hosted_subdomain
 
 
 class TestEmbedCustomDomainGating(TestCase):
@@ -16,7 +16,14 @@ class TestEmbedCustomDomainGating(TestCase):
             timezone='UTC',
         )
 
-    def _set_subscription(self, *, slug: str, status: str, stripe_subscription_id: str | None):
+    def _set_subscription(
+        self,
+        *,
+        slug: str,
+        status: str,
+        stripe_subscription_id: str | None,
+        custom_domain_addon_enabled: bool = False,
+    ):
         plan = Plan.objects.create(
             name=slug.title(),
             slug=slug,
@@ -31,21 +38,31 @@ class TestEmbedCustomDomainGating(TestCase):
                 'status': status,
                 'stripe_subscription_id': stripe_subscription_id,
                 'active': True,
+                'custom_domain_addon_enabled': custom_domain_addon_enabled,
             },
         )
 
     def test_stripe_managed_trialing_is_blocked(self):
-        self._set_subscription(slug='team', status='trialing', stripe_subscription_id='sub_123')
+        self._set_subscription(slug='team', status='trialing', stripe_subscription_id='sub_123', custom_domain_addon_enabled=True)
         self.assertFalse(can_use_custom_domain(self.org))
         self.assertFalse(can_use_embed_widget(self.org))
+        self.assertFalse(can_use_hosted_subdomain(self.org))
 
     def test_manual_admin_trialing_is_allowed(self):
         # Manual/admin-assigned: no Stripe subscription id.
-        self._set_subscription(slug='team', status='trialing', stripe_subscription_id=None)
+        self._set_subscription(slug='team', status='trialing', stripe_subscription_id=None, custom_domain_addon_enabled=True)
         self.assertTrue(can_use_custom_domain(self.org))
         self.assertTrue(can_use_embed_widget(self.org))
+        self.assertTrue(can_use_hosted_subdomain(self.org))
+
+    def test_pro_active_without_addon_blocks_custom_domain(self):
+        self._set_subscription(slug='pro', status='active', stripe_subscription_id='sub_123', custom_domain_addon_enabled=False)
+        self.assertFalse(can_use_custom_domain(self.org))
+        self.assertTrue(can_use_embed_widget(self.org))
+        self.assertTrue(can_use_hosted_subdomain(self.org))
 
     def test_basic_is_blocked(self):
         self._set_subscription(slug='basic', status='active', stripe_subscription_id=None)
         self.assertFalse(can_use_custom_domain(self.org))
         self.assertFalse(can_use_embed_widget(self.org))
+        self.assertFalse(can_use_hosted_subdomain(self.org))

@@ -53,6 +53,20 @@ if _allow_custom_domains:
     ALLOWED_HOSTS = CANONICAL_HOSTS
 else:
     ALLOWED_HOSTS = _env_csv("ALLOWED_HOSTS", CANONICAL_HOSTS)
+
+# Hosted subdomains: allow wildcard subdomains under a base domain.
+# Example: HOSTED_SUBDOMAIN_BASE=circlecal.app => ALLOWED_HOSTS includes .circlecal.app
+_hosted_subdomain_base = (os.getenv('HOSTED_SUBDOMAIN_BASE') or '').strip().lower().lstrip('.')
+if _hosted_subdomain_base:
+    try:
+        if isinstance(ALLOWED_HOSTS, tuple):
+            ALLOWED_HOSTS = list(ALLOWED_HOSTS)
+        if isinstance(ALLOWED_HOSTS, list):
+            suffix = f'.{_hosted_subdomain_base}'
+            if suffix not in [str(h).lower() for h in ALLOWED_HOSTS]:
+                ALLOWED_HOSTS.append(suffix)
+    except Exception:
+        pass
 CSRF_TRUSTED_ORIGINS = _env_csv(
     "CSRF_TRUSTED_ORIGINS",
     [

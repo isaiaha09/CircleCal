@@ -56,6 +56,25 @@ def can_use_embed_widget(org: Organization) -> bool:
 
 
 def can_use_custom_domain(org: Organization) -> bool:
+    """Customer-owned custom domain feature gate.
+
+    Business intent:
+    - Pro/Team plan required (not Stripe trial)
+    - AND the custom-domain add-on must be enabled on the subscription
+    """
+    if not _can_use_pro_team_features_not_trial(org):
+        return False
+    sub = get_subscription(org)
+    if not sub:
+        return False
+    return bool(getattr(sub, 'custom_domain_addon_enabled', False))
+
+
+def can_use_hosted_subdomain(org: Organization) -> bool:
+    """CircleCal-hosted subdomain feature gate.
+
+    This is the scalable default (wildcard DNS/cert) that ships with Pro/Team.
+    """
     return _can_use_pro_team_features_not_trial(org)
 
 

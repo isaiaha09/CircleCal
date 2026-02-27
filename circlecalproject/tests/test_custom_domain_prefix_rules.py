@@ -35,6 +35,7 @@ class TestCustomDomainPrefixRules(TestCase):
                 'status': 'active',
                 'stripe_subscription_id': None,
                 'active': True,
+                'custom_domain_addon_enabled': True,
             },
         )
 
