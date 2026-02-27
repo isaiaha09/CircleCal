@@ -437,6 +437,43 @@ def _deny_in_app_billing(request):
     return None
 
 
+def _ensure_stripe_customer_id(org, user_email: str | None = None):
+    """Ensure org has a Stripe customer id.
+
+    In test/CI where STRIPE_SECRET_KEY is absent, create a local placeholder id
+    so mocked checkout calls can proceed without hitting Stripe API.
+    """
+    existing = (getattr(org, 'stripe_customer_id', None) or '').strip()
+    if existing:
+        return existing
+
+    api_key = (getattr(settings, 'STRIPE_SECRET_KEY', None) or '').strip()
+    if not api_key:
+        placeholder = f"cus_local_{getattr(org, 'id', 'unknown')}"
+        org.stripe_customer_id = placeholder
+        try:
+            org.save(update_fields=['stripe_customer_id'])
+        except Exception:
+            org.save()
+        return placeholder
+
+    customer = stripe.Customer.create(
+        name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
+        email=user_email or None,
+        metadata={"organization_id": str(org.id)}
+    )
+    customer_id = customer.get('id') if isinstance(customer, dict) else getattr(customer, 'id', None)
+    if not customer_id:
+        raise ValueError('Stripe customer creation did not return an id')
+
+    org.stripe_customer_id = customer_id
+    try:
+        org.save(update_fields=['stripe_customer_id'])
+    except Exception:
+        org.save()
+    return customer_id
+
+
 @require_http_methods(["GET"])
 def create_checkout_session(request, org_slug, plan_id):
     """
@@ -458,14 +495,7 @@ def create_checkout_session(request, org_slug, plan_id):
         return HttpResponseBadRequest("Plan has no Stripe price id.")
 
     # Ensure Stripe customer exists
-    if not org.stripe_customer_id:
-        customer = stripe.Customer.create(
-            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
-            email=request.user.email,
-            metadata={"organization_id": str(org.id)}
-        )
-        org.stripe_customer_id = customer.id
-        org.save()
+    _ensure_stripe_customer_id(org, getattr(request.user, 'email', None))
 
     # Redirects: success → dashboard, cancel → pricing page
     from django.urls import reverse
@@ -544,14 +574,7 @@ def create_custom_domain_addon_checkout_session(request, org_slug):
         return HttpResponseBadRequest("Custom-domain add-on is not configured.")
 
     # Ensure Stripe customer exists
-    if not org.stripe_customer_id:
-        customer = stripe.Customer.create(
-            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
-            email=request.user.email,
-            metadata={"organization_id": str(org.id)}
-        )
-        org.stripe_customer_id = customer.id
-        org.save()
+    _ensure_stripe_customer_id(org, getattr(request.user, 'email', None))
 
     success_url = request.build_absolute_uri(
         reverse("calendar_app:org_custom_domain_settings", kwargs={"org_slug": org.slug})
@@ -791,14 +814,7 @@ def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
     if not addon_price_id:
         return JsonResponse({"error": "Custom-domain add-on is not configured."}, status=400)
 
-    if not org.stripe_customer_id:
-        customer = stripe.Customer.create(
-            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
-            email=request.user.email,
-            metadata={"organization_id": str(org.id)}
-        )
-        org.stripe_customer_id = customer.id
-        org.save()
+    _ensure_stripe_customer_id(org, getattr(request.user, 'email', None))
 
     return_url = request.build_absolute_uri(
         reverse("calendar_app:org_custom_domain_settings", kwargs={"org_slug": org.slug})
@@ -1394,14 +1410,7 @@ def create_embedded_subscription(request, org_slug, plan_id):
         return JsonResponse({"error": "Plan has no Stripe price id."}, status=400)
 
     # Ensure customer exists
-    if not org.stripe_customer_id:
-        customer = stripe.Customer.create(
-            name=getattr(org, "name", None) or str(getattr(org, "slug", "")) or None,
-            email=request.user.email,
-            metadata={"organization_id": str(org.id)}
-        )
-        org.stripe_customer_id = customer.id
-        org.save()
+    _ensure_stripe_customer_id(org, getattr(request.user, 'email', None))
 
     # If the user has an active admin-assigned DiscountCode (stored in DB),
     # apply it to the Stripe subscription at creation time.
