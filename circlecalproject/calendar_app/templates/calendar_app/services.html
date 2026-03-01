@@ -9,7 +9,7 @@
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
             <h1 class="text-2xl font-bold text-blue-700 text-center sm:text-left">Services</h1>
-            <p class="text-sm text-gray-600">Create and manage your bookable services.</p>
+            <p class="text-sm text-gray-600 text-center sm:text-left">Create and manage your bookable services.</p>
         </div>
         <a href="{% url 'calendar_app:create_service' org.slug %}"
            {% if not can_add_more_services %}data-cc-service-limit="1"{% endif %}
@@ -33,7 +33,7 @@
                             </div>
                             <div class="bg-white border border-blue-100 rounded-xl p-4">
                                 <div class="text-sm font-bold text-blue-800">Custom domain (recommended)</div>
-                                <div class="text-sm text-gray-700 mt-1">Use a booking subdomain like <span class="font-mono">booking.yoursite.com</span> so the booking flow can reliably stay inside the iframe.</div>
+                                <div class="text-sm text-gray-700 mt-1">Use a booking subdomain like <span class="font-mono break-all">booking.yoursite.com</span> so the booking flow can reliably stay inside the iframe.</div>
                             </div>
                         </div>
 
@@ -45,12 +45,12 @@
                         </div>
 
                         {% if org.custom_domain and org.custom_domain_verified %}
-                            <div class="mt-3 pt-3 border-t border-blue-100 text-sm text-gray-700">
+                            <div class="mt-3 pt-3 border-t border-blue-100 text-sm text-gray-700 min-w-0">
                                 <span class="font-semibold text-blue-800">Tip:</span>
                                 Once verified, use this as your iframe <span class="font-mono">src</span> (so the booking flow stays reliably embedded):
-                                <div class="mt-2">
+                                <div class="mt-2 overflow-x-auto">
                                     {% if has_active_services %}
-                                        <span class="font-mono">https://{{ org.custom_domain }}{% url 'bookings:public_org_page' org.slug %}?embed=1&key={{ embed_key|default:'' }}</span>
+                                        <span class="font-mono break-all">https://{{ org.custom_domain }}{% url 'bookings:public_org_page' org.slug %}?embed=1&key={{ embed_key|default:'' }}</span>
                                     {% else %}
                                         <span class="font-mono text-gray-500">Activate a service to view this URL</span>
                                     {% endif %}
@@ -96,7 +96,7 @@
                         
                     </div>
                     
-                    <p class="text-gray-600 text-sm">{{ service.description|default:"No description" }}</p>
+                    <p class="text-gray-600 text-sm break-words">{{ service.description|default:"No description" }}</p>
                     
                     <div class="mt-4 bg-gray-50 border border-gray-100 rounded-xl p-4">
                         <div class="grid grid-cols-2 gap-3 text-sm text-gray-700">

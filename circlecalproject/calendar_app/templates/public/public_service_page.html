@@ -1090,10 +1090,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     try {
       const d = SERVICE_MAP[slug] || {};
       const maxP = Math.max(1, Number(d.max_participants || 1) || 1);
-      const slotRemainingRaw = Number(window.__ccSelectedSlotRemaining);
-      const slotRemaining = (Number.isFinite(slotRemainingRaw) && slotRemainingRaw >= 0)
-        ? Math.floor(slotRemainingRaw)
-        : null;
+      const slotRemaining = parseRemainingCapacity(window.__ccSelectedSlotRemaining);
       const allowedNow = (slotRemaining === null) ? maxP : Math.max(0, Math.min(maxP, slotRemaining));
       const bookNowBtn = document.getElementById('bookNowBtn');
       const slotAvailEl = document.getElementById('participantSlotAvailability');
@@ -1171,11 +1168,28 @@ document.addEventListener("DOMContentLoaded", async function () {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  function parseRemainingCapacity(raw) {
+    try {
+      if (raw === null || raw === undefined) return null;
+      if (typeof raw === 'number') {
+        if (!Number.isFinite(raw) || raw < 0) return null;
+        return Math.floor(raw);
+      }
+      if (typeof raw === 'string') {
+        const s = raw.trim();
+        if (s === '') return null;
+        if (!/^\d+$/.test(s)) return null;
+        return Math.floor(Number(s));
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function hasOpenCapacity(slot) {
     try {
-      const remainingRaw = Number(slot && slot.remaining_capacity);
-      if (Number.isFinite(remainingRaw)) {
-        return Math.floor(remainingRaw) > 0;
+      const remaining = parseRemainingCapacity(slot && slot.remaining_capacity);
+      if (remaining !== null) {
+        return remaining > 0;
       }
     } catch (e) {}
     return true;
@@ -1828,10 +1842,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 selectedDateLabel.innerText = headerText;
                 selectedDateTimeLabel.innerText = headerText;
                 try {
-                  const remaining = Number(slotObj && slotObj.remaining_capacity);
-                  window.__ccSelectedSlotRemaining = (Number.isFinite(remaining) && remaining >= 0)
-                    ? Math.floor(remaining)
-                    : null;
+                  window.__ccSelectedSlotRemaining = parseRemainingCapacity(slotObj && slotObj.remaining_capacity);
                 } catch (e) {
                   window.__ccSelectedSlotRemaining = null;
                 }
@@ -1889,10 +1900,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
         const d = SERVICE_MAP[slug] || {};
         const serviceMax = Math.max(1, Number(d.max_participants || 1) || 1);
-        const slotRemainingRaw = Number(window.__ccSelectedSlotRemaining);
-        const slotRemaining = (Number.isFinite(slotRemainingRaw) && slotRemainingRaw >= 0)
-          ? Math.floor(slotRemainingRaw)
-          : null;
+        const slotRemaining = parseRemainingCapacity(window.__ccSelectedSlotRemaining);
         const allowedNow = (slotRemaining === null) ? serviceMax : Math.max(0, Math.min(serviceMax, slotRemaining));
         const requested = Math.max(1, Math.floor(Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1) || 1));
         if (allowedNow <= 0) {

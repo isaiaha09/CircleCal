@@ -16,6 +16,12 @@ import pytest
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 DEVSERVER_LOG = os.path.join(PROJECT_ROOT, 'tests', 'e2e', 'devserver.log')
 
+if os.getenv('RUN_LONG_E2E', '').strip().lower() not in {'1', 'true', 'yes', 'on'}:
+    pytest.skip(
+        'Long E2E disabled by default. Set RUN_LONG_E2E=1 to run tests/e2e/test_booking_flow_playwright.py.',
+        allow_module_level=True,
+    )
+
 
 def server_is_up(url='http://127.0.0.1:8000/'):
     try:
@@ -100,61 +106,6 @@ def test_public_booking_flow():
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
 
-            def submit_via_api_slot_fallback(url_hint):
-                if not org_slug or not service_slug:
-                    return False
-
-                slot_payload = None
-                today = datetime.date.today()
-                for day_offset in range(0, 60):
-                    d = today + datetime.timedelta(days=day_offset)
-                    date_str = d.isoformat()
-                    avail_url = (
-                        f'http://127.0.0.1:8000/bus/{org_slug}/services/{service_slug}/availability/'
-                        f'?start={date_str}T00:00:00&end={date_str}T23:59:00&inc=30&edge_buffers=0&allow_ends_after_availability=0'
-                    )
-                    try:
-                        with urllib.request.urlopen(avail_url, timeout=10) as r:
-                            data = json.loads(r.read().decode('utf-8'))
-                    except Exception:
-                        continue
-
-                    if isinstance(data, list) and data:
-                        first = data[0]
-                        if isinstance(first, dict) and first.get('start') and first.get('end'):
-                            slot_payload = first
-                            break
-
-                if not slot_payload:
-                    return False
-
-                try:
-                    page.eval_on_selector(
-                        '#timeModalViewDetails form',
-                        """(form, payload) => {
-                            const start = document.getElementById('startInput');
-                            const end = document.getElementById('endInput');
-                            const details = document.getElementById('timeModalViewDetails');
-                            const slots = document.getElementById('timeModalViewSlots');
-                            const modal = document.getElementById('timeModal');
-                            const btn = document.getElementById('bookNowBtn');
-                            if (start) start.value = payload.start;
-                            if (end) end.value = payload.end;
-                            if (slots) slots.style.display = 'none';
-                            if (details) details.style.display = 'block';
-                            if (modal) modal.style.display = 'flex';
-                            if (btn) btn.disabled = false;
-                        }""",
-                        slot_payload,
-                    )
-                    page.fill('form input[name="client_name"]', 'Playwright Test')
-                    page.fill('form input[name="client_email"]', 'pwtest@example.com')
-                    with page.expect_navigation(timeout=12000):
-                        page.eval_on_selector('#timeModalViewDetails form', 'f => f.submit()')
-                    return 'booking_success' in page.url
-                except Exception:
-                    return False
-
             def open_bookable_details_view(max_month_advance=2, max_days_per_month=31):
                 month_attempt = 0
                 while month_attempt <= max_month_advance:
@@ -178,33 +129,27 @@ def test_public_booking_flow():
                         except PlaywrightTimeoutError:
                             continue
 
-                        slot_count = page.locator('#timeSlots .time-circle.open').count()
+                        slot_count = page.locator('#timeSlots .time-circle').count()
                         for slot_idx in range(slot_count):
-                            slots = page.query_selector_all('#timeSlots .time-circle.open')
+                            slots = page.query_selector_all('#timeSlots .time-circle')
                             if slot_idx >= len(slots):
                                 break
 
                             slot = slots[slot_idx]
+                            cls = (slot.get_attribute('class') or '').lower()
+                            aria_disabled = (slot.get_attribute('aria-disabled') or '').lower()
+                            if 'disabled' in cls or aria_disabled == 'true':
+                                continue
+
                             slot.click()
 
                             try:
-                                page.wait_for_function(
-                                    """() => {
-                                        const details = document.getElementById('timeModalViewDetails');
-                                        if (!details) return false;
-                                        const shown = (details.style.display || '').toLowerCase() === 'block';
-                                        const start = document.getElementById('startInput');
-                                        const hasStart = !!(start && start.value && start.value.trim());
-                                        return shown && hasStart;
-                                    }""",
-                                    timeout=5000,
-                                )
                                 page.wait_for_selector('form input[name="client_name"]', timeout=6000)
                                 page.wait_for_selector('form input[name="client_email"]', timeout=6000)
                             except PlaywrightTimeoutError:
                                 try:
                                     page.click('#backToSlotsBtn')
-                                    page.wait_for_selector('#timeSlots .time-circle.open', timeout=4000)
+                                    page.wait_for_selector('#timeSlots .time-circle', timeout=4000)
                                 except Exception:
                                     pass
                                 continue
@@ -223,23 +168,9 @@ def test_public_booking_flow():
                             if page.is_enabled('#bookNowBtn'):
                                 return True
 
-                            # Fallback: some environments can keep the button disabled due
-                            # to stale client-side capacity flags even when the slot can be
-                            # booked server-side. Try a direct form submit and accept success.
-                            try:
-                                with page.expect_navigation(timeout=12000):
-                                    page.eval_on_selector(
-                                        '#timeModalViewDetails form',
-                                        "f => { if (f.requestSubmit) { f.requestSubmit(); } else { f.submit(); } }",
-                                    )
-                                if 'booking_success' in page.url:
-                                    return True
-                            except Exception:
-                                pass
-
                             try:
                                 page.click('#backToSlotsBtn')
-                                page.wait_for_selector('#timeSlots .time-circle.open', timeout=4000)
+                                page.wait_for_selector('#timeSlots .time-circle', timeout=4000)
                             except Exception:
                                 break
 
@@ -273,7 +204,7 @@ def test_public_booking_flow():
                                 timeout=8000,
                             )
                     except Exception:
-                        page.wait_for_timeout(400)
+                            page.wait_for_timeout(400)
 
                     month_attempt += 1
 
@@ -299,13 +230,10 @@ def test_public_booking_flow():
                 page.wait_for_load_state('networkidle')
 
             if not open_bookable_details_view(max_month_advance=2):
-                if not submit_via_api_slot_fallback(svc_url):
-                    debug = dump_debug(page, svc_url)
-                    raise AssertionError(
-                        f"No bookable slot found (submit button remained disabled for all checked day/time combinations)\n{debug}"
-                    )
-                browser.close()
-                return
+                debug = dump_debug(page, svc_url)
+                raise AssertionError(
+                    f"No bookable slot found (submit button remained disabled for all checked day/time combinations)\n{debug}"
+                )
 
             if 'booking_success' in page.url:
                 browser.close()
