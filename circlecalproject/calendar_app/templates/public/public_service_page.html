@@ -395,7 +395,7 @@
     <div class="calendar-grid" id="dayGrid"></div>
   </div>
 
-  <p class="text-center text-sm text-gray-600 mt-3 mb-1">Brought to you by <a href="{% url 'calendar_app:home' %}" class="font-bold text-blue-600 hover:underline">CircleCal</a></p>
+  <p class="text-center text-sm text-gray-600 mt-3 mb-1">Brought to you by <a id="ccBroughtByLink" href="{% url 'calendar_app:home' %}" class="font-bold text-blue-600 hover:underline">CircleCal</a></p>
 
   <div id="mainServiceDetails" class="service-details-fade">
     <div id="mainSvcTitle" class="modal-title" style="margin-bottom:6px;"></div>
@@ -746,6 +746,19 @@ window.bookedSlotsThisSession = window.bookedSlotsThisSession || [];
 <script>
 document.addEventListener("DOMContentLoaded", async function () {
   try { /* init */ } catch (e) {}
+  const ccBroughtByLink = document.getElementById('ccBroughtByLink');
+  if (ccBroughtByLink && document.body && document.body.getAttribute('data-cc-app') === '1') {
+    const stopHomeNavInApp = function (e) {
+      try { e.preventDefault(); } catch (_) {}
+      try { e.stopPropagation(); } catch (_) {}
+    };
+    ccBroughtByLink.addEventListener('click', stopHomeNavInApp);
+    ccBroughtByLink.addEventListener('keydown', function (e) {
+      if (e && (e.key === 'Enter' || e.key === ' ')) stopHomeNavInApp(e);
+    });
+    ccBroughtByLink.setAttribute('aria-disabled', 'true');
+    ccBroughtByLink.setAttribute('tabindex', '-1');
+  }
   const dayGrid = document.getElementById("dayGrid");
   const monthHeader = document.getElementById("monthHeader");
   const calendarLoading = document.getElementById('calendarLoading');
