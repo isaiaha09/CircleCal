@@ -328,6 +328,27 @@
     display: block !important; /* show when visible class applied */
   }
 
+  /* Keep Cloudflare Turnstile from overflowing narrow devices */
+  .cc-turnstile-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+  }
+  @media (max-width: 360px) {
+    .cc-turnstile-wrap .cf-turnstile {
+      transform: scale(0.9);
+      transform-origin: top center;
+    }
+  }
+  @media (max-width: 330px) {
+    .cc-turnstile-wrap .cf-turnstile {
+      transform: scale(0.82);
+      transform-origin: top center;
+    }
+  }
+
   /* Add this to style spacers in the calendar grid */
   .calendar-grid .spacer {
      pointer-events: none;
@@ -347,6 +368,12 @@
 </script>
 
 <div class="calendar-container" style="position:relative;">
+
+  {% if error %}
+    <div class="mb-4 p-3 rounded-md bg-red-50 border-l-4 border-red-400 text-red-800" role="alert" aria-live="polite">
+      {{ error }}
+    </div>
+  {% endif %}
   
   {% if trialing_active %}
     <div class="mb-4 p-3 rounded-md bg-amber-50 border-l-4 border-amber-400 text-amber-800" role="status" aria-live="polite">
@@ -716,6 +743,13 @@
         <p class="text-xs text-gray-500 mt-2">Payment options appear for paid services.</p>
       </div>
 
+      {% if turnstile_enabled and turnstile_site_key %}
+        <div class="cc-turnstile-wrap mb-4">
+          <div id="bookingTurnstile" class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-theme="light" data-size="normal"></div>
+          <input type="hidden" id="bookingTurnstileToken" name="cf-turnstile-response" value="">
+        </div>
+      {% endif %}
+
       <div class="modal-actions">
         <button type="button" id="backToSlotsBtn" class="px-4 py-2 text-sm md:text-base rounded border border-gray-300 text-gray-700 hover:bg-gray-100 flex-1 md:flex-none">Back</button>
         <button type="submit" id="bookNowBtn" class="bg-blue-600 text-white px-4 py-2 text-sm md:text-base rounded hover:bg-blue-700 flex-1 md:flex-none">Book now</button>
@@ -734,6 +768,9 @@
 
 {% if open_checkout %}
 <script src="https://js.stripe.com/v3/"></script>
+{% endif %}
+{% if turnstile_enabled and turnstile_site_key %}
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 {% endif %}
 
 {{ service_payment_controls|json_script:"service-payment-controls" }}
@@ -792,6 +829,52 @@ document.addEventListener("DOMContentLoaded", async function () {
   const offlineQrWrap = document.getElementById('offlineQrWrap');
   const offlineQrImg = document.getElementById('offlineQrImg');
   const offlineQrFallback = document.getElementById('offlineQrFallback');
+  const bookingTurnstileEl = document.getElementById('bookingTurnstile');
+  const bookingTurnstileTokenInput = document.getElementById('bookingTurnstileToken');
+  const bookingTurnstileEnabled = {{ turnstile_enabled|yesno:"true,false" }};
+  let bookingTurnstileWidgetId = null;
+
+  function ensureBookingTurnstileWidget() {
+    try {
+      if (!bookingTurnstileEnabled || !bookingTurnstileEl) return;
+      if (bookingTurnstileWidgetId !== null) return;
+      const siteKey = (bookingTurnstileEl.dataset && bookingTurnstileEl.dataset.sitekey) ? bookingTurnstileEl.dataset.sitekey : '';
+      if (!siteKey) return;
+      if (!window.turnstile || typeof window.turnstile.render !== 'function') return;
+      bookingTurnstileWidgetId = window.turnstile.render('#bookingTurnstile', {
+        sitekey: siteKey,
+        theme: 'light',
+        size: 'normal',
+        callback: function (token) {
+          if (bookingTurnstileTokenInput) bookingTurnstileTokenInput.value = token || '';
+        },
+        'expired-callback': function () {
+          if (bookingTurnstileTokenInput) bookingTurnstileTokenInput.value = '';
+        },
+        'error-callback': function () {
+          if (bookingTurnstileTokenInput) bookingTurnstileTokenInput.value = '';
+        }
+      });
+    } catch (e) {
+      if (bookingTurnstileTokenInput) bookingTurnstileTokenInput.value = '';
+    }
+  }
+
+  function resetBookingTurnstileWidget() {
+    try {
+      if (bookingTurnstileTokenInput) bookingTurnstileTokenInput.value = '';
+      if (bookingTurnstileWidgetId !== null && window.turnstile && typeof window.turnstile.reset === 'function') {
+        window.turnstile.reset(bookingTurnstileWidgetId);
+      }
+    } catch (e) {}
+  }
+
+  // Attempt render shortly after load (script may still be downloading).
+  try {
+    setTimeout(ensureBookingTurnstileWidget, 80);
+    setTimeout(ensureBookingTurnstileWidget, 400);
+    setTimeout(ensureBookingTurnstileWidget, 1000);
+  } catch (e) {}
 
   function _ccSetModalOpen(isOpen) {
     try {
@@ -1868,6 +1951,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 circle.dataset.slotKey = slotKey;
                 timeModalViewSlots.style.display = 'none';
                 timeModalViewDetails.style.display = 'block';
+                ensureBookingTurnstileWidget();
               });
             }
             circlesContainer.appendChild(circle);
@@ -1904,6 +1988,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     backBtn.addEventListener('click', () => {
       timeModalViewDetails.style.display = 'none';
       timeModalViewSlots.style.display = 'block';
+      resetBookingTurnstileWidget();
     });
   }
 
@@ -1911,6 +1996,19 @@ document.addEventListener("DOMContentLoaded", async function () {
   const bookingForm = document.querySelector('#timeModalViewDetails form');
   if (bookingForm) {
     bookingForm.addEventListener('submit', (e) => {
+      if (bookingTurnstileEnabled) {
+        const token = (bookingTurnstileTokenInput && bookingTurnstileTokenInput.value ? bookingTurnstileTokenInput.value : '').trim();
+        if (!token) {
+          e.preventDefault();
+          try {
+            ensureBookingTurnstileWidget();
+            if (typeof showToast === 'function') showToast('warning', 'Please complete the security check before booking.');
+            else alert('Please complete the security check before booking.');
+          } catch (_) {}
+          return;
+        }
+      }
+
       try {
         const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
         const d = SERVICE_MAP[slug] || {};

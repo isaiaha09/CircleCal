@@ -35,6 +35,17 @@ from django.http import HttpResponse
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from . import ics as bookings_ics
 
+try:
+    from circlecalproject.bot_protection import (
+        get_turnstile_site_key,
+        turnstile_is_enabled,
+        verify_turnstile,
+    )
+except Exception:
+    get_turnstile_site_key = None
+    turnstile_is_enabled = None
+    verify_turnstile = None
+
 
 def _is_embed_request(request) -> bool:
     try:
@@ -48,6 +59,35 @@ def _is_embed_request(request) -> bool:
         return False
     except Exception:
         return False
+
+
+def _is_app_webview_request(request) -> bool:
+    try:
+        ua = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    except Exception:
+        ua = ''
+    # Keep Turnstile enabled for normal web/PWA traffic.
+    # Only suppress inside the native CircleCal mobile app WebView.
+    if 'circlecalapp' in ua:
+        return True
+    try:
+        # Optional explicit app signal (if sent by native clients).
+        return (request.META.get('HTTP_X_CC_APP') == '1')
+    except Exception:
+        return False
+
+
+def _get_turnstile_state_for_request(request) -> tuple[bool, str]:
+    enabled = bool(turnstile_is_enabled() if turnstile_is_enabled else False)
+    site_key = (get_turnstile_site_key() if get_turnstile_site_key else '') or ''
+
+    # Embedded app WebViews can be unreliable with challenge widgets.
+    if _is_app_webview_request(request):
+        return False, ''
+
+    if not enabled or not site_key:
+        return False, ''
+    return True, site_key
 
 
 def _request_host_no_port(request) -> str:
@@ -2994,6 +3034,8 @@ def _build_public_service_page_context(
             trialing_active = True
             trial_end_date = subscription.trial_end
 
+    turnstile_enabled, turnstile_site_key = _get_turnstile_state_for_request(request)
+
     # Attach assigned member display names to services for client UI.
     # Populate these regardless of the `show_with_line` flag so embed/custom
     # views and custom domains receive the same per-service metadata. The
@@ -3080,6 +3122,8 @@ def _build_public_service_page_context(
         "offline_methods_allowed": offline_methods_allowed,
         "offline_methods": offline_methods,
         "offline_instructions": offline_instructions,
+        "turnstile_enabled": turnstile_enabled,
+        "turnstile_site_key": turnstile_site_key,
         "service_weekly_map_json": json.dumps(service_weekly_map),
         # Support reschedule GET params to prefill client info and attach reschedule metadata
         'reschedule_source': request.GET.get('reschedule_source') or request.GET.get('source'),
@@ -3204,6 +3248,34 @@ def public_service_page(request, org_slug, service_slug):
         # inside third-party iframes; redirect the user to the full booking page.
         if is_embed and embed_breakout:
             return redirect(reverse('bookings:public_service_page', args=[org.slug, service.slug]))
+
+        # Bot protection: verify Turnstile challenge on public bookings.
+        try:
+            turnstile_enabled, _turnstile_site_key = _get_turnstile_state_for_request(request)
+            if turnstile_enabled and verify_turnstile:
+                ok, err = verify_turnstile(request)
+                if not ok:
+                    ctx = _build_public_service_page_context(
+                        request,
+                        org=org,
+                        services=services,
+                        service=service,
+                        show_with_line=show_with_line,
+                        offline_methods_allowed=offline_methods_allowed,
+                        offline_methods=offline_methods,
+                        offline_instructions=offline_instructions,
+                    )
+                    ctx['error'] = err or 'Security check failed. Please try again.'
+                    resp = render(request, "public/public_service_page.html", ctx, status=400)
+                    if is_embed:
+                        try:
+                            resp.xframe_options_exempt = True
+                        except Exception:
+                            pass
+                    return resp
+        except Exception:
+            # Fail open if verification has an internal issue.
+            pass
 
         client_name = request.POST.get("client_name")
         client_email = request.POST.get("client_email")
