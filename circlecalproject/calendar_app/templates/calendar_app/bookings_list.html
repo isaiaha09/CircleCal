@@ -445,6 +445,7 @@
           data-status="{% if booking.start <= now and booking.end >= now %}ongoing{% elif booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
           data-service-id="{{ booking.service.id|default:'' }}"
           data-service-price="{{ booking.service.price|default:'' }}"
+          data-refund-policy="{% if booking.service.refunds_allowed %}{% if booking.service.refund_policy_text %}{{ booking.service.refund_policy_text|escapejs }}{% elif booking.service.refund_cutoff_hours|default:0 <= 0 %}Refunds are permitted up to the appointment time.{% else %}Refunds permitted except within {{ booking.service.refund_cutoff_hours }} hour{% if booking.service.refund_cutoff_hours != 1 %}s{% endif %} of the appointment.{% endif %}{% else %}Refunds are not permitted for this service.{% endif %}"
           data-participant-count="{{ booking.participant_count|default:1 }}"
           data-total-price="{{ booking.total_price|default:0 }}"
           data-payment-method="{{ booking.payment_method|default:'' }}"
@@ -633,6 +634,10 @@
         <div class="cc-booking-modal-label">Payment:</div>
         <div id="modalPayment" class="cc-booking-modal-value"></div>
         <div id="modalPaymentSub" class="cc-booking-modal-subvalue"></div>
+      </div>
+      <div>
+        <div class="cc-booking-modal-label">Refund Policy:</div>
+        <div id="modalRefundPolicy" class="cc-booking-modal-value" style="white-space: pre-line;"></div>
       </div>
     </div>
 
@@ -1053,6 +1058,20 @@ function viewBooking(id) {
     } catch (e2) {}
   }
 
+  // Refund policy (service-specific)
+  try {
+    const refundEl = document.getElementById('modalRefundPolicy');
+    if (refundEl) {
+      const policy = (row.dataset.refundPolicy || '').trim();
+      refundEl.textContent = policy || 'Refund policy not available.';
+    }
+  } catch (e) {
+    try {
+      const refundEl = document.getElementById('modalRefundPolicy');
+      if (refundEl) refundEl.textContent = 'Refund policy not available.';
+    } catch (e2) {}
+  }
+
   document.getElementById('bookingModal').style.display = 'flex';
 }
 
@@ -1111,6 +1130,27 @@ function insertBookingRow(b, toTop=true) {
     const svcPrice = (b.service_price !== undefined && b.service_price !== null) ? String(b.service_price) : (b.price !== undefined && b.price !== null ? String(b.price) : '');
     newTr.setAttribute('data-service-price', svcPrice);
   }catch(e){ newTr.setAttribute('data-service-price',''); }
+  try{
+    let refundPolicy = '';
+    if (b.refund_policy_effective_text !== undefined && b.refund_policy_effective_text !== null) {
+      refundPolicy = String(b.refund_policy_effective_text);
+    } else {
+      const refundsAllowed = !!b.refunds_allowed;
+      const customText = (b.refund_policy_text || '').toString().trim();
+      const cutoffRaw = Number((b.refund_cutoff_hours !== undefined && b.refund_cutoff_hours !== null) ? b.refund_cutoff_hours : 0);
+      const cutoff = (isFinite(cutoffRaw) ? Math.max(0, Math.floor(cutoffRaw)) : 0);
+      if (!refundsAllowed) {
+        refundPolicy = 'Refunds are not permitted for this service.';
+      } else if (customText) {
+        refundPolicy = customText;
+      } else if (cutoff <= 0) {
+        refundPolicy = 'Refunds are permitted up to the appointment time.';
+      } else {
+        refundPolicy = `Refunds permitted except within ${cutoff} hour${cutoff === 1 ? '' : 's'} of the appointment.`;
+      }
+    }
+    newTr.setAttribute('data-refund-policy', refundPolicy);
+  }catch(e){ newTr.setAttribute('data-refund-policy',''); }
   try{
     if (b.duration !== undefined && b.duration !== null) newTr.setAttribute('data-duration', String(b.duration));
   }catch(e){}

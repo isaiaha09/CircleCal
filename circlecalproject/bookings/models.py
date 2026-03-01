@@ -450,6 +450,41 @@ def filter_offline_payment_instructions_for_method(instructions: str, method: st
         return ''
 
 
+def build_service_refund_policy_text(service: Service | None) -> str:
+    """Return the client-facing refund policy text for a service.
+
+    - Custom `refund_policy_text` overrides default generated wording.
+    - `refund_cutoff_hours <= 0` means refunds are allowed up to appointment time.
+    """
+    if not service:
+        return ''
+
+    try:
+        refunds_allowed = bool(getattr(service, 'refunds_allowed', False))
+    except Exception:
+        refunds_allowed = False
+
+    if not refunds_allowed:
+        return 'Refunds are not permitted for this service.'
+
+    try:
+        custom_text = (getattr(service, 'refund_policy_text', '') or '').strip()
+    except Exception:
+        custom_text = ''
+    if custom_text:
+        return custom_text
+
+    try:
+        cutoff = int(getattr(service, 'refund_cutoff_hours', 0) or 0)
+    except Exception:
+        cutoff = 0
+
+    if cutoff <= 0:
+        return 'Refunds are permitted up to the appointment time.'
+
+    return f"Refunds permitted except within {cutoff} hour{'s' if cutoff != 1 else ''} of the appointment."
+
+
 class WeeklyAvailability(models.Model):
     """Defines one available time window for an organization on a given weekday.
 

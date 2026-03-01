@@ -453,6 +453,7 @@
       refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
       refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
       refund_policy_text: "{{ s.refund_policy_text|default:""|escapejs }}",
+      refund_policy_effective_text: "{{ s.refund_policy_effective_text|default:""|escapejs }}",
       buffer_after: {{ s.buffer_after|default:0 }},
       allow_ends_after_availability: {{ s.allow_ends_after_availability|yesno:"true,false" }},
       time_increment_minutes: {{ s.time_increment_minutes|default:30 }},
@@ -492,20 +493,9 @@
         const assigned = (opt && opt.dataset && opt.dataset.assignedNames) ? opt.dataset.assignedNames : (d.assigned_names || '');
         if (mainSvcTeamEl) mainSvcTeamEl.textContent = assigned || '—';
       } catch (err) { /* ignore */ }
-      if (d.refunds_allowed) {
-        mainSvcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
-        if (d.refund_policy_text) {
-          mainSvcRefundText.style.display = '';
-          mainSvcRefundText.textContent = d.refund_policy_text;
-        } else {
-          mainSvcRefundText.style.display = 'none';
-          mainSvcRefundText.textContent = '';
-        }
-      } else {
-        mainSvcRefundLine.textContent = 'Refunds are not permitted for this service.';
-        mainSvcRefundText.style.display = 'none';
-        mainSvcRefundText.textContent = '';
-      }
+      mainSvcRefundLine.textContent = d.refund_policy_effective_text || 'Refunds are not permitted for this service.';
+      mainSvcRefundText.style.display = 'none';
+      mainSvcRefundText.textContent = '';
       // (Client-facing info intentionally omits buffer/increment/fixed details)
     }
 
@@ -664,17 +654,9 @@
         <!-- Client-facing modal intentionally omits buffer/increment/fixed/allow settings -->
         <div><strong>Refunds:</strong>
           <span id="svcRefundLine">
-            {% if service.refunds_allowed %}
-              Refunds permitted except within {{ service.refund_cutoff_hours }} hours of the appointment.
-            {% else %}
-              Refunds are not permitted for this service.
-            {% endif %}
+            {{ service.refund_policy_effective_text|default:"Refunds are not permitted for this service." }}
           </span>
-          {% if service.refunds_allowed and service.refund_policy_text %}
-            <div id="svcRefundText" class="mt-1 text-gray-600">{{ service.refund_policy_text }}</div>
-          {% else %}
-            <div id="svcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
-          {% endif %}
+          <div id="svcRefundText" class="mt-1 text-gray-600" style="display:none;"></div>
         </div>
       </div>
 
@@ -1701,20 +1683,9 @@ document.addEventListener("DOMContentLoaded", async function () {
           const svcTeamEl = document.getElementById('svcTeam');
           if (svcTeamEl) svcTeamEl.textContent = assigned || '—';
         } catch (err) { /* ignore */ }
-        if (d.refunds_allowed) {
-          svcRefundLine.textContent = `Refunds permitted except within ${d.refund_cutoff_hours} hours of the appointment.`;
-          if (d.refund_policy_text) {
-            svcRefundText.style.display = '';
-            svcRefundText.textContent = d.refund_policy_text;
-          } else {
-            svcRefundText.style.display = 'none';
-            svcRefundText.textContent = '';
-          }
-        } else {
-          svcRefundLine.textContent = 'Refunds are not permitted for this service.';
-          svcRefundText.style.display = 'none';
-          svcRefundText.textContent = '';
-        }
+        svcRefundLine.textContent = d.refund_policy_effective_text || 'Refunds are not permitted for this service.';
+        svcRefundText.style.display = 'none';
+        svcRefundText.textContent = '';
         // Client-facing modal intentionally omits buffer/increment/fixed/allow details
       }
 

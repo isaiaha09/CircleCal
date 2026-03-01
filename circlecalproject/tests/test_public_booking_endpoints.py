@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, time, timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -11,6 +11,7 @@ from billing.models import Plan, Subscription
 from bookings.models import Booking, OrgSettings, Service, ServiceWeeklyAvailability, WeeklyAvailability
 
 
+@override_settings(TURNSTILE_ENABLED=False)
 class TestPublicBookingEndpoints(TestCase):
     def setUp(self):
         User = get_user_model()

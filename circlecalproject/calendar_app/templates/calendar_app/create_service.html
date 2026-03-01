@@ -1650,17 +1650,18 @@
           <div>
             <label class="block text-sm font-medium text-gray-700">Refund cutoff (hours)</label>
             <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
-              <input name="refund_cutoff_hours" type="number" value="24" min="1" class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+              <input name="refund_cutoff_hours" type="number" value="24" min="0" class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
               {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
             </div>
-            <p class="mt-2 text-xs text-gray-500">Inside this window, refunds are not permitted.</p>
+            <p class="mt-2 text-xs text-gray-500">Inside this window, refunds are not permitted. Set to 0 to allow refunds up to appointment time.</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Custom refund policy text</label>
             <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
-              <textarea name="refund_policy_text" rows="3" class="cc-field mt-1 w-full" placeholder="Optional. Shown to clients in emails and pages." {% if not can_use_pro_team %}disabled{% endif %}></textarea>
+              <textarea name="refund_policy_text" rows="3" class="cc-field mt-1 w-full" placeholder="Optional. Leave blank to use default policy message." {% if not can_use_pro_team %}disabled{% endif %}></textarea>
               {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
             </div>
+            <p id="refundPolicyDefaultPreview" class="mt-2 text-xs text-gray-500">Default message shown to clients: Refunds permitted except within 24 hours of the appointment.</p>
           </div>
         </div>
 
@@ -1672,13 +1673,37 @@
               const chk = document.getElementById('refunds_allowed');
               const cutoff = document.querySelector('input[name="refund_cutoff_hours"]');
               const text = document.querySelector('textarea[name="refund_policy_text"]');
-              if (!chk || !cutoff || !text) return;
+              const preview = document.getElementById('refundPolicyDefaultPreview');
+              if (!chk || !cutoff || !text || !preview) return;
+
+              function buildDefaultMessage(refundsAllowed, cutoffHours){
+                if (!refundsAllowed) return 'Refunds are not permitted for this service.';
+                const n = Number(cutoffHours);
+                if (!Number.isFinite(n) || n <= 0) return 'Refunds are permitted up to the appointment time.';
+                const whole = Math.max(0, Math.floor(n));
+                return `Refunds permitted except within ${whole} hour${whole === 1 ? '' : 's'} of the appointment.`;
+              }
+
+              function updatePreview(){
+                const custom = (text.value || '').trim();
+                if (custom){
+                  preview.textContent = 'Custom refund policy text will be shown to clients for this service.';
+                  return;
+                }
+                preview.textContent = `Default message shown to clients: ${buildDefaultMessage(!!chk.checked, cutoff.value)}`;
+              }
+
               function update(){
                 const enabled = CAN_USE_PRO_TEAM && !!chk.checked;
                 try{ cutoff.disabled = !enabled; }catch(e){}
                 try{ text.disabled = !enabled; }catch(e){}
+                updatePreview();
               }
               chk.addEventListener('change', update);
+              cutoff.addEventListener('input', updatePreview);
+              cutoff.addEventListener('change', updatePreview);
+              text.addEventListener('input', updatePreview);
+              text.addEventListener('change', updatePreview);
               update();
             }catch(e){ /* ignore */ }
           })();

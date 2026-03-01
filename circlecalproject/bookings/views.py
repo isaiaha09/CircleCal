@@ -14,6 +14,7 @@ from accounts.models import Business as Organization
 from accounts.models import Membership
 from bookings.models import Service
 from bookings.models import FacilityResource, ServiceResource
+from bookings.models import build_service_refund_policy_text
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -3067,6 +3068,17 @@ def _build_public_service_page_context(
             s.assigned_names = ''
         service.assigned_names = ''
 
+    # Attach effective client-facing refund policy text for consistent rendering
+    # across public surfaces (service info icon, modal details, etc.).
+    try:
+        for s in services:
+            s.refund_policy_effective_text = build_service_refund_policy_text(s)
+        service.refund_policy_effective_text = build_service_refund_policy_text(service)
+    except Exception:
+        for s in services:
+            s.refund_policy_effective_text = ''
+        service.refund_policy_effective_text = ''
+
     # Provide per-service EFFECTIVE weekly availability (UI index 0=Sun..6=Sat) as JSON.
     any_org_rows = WeeklyAvailability.objects.filter(organization=org, is_active=True).exists()
     service_weekly_map = {}
@@ -3827,6 +3839,7 @@ def booking_success(request, org_slug, service_slug, booking_id):
         "service": service,
         "booking": booking,
         "offline_instructions": offline_instructions,
+        "refund_policy_text_effective": build_service_refund_policy_text(service),
     })
     if is_embed:
         try:

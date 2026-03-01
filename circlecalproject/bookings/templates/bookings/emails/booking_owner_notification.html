@@ -51,14 +51,7 @@
         <div class="detail-row">
           <span class="detail-label">Refunds:</span>
           <span class="detail-value">
-            {% if service.refunds_allowed %}
-              Refunds permitted except within {{ service.refund_cutoff_hours }} hours of the appointment.
-              {% if service.refund_policy_text %}
-                <div class="detail-subtext">{{ service.refund_policy_text }}</div>
-              {% endif %}
-            {% else %}
-              Refunds are not permitted for this service.
-            {% endif %}
+            {{ refund_policy_text_effective|default:"Refunds are not permitted for this service." }}
           </span>
         </div>
       </div>

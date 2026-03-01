@@ -9,7 +9,11 @@ from django.utils import timezone
 from zoneinfo import ZoneInfo
 from django.core.signing import TimestampSigner
 from django.urls import reverse
-from bookings.models import build_offline_payment_instructions, filter_offline_payment_instructions_for_method
+from bookings.models import (
+    build_offline_payment_instructions,
+    build_service_refund_policy_text,
+    filter_offline_payment_instructions_for_method,
+)
 
 
 def _abs_url(url: str) -> str:
@@ -472,6 +476,7 @@ def send_booking_confirmation(booking):
         'reschedule_url': reschedule_url,
         'ics_url': f"{base_url}{reverse('bookings:booking_ics', args=[booking.id])}?token={quote(token)}",
         'payment_method': payment_method,
+        'refund_policy_text_effective': build_service_refund_policy_text(getattr(booking, 'service', None)),
         'stripe_card_brand': '',
         'stripe_card_last4': '',
         'outlook_web_url': '',
@@ -832,6 +837,7 @@ def send_owner_booking_notification(booking):
         'booking': booking,
         'org': org,
         'service': booking.service,
+        'refund_policy_text_effective': build_service_refund_policy_text(getattr(booking, 'service', None)),
         'client_name': booking.client_name,
         'client_email': booking.client_email,
         'start_local': start_local,
@@ -927,6 +933,7 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
         'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
         'old_booking_id': old_booking_id,
         'old_booking_display': old_booking_display,
+        'refund_policy_text_effective': build_service_refund_policy_text(getattr(booking, 'service', None)),
     }
 
     try:

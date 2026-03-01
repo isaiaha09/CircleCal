@@ -1128,9 +1128,9 @@ def apply_service_update(request, org_slug, service_id):
             try:
                 cutoff_val = int(cutoff_val)
             except Exception:
-                cutoff_val = int(getattr(svc, 'refund_cutoff_hours', 24) or 24)
-            if cutoff_val < 1:
-                cutoff_val = 1
+                cutoff_val = int(getattr(svc, 'refund_cutoff_hours', 0) or 0)
+            if cutoff_val < 0:
+                cutoff_val = 0
             fields['refund_cutoff_hours'] = cutoff_val
         else:
             fields['refund_cutoff_hours'] = 0
@@ -6889,8 +6889,8 @@ def create_service(request, org_slug):
                     if refunds_allowed:
                         try:
                             cutoff_val = int(request.POST.get("refund_cutoff_hours") or 24)
-                            if cutoff_val < 1:
-                                cutoff_val = 1
+                            if cutoff_val < 0:
+                                cutoff_val = 0
                             svc.refund_cutoff_hours = cutoff_val
                         except Exception:
                             pass
@@ -7399,19 +7399,19 @@ def edit_service(request, org_slug, service_id):
                         pass
                     if refunds_allowed:
                         cutoff_raw = request.POST.get("refund_cutoff_hours")
-                        # When refunds are allowed, require cutoff >= 1
+                        # When refunds are allowed, permit cutoff >= 0.
                         if cutoff_raw is not None and cutoff_raw != "":
                             try:
                                 cutoff_val = int(cutoff_raw)
-                                if cutoff_val < 1:
-                                    messages.error(request, "Refund cutoff must be at least 1 hour when refunds are allowed.")
-                                    cutoff_val = 1
+                                if cutoff_val < 0:
+                                    messages.error(request, "Refund cutoff cannot be negative.")
+                                    cutoff_val = 0
                                 service.refund_cutoff_hours = cutoff_val
                             except ValueError:
                                 messages.error(request, "Invalid value for refund_cutoff_hours.")
                         else:
-                            # Default to 24 if not provided
-                            service.refund_cutoff_hours = max(1, service.refund_cutoff_hours or 24)
+                            # Keep existing value; floor at 0.
+                            service.refund_cutoff_hours = max(0, service.refund_cutoff_hours or 0)
                         service.refund_policy_text = (request.POST.get("refund_policy_text") or "").strip()
                     else:
                         try:
