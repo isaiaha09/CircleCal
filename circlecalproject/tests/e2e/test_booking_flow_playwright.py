@@ -100,6 +100,110 @@ def test_public_booking_flow():
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
 
+            def open_bookable_details_view(max_month_advance=2, max_days_per_month=31):
+                month_attempt = 0
+                while month_attempt <= max_month_advance:
+                    try:
+                        page.wait_for_selector('.day-circle', timeout=15000)
+                    except PlaywrightTimeoutError:
+                        return False
+
+                    day_count = page.locator('.day-circle:not(.disabled)').count()
+                    day_limit = min(day_count, max_days_per_month)
+
+                    for day_idx in range(day_limit):
+                        days = page.query_selector_all('.day-circle:not(.disabled)')
+                        if day_idx >= len(days):
+                            break
+                        days[day_idx].click()
+
+                        try:
+                            page.wait_for_selector('#timeModal', timeout=8000)
+                            page.wait_for_selector('#timeSlots .time-circle', timeout=10000)
+                        except PlaywrightTimeoutError:
+                            continue
+
+                        slot_count = page.locator('#timeSlots .time-circle').count()
+                        for slot_idx in range(slot_count):
+                            slots = page.query_selector_all('#timeSlots .time-circle')
+                            if slot_idx >= len(slots):
+                                break
+
+                            slot = slots[slot_idx]
+                            cls = (slot.get_attribute('class') or '').lower()
+                            aria_disabled = (slot.get_attribute('aria-disabled') or '').lower()
+                            if 'disabled' in cls or aria_disabled == 'true':
+                                continue
+
+                            slot.click()
+
+                            try:
+                                page.wait_for_selector('form input[name="client_name"]', timeout=6000)
+                                page.wait_for_selector('form input[name="client_email"]', timeout=6000)
+                            except PlaywrightTimeoutError:
+                                try:
+                                    page.click('#backToSlotsBtn')
+                                    page.wait_for_selector('#timeSlots .time-circle', timeout=4000)
+                                except Exception:
+                                    pass
+                                continue
+
+                            page.fill('form input[name="client_name"]', 'Playwright Test')
+                            page.fill('form input[name="client_email"]', 'pwtest@example.com')
+
+                            try:
+                                page.wait_for_function(
+                                    "() => { const b = document.getElementById('bookNowBtn'); return !!b && !b.disabled; }",
+                                    timeout=3000,
+                                )
+                            except Exception:
+                                pass
+
+                            if page.is_enabled('#bookNowBtn'):
+                                return True
+
+                            try:
+                                page.click('#backToSlotsBtn')
+                                page.wait_for_selector('#timeSlots .time-circle', timeout=4000)
+                            except Exception:
+                                break
+
+                        try:
+                            page.click('#timeModalViewSlots .modal-close')
+                        except Exception:
+                            try:
+                                page.click('#backToSlotsBtn')
+                                page.click('#timeModalViewSlots .modal-close')
+                            except Exception:
+                                pass
+
+                    if month_attempt == max_month_advance:
+                        break
+
+                    prev_header = None
+                    try:
+                        prev_header = page.inner_text('#monthHeader')
+                    except Exception:
+                        prev_header = None
+
+                    btn = page.query_selector('#nextMonthBtn')
+                    if not btn:
+                        break
+                    btn.click()
+                    try:
+                        if prev_header is not None:
+                            page.wait_for_function(
+                                "(prev) => { const el = document.getElementById('monthHeader'); return !!el && el.innerText && el.innerText !== prev; }",
+                                arg=prev_header,
+                                timeout=8000,
+                            )
+                    except Exception:
+                        page.wait_for_timeout(400)
+
+                    month_attempt += 1
+
+                return False
+
             # Navigate to the seeded service page, or fall back to finding a public service link
             if svc_url:
                 resp = page.goto(svc_url, wait_until='networkidle')
@@ -119,81 +223,11 @@ def test_public_booking_flow():
                 link.click()
                 page.wait_for_load_state('networkidle')
 
-            # Wait for the calendar to initialize by waiting for day circles to be present
-            try:
-                page.wait_for_selector('.day-circle', timeout=15000)
-            except PlaywrightTimeoutError:
+            if not open_bookable_details_view(max_month_advance=2):
                 debug = dump_debug(page, svc_url)
-                raise AssertionError(f"Calendar did not render on service page (no .day-circle found)\n{debug}")
-
-            # Pick the first enabled day (not .disabled)
-            day = page.query_selector('.day-circle:not(.disabled)')
-            if not day:
-                # Common edge case: it's late on the last day of the month, so today's
-                # remaining slots are exhausted and tomorrow is in the next month.
-                # Advance a month and retry a couple times before failing.
-                try:
-                    prev_header = None
-                    try:
-                        prev_header = page.inner_text('#monthHeader')
-                    except Exception:
-                        prev_header = None
-
-                    for _ in range(2):
-                        btn = page.query_selector('#nextMonthBtn')
-                        if not btn:
-                            break
-                        btn.click()
-                        try:
-                            if prev_header is not None:
-                                page.wait_for_function(
-                                    "(prev) => { const el = document.getElementById('monthHeader'); return !!el && el.innerText && el.innerText !== prev; }",
-                                    arg=prev_header,
-                                    timeout=8000,
-                                )
-                                prev_header = page.inner_text('#monthHeader')
-                        except Exception:
-                            # Fallback: small delay to allow re-render
-                            page.wait_for_timeout(400)
-
-                        page.wait_for_selector('.day-circle', timeout=15000)
-                        day = page.query_selector('.day-circle:not(.disabled)')
-                        if day:
-                            break
-                except Exception:
-                    day = None
-
-            if not day:
-                debug = dump_debug(page, svc_url)
-                raise AssertionError(f"No enabled day found in the calendar to open time slots\n{debug}")
-            day.click()
-
-            # Wait for the time modal and at least one time block to appear
-            try:
-                page.wait_for_selector('#timeModal', timeout=8000)
-                page.wait_for_selector('#timeSlots .time-circle', timeout=10000)
-            except PlaywrightTimeoutError:
-                debug = dump_debug(page, svc_url)
-                raise AssertionError(f"Time slots modal did not appear or no time blocks available\n{debug}")
-
-            # Click the first available time block
-            time_block = page.query_selector('#timeSlots .time-circle')
-            if time_block is None:
-                debug = dump_debug(page, svc_url)
-                raise AssertionError(f"No clickable time block found\n{debug}")
-            time_block.click()
-
-            # Wait for booking form inputs
-            try:
-                page.wait_for_selector('form input[name="client_name"]', timeout=6000)
-                page.wait_for_selector('form input[name="client_email"]', timeout=6000)
-            except PlaywrightTimeoutError:
-                debug = dump_debug(page, svc_url)
-                raise AssertionError(f"Booking form did not appear after selecting a time block\n{debug}")
-
-            # Fill and submit
-            page.fill('form input[name="client_name"]', 'Playwright Test')
-            page.fill('form input[name="client_email"]', 'pwtest@example.com')
+                raise AssertionError(
+                    f"No bookable slot found (submit button remained disabled for all checked day/time combinations)\n{debug}"
+                )
 
             with page.expect_navigation(timeout=12000):
                 page.click('#bookNowBtn')
