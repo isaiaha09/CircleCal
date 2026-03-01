@@ -529,6 +529,24 @@
 
           <div class="grid sm:grid-cols-2 gap-6 mt-4">
             <div>
+              <label class="block text-sm font-medium text-gray-700">Max clients per slot</label>
+              <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+                <input id="max_participants" name="max_participants" type="number" min="1" value="{{ request.POST.max_participants|default:1 }}"
+                  class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %} />
+                {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock data-cc-plan="pro" role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+              </div>
+              <p class="mt-2 text-xs text-gray-500">Allow multiple clients to join the same appointment slot.</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Custom group pricing tiers</label>
+              <input type="hidden" id="group_pricing_json" name="group_pricing_json" value="{{ request.POST.group_pricing_json|default:'{}'|escape }}">
+              <div id="group_pricing_rows" class="mt-1 space-y-2" data-initial='{{ request.POST.group_pricing_json|default:"{}"|escapejs }}'></div>
+              <p class="mt-2 text-xs text-gray-500">Set total price per group size. Missing sizes default to base price × clients.</p>
+            </div>
+          </div>
+
+          <div class="grid sm:grid-cols-2 gap-6 mt-4">
+            <div>
               <!-- Prep buffer removed: buffer_before is deprecated and not used by availability/overlap logic -->
               <label class="block text-sm font-medium text-gray-700">Buffer Time Post-Service Appointment (minutes)</label>
               <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
@@ -615,6 +633,93 @@
             </div>
           </div>
         </div>
+
+        <script>
+          (function(){
+            function parseInitial(raw){
+              try{
+                const v = JSON.parse(raw || '{}');
+                return (v && typeof v === 'object') ? v : {};
+              }catch(e){
+                try {
+                  const v2 = Function('"use strict"; return (' + (raw || '{}') + ');')();
+                  return (v2 && typeof v2 === 'object') ? v2 : {};
+                } catch (_) {
+                  return {};
+                }
+              }
+            }
+            function toMoney(v){
+              const n = Number(v || 0);
+              if (!Number.isFinite(n) || n < 0) return '';
+              return n.toFixed(2);
+            }
+            function renderRows(){
+              const maxEl = document.getElementById('max_participants');
+              const rowsEl = document.getElementById('group_pricing_rows');
+              const hiddenEl = document.getElementById('group_pricing_json');
+              if (!maxEl || !rowsEl || !hiddenEl) return;
+
+              const initial = parseInitial(rowsEl.getAttribute('data-initial') || '{}');
+              const current = parseInitial(hiddenEl.value || '{}');
+              const merged = Object.assign({}, initial, current);
+
+              let maxP = Number(maxEl.value || 1);
+              if (!Number.isFinite(maxP) || maxP < 1) maxP = 1;
+              maxP = Math.floor(maxP);
+
+              rowsEl.innerHTML = '';
+              const out = {};
+              for (let qty = 2; qty <= maxP; qty++){
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-2';
+
+                const label = document.createElement('label');
+                label.className = 'text-sm text-gray-700 w-28';
+                label.textContent = qty + ' clients';
+
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.min = '0';
+                input.step = '0.01';
+                input.className = 'cc-field w-40';
+                input.placeholder = 'Total price';
+                const initVal = merged[String(qty)] !== undefined ? merged[String(qty)] : '';
+                input.value = toMoney(initVal);
+                if (input.value) out[String(qty)] = input.value;
+
+                input.addEventListener('input', function(){
+                  const data = {};
+                  const all = rowsEl.querySelectorAll('input[data-qty]');
+                  all.forEach(function(el){
+                    const q = String(el.getAttribute('data-qty') || '');
+                    const v = String(el.value || '').trim();
+                    if (!q || !v) return;
+                    const n = Number(v);
+                    if (!Number.isFinite(n) || n < 0) return;
+                    data[q] = n.toFixed(2);
+                  });
+                  hiddenEl.value = JSON.stringify(data);
+                });
+                input.setAttribute('data-qty', String(qty));
+
+                row.appendChild(label);
+                row.appendChild(input);
+                rowsEl.appendChild(row);
+              }
+              hiddenEl.value = JSON.stringify(out);
+              rowsEl.setAttribute('data-initial', '{}');
+            }
+
+            document.addEventListener('DOMContentLoaded', function(){
+              const maxEl = document.getElementById('max_participants');
+              if (!maxEl) return;
+              renderRows();
+              maxEl.addEventListener('input', renderRows);
+              maxEl.addEventListener('change', renderRows);
+            });
+          })();
+        </script>
 
         {% if is_team_plan %}
         <!-- Assign service to one or more team members (Team plan users) -->

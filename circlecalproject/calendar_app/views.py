@@ -638,6 +638,14 @@ def apply_service_update(request, org_slug, service_id):
     except Exception:
         return HttpResponseBadRequest('Invalid JSON')
 
+    try:
+        from billing.utils import get_plan_slug, PRO_SLUG, TEAM_SLUG, get_subscription
+        sub = get_subscription(org)
+        is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        can_use_pro_team = (get_plan_slug(org) in {PRO_SLUG, TEAM_SLUG}) and (not is_trialing)
+    except Exception:
+        can_use_pro_team = False
+
     if not payload.get('confirm'):
         return HttpResponseBadRequest('Must include confirm=true to apply changes')
 
@@ -963,6 +971,15 @@ def apply_service_update(request, org_slug, service_id):
             fields['max_booking_days'] = int(payload.get('max_booking_days') or 0)
         except Exception:
             pass
+    if 'max_participants' in payload:
+        try:
+            if can_use_pro_team:
+                mp = int(payload.get('max_participants') or 1)
+                fields['max_participants'] = max(1, mp)
+            else:
+                fields['max_participants'] = 1
+        except Exception:
+            fields['max_participants'] = 1
     if 'time_increment_minutes' in payload:
         try:
             fields['time_increment_minutes'] = int(payload.get('time_increment_minutes') or 0) or 30
@@ -1002,6 +1019,36 @@ def apply_service_update(request, org_slug, service_id):
             fields['refund_policy_text'] = (payload.get('refund_policy_text') or '').strip()
         except Exception:
             pass
+
+    if 'group_pricing' in payload:
+        try:
+            if not can_use_pro_team:
+                fields['group_pricing'] = {}
+            else:
+                raw_tiers = payload.get('group_pricing') or {}
+                if not isinstance(raw_tiers, dict):
+                    raw_tiers = {}
+                max_p = int(fields.get('max_participants', getattr(svc, 'max_participants', 1) or 1))
+                if max_p < 1:
+                    max_p = 1
+                cleaned_tiers = {}
+                for raw_k, raw_v in raw_tiers.items():
+                    try:
+                        qty = int(raw_k)
+                    except Exception:
+                        continue
+                    if qty < 2 or qty > max_p:
+                        continue
+                    try:
+                        val = float(raw_v)
+                    except Exception:
+                        continue
+                    if val < 0:
+                        continue
+                    cleaned_tiers[str(qty)] = f"{val:.2f}"
+                fields['group_pricing'] = cleaned_tiers
+        except Exception:
+            fields['group_pricing'] = {}
 
     # Per-service payment method controls.
     # The edit page saves via this JSON endpoint, so we must persist these too.
@@ -6570,6 +6617,43 @@ def create_service(request, org_slug):
             except ValueError:
                 messages.error(request, "Numeric fields must be valid numbers.")
             else:
+                # Group booking controls (Pro/Team only)
+                max_participants = 1
+                group_pricing = {}
+                if can_use_pro_team:
+                    try:
+                        raw_max_participants = request.POST.get('max_participants')
+                        max_participants = int(raw_max_participants or 1)
+                    except Exception:
+                        max_participants = 1
+                    if max_participants < 1:
+                        max_participants = 1
+
+                    raw_group_pricing = (request.POST.get('group_pricing_json') or '').strip()
+                    if raw_group_pricing:
+                        try:
+                            posted_tiers = json.loads(raw_group_pricing)
+                            if isinstance(posted_tiers, dict):
+                                cleaned_tiers = {}
+                                for raw_k, raw_v in posted_tiers.items():
+                                    try:
+                                        qty = int(raw_k)
+                                    except Exception:
+                                        continue
+                                    if qty < 2 or qty > max_participants:
+                                        continue
+                                    try:
+                                        val = float(raw_v)
+                                    except Exception:
+                                        continue
+                                    if val < 0:
+                                        continue
+                                    cleaned_tiers[str(qty)] = f"{val:.2f}"
+                                group_pricing = cleaned_tiers
+                        except Exception:
+                            messages.error(request, "Group pricing tiers are invalid.")
+                            return _render_create_service_form()
+
                 # Normalize desired assignees (used for both assignments and availability validation)
                 desired_assignee_ids = set()
                 try:
@@ -6778,6 +6862,8 @@ def create_service(request, org_slug):
                     requires_facility_resources=bool(requires_facility_resources),
                     allow_stripe_payments=allow_stripe_payments,
                     allowed_offline_payment_methods=allowed_offline_payment_methods,
+                    max_participants=(max_participants if can_use_pro_team else 1),
+                    group_pricing=(group_pricing if can_use_pro_team else {}),
                 )
                 # Per-service client slot settings
                 try:
@@ -7224,12 +7310,69 @@ def edit_service(request, org_slug, service_id):
             except ValueError:
                 messages.error(request, "Numeric fields must be valid numbers.")
             else:
+                # Group booking controls (Pro/Team only)
+                max_participants = 1
+                group_pricing = {}
+                if can_use_pro_team:
+                    try:
+                        raw_max_participants = request.POST.get('max_participants')
+                        max_participants = int(raw_max_participants or getattr(service, 'max_participants', 1) or 1)
+                    except Exception:
+                        max_participants = int(getattr(service, 'max_participants', 1) or 1)
+                    if max_participants < 1:
+                        max_participants = 1
+
+                    raw_group_pricing = (request.POST.get('group_pricing_json') or '').strip()
+                    if raw_group_pricing:
+                        try:
+                            posted_tiers = json.loads(raw_group_pricing)
+                            if isinstance(posted_tiers, dict):
+                                cleaned_tiers = {}
+                                for raw_k, raw_v in posted_tiers.items():
+                                    try:
+                                        qty = int(raw_k)
+                                    except Exception:
+                                        continue
+                                    if qty < 2 or qty > max_participants:
+                                        continue
+                                    try:
+                                        val = float(raw_v)
+                                    except Exception:
+                                        continue
+                                    if val < 0:
+                                        continue
+                                    cleaned_tiers[str(qty)] = f"{val:.2f}"
+                                group_pricing = cleaned_tiers
+                        except Exception:
+                            messages.error(request, "Group pricing tiers are invalid.")
+                            return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
+                    else:
+                        try:
+                            existing_tiers = getattr(service, 'group_pricing', None) or {}
+                            if isinstance(existing_tiers, dict):
+                                for raw_k, raw_v in existing_tiers.items():
+                                    try:
+                                        qty = int(raw_k)
+                                        val = float(raw_v)
+                                    except Exception:
+                                        continue
+                                    if qty < 2 or qty > max_participants or val < 0:
+                                        continue
+                                    group_pricing[str(qty)] = f"{val:.2f}"
+                        except Exception:
+                            group_pricing = {}
+
                 service.name = name
                 service.description = description
                 service.duration = duration
                 service.price = price
                 service.buffer_before = buffer_before
                 service.buffer_after = buffer_after if can_use_pro_team else 0
+                try:
+                    service.max_participants = max_participants if can_use_pro_team else 1
+                    service.group_pricing = group_pricing if can_use_pro_team else {}
+                except Exception:
+                    pass
                 # Trial/Basic: lock min notice + max advance.
                 service.min_notice_hours = min_notice_hours if can_use_pro_team else 24
                 service.max_booking_days = max_booking_days if can_use_pro_team else (31 if is_trialing else 30)
@@ -8511,6 +8654,8 @@ def bookings_recent(request, org_slug):
             'service_id': b.service.id if b.service else None,
             'duration': (int(b.service.duration) if (b.service and getattr(b.service, 'duration', None) is not None) else (None if not (b.start and b.end) else int((b.end - b.start).total_seconds()/60))),
             'service_price': (float(b.service.price) if (b.service and getattr(b.service, 'price', None) is not None) else None),
+            'participant_count': int(getattr(b, 'participant_count', 1) or 1),
+            'total_price': float(getattr(b, 'total_price', 0) or 0),
             'start': b.start.isoformat() if b.start else None,
             'end': b.end.isoformat() if b.end else None,
             'start_date': start_date,
@@ -9190,6 +9335,8 @@ def bookings_audit_undo(request, org_slug):
         'public_ref': getattr(b, 'public_ref', None),
         'service_name': svc.name if svc else None,
         'service_id': svc.id if svc else None,
+        'participant_count': int(getattr(b, 'participant_count', 1) or 1),
+        'total_price': float(getattr(b, 'total_price', 0) or 0),
         'start_date': start_date,
         'time_range': time_range,
         'client_name': b.client_name,

@@ -2899,6 +2899,8 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Client:</strong> <span id="clientName"></span></p>
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Lesson Type:</strong> <span id="lessonType"></span></p>
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Time:</strong> <span id="lessonTime"></span></p>
+            <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Participants:</strong> <span id="bookingParticipants"></span></p>
+            <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Booking Total:</strong> <span id="bookingTotal"></span></p>
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Payment:</strong> <span id="paymentMethod"></span></p>
     </div>
 
@@ -10885,10 +10887,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function openBookingModal(event) {
             const modal = document.getElementById('bookingModal');
-            document.getElementById('clientName').textContent = event.extendedProps.client_name || 'Unknown';
-            document.getElementById('lessonType').textContent = event.extendedProps.lesson_type || 'N/A';
+            const xp = event.extendedProps || {};
+            document.getElementById('clientName').textContent = xp.client_name || 'Unknown';
+            document.getElementById('lessonType').textContent = xp.service_name || xp.lesson_type || event.title || 'N/A';
             document.getElementById('lessonTime').textContent = `${event.start.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - ${event.end.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
-            document.getElementById('paymentMethod').textContent = event.extendedProps.payment_method || 'N/A';
+            const participantsRaw = Number(
+                (xp.participant_count !== undefined ? xp.participant_count : xp.participantCount) || 1
+            );
+            const participants = (Number.isFinite(participantsRaw) && participantsRaw > 0) ? Math.floor(participantsRaw) : 1;
+            document.getElementById('bookingParticipants').textContent = `${participants}`;
+
+            const totalRaw = Number(
+                (xp.total_price !== undefined ? xp.total_price : xp.totalPrice) || 0
+            );
+            document.getElementById('bookingTotal').textContent = (Number.isFinite(totalRaw) && totalRaw >= 0) ? `$${totalRaw.toFixed(2)}` : '—';
+
+            const pm = String(xp.payment_method || '').toLowerCase();
+            const offline = String(xp.offline_payment_method || '').trim();
+            if (pm === 'stripe') {
+                document.getElementById('paymentMethod').textContent = 'Card';
+            } else if (pm === 'offline') {
+                document.getElementById('paymentMethod').textContent = offline ? `Offline (${offline})` : 'Offline';
+            } else if (pm === 'none' || !pm) {
+                document.getElementById('paymentMethod').textContent = 'No payment required';
+            } else {
+                document.getElementById('paymentMethod').textContent = pm;
+            }
 
             _ccRaiseBookingModalAboveDaySchedule(modal);
             modal.style.display = 'flex';
@@ -11117,6 +11141,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     document.getElementById('lessonTime').textContent = 'Invalid time';
                 }
+
+                const participantsRaw = Number(
+                    (xp.participant_count !== undefined ? xp.participant_count : xp.participantCount) || 1
+                );
+                const participants = (Number.isFinite(participantsRaw) && participantsRaw > 0)
+                    ? Math.floor(participantsRaw)
+                    : 1;
+                document.getElementById('bookingParticipants').textContent = `${participants}`;
+
+                const totalRaw = Number(
+                    (xp.total_price !== undefined ? xp.total_price : xp.totalPrice) || 0
+                );
+                document.getElementById('bookingTotal').textContent = (Number.isFinite(totalRaw) && totalRaw >= 0)
+                    ? `$${totalRaw.toFixed(2)}`
+                    : '—';
+
                 document.getElementById('paymentMethod').textContent = xp.payment_method || 'N/A';
 
                 _ccRaiseBookingModalAboveDaySchedule(bookingModal);

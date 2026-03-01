@@ -418,6 +418,8 @@
       description: "{{ s.description|default:""|escapejs }}",
       duration: {{ s.duration|default:0 }},
       price: {{ s.price|default:0 }},
+      max_participants: {{ s.max_participants|default:1 }},
+      group_pricing: {{ s.group_pricing|default:'{}'|safe }},
       {% if show_with_line %}assigned_names: "{{ s.assigned_names|default:''|escapejs }}",{% endif %}
       refunds_allowed: {{ s.refunds_allowed|yesno:"true,false" }},
       refund_cutoff_hours: {{ s.refund_cutoff_hours|default:0 }},
@@ -647,6 +649,11 @@
         </div>
       </div>
 
+      <label class="block text-sm text-gray-700 mb-1" for="participantCountInput">How many clients are joining this booking?</label>
+      <input type="number" id="participantCountInput" name="participant_count" min="1" value="1" class="w-full mb-2 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+      <p id="participantCountHint" class="text-xs text-gray-500 mb-4">This service allows up to 1 client per booking.</p>
+      <p id="participantSlotAvailability" class="text-xs text-amber-700 mb-4" style="display:none;"></p>
+
       <label class="block text-sm text-gray-700 mb-1">Your name</label>
       <input type="text" name="client_name" required value="{{ prefill_client_name|default:'' }}" class="w-full mb-3 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="John Doe">
 
@@ -758,6 +765,8 @@ document.addEventListener("DOMContentLoaded", async function () {
   const svcDesc = document.getElementById("svcDesc");
   const svcDuration = document.getElementById("svcDuration");
   const svcPrice = document.getElementById("svcPrice");
+  const participantCountInput = document.getElementById('participantCountInput');
+  const participantCountHint = document.getElementById('participantCountHint');
   const svcRefundLine = document.getElementById("svcRefundLine");
   const svcRefundText = document.getElementById("svcRefundText");
   const paymentSection = document.getElementById('paymentSection');
@@ -964,10 +973,26 @@ document.addEventListener("DOMContentLoaded", async function () {
     const bookNowBtn = document.getElementById('bookNowBtn');
     if (paymentUnavailableNote) paymentUnavailableNote.style.display = 'none';
     if (bookNowBtn) bookNowBtn.disabled = false;
+    const participants = (() => {
+      try {
+        const n = Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1);
+        if (!Number.isFinite(n) || n < 1) return 1;
+        return Math.floor(n);
+      } catch (e) { return 1; }
+    })();
+
     let price = 0;
     try {
-      const d = SERVICE_MAP[slug];
-      price = Number(d && d.price != null ? d.price : 0) || 0;
+      const d = SERVICE_MAP[slug] || {};
+      const base = Number(d && d.price != null ? d.price : 0) || 0;
+      const tiers = (d && typeof d.group_pricing === 'object' && d.group_pricing) ? d.group_pricing : {};
+      const tierRaw = tiers[String(participants)];
+      const tierNum = Number(tierRaw);
+      if (participants > 1 && Number.isFinite(tierNum) && tierNum >= 0) {
+        price = tierNum;
+      } else {
+        price = base * participants;
+      }
     } catch (e) {
       price = 0;
     }
@@ -1059,6 +1084,47 @@ document.addEventListener("DOMContentLoaded", async function () {
     }
     try{ _refreshOfflineInstructionsDisplay(); }catch(e){}
     try{ _refreshOfflineQrDisplay(); }catch(e){}
+  }
+
+  function syncParticipantCapacityForService(slug) {
+    try {
+      const d = SERVICE_MAP[slug] || {};
+      const maxP = Math.max(1, Number(d.max_participants || 1) || 1);
+      const slotRemainingRaw = Number(window.__ccSelectedSlotRemaining);
+      const slotRemaining = (Number.isFinite(slotRemainingRaw) && slotRemainingRaw >= 0)
+        ? Math.floor(slotRemainingRaw)
+        : null;
+      const allowedNow = (slotRemaining === null) ? maxP : Math.max(0, Math.min(maxP, slotRemaining));
+      const bookNowBtn = document.getElementById('bookNowBtn');
+      const slotAvailEl = document.getElementById('participantSlotAvailability');
+
+      if (participantCountInput) {
+        participantCountInput.max = String(Math.max(1, allowedNow));
+        const cur = Math.max(1, Math.floor(Number(participantCountInput.value || 1) || 1));
+        participantCountInput.value = String(Math.min(cur, Math.max(1, allowedNow)));
+        participantCountInput.disabled = allowedNow <= 1;
+      }
+      if (participantCountHint) {
+        participantCountHint.textContent = `This service allows up to ${maxP} client${maxP === 1 ? '' : 's'} per booking.`;
+      }
+      if (slotAvailEl) {
+        if (slotRemaining === null) {
+          slotAvailEl.style.display = 'none';
+          slotAvailEl.textContent = '';
+        } else if (allowedNow <= 0) {
+          slotAvailEl.style.display = '';
+          slotAvailEl.className = 'text-xs text-red-700 mb-4';
+          slotAvailEl.textContent = 'This specific time slot is full. Please choose another time.';
+        } else {
+          slotAvailEl.style.display = '';
+          slotAvailEl.className = 'text-xs text-amber-700 mb-4';
+          slotAvailEl.textContent = `Only ${allowedNow} slot${allowedNow === 1 ? '' : 's'} left for this time. The max you can book right now is ${allowedNow}.`;
+        }
+      }
+      if (bookNowBtn) {
+        bookNowBtn.disabled = (slotRemaining !== null && allowedNow <= 0);
+      }
+    } catch (e) {}
   }
 
   if (paymentSection) {
@@ -1349,6 +1415,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   // Fetch availability from server and show time circles for selected day
   async function openTimeModal(year, month, day, dateKey) {
+    try { window.__ccSelectedSlotRemaining = null; } catch (e) {}
     // Default the booking modal to the service currently selected on the calendar.
     try {
       const selectedSlug = window.selectedServiceSlug || '{{ service.slug }}';
@@ -1482,7 +1549,22 @@ document.addEventListener("DOMContentLoaded", async function () {
         svcName.textContent = d.name;
         svcDesc.textContent = d.description || "—";
         svcDuration.textContent = d.duration || 0;
-        svcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+        let participants = 1;
+        try {
+          const maxP = Math.max(1, Number(d.max_participants || 1) || 1);
+          participants = Math.max(1, Math.floor(Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1) || 1));
+          if (participants > maxP) participants = maxP;
+        } catch (e) { participants = 1; }
+        try {
+          const base = Number(d && d.price != null ? d.price : 0) || 0;
+          const tiers = (d && typeof d.group_pricing === 'object' && d.group_pricing) ? d.group_pricing : {};
+          const tierRaw = tiers[String(participants)];
+          const tierNum = Number(tierRaw);
+          const total = (participants > 1 && Number.isFinite(tierNum) && tierNum >= 0) ? tierNum : (base * participants);
+          svcPrice.textContent = Number(total).toFixed(2);
+        } catch (e) {
+          svcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
+        }
         // Populate team members into the booking modal (reads option dataset if available)
         try {
           const opt = serviceSelect && serviceSelect.options ? serviceSelect.options[serviceSelect.selectedIndex] : null;
@@ -1508,12 +1590,23 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
 
       // Initialize details
+      syncParticipantCapacityForService(serviceSelect.value);
       updateServiceDetails(serviceSelect.value);
       updatePaymentSectionForServiceSlug(serviceSelect.value);
       serviceSelect.addEventListener('change', (e) => {
+        try { window.__ccSelectedSlotRemaining = null; } catch (err) {}
+        syncParticipantCapacityForService(e.target.value);
         updateServiceDetails(e.target.value);
         updatePaymentSectionForServiceSlug(e.target.value);
       });
+      if (participantCountInput) {
+        participantCountInput.addEventListener('input', () => {
+          const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
+          syncParticipantCapacityForService(slug);
+          updateServiceDetails(slug);
+          updatePaymentSectionForServiceSlug(slug);
+        });
+      }
       // Include edge buffer preference (prefer server setting, allow local override)
       const edgeVal2 = (function(){
         try {
@@ -1733,6 +1826,18 @@ document.addEventListener("DOMContentLoaded", async function () {
                 const headerText = `${date.toDateString()} • ${labelFromMin(sm)}`;
                 selectedDateLabel.innerText = headerText;
                 selectedDateTimeLabel.innerText = headerText;
+                try {
+                  const remaining = Number(slotObj && slotObj.remaining_capacity);
+                  window.__ccSelectedSlotRemaining = (Number.isFinite(remaining) && remaining >= 0)
+                    ? Math.floor(remaining)
+                    : null;
+                } catch (e) {
+                  window.__ccSelectedSlotRemaining = null;
+                }
+                try {
+                  const selectedSlug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
+                  syncParticipantCapacityForService(selectedSlug);
+                } catch (e) {}
                 circle.dataset.slotKey = slotKey;
                 timeModalViewSlots.style.display = 'none';
                 timeModalViewDetails.style.display = 'block';
@@ -1779,6 +1884,29 @@ document.addEventListener("DOMContentLoaded", async function () {
   const bookingForm = document.querySelector('#timeModalViewDetails form');
   if (bookingForm) {
     bookingForm.addEventListener('submit', (e) => {
+      try {
+        const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
+        const d = SERVICE_MAP[slug] || {};
+        const serviceMax = Math.max(1, Number(d.max_participants || 1) || 1);
+        const slotRemainingRaw = Number(window.__ccSelectedSlotRemaining);
+        const slotRemaining = (Number.isFinite(slotRemainingRaw) && slotRemainingRaw >= 0)
+          ? Math.floor(slotRemainingRaw)
+          : null;
+        const allowedNow = (slotRemaining === null) ? serviceMax : Math.max(0, Math.min(serviceMax, slotRemaining));
+        const requested = Math.max(1, Math.floor(Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1) || 1));
+        if (allowedNow <= 0) {
+          e.preventDefault();
+          try { if (typeof showToast === 'function') showToast('warning', 'That time slot is full. Please choose another time.'); } catch (_) {}
+          return;
+        }
+        if (requested > allowedNow) {
+          e.preventDefault();
+          if (participantCountInput) participantCountInput.value = String(allowedNow);
+          try { if (typeof showToast === 'function') showToast('warning', `Only ${allowedNow} slot${allowedNow === 1 ? '' : 's'} left for that time. Max you can book now is ${allowedNow}.`); } catch (_) {}
+          return;
+        }
+      } catch (err) {}
+
       try{
         const selected = bookingForm.querySelector('input[name="payment_method"]:checked');
         const v = selected ? String(selected.value || '').toLowerCase() : '';

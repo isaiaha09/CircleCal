@@ -171,6 +171,83 @@ def _build_booking_people_context(booking) -> dict:
     return {'owner_card': owner_card, 'staff_cards': staff_cards}
 
 
+def _build_group_booking_context(booking) -> dict:
+    """Return email context for group bookings (only when participants > 1)."""
+    try:
+        participants = int(getattr(booking, 'participant_count', 1) or 1)
+    except Exception:
+        participants = 1
+
+    if participants <= 1:
+        return {
+            'show_group_booking_details': False,
+            'participant_count': 1,
+            'group_total_price': None,
+        }
+
+    total = None
+    try:
+        raw_total = getattr(booking, 'total_price', None)
+        if raw_total is not None:
+            total = raw_total
+    except Exception:
+        total = None
+
+    if total is None:
+        try:
+            svc = getattr(booking, 'service', None)
+            if svc and hasattr(svc, 'total_price_for_participants'):
+                total = svc.total_price_for_participants(participants)
+        except Exception:
+            total = None
+
+    return {
+        'show_group_booking_details': True,
+        'participant_count': participants,
+        'group_total_price': total,
+    }
+
+
+def _build_calendar_quick_links(booking) -> dict:
+    """Build Outlook Web + Google Calendar deep links for a booking."""
+    try:
+        dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+        title = (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking'))
+        org_name = getattr(booking.organization, 'name', '')
+        ref = getattr(booking, 'public_ref', '')
+
+        gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
+        g_params = {
+            'text': title,
+            'dates': f"{dtstart}/{dtend}",
+            'details': f"Booking at {org_name}\\nRef: {ref}",
+            'location': org_name,
+        }
+        google_calendar_url = gcal_base + '&' + urlencode(g_params)
+
+        outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
+        outlook_params = {
+            'rru': 'addevent',
+            'subject': title,
+            'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'body': f"Booking at {org_name}\\nRef: {ref}",
+            'location': org_name,
+        }
+        outlook_web_url = outlook_base + '?' + urlencode(outlook_params)
+        return {
+            'google_calendar_url': google_calendar_url,
+            'outlook_web_url': outlook_web_url,
+        }
+    except Exception:
+        return {
+            'google_calendar_url': '',
+            'outlook_web_url': '',
+        }
+
+
 def _dedupe_emails(emails):
     """Return a stable, de-duped list of non-empty emails."""
     seen = set()
@@ -406,29 +483,14 @@ def send_booking_confirmation(booking):
     except Exception:
         pass
 
+    try:
+        context.update(_build_group_booking_context(booking))
+    except Exception:
+        pass
+
     # Add a Google Calendar quick-link (TEMPLATE action)
     try:
-        dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
-        g_params = {
-            'text': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
-            'dates': f"{dtstart}/{dtend}",
-            'details': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
-            'location': getattr(booking.organization, 'name', ''),
-        }
-        context['google_calendar_url'] = gcal_base + '&' + urlencode(g_params)
-
-        outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
-        outlook_params = {
-            'rru': 'addevent',
-            'subject': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
-            'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'body': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
-            'location': getattr(booking.organization, 'name', ''),
-        }
-        context['outlook_web_url'] = outlook_base + '?' + urlencode(outlook_params)
+        context.update(_build_calendar_quick_links(booking))
     except Exception:
         context['google_calendar_url'] = ''
         context['outlook_web_url'] = ''
@@ -588,6 +650,16 @@ def send_booking_cancellation(booking, refund_info=None):
         context.update(_build_booking_people_context(booking))
     except Exception:
         pass
+
+    try:
+        context.update(_build_group_booking_context(booking))
+    except Exception:
+        pass
+
+    try:
+        context.update(_build_calendar_quick_links(booking))
+    except Exception:
+        pass
     
     logger = logging.getLogger(__name__)
     subject = f"Booking Cancelled - {booking.organization.name}"
@@ -643,6 +715,16 @@ def send_internal_booking_cancellation_notification(booking, refund_info=None):
 
     try:
         context.update(_build_booking_people_context(booking))
+    except Exception:
+        pass
+
+    try:
+        context.update(_build_group_booking_context(booking))
+    except Exception:
+        pass
+
+    try:
+        context.update(_build_calendar_quick_links(booking))
     except Exception:
         pass
 
@@ -852,6 +934,11 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
     except Exception:
         pass
 
+    try:
+        context.update(_build_group_booking_context(booking))
+    except Exception:
+        pass
+
     # Compute organization-localized display strings for start/end and duration
     try:
         org_tz_name = getattr(booking.organization, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC'))
@@ -885,27 +972,7 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
 
     # Add calendar quick-links (Outlook Web + Google) like confirmation email
     try:
-        dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
-        g_params = {
-            'text': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
-            'dates': f"{dtstart}/{dtend}",
-            'details': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
-            'location': getattr(booking.organization, 'name', ''),
-        }
-        context['google_calendar_url'] = gcal_base + '&' + urlencode(g_params)
-
-        outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
-        outlook_params = {
-            'rru': 'addevent',
-            'subject': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
-            'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'body': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
-            'location': getattr(booking.organization, 'name', ''),
-        }
-        context['outlook_web_url'] = outlook_base + '?' + urlencode(outlook_params)
+        context.update(_build_calendar_quick_links(booking))
     except Exception:
         context['google_calendar_url'] = ''
         context['outlook_web_url'] = ''

@@ -445,6 +445,8 @@
           data-status="{% if booking.start <= now and booking.end >= now %}ongoing{% elif booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
           data-service-id="{{ booking.service.id|default:'' }}"
           data-service-price="{{ booking.service.price|default:'' }}"
+          data-participant-count="{{ booking.participant_count|default:1 }}"
+          data-total-price="{{ booking.total_price|default:0 }}"
           data-payment-method="{{ booking.payment_method|default:'' }}"
           data-offline-method="{{ booking.offline_payment_method|default:'' }}"
           data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }} {{ booking.public_ref|default:''|lower }} {{ booking.id }}">
@@ -615,9 +617,17 @@
         <div class="cc-booking-modal-label">Duration:</div>
         <div id="modalDuration" class="cc-booking-modal-value"></div>
       </div>
-      <div>
+      <div id="modalChargeRow">
         <div class="cc-booking-modal-label">Charge:</div>
         <div id="modalCharge" class="cc-booking-modal-value"></div>
+      </div>
+      <div>
+        <div class="cc-booking-modal-label">Participants:</div>
+        <div id="modalParticipants" class="cc-booking-modal-value"></div>
+      </div>
+      <div id="modalTotalRow">
+        <div class="cc-booking-modal-label">Booking Total:</div>
+        <div id="modalTotal" class="cc-booking-modal-value"></div>
       </div>
       <div>
         <div class="cc-booking-modal-label">Payment:</div>
@@ -979,6 +989,26 @@ function viewBooking(id) {
   }
   document.getElementById('modalCharge').textContent = priceText;
 
+  // Group booking details
+  const participantsVal = Number(row.dataset.participantCount || '1');
+  const participants = (isFinite(participantsVal) && participantsVal > 0) ? Math.floor(participantsVal) : 1;
+  document.getElementById('modalParticipants').textContent = `${participants}`;
+  const totalVal = Number(row.dataset.totalPrice || '0');
+  document.getElementById('modalTotal').textContent = (isFinite(totalVal) && totalVal >= 0) ? `$${totalVal.toFixed(2)}` : '-';
+
+  // Multi-client bookings: show only booking total (hide per-person/base charge row)
+  try {
+    const chargeRow = document.getElementById('modalChargeRow');
+    const totalRow = document.getElementById('modalTotalRow');
+    if (participants > 1) {
+      if (chargeRow) chargeRow.style.display = 'none';
+      if (totalRow) totalRow.style.display = '';
+    } else {
+      if (chargeRow) chargeRow.style.display = '';
+      if (totalRow) totalRow.style.display = '';
+    }
+  } catch (e) {}
+
   // Payment method
   try {
     const pm = (row.dataset.paymentMethod || '').toLowerCase();
@@ -1084,6 +1114,13 @@ function insertBookingRow(b, toTop=true) {
   try{
     if (b.duration !== undefined && b.duration !== null) newTr.setAttribute('data-duration', String(b.duration));
   }catch(e){}
+  try{
+    newTr.setAttribute('data-participant-count', String((b.participant_count !== undefined && b.participant_count !== null) ? b.participant_count : 1));
+    newTr.setAttribute('data-total-price', String((b.total_price !== undefined && b.total_price !== null) ? b.total_price : 0));
+  }catch(e){
+    newTr.setAttribute('data-participant-count', '1');
+    newTr.setAttribute('data-total-price', '0');
+  }
   newTr.setAttribute('data-search', (b.client_name || '').toLowerCase() + ' ' + (b.client_email || '').toLowerCase());
   try{
     newTr.setAttribute('data-payment-method', (b.payment_method || b.paymentMethod || ''));
@@ -1101,6 +1138,11 @@ function insertBookingRow(b, toTop=true) {
     <td>
       <div style="font-weight:600;">${b.client_name || ''}</div>
       <div style="font-size:13px; color:#6c757d;">${b.client_email || ''}</div>
+      <div style="font-size:12px; color:#6c757d;">${(() => {
+        const pc = Number((b.participant_count !== undefined && b.participant_count !== null) ? b.participant_count : 1);
+        const pp = (isFinite(pc) && pc > 0) ? Math.floor(pc) : 1;
+        return `${pp} participant${pp === 1 ? '' : 's'}`;
+      })()}</div>
     </td>
     <td>${b.service_name || 'N/A'}</td>
     <td>${(b.duration !== undefined && b.duration !== null ? (b.duration + ' min') : (preservedDurationText || '- min'))}</td>

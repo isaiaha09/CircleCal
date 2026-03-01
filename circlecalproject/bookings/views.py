@@ -8,7 +8,7 @@ from django.utils.timezone import make_aware
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Sum
 from typing import Optional
 from accounts.models import Business as Organization
 from accounts.models import Membership
@@ -1022,6 +1022,8 @@ def booking_to_event(bk: Booking):
             'is_blocking': bk.is_blocking,
             'payment_method': getattr(bk, 'payment_method', None),
             'payment_status': getattr(bk, 'payment_status', None),
+            'participant_count': int(getattr(bk, 'participant_count', 1) or 1),
+            'total_price': str(getattr(bk, 'total_price', 0) or 0),
             # Flag all overrides (service NULL) so frontend can reliably detect them after hard refresh
             'is_per_date': bk.service is None,
         }
@@ -1233,7 +1235,7 @@ def _require_org_and_role(request, roles=("owner", "admin", "manager", "staff"))
     return org, None
 
 
-def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int] = None):
+def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int] = None, requested_participants: int = 1):
     """
     Prevent overlapping bookings inside the same organization.
     If `service` is provided, take its `buffer_before` and `buffer_after` into account
@@ -1299,6 +1301,37 @@ def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int]
     if resource_id is not None:
         candidate_qs = candidate_qs.filter(resource_id=int(resource_id))
 
+    # Group capacity exception: allow multiple bookings in the exact same slot
+    # for the same service until max participants is reached.
+    same_slot_share_allowed = False
+    if service is not None:
+        try:
+            max_participants = int(getattr(service, 'max_participants', 1) or 1)
+        except Exception:
+            max_participants = 1
+        try:
+            requested_qty = int(requested_participants or 1)
+        except Exception:
+            requested_qty = 1
+        if requested_qty < 1:
+            requested_qty = 1
+
+        if max_participants > 1:
+            same_slot_qs = Booking.objects.filter(
+                organization=org,
+                is_blocking=False,
+                service=service,
+                start=start_dt,
+                end=end_dt,
+            )
+            if resource_id is not None:
+                same_slot_qs = same_slot_qs.filter(resource_id=int(resource_id))
+            try:
+                booked_participants = int(same_slot_qs.aggregate(total=Sum('participant_count')).get('total') or 0)
+            except Exception:
+                booked_participants = 0
+            same_slot_share_allowed = (booked_participants + requested_qty) <= max_participants
+
     for b in candidate_qs:
         # Normalize booking times to UTC if possible
         try:
@@ -1310,6 +1343,15 @@ def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int]
         except Exception:
             b_end = b.end
 
+        # Group-capacity: same service + exact same slot can coexist until
+        # capacity is reached.
+        try:
+            if same_slot_share_allowed and service is not None and int(getattr(b, 'service_id', 0) or 0) == int(getattr(service, 'id', 0) or 0):
+                if b_start == start_utc and b_end == end_utc:
+                    continue
+        except Exception:
+            pass
+
         # 1) Direct overlap (use proposed_end including the candidate's after-buffer)
         if (b_start < proposed_end_utc) and (b_end > start_utc):
             return True
@@ -1320,6 +1362,41 @@ def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int]
             return True
 
     return False
+
+
+def _slot_remaining_capacity(org: Organization, service: Optional[Service], start_dt, end_dt, resource_id: Optional[int] = None) -> int:
+    """Return remaining participant capacity for an exact service slot.
+
+    For non-group services (max_participants <= 1), returns 1.
+    """
+    if not service:
+        return 1
+    try:
+        max_participants = int(getattr(service, 'max_participants', 1) or 1)
+    except Exception:
+        max_participants = 1
+    if max_participants <= 1:
+        return 1
+
+    qs = Booking.objects.filter(
+        organization=org,
+        is_blocking=False,
+        service=service,
+        start=start_dt,
+        end=end_dt,
+    )
+    if resource_id is not None:
+        try:
+            qs = qs.filter(resource_id=int(resource_id))
+        except Exception:
+            pass
+
+    try:
+        booked_participants = int(qs.aggregate(total=Sum('participant_count')).get('total') or 0)
+    except Exception:
+        booked_participants = 0
+
+    return max(0, int(max_participants - booked_participants))
 
 
 def _solo_services_count_for_member(org: Organization, membership_id: int) -> int:
@@ -2096,6 +2173,19 @@ def create_booking(request, org_slug):
     except Service.DoesNotExist:
         return HttpResponseBadRequest("Invalid service_id")
 
+    try:
+        participant_count = int(data.get('participant_count') or 1)
+    except Exception:
+        participant_count = 1
+    if participant_count < 1:
+        participant_count = 1
+    try:
+        max_participants = int(getattr(service, 'max_participants', 1) or 1)
+    except Exception:
+        max_participants = 1
+    if participant_count > max_participants:
+        return HttpResponseBadRequest('Participant count exceeds this service\'s maximum capacity.')
+
     start_raw = data.get('start')
     if not start_raw:
         return HttpResponseBadRequest('`start` is required')
@@ -2164,9 +2254,15 @@ def create_booking(request, org_slug):
             if not selected_resource_id:
                 return HttpResponseBadRequest('No facility resources are available for that time slot.')
 
+    remaining_for_slot = _slot_remaining_capacity(org, service, start_dt, end_dt, resource_id=selected_resource_id)
+    if participant_count > remaining_for_slot:
+        if remaining_for_slot <= 0:
+            return HttpResponseBadRequest('That time slot is full. Please choose another slot.')
+        return HttpResponseBadRequest(f'Only {remaining_for_slot} slot(s) remain for that time. Please reduce participants to {remaining_for_slot} or choose another slot.')
+
     # Overlap check (buffer-aware when `service` provided). If this service uses
     # discrete resources, scope overlap checks to the selected resource.
-    overlap_result = _has_overlap(org, start_dt, end_dt, service=service, resource_id=selected_resource_id)
+    overlap_result = _has_overlap(org, start_dt, end_dt, service=service, resource_id=selected_resource_id, requested_participants=participant_count)
     squish_warning = None
     if overlap_result:
         # If the service allows 'squished' bookings, permit creation but add a non-blocking warning
@@ -2196,6 +2292,8 @@ def create_booking(request, org_slug):
         client_email=data.get('client_email', ''),
         is_blocking=False,   # service bookings are never "blocking" events
         resource_id=selected_resource_id,
+        participant_count=participant_count,
+        total_price=service.total_price_for_participants(participant_count),
     )
     resp = {
         'status': 'ok',
@@ -3137,13 +3235,45 @@ def public_service_page(request, org_slug, service_slug):
         else:
             end = end.astimezone(org_tz)
 
+        try:
+            participant_count = int(request.POST.get('participant_count') or 1)
+        except Exception:
+            participant_count = 1
+        if participant_count < 1:
+            participant_count = 1
+        try:
+            max_participants = int(getattr(service, 'max_participants', 1) or 1)
+        except Exception:
+            max_participants = 1
+        if participant_count > max_participants:
+            return HttpResponseBadRequest('Participant count exceeds this service\'s maximum capacity.')
+
+        remaining_for_slot = _slot_remaining_capacity(org, service, start, end)
+        if participant_count > remaining_for_slot:
+            ctx = _build_public_service_page_context(
+                request,
+                org=org,
+                services=services,
+                service=service,
+                show_with_line=show_with_line,
+                offline_methods_allowed=offline_methods_allowed,
+                offline_methods=offline_methods,
+                offline_instructions=offline_instructions,
+            )
+            if remaining_for_slot <= 0:
+                ctx["error"] = "Sorry, that time is fully booked. Please choose another slot."
+            else:
+                ctx["error"] = f"Only {remaining_for_slot} slot(s) are left for that time. Please reduce participants to {remaining_for_slot} or choose another slot."
+            resp = render(request, "public/public_service_page.html", ctx)
+            if is_embed:
+                try:
+                    resp.xframe_options_exempt = True
+                except Exception:
+                    pass
+            return resp
+
         # Double-check there's still no conflict (exclude per-date overrides)
-        conflict = Booking.objects.filter(
-            organization=org,
-            start__lt=end,
-            end__gt=start,
-            service__isnull=False  # only check real service bookings
-        ).exists()
+        conflict = _has_overlap(org, start, end, service=service, requested_participants=participant_count)
         if conflict:
             ctx = _build_public_service_page_context(
                 request,
@@ -3191,8 +3321,10 @@ def public_service_page(request, org_slug, service_slug):
         chosen_offline_method = ''
         # Free services bypass payments regardless of selection
         try:
-            service_price = float(getattr(service, 'price', 0) or 0)
+            total_price_decimal = service.total_price_for_participants(participant_count)
+            service_price = float(total_price_decimal)
         except Exception:
+            total_price_decimal = 0
             service_price = 0
         is_paid_service = service_price > 0
 
@@ -3275,9 +3407,11 @@ def public_service_page(request, org_slug, service_slug):
                     payment_method='stripe',
                     payment_status='pending',
                     rescheduled_from_booking_id=reschedule_old_id,
+                    participant_count=participant_count,
+                    total_price=total_price_decimal,
                 )
 
-                unit_amount = int(round(service_price * 100))
+                unit_amount = int(round(float(total_price_decimal) * 100))
                 return_path = reverse('bookings:public_stripe_return', args=[org.slug, service.slug, intent.id])
                 site_url = (getattr(settings, 'SITE_URL', None) or '').strip()
                 if site_url:
@@ -3295,7 +3429,7 @@ def public_service_page(request, org_slug, service_slug):
                         'price_data': {
                             'currency': 'usd',
                             'product_data': {
-                                'name': f"{org.name} — {service.name}",
+                                'name': f"{org.name} — {service.name} ({participant_count} client{'s' if participant_count != 1 else ''})",
                             },
                             'unit_amount': unit_amount,
                         },
@@ -3368,6 +3502,8 @@ def public_service_page(request, org_slug, service_slug):
             offline_payment_method=(chosen_offline_method if payment_method == 'offline' else ''),
             payment_status=('not_required' if payment_method == 'none' else 'offline_due'),
             rescheduled_from_booking_id=reschedule_old_id,
+            participant_count=participant_count,
+            total_price=total_price_decimal,
         )
 
         try:
@@ -3491,6 +3627,8 @@ def public_service_page(request, org_slug, service_slug):
                 'offline_methods': eff_off,
                 'offline_label': _offline_methods_label(eff_off),
                 'offline_allowed': bool(offline_methods_allowed and eff_off),
+                'max_participants': int(getattr(s, 'max_participants', 1) or 1),
+                'group_pricing': (getattr(s, 'group_pricing', None) or {}),
             }
         ctx['service_payment_controls'] = svc_payment
     except Exception:
@@ -3678,12 +3816,13 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         return resp
 
     # Re-check conflicts at finalize time.
-    conflict = Booking.objects.filter(
-        organization=org,
-        start__lt=intent.end,
-        end__gt=intent.start,
-        service__isnull=False,
-    ).exists()
+    conflict = _has_overlap(
+        org,
+        intent.start,
+        intent.end,
+        service=service,
+        requested_participants=(getattr(intent, 'participant_count', 1) or 1),
+    )
     if conflict:
         ctx = _build_public_service_page_context(
             request,
@@ -3717,6 +3856,8 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         payment_status='paid',
         stripe_checkout_session_id=session_id,
         rescheduled_from_booking_id=getattr(intent, 'rescheduled_from_booking_id', None),
+        participant_count=(getattr(intent, 'participant_count', 1) or 1),
+        total_price=(getattr(intent, 'total_price', 0) or 0),
     )
 
     # Add the finalized booking identifiers to the PaymentIntent metadata so
@@ -4674,6 +4815,106 @@ def service_availability(request, org_slug, service_slug):
                 available_slots.append(slot_info)
 
                 slot_start += slot_increment
+
+    # Group-capacity top-up: if a slot already has bookings for this service but
+    # has not reached max participants, keep that exact slot available.
+    try:
+        max_participants = int(getattr(service, 'max_participants', 1) or 1)
+    except Exception:
+        max_participants = 1
+
+    if max_participants > 1:
+        try:
+            remaining_by_key = {}
+            grouped = (
+                Booking.objects
+                .filter(
+                    organization=org,
+                    service=service,
+                    is_blocking=False,
+                    start__lt=range_end,
+                    end__gt=range_start,
+                )
+                .values('start', 'end')
+                .annotate(total_participants=Sum('participant_count'))
+            )
+
+            for row in grouped:
+                slot_start = row.get('start')
+                slot_end = row.get('end')
+                if not slot_start or not slot_end:
+                    continue
+                try:
+                    slot_start_org = slot_start.astimezone(org_tz)
+                except Exception:
+                    slot_start_org = slot_start
+                try:
+                    slot_end_org = slot_end.astimezone(org_tz)
+                except Exception:
+                    slot_end_org = slot_end
+                try:
+                    booked_total = int(row.get('total_participants') or 0)
+                except Exception:
+                    booked_total = 0
+                remaining_by_key[(slot_start_org.isoformat(), slot_end_org.isoformat())] = max(0, int(max_participants - booked_total))
+
+            existing_keys = set()
+            normalized_slots = []
+            for si in (available_slots or []):
+                try:
+                    key = (si.get('start'), si.get('end'))
+                    existing_keys.add(key)
+                    remaining = int(remaining_by_key.get(key, max_participants))
+                    if remaining <= 0:
+                        continue
+                    si['remaining_capacity'] = remaining
+                    normalized_slots.append(si)
+                except Exception:
+                    continue
+            available_slots = normalized_slots
+
+            for row in grouped:
+                try:
+                    booked_total = int(row.get('total_participants') or 0)
+                except Exception:
+                    booked_total = 0
+                if booked_total >= max_participants:
+                    continue
+
+                slot_start = row.get('start')
+                slot_end = row.get('end')
+                if not slot_start or not slot_end:
+                    continue
+                try:
+                    slot_start_org = slot_start.astimezone(org_tz)
+                except Exception:
+                    slot_start_org = slot_start
+                try:
+                    slot_end_org = slot_end.astimezone(org_tz)
+                except Exception:
+                    slot_end_org = slot_end
+
+                if slot_start_org < earliest_allowed:
+                    continue
+                if slot_start_org > latest_allowed:
+                    continue
+                if slot_start_org < range_start or slot_end_org > range_end:
+                    continue
+
+                k = (slot_start_org.isoformat(), slot_end_org.isoformat())
+                if k in existing_keys:
+                    continue
+
+                available_slots.append({
+                    'start': k[0],
+                    'end': k[1],
+                    'used_freeze': False,
+                    'freeze_date': None,
+                    'remaining_capacity': max(0, int(max_participants - booked_total)),
+                })
+                existing_keys.add(k)
+        except Exception:
+            pass
 
     if debug_avail:
         try:

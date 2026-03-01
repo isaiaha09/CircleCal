@@ -8,7 +8,12 @@ Service: {{ booking.service.name|default:booking.title }}
 Date & Time: {{ booking.start|date:"l, F j, Y" }} at {{ booking.start|time:"g:i A" }}
 Duration: {{ booking.service.duration|default:"--" }} minutes
 Business: {{ booking.organization.name }}
-{% if booking.service.price %}Price: ${{ booking.service.price }}{% endif %}
+{% if show_group_booking_details %}
+People: {{ participant_count }}
+{% if group_total_price is not None %}Total Price: ${{ group_total_price|floatformat:2 }}{% endif %}
+{% elif booking.service.price %}
+Price: ${{ booking.service.price }}
+{% endif %}
 
 If you need to make any changes or have questions, please contact us directly.
 

@@ -4,6 +4,7 @@ from django.core.validators import MinValueValidator
 from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from decimal import Decimal
 User = get_user_model()
 from accounts.models import Business as Organization, Membership
 import secrets
@@ -81,6 +82,41 @@ class Service(models.Model):
     #   * [..] => explicit allowed subset (e.g. ["cash","venmo"])
     allow_stripe_payments = models.BooleanField(default=True)
     allowed_offline_payment_methods = models.JSONField(null=True, blank=True, default=None)
+
+    # Group booking controls (Pro/Team).
+    # - max_participants controls how many clients can join a single booking slot.
+    # - group_pricing maps participant count -> total booking price for that count.
+    #   Example: {"2": "75.00", "3": "100.00"}
+    #   Missing counts fall back to base price * participants.
+    max_participants = models.PositiveIntegerField(default=1)
+    group_pricing = models.JSONField(default=dict, blank=True)
+
+    def total_price_for_participants(self, participants: int) -> Decimal:
+        try:
+            qty = int(participants or 1)
+        except Exception:
+            qty = 1
+        if qty < 1:
+            qty = 1
+
+        try:
+            base_price = Decimal(str(getattr(self, 'price', 0) or 0))
+        except Exception:
+            base_price = Decimal('0')
+
+        if qty <= 1:
+            return base_price
+
+        try:
+            tiers = getattr(self, 'group_pricing', None) or {}
+            if isinstance(tiers, dict):
+                raw = tiers.get(str(qty), None)
+                if raw is not None and str(raw).strip() != '':
+                    return Decimal(str(raw))
+        except Exception:
+            pass
+
+        return (base_price * Decimal(qty)).quantize(Decimal('0.01'))
 
     def __str__(self):
         try:
@@ -207,6 +243,10 @@ class Booking(models.Model):
     payment_status = models.CharField(max_length=20, blank=True, default='not_required', db_index=True)
     stripe_checkout_session_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
 
+    # Group booking details
+    participant_count = models.PositiveIntegerField(default=1)
+    total_price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+
     # When a booking is created via the public reschedule flow, store the old booking id
     # so we can defer reschedule cleanup/emails until payment clears (Stripe).
     rescheduled_from_booking_id = models.IntegerField(null=True, blank=True, db_index=True)
@@ -252,6 +292,10 @@ class PublicBookingIntent(models.Model):
     # 'pending' | 'paid' | 'cancelled' | 'expired'
     payment_status = models.CharField(max_length=20, blank=True, default='pending', db_index=True)
     stripe_checkout_session_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
+
+    # Group booking details mirrored from public form
+    participant_count = models.PositiveIntegerField(default=1)
+    total_price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
     # Reschedule support: defer cleanup until payment succeeds.
     rescheduled_from_booking_id = models.IntegerField(null=True, blank=True, db_index=True)

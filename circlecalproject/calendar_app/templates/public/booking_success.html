@@ -29,6 +29,8 @@
       <div><strong>Time:</strong> {{ booking.start|time:"g:i A" }} – {{ booking.end|time:"g:i A" }}</div>
     {% endtimezone %}
     <div><strong>Email:</strong> {{ booking.client_email }}</div>
+    <div><strong>Clients in this booking:</strong> {{ booking.participant_count|default:1 }}</div>
+    <div><strong>Total:</strong> ${{ booking.total_price|default:service.price }}</div>
 
     {% if booking.payment_method and booking.payment_method != 'none' %}
       <div>

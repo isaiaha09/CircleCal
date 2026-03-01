@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from accounts.models import Business, Membership
 from billing.models import Plan, Subscription
-from bookings.models import Booking, Service, ServiceWeeklyAvailability, WeeklyAvailability
+from bookings.models import Booking, OrgSettings, Service, ServiceWeeklyAvailability, WeeklyAvailability
 
 
 class TestPublicBookingEndpoints(TestCase):
@@ -170,3 +170,85 @@ class TestPublicBookingEndpoints(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertIn(self.service.name, resp.content.decode('utf-8', errors='ignore'))
+
+    def test_group_capacity_keeps_slot_available_until_full(self):
+        self.service.max_participants = 3
+        self.service.group_pricing = {'2': '75.00', '3': '100.00'}
+        self.service.price = 50
+        self.service.save(update_fields=['max_participants', 'group_pricing', 'price'])
+
+        day_start = datetime(self.day.year, self.day.month, self.day.day, 0, 0, 0)
+        day_end = day_start + timedelta(days=1)
+        slot_prefix = f"{self.day.isoformat()}T09:00"
+
+        b_start = timezone.make_aware(datetime(self.day.year, self.day.month, self.day.day, 9, 0, 0), timezone.get_fixed_timezone(0))
+        b_end = b_start + timedelta(minutes=30)
+
+        Booking.objects.create(
+            organization=self.org,
+            service=self.service,
+            title=self.service.name,
+            start=b_start,
+            end=b_end,
+            is_blocking=False,
+            participant_count=2,
+            total_price=75,
+        )
+
+        url = reverse('bookings:service_availability', args=[self.org.slug, self.service.slug])
+        resp = self.client.get(url, {'start': self._iso_z(day_start), 'end': self._iso_z(day_end)})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(any((s.get('start') or '').startswith(slot_prefix) for s in payload))
+
+        Booking.objects.create(
+            organization=self.org,
+            service=self.service,
+            title=self.service.name,
+            start=b_start,
+            end=b_end,
+            is_blocking=False,
+            participant_count=1,
+            total_price=50,
+        )
+
+        resp2 = self.client.get(url, {'start': self._iso_z(day_start), 'end': self._iso_z(day_end)})
+        self.assertEqual(resp2.status_code, 200)
+        payload2 = resp2.json()
+        self.assertFalse(any((s.get('start') or '').startswith(slot_prefix) for s in payload2))
+
+    def test_public_booking_saves_participant_count_and_tier_total(self):
+        OrgSettings.objects.update_or_create(
+            organization=self.org,
+            defaults={
+                'offline_payment_methods': ['cash'],
+                'offline_payment_instructions': 'Cash: pay in person',
+            },
+        )
+
+        self.service.price = 50
+        self.service.max_participants = 3
+        self.service.group_pricing = {'2': '75.00', '3': '100.00'}
+        self.service.allow_stripe_payments = False
+        self.service.allowed_offline_payment_methods = ['cash']
+        self.service.save(update_fields=['price', 'max_participants', 'group_pricing', 'allow_stripe_payments', 'allowed_offline_payment_methods'])
+
+        start = timezone.make_aware(datetime(self.day.year, self.day.month, self.day.day, 10, 0, 0), timezone.get_fixed_timezone(0))
+        end = start + timedelta(minutes=30)
+
+        url = reverse('bookings:public_service_page', args=[self.org.slug, self.service.slug])
+        resp = self.client.post(url, {
+            'client_name': 'Group Booker',
+            'client_email': 'group@example.com',
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'service_slug': self.service.slug,
+            'participant_count': '2',
+            'payment_method': 'cash',
+        })
+        self.assertEqual(resp.status_code, 302)
+
+        created = Booking.objects.filter(organization=self.org, service=self.service, client_email='group@example.com').order_by('-id').first()
+        self.assertIsNotNone(created)
+        self.assertEqual(created.participant_count, 2)
+        self.assertEqual(float(created.total_price), 75.0)

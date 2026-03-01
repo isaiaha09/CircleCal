@@ -1310,6 +1310,24 @@
         </div>
       </div>
 
+      <div class="grid grid-cols-2 gap-4 mt-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Max clients per slot</label>
+          <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
+            <input id="max_participants" name="max_participants" type="number" min="1" value="{{ service.max_participants|default:1 }}"
+                   class="cc-field mt-1 w-full" {% if not can_use_pro_team %}disabled{% endif %}>
+            {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
+          </div>
+          <p class="mt-1 text-xs text-gray-500">Allow multiple clients to join this service in one slot.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Custom group pricing tiers</label>
+          <input type="hidden" id="group_pricing_json" name="group_pricing_json" value='{{ service.group_pricing|default:"{}"|escape }}'>
+          <div id="group_pricing_rows" class="mt-1 space-y-2" data-initial='{{ service.group_pricing|default:"{}"|escapejs }}'></div>
+          <p class="mt-1 text-xs text-gray-500">Set total price per group size (2..max). Missing sizes use base price × clients.</p>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 gap-3 mt-4">
         <div>
           <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:block;">
@@ -1352,6 +1370,93 @@
           <p class="mt-1 text-xs text-gray-500">Enable to allow the final time slot to finish after your daily availability end.</p>
         </div>
       </div>
+
+      <script>
+        (function(){
+          function parseObj(raw){
+            try{
+              const v = JSON.parse(raw || '{}');
+              return (v && typeof v === 'object') ? v : {};
+            }catch(e){
+              try {
+                const v2 = Function('"use strict"; return (' + (raw || '{}') + ');')();
+                return (v2 && typeof v2 === 'object') ? v2 : {};
+              } catch (_) {
+                return {};
+              }
+            }
+          }
+          function money(v){
+            const n = Number(v || 0);
+            if (!Number.isFinite(n) || n < 0) return '';
+            return n.toFixed(2);
+          }
+          function render(){
+            const maxEl = document.getElementById('max_participants');
+            const rowsEl = document.getElementById('group_pricing_rows');
+            const hiddenEl = document.getElementById('group_pricing_json');
+            if (!maxEl || !rowsEl || !hiddenEl) return;
+
+            const initial = parseObj(rowsEl.getAttribute('data-initial') || '{}');
+            const current = parseObj(hiddenEl.value || '{}');
+            const merged = Object.assign({}, initial, current);
+
+            let maxP = Number(maxEl.value || 1);
+            if (!Number.isFinite(maxP) || maxP < 1) maxP = 1;
+            maxP = Math.floor(maxP);
+
+            rowsEl.innerHTML = '';
+            const out = {};
+            for (let qty = 2; qty <= maxP; qty++){
+              const row = document.createElement('div');
+              row.className = 'flex items-center gap-2';
+
+              const label = document.createElement('label');
+              label.className = 'text-sm text-gray-700 w-28';
+              label.textContent = qty + ' clients';
+
+              const input = document.createElement('input');
+              input.type = 'number';
+              input.min = '0';
+              input.step = '0.01';
+              input.className = 'cc-field w-40';
+              input.placeholder = 'Total price';
+              input.setAttribute('data-qty', String(qty));
+              const initVal = merged[String(qty)] !== undefined ? merged[String(qty)] : '';
+              input.value = money(initVal);
+              if (input.value) out[String(qty)] = input.value;
+
+              input.addEventListener('input', function(){
+                const data = {};
+                rowsEl.querySelectorAll('input[data-qty]').forEach(function(el){
+                  const q = String(el.getAttribute('data-qty') || '');
+                  const v = String(el.value || '').trim();
+                  if (!q || !v) return;
+                  const n = Number(v);
+                  if (!Number.isFinite(n) || n < 0) return;
+                  data[q] = n.toFixed(2);
+                });
+                hiddenEl.value = JSON.stringify(data);
+              });
+
+              row.appendChild(label);
+              row.appendChild(input);
+              rowsEl.appendChild(row);
+            }
+
+            hiddenEl.value = JSON.stringify(out);
+            rowsEl.setAttribute('data-initial', '{}');
+          }
+
+          document.addEventListener('DOMContentLoaded', function(){
+            const maxEl = document.getElementById('max_participants');
+            if (!maxEl) return;
+            render();
+            maxEl.addEventListener('input', render);
+            maxEl.addEventListener('change', render);
+          });
+        })();
+      </script>
 
       <script>
         // Jump to Calendar with this service preselected and Day Schedule auto-opened.
@@ -2261,6 +2366,8 @@
         refund_cutoff_hours: {{ service.refund_cutoff_hours|default:24 }},
         refund_policy_text: "{{ service.refund_policy_text|escapejs }}",
         price: "{{ service.price }}",
+        max_participants: {{ service.max_participants|default:1 }},
+        group_pricing: {{ service.group_pricing|default:'{}'|safe }},
         name: "{{ service.name|escapejs }}",
         description: "{{ service.description|escapejs }}",
         min_notice_hours: {{ service.min_notice_hours|default:1 }},
@@ -2319,7 +2426,7 @@
       }
 
       // Normalize known numeric fields (take last value if repeated).
-      const numericNames = ['time_increment_minutes', 'duration', 'buffer_after', 'min_notice_hours', 'max_booking_days', 'refund_cutoff_hours'];
+      const numericNames = ['time_increment_minutes', 'duration', 'buffer_after', 'min_notice_hours', 'max_booking_days', 'refund_cutoff_hours', 'max_participants'];
       for (const k of numericNames){
         if (!(k in out)) continue;
         const raw = Array.isArray(out[k]) ? out[k][out[k].length - 1] : out[k];
@@ -2363,6 +2470,13 @@
           .sort();
         out.offline_methods = selected;
       }catch(e){ out.offline_methods = []; }
+
+      try{
+        const gp = form.querySelector('#group_pricing_json');
+        const raw = gp ? String(gp.value || '').trim() : '{}';
+        const parsed = JSON.parse(raw || '{}');
+        out.group_pricing = (parsed && typeof parsed === 'object') ? parsed : {};
+      }catch(e){ out.group_pricing = {}; }
 
       return out;
     }
@@ -2493,15 +2607,18 @@
         const keys = [
           'name','description','duration','buffer_after','time_increment_minutes','use_fixed_increment',
           'allow_squished_bookings','allow_ends_after_availability','refunds_allowed','refund_cutoff_hours','refund_policy_text',
-          'price','min_notice_hours','max_booking_days','show_on_public_calendar','requires_facility_resources'
+          'price','min_notice_hours','max_booking_days','max_participants','group_pricing','show_on_public_calendar','requires_facility_resources'
         ];
         function normVal(k,v){
           if (k === 'use_fixed_increment' || k === 'allow_squished_bookings' || k === 'allow_ends_after_availability' || k === 'refunds_allowed' || k === 'show_on_public_calendar' || k === 'requires_facility_resources'){
             if (v === true || v === 'true' || v === 1 || v === '1') return true;
             return false;
           }
-          if (k === 'duration' || k === 'buffer_after' || k === 'time_increment_minutes' || k === 'refund_cutoff_hours' || k === 'min_notice_hours' || k === 'max_booking_days'){
+          if (k === 'duration' || k === 'buffer_after' || k === 'time_increment_minutes' || k === 'refund_cutoff_hours' || k === 'min_notice_hours' || k === 'max_booking_days' || k === 'max_participants'){
             try{ return Number(v) || 0; }catch(e){ return 0; }
+          }
+          if (k === 'group_pricing'){
+            try{ return JSON.stringify(v || {}); }catch(e){ return '{}'; }
           }
           if (k === 'price') return String(v || '');
           return String(v || '');
@@ -2546,6 +2663,10 @@
           }
           if (k === 'duration') return (v || 0) + ' minutes';
           if (k === 'buffer_after') return (v || 0) + ' minutes';
+          if (k === 'max_participants') return String(v || 1);
+          if (k === 'group_pricing'){
+            try{ return JSON.stringify(v || {}); }catch(e){ return '{}'; }
+          }
           if (k === 'price') return (v !== undefined && v !== null) ? '$' + v : '';
           if (k === 'refund_policy_text') return String(v || '—');
           return String(v === undefined || v === null ? '' : v);
@@ -2957,8 +3078,7 @@
 
       // Collect repeated keys (e.g., assigned_members) as arrays.
       for (const [k, v] of fd.entries()){
-        const el = form.querySelector(`[name="${k}"]`);
-        const normalized = (el && el.type === 'checkbox') ? (el.checked ? '1' : '0') : v;
+        const normalized = v;
 
         if (Object.prototype.hasOwnProperty.call(out, k)){
           if (!Array.isArray(out[k])) out[k] = [out[k]];
@@ -2985,6 +3105,22 @@
         }
       }
 
+      // Explicitly include payment controls for stable dirty-state behavior.
+      try {
+        const stripeEl = form.querySelector('#allow_stripe_payments');
+        out.allow_stripe_payments = (stripeEl && stripeEl.checked) ? '1' : '0';
+      } catch (e) {
+        out.allow_stripe_payments = '0';
+      }
+      try {
+        out.offline_methods = Array.from(form.querySelectorAll('input[name="offline_methods"]:checked'))
+          .map(el => String(el.value || ''))
+          .filter(v => !!v)
+          .sort();
+      } catch (e) {
+        out.offline_methods = [];
+      }
+
       // Sort keys to make stable string
       const keys = Object.keys(out).sort();
       const stable = {};
@@ -2993,6 +3129,14 @@
     }
 
     let savedSnapshot = serializeForm();
+    const hasSavedFlag = (function(){
+      try {
+        const qs = new URLSearchParams(window.location.search || '');
+        return qs.get('saved') === '1';
+      } catch (e) {
+        return false;
+      }
+    })();
 
     function setViewButtonsEnabled(enabled){
       for (const b of viewBtns){
@@ -3020,8 +3164,9 @@
       }
     }
 
-    // Initialize according to whether current form equals saved snapshot
-    const isInitiallySaved = (serializeForm() === savedSnapshot);
+    // Initialize state. If redirected with ?saved=1, start as saved and then
+    // rebase once dynamic field hydration settles.
+    const isInitiallySaved = hasSavedFlag ? true : (serializeForm() === savedSnapshot);
     setViewButtonsEnabled(isInitiallySaved);
     setSaveButtonsEnabled(!isInitiallySaved);
 
@@ -3041,6 +3186,26 @@
     function scheduleUpdate(){
       if (timer) clearTimeout(timer);
       timer = setTimeout(()=>{ timer = null; updateState(); }, 120);
+    }
+
+    // Some dynamic controls finish populating after this script executes.
+    // Rebase the snapshot after load so a freshly saved page doesn't appear dirty.
+    function rebaseSnapshot(){
+      try{
+        savedSnapshot = serializeForm();
+        setViewButtonsEnabled(true);
+        setSaveButtonsEnabled(false);
+      }catch(e){ /* ignore */ }
+    }
+
+    if (hasSavedFlag){
+      try { setTimeout(rebaseSnapshot, 0); } catch(e) {}
+      try { setTimeout(rebaseSnapshot, 250); } catch(e) {}
+      try {
+        window.addEventListener('load', function(){
+          try { setTimeout(rebaseSnapshot, 120); } catch(e) {}
+        }, { once: true });
+      } catch(e) {}
     }
 
     const controls = form.querySelectorAll('input, textarea, select');
