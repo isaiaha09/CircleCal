@@ -4916,6 +4916,28 @@ def service_availability(request, org_slug, service_slug):
         except Exception:
             pass
 
+    # Defensive normalization: if any slot carries explicit remaining capacity,
+    # never return it as available when capacity is zero or negative.
+    try:
+        normalized_slots = []
+        for si in (available_slots or []):
+            try:
+                raw_remaining = si.get('remaining_capacity', None)
+            except Exception:
+                raw_remaining = None
+            remaining_value = None
+            if raw_remaining is not None:
+                try:
+                    remaining_value = int(raw_remaining)
+                except Exception:
+                    remaining_value = None
+            if remaining_value is not None and remaining_value <= 0:
+                continue
+            normalized_slots.append(si)
+        available_slots = normalized_slots
+    except Exception:
+        pass
+
     if debug_avail:
         try:
             bw = []

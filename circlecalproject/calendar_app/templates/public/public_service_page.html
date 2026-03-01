@@ -1112,9 +1112,8 @@ document.addEventListener("DOMContentLoaded", async function () {
           slotAvailEl.style.display = 'none';
           slotAvailEl.textContent = '';
         } else if (allowedNow <= 0) {
-          slotAvailEl.style.display = '';
-          slotAvailEl.className = 'text-xs text-red-700 mb-4';
-          slotAvailEl.textContent = 'This specific time slot is full. Please choose another time.';
+          slotAvailEl.style.display = 'none';
+          slotAvailEl.textContent = '';
         } else {
           slotAvailEl.style.display = '';
           slotAvailEl.className = 'text-xs text-amber-700 mb-4';
@@ -1170,6 +1169,21 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function hasOpenCapacity(slot) {
+    try {
+      const remainingRaw = Number(slot && slot.remaining_capacity);
+      if (Number.isFinite(remainingRaw)) {
+        return Math.floor(remainingRaw) > 0;
+      }
+    } catch (e) {}
+    return true;
+  }
+
+  function onlyOpenSlots(slots) {
+    if (!Array.isArray(slots)) return [];
+    return slots.filter(hasOpenCapacity);
   }
 
   async function generateCalendar(month, year) {
@@ -1342,7 +1356,10 @@ document.addEventListener("DOMContentLoaded", async function () {
         fetches.push(
           fetch(availUrl)
             .then(r => r.ok ? r.json() : [])
-            .then(slots => { detailedDayHasSlots[dateKey] = Array.isArray(slots) && slots.length > 0; })
+            .then(slots => {
+              const openSlots = onlyOpenSlots(slots);
+              detailedDayHasSlots[dateKey] = openSlots.length > 0;
+            })
             .catch(() => { detailedDayHasSlots[dateKey] = false; })
         );
       } else {
@@ -1631,7 +1648,8 @@ document.addEventListener("DOMContentLoaded", async function () {
       
       const availResp = await fetch(availUrl);
       if (!availResp.ok) throw new Error("Failed to load availability");
-      const slots = await availResp.json();
+      const slotsRaw = await availResp.json();
+      const slots = onlyOpenSlots(slotsRaw);
 
       // Replace the "Loading…" placeholder.
       try { timeSlots.innerHTML = ''; } catch (_) {}
@@ -1719,23 +1737,23 @@ document.addEventListener("DOMContentLoaded", async function () {
       }).filter(r => r.startMin != null && r.endMin != null && r.endMin > r.startMin);
 
       // Group slots by hour for exact rendering; labels derive from slot starts
-      const slotsByHour = new Map(); // hourStartMin -> [{startMin, endMin, label}]
-        for (let idx=0; idx<slots.length; idx++) {
-          const s = slots[idx];
-          const sm = isoToLocalMinutes(s.start);
-          const em = isoToLocalMinutes(s.end);
-          if (sm == null || em == null || em <= sm) continue;
-          const hourKey = Math.floor(sm/60)*60;
-          const h = Math.floor(sm/60);
-          const m = sm % 60;
-          const ampm = h >= 12 ? 'PM' : 'AM';
-          let dispH = h % 12; if (dispH === 0) dispH = 12;
-          const label = `${dispH}:${String(m).padStart(2,'0')} ${ampm}`;
-          const arr = slotsByHour.get(hourKey) || [];
-          // attach index so we can cross-reference metadata later
-          arr.push({ startMin: sm, endMin: em, label, slotIndex: idx });
-          slotsByHour.set(hourKey, arr);
-        }
+      const slotsByHour = new Map(); // hourStartMin -> [{startMin, endMin, label, slotObj}]
+      for (let idx = 0; idx < slots.length; idx++) {
+        const s = slots[idx];
+        const sm = isoToLocalMinutes(s.start);
+        const em = isoToLocalMinutes(s.end);
+        if (sm == null || em == null || em <= sm) continue;
+        const hourKey = Math.floor(sm / 60) * 60;
+        const h = Math.floor(sm / 60);
+        const m = sm % 60;
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        let dispH = h % 12;
+        if (dispH === 0) dispH = 12;
+        const label = `${dispH}:${String(m).padStart(2, '0')} ${ampm}`;
+        const arr = slotsByHour.get(hourKey) || [];
+        arr.push({ startMin: sm, endMin: em, label, slotObj: s });
+        slotsByHour.set(hourKey, arr);
+      }
 
       // Render rows using saved Client View settings (block size + increment),
       // but only at valid server-provided start times.
@@ -1744,14 +1762,6 @@ document.addEventListener("DOMContentLoaded", async function () {
         // honor the earliest server-provided availability.
         const minStart = Math.min(...slotRanges.map(r => r.startMin));
         const maxEnd = Math.max(...slotRanges.map(r => r.endMin));
-
-        // Map of valid start -> end (from server slots)
-        const startToEnd = new Map();
-        for (const s of slots) {
-          const sm = isoToLocalMinutes(s.start);
-          const em = isoToLocalMinutes(s.end);
-          if (sm != null && em != null && em > sm) startToEnd.set(sm, em);
-        }
 
         // Helper: format label from minute-of-day
         function labelFromMin(totalMin) {
@@ -1762,19 +1772,8 @@ document.addEventListener("DOMContentLoaded", async function () {
           return `${h}:${String(m).padStart(2,'0')} ${ampm}`;
         }
 
-        // NEW: Iterate from earliest start minute directly, stepping by client increment, preserving irregular offsets.
         // Group rows by the hour of each slot's start for readability.
-        const validStarts = Array.from(startToEnd.keys()).sort((a,b)=>a-b);
-        const hours = [];
-        const hourMap = new Map();
-        for (const sm of validStarts) {
-          const hourStart = Math.floor(sm/60)*60; // minute-of-day of the hour
-          if (!hourMap.has(hourStart)) {
-            hourMap.set(hourStart, []);
-            hours.push(hourStart);
-          }
-          hourMap.get(hourStart).push(sm);
-        }
+        const hours = Array.from(slotsByHour.keys()).sort((a, b) => a - b);
 
         for (const hourStart of hours) {
           const row = document.createElement('div');
@@ -1792,13 +1791,15 @@ document.addEventListener("DOMContentLoaded", async function () {
           circlesContainer.className = 'circles-container';
 
           // Render circles for all server-provided starts (each window may have its own baseline).
-          for (const sm of hourMap.get(hourStart)) {
-            const endMin = startToEnd.get(sm);
-            // find original slot object to read metadata
-            const slotObj = slots.find(sl => {
-              const ssm = isoToLocalMinutes(sl.start);
-              return ssm === sm;
-            }) || {};
+          const hourSlots = (slotsByHour.get(hourStart) || []).slice().sort((a, b) => {
+            if (a.startMin !== b.startMin) return a.startMin - b.startMin;
+            return a.endMin - b.endMin;
+          });
+
+          for (const slotEntry of hourSlots) {
+            const sm = slotEntry.startMin;
+            const endMin = slotEntry.endMin;
+            const slotObj = slotEntry.slotObj || {};
             const slotKey = `${year}-${month}-${day}-${sm}`;
             const wasBookedThisSession = window.bookedSlotsThisSession.includes(slotKey);
             const circle = document.createElement('div');
@@ -1896,7 +1897,10 @@ document.addEventListener("DOMContentLoaded", async function () {
         const requested = Math.max(1, Math.floor(Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1) || 1));
         if (allowedNow <= 0) {
           e.preventDefault();
-          try { if (typeof showToast === 'function') showToast('warning', 'That time slot is full. Please choose another time.'); } catch (_) {}
+          try {
+            timeModalViewDetails.style.display = 'none';
+            timeModalViewSlots.style.display = 'block';
+          } catch (_) {}
           return;
         }
         if (requested > allowedNow) {

@@ -28,16 +28,20 @@ class Command(BaseCommand):
         org, _ = Organization.objects.get_or_create(slug=org_slug, defaults={'name': 'PW E2E Org ' + sfx})
         svc, _ = Service.objects.get_or_create(organization=org, slug=svc_slug, defaults={'name': 'PW E2E Service', 'duration': 30, 'price': 0})
 
-        # Ensure availability exists for today and tomorrow so tests running at any time of day.
+        # Ensure availability exists for all weekdays so E2E remains deterministic regardless
+        # of when the test runs or which dates the browser probes.
         # NOTE: Unassigned services (no assignees) are treated as explicitly-scoped and therefore
         # require per-service weekly availability rows; org weekly availability alone is not enough.
-        today = datetime.date.today()
-        wd_today = today.weekday()
-        wd_tomorrow = (today + datetime.timedelta(days=1)).weekday()
-        WeeklyAvailability.objects.get_or_create(organization=org, weekday=wd_today, defaults={'start_time': '08:00', 'end_time': '18:00'})
-        WeeklyAvailability.objects.get_or_create(organization=org, weekday=wd_tomorrow, defaults={'start_time': '08:00', 'end_time': '18:00'})
-
-        ServiceWeeklyAvailability.objects.get_or_create(service=svc, weekday=wd_today, defaults={'start_time': '08:00', 'end_time': '18:00'})
-        ServiceWeeklyAvailability.objects.get_or_create(service=svc, weekday=wd_tomorrow, defaults={'start_time': '08:00', 'end_time': '18:00'})
+        for weekday in range(7):
+            WeeklyAvailability.objects.get_or_create(
+                organization=org,
+                weekday=weekday,
+                defaults={'start_time': '08:00', 'end_time': '18:00'},
+            )
+            ServiceWeeklyAvailability.objects.get_or_create(
+                service=svc,
+                weekday=weekday,
+                defaults={'start_time': '08:00', 'end_time': '18:00'},
+            )
 
         self.stdout.write(json.dumps({'org_slug': org.slug, 'service_slug': svc.slug}))
