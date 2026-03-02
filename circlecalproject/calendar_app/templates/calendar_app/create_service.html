@@ -967,6 +967,9 @@
             <p class="text-sm text-gray-500 mt-3 text-center">
               Specify which days/times this service is offered. These must fit within the allowed window shown for each day.
             </p>
+            {% if is_team_plan %}
+              <p class="text-xs text-gray-500 mt-2 text-center">No team members assigned: you can set service windows across the full day (12:00 AM to 11:59 PM). Booking capacity is enforced by facility resources.</p>
+            {% endif %}
 
             <div class="mt-2 text-center">
               {% if not can_edit_service_availability %}

@@ -1775,6 +1775,9 @@
         {% endif %}
 
         <div class="mt-2 text-center">
+          {% if is_team_plan and assigned_member_ids|length == 0 %}
+            <div class="text-xs text-gray-500 mb-1">No team members assigned: you can set service windows across the full day (12:00 AM to 11:59 PM). Booking capacity is enforced by facility resources.</div>
+          {% endif %}
           {% if not can_edit_service_availability %}
             <div class="text-xs text-gray-500">Service availability is available on Pro/Team plans. Upgrade to unlock per-service availability.</div>
           {% else %}

@@ -5285,6 +5285,8 @@ def service_availability_constraints(request, org_slug):
                     exclude_service_id=exclude_service_id,
                 )
             else:
+                # Team product rule: no assignees => facility-owned service can be configured
+                # across the full week; capacity is constrained by facility resources at booking time.
                 allowed_map = _full_weekly_ui_map()
         else:
             if can_use_pro_team:
@@ -6407,7 +6409,7 @@ def create_service(request, org_slug):
                         exclude_service_id=None,
                     )
                 else:
-                    # No assignees yet: allow configuring service availability freely (24/7).
+                    # Team product rule: no assignees => allow full-week service setup.
                     allowed_map = _full_weekly_ui_map()
             else:
                 # Pro/solo: constrain to org remaining availability when the plan supports it;
@@ -6732,12 +6734,15 @@ def create_service(request, org_slug):
                                 cleaned_rows = [(o.weekday, o.start_time, o.end_time) for o in parsed_weekly_objs]
                                 # Pro/Team partitioning guardrail:
                                 # - 1+ assignees: service must fit within remaining common availability
-                                # - 0 assignees: on Pro/Team, service must fit within remaining org availability
+                                # - Team + 0 assignees: allow full-week service setup
                                 if desired_assignee_ids:
                                     allowed_ui_map = _effective_common_weekly_map_minus_other_services(org, list(desired_assignee_ids), exclude_service_id=None)
                                     _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, cleaned_rows)
                                 else:
-                                    if can_use_pro_team:
+                                    if is_team_plan:
+                                        # Team product rule: no assignees are not constrained by org remaining map here.
+                                        pass
+                                    elif can_use_pro_team:
                                         allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=None)
                                         _enforce_service_windows_within_ui_allowed_map(
                                             allowed_ui_map,
@@ -8057,12 +8062,15 @@ def edit_service(request, org_slug, service_id):
 
                                 # Pro/Team partitioning guardrail:
                                 # - 1+ assignees: service must fit within remaining common availability
-                                # - 0 assignees: on Pro/Team, service must fit within remaining org availability
+                                # - Team + 0 assignees: allow full-week service setup
                                 if assigned_ids_local:
                                     allowed_ui_map = _effective_common_weekly_map_minus_other_services(org, assigned_ids_local, exclude_service_id=service.id)
                                     _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, cleaned_rows)
                                 else:
-                                    if can_use_pro_team:
+                                    if is_team_plan:
+                                        # Team product rule: no assignees are not constrained by org remaining map here.
+                                        pass
+                                    elif can_use_pro_team:
                                         allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=service.id)
                                         _enforce_service_windows_within_ui_allowed_map(
                                             allowed_ui_map,
@@ -8227,7 +8235,7 @@ def edit_service(request, org_slug, service_id):
                 )
             else:
                 if is_team_plan:
-                    # Team: only apply member-based constraints once assignees exist.
+                    # Team product rule: no assignees => allow full-week service setup.
                     allowed_map = _full_weekly_ui_map()
                 else:
                     # Pro/solo: constrain to org remaining availability when the plan supports it;
