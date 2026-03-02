@@ -3354,11 +3354,16 @@ document.addEventListener('DOMContentLoaded', function() {
     let __svcParityReadyLastAttempt = null;
     let __svcParityDebounceTimer = null;
 
-    function _scheduleServiceScopeMonthParity() {
+    function _scheduleServiceScopeMonthParity(opts) {
+        const immediate = !!(opts && opts.immediate);
         try {
             if (__svcParityDebounceTimer) {
                 clearTimeout(__svcParityDebounceTimer);
                 __svcParityDebounceTimer = null;
+            }
+            if (immediate) {
+                try { refreshServiceScopeMonthParity(); } catch (e) { /* ignore */ }
+                return;
             }
             __svcParityDebounceTimer = setTimeout(function () {
                 __svcParityDebounceTimer = null;
@@ -3803,6 +3808,9 @@ document.addEventListener('DOMContentLoaded', function() {
     async function refreshServiceScopeMonthParity() {
         const svc = _svcForSelectedScope();
         if (!svc) return;
+        const scopeSnapshot = String(SELECTED_MEMBER || '');
+        const expectedScope = `svc:${String(svc.id)}`;
+        if (scopeSnapshot !== expectedScope) return;
 
         // If this service has no explicitly saved weekly availability windows, it must
         // remain unavailable until the user manually enables days/ranges and saves.
@@ -3878,6 +3886,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const token = ++__svcParityToken;
+        const _parityStillCurrent = () => {
+            try {
+                return token === __svcParityToken && String(SELECTED_MEMBER || '') === scopeSnapshot;
+            } catch (e) {
+                return false;
+            }
+        };
         const sorted = dates.slice().sort();
         const minDate = sorted[0];
         const maxDate = sorted[sorted.length - 1];
@@ -3885,6 +3900,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Fast path: re-apply cached results for the same visible month/service
         if (__svcParityLastKey === key && __svcParityLastMap) {
+            if (!_parityStillCurrent()) return;
             _applyServiceScopeDayClasses(__svcParityLastMap);
             try { _setCalendarLoading(false); } catch (e) {}
             return;
@@ -3966,7 +3982,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                 } catch (e) { /* ignore */ }
-                if (token !== __svcParityToken) return;
+                if (!_parityStillCurrent()) return;
                 _applyServiceScopeDayClasses(dayHasSlots);
                 try { renderOverridesTable(); } catch (e) { /* ignore */ }
             } finally {
@@ -4051,7 +4067,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (e) { /* ignore */ }
 
-        if (token !== __svcParityToken) return;
+        if (!_parityStillCurrent()) return;
         _applyServiceScopeDayClasses(dayHasSlots);
         try { renderOverridesTable(); } catch (e) { /* ignore */ }
         // Remove the overlay once we've painted the month; refine in background.
@@ -4084,7 +4100,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (pendingApply) return;
                 pendingApply = setTimeout(() => {
                     pendingApply = null;
-                    if (token !== __svcParityToken) return;
+                        if (!_parityStillCurrent()) return;
                     _applyServiceScopeDayClasses(dayHasSlots);
                 }, 75);
             };
@@ -4111,7 +4127,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 await Promise.all(Array.from({ length: Math.min(concurrency, candidates.length) }, () => worker()));
             } catch (e) { /* ignore */ }
-            if (token !== __svcParityToken) return;
+            if (!_parityStillCurrent()) return;
 
             if (pendingApply) {
                 try { clearTimeout(pendingApply); } catch (e) {}
@@ -4120,6 +4136,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             __svcParityLastKey = key;
             __svcParityLastMap = dayHasSlots;
+            if (!_parityStillCurrent()) return;
             _applyServiceScopeDayClasses(dayHasSlots);
             try { renderOverridesTable(); } catch (e) { /* ignore */ }
         })();
@@ -6879,7 +6896,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 function applySelection(selection){
                     try{
+                        const prevSelection = String(SELECTED_MEMBER || '');
                         SELECTED_MEMBER = selection || null;
+                        const nextSelection = String(SELECTED_MEMBER || '');
+                        const selectionChanged = (prevSelection !== nextSelection);
+
+                        // Scope changed (member <-> service or different service/member):
+                        // cancel stale parity requests and pending debounced runs so old
+                        // service availability cannot repaint after switching context.
+                        try {
+                            if (selectionChanged && typeof _invalidateServiceScopeParityCache === 'function') {
+                                _invalidateServiceScopeParityCache();
+                            }
+                        } catch (e) {}
+                        try {
+                            if (selectionChanged && __svcParityDebounceTimer) {
+                                clearTimeout(__svcParityDebounceTimer);
+                                __svcParityDebounceTimer = null;
+                            }
+                        } catch (e) {}
+                        try { if (selectionChanged && typeof _setCalendarLoading === 'function') _setCalendarLoading(false); } catch (e) {}
 
                         // Always clear any prior "no remaining availability" overlay state immediately
                         // when switching scopes so it cannot stick from a previous service.
@@ -6942,6 +6978,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         // Critical: refresh month day-circle classes for the *current* selection.
                         // Relying only on FullCalendar's async `eventsSet`/`datesSet` can leave the
                         // UI showing stale availability until a hard refresh.
+                        try {
+                            if (typeof _scheduleServiceScopeMonthParity === 'function' && SELECTED_MEMBER && String(SELECTED_MEMBER).startsWith('svc:')) {
+                                _scheduleServiceScopeMonthParity({ immediate: true });
+                            }
+                        } catch (e) {}
                         try { if (typeof updateUnavailableDays === 'function') updateUnavailableDays(); } catch (e) {}
                         try { setTimeout(function(){ try { if (typeof updateUnavailableDays === 'function') updateUnavailableDays(); } catch (e) {} }, 0); } catch (e) {}
 
