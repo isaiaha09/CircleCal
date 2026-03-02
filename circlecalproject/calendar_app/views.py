@@ -1216,26 +1216,56 @@ def apply_service_update(request, org_slug, service_id):
         pass
 
     # Handle per-service weekly availability fields (svc_avail_0..svc_avail_6).
+    # Atomic behavior: if any posted range is invalid, reject the save instead of
+    # silently dropping ranges and partially persisting.
     try:
         can_edit_svc_avail, _reason = _service_availability_applicability(org, svc)
         if can_edit_svc_avail:
             svc_windows = []
+            svc_errors = []
+
+            def _normalize_hhmm(value):
+                try:
+                    s = str(value or '').strip()
+                    if not s:
+                        return ''
+                    # Accept HH:MM and HH:MM:SS from some browsers/clients.
+                    if len(s) == 8 and s[2] == ':' and s[5] == ':':
+                        s = s[:5]
+                    if len(s) != 5 or s[2] != ':':
+                        return ''
+                    hh = int(s[:2])
+                    mm = int(s[3:5])
+                    if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+                        return ''
+                    return f"{hh:02d}:{mm:02d}"
+                except Exception:
+                    return ''
+
             for ui_day in range(7):
                 key = f"svc_avail_{ui_day}"
                 raw = payload.get(key, '') or ''
                 raw = str(raw).strip()
                 if not raw:
                     continue
+
                 model_wd = ((ui_day - 1) % 7)  # UI 0=Sun..6=Sat -> model 0=Mon..6=Sun
                 parts = [p.strip() for p in raw.split(',') if p.strip()]
                 for part in parts:
                     try:
-                        start_s, end_s = [x.strip() for x in part.split('-')]
+                        seg = [x.strip() for x in str(part).split('-', 1)]
+                        if len(seg) != 2:
+                            raise ValueError('range split failed')
+                        start_s = _normalize_hhmm(seg[0])
+                        end_s = _normalize_hhmm(seg[1])
+                        if not start_s or not end_s:
+                            raise ValueError('time format invalid')
+                        svc_windows.append((model_wd, start_s, end_s))
                     except Exception:
-                        continue
-                    if len(start_s) != 5 or len(end_s) != 5 or start_s[2] != ':' or end_s[2] != ':':
-                        continue
-                    svc_windows.append((model_wd, start_s, end_s))
+                        svc_errors.append(f"Invalid time range for {key}: {part}")
+
+            if svc_errors:
+                return JsonResponse({'status': 'error', 'error': svc_errors[0]})
 
             if svc_windows:
                 new_objs = []
@@ -1244,25 +1274,69 @@ def apply_service_update(request, org_slug, service_id):
                         st = datetime.strptime(start_s, '%H:%M').time()
                         et = datetime.strptime(end_s, '%H:%M').time()
                     except Exception:
+                        svc_errors.append(f"Invalid time values: {start_s}-{end_s}")
                         continue
-                    obj = ServiceWeeklyAvailability(service=svc, weekday=wd, start_time=st, end_time=et, is_active=True)
+
+                    # Keep strict range sanity here; broader subset/partition rules are
+                    # enforced against allowed UI maps below.
+                    if et <= st:
+                        svc_errors.append(f"End time must be after start time: {start_s}-{end_s}")
+                        continue
+
+                    new_objs.append(
+                        ServiceWeeklyAvailability(
+                            service=svc,
+                            weekday=wd,
+                            start_time=st,
+                            end_time=et,
+                            is_active=True,
+                        )
+                    )
+
+                if svc_errors:
+                    return JsonResponse({'status': 'error', 'error': svc_errors[0]})
+
+                # Enforce the same allowed-map constraints used by the non-AJAX edit flow.
+                try:
+                    cleaned_rows = [(o.weekday, o.start_time, o.end_time) for o in new_objs]
                     try:
-                        obj.full_clean()
+                        from bookings.models import ServiceAssignment
+                        assigned_ids_local = list(
+                            ServiceAssignment.objects.filter(service=svc)
+                            .values_list('membership_id', flat=True)
+                            .distinct()
+                        )
                     except Exception:
-                        continue
-                    new_objs.append(obj)
-                if new_objs:
-                    # Enforce subset + partition overlap guardrails before persisting.
-                    try:
-                        mid = _get_single_assignee_membership_id(org, svc)
-                        cleaned_rows = [(o.weekday, o.start_time, o.end_time) for o in new_objs]
-                        if mid is not None:
-                            _enforce_service_windows_within_member_availability(org, mid, cleaned_rows)
-                            _enforce_no_overlap_between_mixed_signature_solo_services(org, mid, svc, cleaned_rows)
-                    except ValueError as ve:
-                        return JsonResponse({'status': 'error', 'error': str(ve)})
-                    ServiceWeeklyAvailability.objects.filter(service=svc).delete()
-                    ServiceWeeklyAvailability.objects.bulk_create(new_objs)
+                        assigned_ids_local = []
+
+                    if assigned_ids_local:
+                        allowed_ui_map = _effective_common_weekly_map_minus_other_services(
+                            org,
+                            assigned_ids_local,
+                            exclude_service_id=svc.id,
+                        )
+                        _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, cleaned_rows)
+                    else:
+                        if is_team_plan:
+                            # Team product rule: no assignees are not constrained by org remaining map here.
+                            pass
+                        elif can_use_pro_team:
+                            allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=svc.id)
+                            _enforce_service_windows_within_ui_allowed_map(
+                                allowed_ui_map,
+                                cleaned_rows,
+                                err_prefix=(
+                                    'Service availability must be within your remaining overall availability '
+                                    '(after accounting for your other services).'
+                                ),
+                            )
+                        else:
+                            _enforce_service_windows_within_ui_allowed_map(_build_org_weekly_map(org), cleaned_rows)
+                except ValueError as ve:
+                    return JsonResponse({'status': 'error', 'error': str(ve)})
+
+                ServiceWeeklyAvailability.objects.filter(service=svc).delete()
+                ServiceWeeklyAvailability.objects.bulk_create(new_objs)
             else:
                 # If nothing posted, remove per-service windows.
                 ServiceWeeklyAvailability.objects.filter(service=svc).delete()

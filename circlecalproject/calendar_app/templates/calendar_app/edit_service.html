@@ -2579,7 +2579,55 @@
       return res.json();
     }
 
+    function normalizeSvcTimeForPayload(value){
+      try{
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        // Accept HH:MM and HH:MM:SS; normalize to HH:MM.
+        const m = raw.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+        if (!m) return '';
+        const hh = Number(m[1]);
+        const mm = Number(m[2]);
+        if (!Number.isInteger(hh) || !Number.isInteger(mm)) return '';
+        if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return '';
+        return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      }catch(e){ return ''; }
+    }
+
+    function syncSvcAvailabilityHiddenFromUi(){
+      try{
+        const editors = Array.from(form.querySelectorAll('.svc-day-editor[data-ui]'));
+        for (const ed of editors){
+          const ui = String(ed.getAttribute('data-ui') || '').trim();
+          if (!ui) continue;
+          const hidden = form.querySelector('.svc-avail-hidden[data-ui="' + ui + '"]');
+          if (!hidden || hidden.disabled) continue;
+
+          const unavail = ed.querySelector('.svc-unavail');
+          if (unavail && unavail.checked){
+            hidden.value = '';
+            continue;
+          }
+
+          const rows = Array.from(ed.querySelectorAll('.svc-range-row'));
+          const parts = [];
+          for (const row of rows){
+            const startEl = row.querySelector('input.range-start');
+            const endEl = row.querySelector('input.range-end');
+            const start = normalizeSvcTimeForPayload(startEl ? startEl.value : '');
+            const end = normalizeSvcTimeForPayload(endEl ? endEl.value : '');
+            if (!start || !end) continue;
+            parts.push(start + '-' + end);
+          }
+          hidden.value = parts.join(',');
+        }
+      }catch(e){ /* ignore */ }
+    }
+
     function serializeFormToPayload(){
+      // Defensive sync: ensure hidden svc_avail_* fields mirror current visible rows.
+      syncSvcAvailabilityHiddenFromUi();
+
       const fd = new FormData(form);
       const out = {};
 
@@ -3043,12 +3091,14 @@
         }
 
         const preview = await postJson(previewUrl, payload);
-        if (!preview || preview.status !== 'ok'){
-          const ok = await applyAndRedirect(payload);
-          if (!ok) {
-            try{ setSaving(false); }catch(e){}
-            form.submit();
-          }
+        if (!preview){
+          showErrorBanner('Unable to validate changes before saving. Please try again.');
+          try{ setSaving(false); }catch(e){}
+          return;
+        }
+        if (preview.status !== 'ok'){
+          showErrorBanner(preview.error || 'Unable to validate changes before saving.');
+          try{ setSaving(false); }catch(e){}
           return;
         }
 
@@ -3072,7 +3122,6 @@
               const ok = await applyAndRedirect(payload);
               if (!ok) {
                 try{ setSaving(false); }catch(e){}
-                form.submit();
               }
             });
             return;
@@ -3081,7 +3130,6 @@
           const ok = await applyAndRedirect(payload);
           if (!ok) {
             try{ setSaving(false); }catch(e){}
-            form.submit();
           }
           return;
         }
@@ -3092,13 +3140,12 @@
           const ok = await applyAndRedirect(payload);
           if (!ok) {
             try{ setSaving(false); }catch(e){}
-            try { form.submit(); } catch(e){ window.location.reload(); }
           }
         });
       } catch (e){
         console.warn('preview failed', e);
         try{ setSaving(false); }catch(_){ }
-        try { form.submit(); } catch (err){ window.location.reload(); }
+        showErrorBanner((e && e.message) ? e.message : 'Unable to save changes.');
       }
     }
 
