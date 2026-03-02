@@ -3257,7 +3257,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // falling through ensures org/week-based month classes still update.
                 const _svc = (typeof _svcForSelectedScope === 'function') ? _svcForSelectedScope() : null;
                 if (_svc) {
-                    refreshServiceScopeMonthParity();
+                    _scheduleServiceScopeMonthParity();
                     // Still keep the overrides table updated (it lists per-date overrides regardless
                     // of whether a day has remaining slots).
                     try { renderOverridesTable(); } catch (e) { /* ignore */ }
@@ -3352,6 +3352,22 @@ document.addEventListener('DOMContentLoaded', function() {
     let __svcParityLastMap = null;
     let __svcParityReadyRetries = 0;
     let __svcParityReadyLastAttempt = null;
+    let __svcParityDebounceTimer = null;
+
+    function _scheduleServiceScopeMonthParity() {
+        try {
+            if (__svcParityDebounceTimer) {
+                clearTimeout(__svcParityDebounceTimer);
+                __svcParityDebounceTimer = null;
+            }
+            __svcParityDebounceTimer = setTimeout(function () {
+                __svcParityDebounceTimer = null;
+                try { refreshServiceScopeMonthParity(); } catch (e) { /* ignore */ }
+            }, 70);
+        } catch (e) {
+            try { refreshServiceScopeMonthParity(); } catch (_) { /* ignore */ }
+        }
+    }
 
     function _invalidateServiceScopeParityCache() {
         // Any per-date override creation/deletion can change real bookable availability.

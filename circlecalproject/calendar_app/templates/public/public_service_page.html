@@ -1404,9 +1404,46 @@ document.addEventListener("DOMContentLoaded", async function () {
       return false;
     }
 
-    // Prefetch detailed availability in parallel for candidate days, then render in one batch
+    // Fast paint: render immediately from batch summary.
+    // Then verify candidate days in the background and patch circles incrementally.
     const detailedDayHasSlots = {};
-    const fetches = [];
+    function getEdgeBuffersForService(slug) {
+      try {
+        const raw = localStorage.getItem('edge_buffers_' + slug);
+        if (raw === '1' || raw === 'true') return 1;
+        if (raw === '0' || raw === 'false') return 0;
+      } catch (e) {}
+      return 0;
+    }
+    const edgeVal = getEdgeBuffersForService(activeServiceSlug);
+    let incQueryBase = '';
+    if (!svcForLoop.use_fixed_increment) {
+      const incVal = Math.max(5, Number(svcForLoop.time_increment_minutes || 30));
+      incQueryBase = `&inc=${incVal}`;
+    }
+
+    const circleByDate = {};
+    function applyCircleState(circle, enabled, y, m, d, dateKey) {
+      if (!circle) return;
+      if (enabled) {
+        circle.classList.remove('disabled');
+        circle.style.pointerEvents = '';
+        circle.style.cursor = 'pointer';
+        circle.removeAttribute('aria-disabled');
+        circle.tabIndex = 0;
+        if (circle.dataset.ccTapBound !== '1') {
+          _ccBindTap(circle, () => openTimeModal(y, m, d, dateKey));
+          circle.dataset.ccTapBound = '1';
+        }
+      } else {
+        circle.classList.add('disabled');
+        circle.style.pointerEvents = 'none';
+        circle.style.cursor = 'not-allowed';
+        circle.setAttribute('aria-disabled', 'true');
+        circle.tabIndex = -1;
+      }
+    }
+
     for (let day = 1; day <= numDays; day++) {
       const date = new Date(year, month, day);
       const yyyy = date.getFullYear();
@@ -1414,63 +1451,16 @@ document.addEventListener("DOMContentLoaded", async function () {
       const dd = String(date.getDate()).padStart(2,'0');
       const dateKey = `${yyyy}-${mm}-${dd}`;
       const summaryVal = dayHasSlots[dateKey];
-      const isAvailable = hasAvailability(summaryVal);
-      // If the batch summary call fails, fall back to checking every day in-range.
-      // This prevents intermittent "all disabled" renders.
-      if (date >= todayMidnight && (batchFailed || isAvailable)) {
-        const start = new Date(year, month, day, 0, 0, 0);
-        const end = new Date(year, month, day, 23, 59, 59);
-        const pad = n => String(n).padStart(2,'0');
-        const toIsoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
-        const cacheBuster = `&_t=${Date.now()}`;
-        // Determine whether to apply edge buffers for this service. Preference order:
-        // 1) explicit localStorage override if present, 2) server-side service setting.
-        function getEdgeBuffersForService(slug) {
-          try {
-            const raw = localStorage.getItem('edge_buffers_' + slug);
-            if (raw === '1' || raw === 'true') return 1;
-            if (raw === '0' || raw === 'false') return 0;
-          } catch (e) {}
-          // Do NOT default to the service's `allow_ends_after_availability` here.
-          // Edge buffer behavior should only be controlled via explicit local override.
-          return 0;
-        }
-        const edgeVal = getEdgeBuffersForService(activeServiceSlug);
-        // If the service is configured to use fixed increments, do NOT force an `inc` param
-        // so the server can apply duration+buffer spacing. Otherwise include the preview tick.
-        // use `svcForLoop` prefetched above (may contain server effective settings)
-        let incQuery = '';
-        
-        if (!svcForLoop.use_fixed_increment) {
-          const incVal = Math.max(5, Number(svcForLoop.time_increment_minutes || 30));
-          incQuery = `&inc=${incVal}`;
-        }
-        
-        const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', activeServiceSlug) + `?start=${encodeURIComponent(toIsoLocal(start))}&end=${encodeURIComponent(toIsoLocal(end))}${incQuery}&edge_buffers=${edgeVal}${cacheBuster}`;
-        fetches.push(
-          fetch(availUrl)
-            .then(r => r.ok ? r.json() : [])
-            .then(slots => {
-              const openSlots = onlyOpenSlots(slots);
-              detailedDayHasSlots[dateKey] = openSlots.length > 0;
-            })
-            .catch(() => { detailedDayHasSlots[dateKey] = false; })
-        );
-      } else {
-        detailedDayHasSlots[dateKey] = false; // past or summary says no
-      }
+      const isAvailableFromSummary = hasAvailability(summaryVal);
+      detailedDayHasSlots[dateKey] = (date >= todayMidnight) && (!batchFailed && isAvailableFromSummary);
     }
-
-    // Wait for all detailed availability calls to resolve
-    try { await Promise.all(fetches); } catch (_) {}
 
     // If a newer render started, abort applying this one
     if (myToken !== renderToken) {
       return;
     }
 
-    // Now render circles in one batch with accurate disabled states
-    const circles = [];
+    // Render circles in one batch using fast summary result first.
     for (let day = 1; day <= numDays; day++) {
       const date = new Date(year, month, day);
       const circle = document.createElement("div");
@@ -1483,19 +1473,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       circle.dataset.date = dateKey;
 
       const enabled = date >= todayMidnight && !!detailedDayHasSlots[dateKey];
-      if (enabled) {
-        circle.style.cursor = 'pointer';
-        circle.tabIndex = 0;
-        _ccBindTap(circle, () => openTimeModal(year, month, day, dateKey));
-      } else {
-        circle.classList.add("disabled");
-        circle.style.pointerEvents = 'none';
-        circle.style.cursor = 'not-allowed';
-        circle.setAttribute('aria-disabled', 'true');
-        circle.tabIndex = -1;
-      }
+      applyCircleState(circle, enabled, year, month, day, dateKey);
+      circleByDate[dateKey] = circle;
       fragment.appendChild(circle);
-      circles.push(circle);
     }
 
     // Append all circles in one batch to prevent partial paints
@@ -1507,6 +1487,61 @@ document.addEventListener("DOMContentLoaded", async function () {
       dayGrid.classList.remove('is-fading');
       monthHeader.classList.remove('is-fading');
     });
+
+    // Background verification for candidate days (does not block paint).
+    const candidates = [];
+    for (let day = 1; day <= numDays; day++) {
+      const date = new Date(year, month, day);
+      if (date < todayMidnight) continue;
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth()+1).padStart(2,'0');
+      const dd = String(date.getDate()).padStart(2,'0');
+      const dateKey = `${yyyy}-${mm}-${dd}`;
+      if (batchFailed || detailedDayHasSlots[dateKey]) candidates.push({ day, dateKey });
+    }
+
+    if (candidates.length > 0) {
+      (async () => {
+        const concurrency = Math.min(4, candidates.length);
+        let idx = 0;
+
+        async function worker() {
+          while (true) {
+            const my = idx++;
+            if (my >= candidates.length) return;
+            const item = candidates[my];
+            const start = new Date(year, month, item.day, 0, 0, 0);
+            const end = new Date(year, month, item.day, 23, 59, 59);
+            const toIsoLocalDay = (d) => {
+              const p = n => String(n).padStart(2,'0');
+              return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+            };
+            const cacheBuster = `&_t=${Date.now()}`;
+            const availUrl = "{% url 'bookings:service_availability' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', activeServiceSlug) + `?start=${encodeURIComponent(toIsoLocalDay(start))}&end=${encodeURIComponent(toIsoLocalDay(end))}${incQueryBase}&edge_buffers=${edgeVal}${cacheBuster}`;
+
+            let hasSlotsNow = false;
+            try {
+              const r = await fetch(availUrl);
+              const slots = r.ok ? await r.json() : [];
+              hasSlotsNow = onlyOpenSlots(slots).length > 0;
+            } catch (e) {
+              hasSlotsNow = false;
+            }
+
+            if (myToken !== renderToken) return;
+            if (detailedDayHasSlots[item.dateKey] !== hasSlotsNow) {
+              detailedDayHasSlots[item.dateKey] = hasSlotsNow;
+              const circle = circleByDate[item.dateKey];
+              if (circle) applyCircleState(circle, hasSlotsNow, year, month, item.day, item.dateKey);
+            }
+          }
+        }
+
+        try {
+          await Promise.all(Array.from({ length: concurrency }, () => worker()));
+        } catch (_) {}
+      })();
+    }
     } catch (e) {
       console.error('generateCalendar failed', e);
       // If this is still the latest render, don't leave the UI in a faded-out state.
@@ -1693,19 +1728,23 @@ document.addEventListener("DOMContentLoaded", async function () {
       syncParticipantCapacityForService(serviceSelect.value);
       updateServiceDetails(serviceSelect.value);
       updatePaymentSectionForServiceSlug(serviceSelect.value);
-      serviceSelect.addEventListener('change', (e) => {
-        try { window.__ccSelectedSlotRemaining = null; } catch (err) {}
-        syncParticipantCapacityForService(e.target.value);
-        updateServiceDetails(e.target.value);
-        updatePaymentSectionForServiceSlug(e.target.value);
-      });
-      if (participantCountInput) {
+      if (serviceSelect && serviceSelect.dataset.ccModalBound !== '1') {
+        serviceSelect.addEventListener('change', (e) => {
+          try { window.__ccSelectedSlotRemaining = null; } catch (err) {}
+          syncParticipantCapacityForService(e.target.value);
+          updateServiceDetails(e.target.value);
+          updatePaymentSectionForServiceSlug(e.target.value);
+        });
+        serviceSelect.dataset.ccModalBound = '1';
+      }
+      if (participantCountInput && participantCountInput.dataset.ccModalBound !== '1') {
         participantCountInput.addEventListener('input', () => {
           const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
           syncParticipantCapacityForService(slug);
           updateServiceDetails(slug);
           updatePaymentSectionForServiceSlug(slug);
         });
+        participantCountInput.dataset.ccModalBound = '1';
       }
       // Include edge buffer preference (prefer server setting, allow local override)
       const edgeVal2 = (function(){
