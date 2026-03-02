@@ -436,6 +436,99 @@
   #svcAvailEditor .time-picker-btn.cancel { background: var(--gray-50); border-color: var(--gray-300); color: var(--gray-900); }
   #svcAvailEditor .time-picker-btn.cancel:hover { background: var(--gray-300); }
 
+  /* Body-mounted service time picker (keeps same design when rendered outside #svcAvailEditor) */
+  .cc-svc-time-picker {
+    background: white;
+    border: 1px solid var(--gray-300);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1);
+    z-index: 30050 !important;
+    padding: 16px;
+    min-width: 280px;
+    display: none;
+    animation: svcSlideDown 0.2s ease-out;
+  }
+  .cc-svc-time-picker.active { display: block; }
+  .cc-svc-time-picker .time-picker-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .cc-svc-time-picker .time-picker-display {
+    font-size: 32px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--primary-600);
+    margin-bottom: 16px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+  .cc-svc-time-picker .time-picker-selectors { display: flex; gap: 12px; margin-bottom: 16px; }
+  .cc-svc-time-picker .time-selector { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .cc-svc-time-picker .time-selector-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--gray-600);
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+  .cc-svc-time-picker .time-scroll-container {
+    height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: var(--gray-50);
+    padding: 4px;
+  }
+  .cc-svc-time-picker .time-scroll-container::-webkit-scrollbar { width: 6px; }
+  .cc-svc-time-picker .time-scroll-container::-webkit-scrollbar-track { background: transparent; }
+  .cc-svc-time-picker .time-scroll-container::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+  .cc-svc-time-picker .time-option {
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    color: var(--gray-700);
+  }
+  .cc-svc-time-picker .time-option:hover { background: white; color: var(--primary-600); }
+  .cc-svc-time-picker .time-option.selected { background: var(--primary-500); color: white; font-weight: 600; }
+  .cc-svc-time-picker .time-option.disabled {
+    opacity: 0.35;
+    filter: grayscale(1);
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .cc-svc-time-picker .time-picker-actions { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }
+  .cc-svc-time-picker .time-picker-btn {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.1;
+  }
+  .cc-svc-time-picker .time-picker-btn.confirm { background: var(--primary-500); border-color: var(--primary-700); color: white; }
+  .cc-svc-time-picker .time-picker-btn.confirm:hover {
+    background: var(--primary-600);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+  }
+  .cc-svc-time-picker .time-picker-btn.cancel { background: var(--gray-50); border-color: var(--gray-300); color: var(--gray-900); }
+  .cc-svc-time-picker .time-picker-btn.cancel:hover { background: var(--gray-300); }
+
   /* Mobile: keep time range rows + picker fully within container */
   @media (max-width: 640px) {
     #svcAvailEditor .svc-range-row {
@@ -508,6 +601,23 @@
     #svcAvailEditor .time-picker-btn {
       min-width: 0;
     }
+
+    .cc-svc-time-picker {
+      min-width: 0;
+      width: min(360px, 92vw);
+      max-width: 92vw;
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
+      box-sizing: border-box;
+      margin: 0;
+      z-index: 12000 !important;
+    }
+    .cc-svc-time-picker .time-scroll-container {
+      height: 160px;
+    }
+    .cc-svc-time-picker .time-picker-btn {
+      min-width: 0;
+    }
   }
 
   /* Extra-small mobile: 320px wide devices */
@@ -536,6 +646,22 @@
       font-size: 14px;
     }
     #svcAvailEditor .time-picker-btn {
+      font-size: 13px;
+      padding: 10px 8px;
+    }
+
+    .cc-svc-time-picker {
+      width: min(320px, 94vw);
+      padding: 14px;
+    }
+    .cc-svc-time-picker .time-picker-display {
+      font-size: 28px;
+    }
+    .cc-svc-time-picker .time-option {
+      padding: 8px;
+      font-size: 14px;
+    }
+    .cc-svc-time-picker .time-picker-btn {
       font-size: 13px;
       padding: 10px 8px;
     }
@@ -1741,7 +1867,7 @@
           // Calendar-like custom time picker (hour/minute scrollers)
           function createCustomTimePicker(inputElement){
             const picker = document.createElement('div');
-            picker.className = 'custom-time-picker';
+            picker.className = 'custom-time-picker cc-svc-time-picker';
 
             const [initialHour, initialMinute] = (inputElement.value || '09:00').split(':');
             let selectedHour = initialHour;
@@ -2035,10 +2161,48 @@
 
             function _ccOpenSvcPicker(inputEl, containerEl){
               try {
-                document.querySelectorAll('#svcAvailEditor .custom-time-picker').forEach(p => p.remove());
+                document.querySelectorAll('.custom-time-picker[data-svc-picker="1"]').forEach(p => p.remove());
                 const picker = createCustomTimePicker(inputEl);
+                picker.setAttribute('data-svc-picker', '1');
                 picker.classList.add('active');
-                containerEl.appendChild(picker);
+                const isMobile = window.matchMedia('(max-width: 640px)').matches;
+                picker.style.position = 'fixed';
+                picker.style.zIndex = '30050';
+
+                if (isMobile) {
+                  picker.style.top = '50%';
+                  picker.style.left = '50%';
+                  picker.style.right = 'auto';
+                  picker.style.bottom = 'auto';
+                  picker.style.transform = 'translate(-50%, -50%)';
+                } else {
+                  picker.style.transform = 'none';
+                  picker.style.visibility = 'hidden';
+                  document.body.appendChild(picker);
+
+                  const rect = inputEl.getBoundingClientRect();
+                  const pickerWidth = picker.offsetWidth || 280;
+                  const pickerHeight = picker.offsetHeight || 320;
+                  const margin = 8;
+
+                  let left = rect.left;
+                  const maxLeft = Math.max(margin, window.innerWidth - pickerWidth - margin);
+                  left = Math.min(Math.max(margin, left), maxLeft);
+
+                  let top = rect.bottom + 6;
+                  const maxTop = Math.max(margin, window.innerHeight - pickerHeight - margin);
+                  if (top > maxTop) {
+                    top = rect.top - pickerHeight - 6;
+                  }
+                  top = Math.min(Math.max(margin, top), maxTop);
+
+                  picker.style.left = `${Math.round(left)}px`;
+                  picker.style.top = `${Math.round(top)}px`;
+                  picker.style.visibility = 'visible';
+                  return;
+                }
+
+                document.body.appendChild(picker);
               } catch (err) { /* ignore */ }
             }
 
