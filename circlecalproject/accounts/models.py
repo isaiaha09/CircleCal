@@ -68,6 +68,10 @@ class Business(models.Model):
     # Cloudflare for SaaS / Custom Hostnames integration (optional).
     # When present, this stores the Cloudflare custom hostname id.
     custom_domain_cloudflare_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
+    custom_domain_cloudflare_ssl_status = models.CharField(max_length=32, blank=True, null=True, db_index=True)
+    custom_domain_cloudflare_dcv_records = models.JSONField(default=list, blank=True)
+    custom_domain_cloudflare_last_checked_at = models.DateTimeField(null=True, blank=True)
+    custom_domain_cloudflare_last_error = models.TextField(blank=True, null=True)
     # Timezone for the organization (e.g., 'America/Los_Angeles', 'America/New_York')
     # Defaults to 'UTC' if not set - organizations should update this to their local timezone
     timezone = models.CharField(max_length=63, default='UTC', help_text="Business's timezone (e.g., America/Los_Angeles)")

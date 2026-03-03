@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.contrib import messages
 from .models import (
     Business,
     Membership,
@@ -32,6 +33,7 @@ class OrganizationAdmin(BaseAdmin):
         "is_archived",
         "timezone",
         "custom_domain_verified",
+        "cloudflare_ssl_status",
         "created_at",
     )
     search_fields = ("name", "slug", "owner__username", "owner__email", "custom_domain")
@@ -53,11 +55,16 @@ class OrganizationAdmin(BaseAdmin):
         "ops_subscription",
         "ops_stripe_connect",
         "ops_custom_domain",
+        "custom_domain_cloudflare_ssl_status",
+        "custom_domain_cloudflare_last_checked_at",
+        "custom_domain_cloudflare_last_error",
         "ops_embed",
         "ops_bookings_30d",
         "ops_last_booking",
         "ops_quick_links",
     )
+
+    actions = ("refresh_cloudflare_custom_hostname_status",)
 
     fieldsets = (
         (
@@ -90,6 +97,10 @@ class OrganizationAdmin(BaseAdmin):
                     "custom_domain_verification_token",
                     "custom_domain_verified",
                     "custom_domain_verified_at",
+                    "custom_domain_cloudflare_id",
+                    "custom_domain_cloudflare_ssl_status",
+                    "custom_domain_cloudflare_last_checked_at",
+                    "custom_domain_cloudflare_last_error",
                 ),
             },
         ),
@@ -172,9 +183,14 @@ class OrganizationAdmin(BaseAdmin):
     def ops_custom_domain(self, obj: Business) -> str:
         domain = (getattr(obj, "custom_domain", None) or "").strip() or "(none)"
         verified = bool(getattr(obj, "custom_domain_verified", False))
-        return f"{domain} • verified={verified}"
+        cf_status = (getattr(obj, "custom_domain_cloudflare_ssl_status", None) or "").strip() or "unknown"
+        return f"{domain} • verified={verified} • cloudflare_ssl={cf_status}"
 
     ops_custom_domain.short_description = "Custom domain"
+
+    @admin.display(description="CF SSL")
+    def cloudflare_ssl_status(self, obj: Business) -> str:
+        return (getattr(obj, "custom_domain_cloudflare_ssl_status", None) or "").strip() or "-"
 
     def ops_embed(self, obj: Business) -> str:
         enabled = bool(getattr(obj, "embed_enabled", False))
@@ -234,6 +250,39 @@ class OrganizationAdmin(BaseAdmin):
         )
 
     ops_quick_links.short_description = "Quick links"
+
+    @admin.action(description="Refresh Cloudflare custom-hostname status")
+    def refresh_cloudflare_custom_hostname_status(self, request, queryset):
+        from calendar_app.custom_domain_cloudflare import sync_custom_hostname
+
+        total = 0
+        active = 0
+        pending = 0
+        errors = 0
+
+        for org in queryset:
+            domain = (getattr(org, "custom_domain", None) or "").strip()
+            if not domain:
+                continue
+            total += 1
+            result = sync_custom_hostname(org, create_if_missing=True)
+            if result.error:
+                errors += 1
+            elif result.active:
+                active += 1
+            else:
+                pending += 1
+
+        if total == 0:
+            self.message_user(request, "No custom domains selected.", level=messages.WARNING)
+            return
+
+        level = messages.SUCCESS if errors == 0 else messages.WARNING
+        self.message_user(
+            request,
+            f"Cloudflare refresh complete: processed={total}, active={active}, pending={pending}, errors={errors}",
+            level=level,
+        )
 
 
 @admin.register(Membership)

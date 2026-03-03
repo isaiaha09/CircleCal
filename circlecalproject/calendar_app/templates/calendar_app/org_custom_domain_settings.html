@@ -40,8 +40,8 @@
         </p>
         <p class="text-sm text-gray-600 mt-2">
             Setup has <span class="font-semibold">two DNS steps</span> at your domain provider:
-            (1) a <span class="font-mono">TXT</span> record to verify ownership (below), and
-            (2) a <span class="font-mono">CNAME</span> (or <span class="font-mono">A</span>) record so <span class="font-mono break-all">booking.yoursite.com</span> actually points to CircleCal.
+            (1) Cloudflare DCV verification record(s) (shown below), and
+            (2) a <span class="font-mono">CNAME</span> so <span class="font-mono break-all">booking.yoursite.com</span> points to CircleCal.
         </p>
         <p class="text-sm text-gray-600 mt-2 break-words">If you don’t own a domain yet, you’ll need to purchase one before you can set up a custom booking subdomain.</p>
 
@@ -93,22 +93,31 @@
             <div class="mt-4 text-sm">
                 <div>
                     <span class="font-semibold text-blue-800">Status:</span>
-                    {% if org.custom_domain_verified %}
+                    {% if cf_ssl_status|lower == 'active' %}
+                        <span class="text-green-700 font-semibold">Live</span>
+                        <span class="text-gray-600">(Cloudflare SSL active)</span>
+                    {% elif cf_ssl_status %}
+                        <span class="text-yellow-700 font-semibold">Provisioning</span>
+                        <span class="text-gray-600">(Cloudflare SSL: {{ cf_ssl_status }})</span>
+                    {% elif org.custom_domain_verified %}
                         <span class="text-green-700 font-semibold">Verified</span>
                     {% else %}
                         <span class="text-yellow-700 font-semibold">Not verified</span>
                     {% endif %}
                 </div>
+                {% if org.custom_domain_cloudflare_last_error %}
+                    <div class="mt-1 text-xs text-red-700">Cloudflare error: {{ org.custom_domain_cloudflare_last_error }}</div>
+                {% endif %}
             </div>
 
             {% if txt_name and txt_value %}
                 <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-6">
                     <div class="font-semibold text-blue-900">DNS verification (TXT)</div>
-                    <p class="text-sm text-gray-600 mt-1">Add this TXT record to prove you own the domain:</p>
+                    <p class="text-sm text-gray-600 mt-1">Add this verification record so Cloudflare can validate your hostname:</p>
                     <p class="text-sm text-gray-600 mt-2">
                         DNS dashboards vary:
                         some want the <span class="font-semibold">full record name</span>, others want only the <span class="font-semibold">Host/Name</span> part (without your root domain).
-                        Either is fine as long as it creates a TXT record named <span class="font-mono">{{ txt_name }}</span>.
+                        Either is fine as long as it creates the record shown by CircleCal/Cloudflare.
                     </p>
                     <div class="mt-3 text-sm">
                         <div class="text-blue-800"><span class="font-semibold">Name (full)</span></div>
@@ -127,6 +136,11 @@
                         <input type="hidden" name="action" value="verify_domain" />
                         <button type="submit" class="bg-blue-600 text-white font-semibold px-4 py-3 rounded-xl hover:bg-blue-700" {% if not can_use_custom_domain %}disabled{% endif %}>Verify</button>
                     </form>
+
+                    <div class="mt-2 text-xs text-gray-600">
+                        Verify checks Cloudflare custom-hostname status and polls for SSL activation.
+                        If status stays pending, keep DNS records unchanged and try again in 1–2 minutes.
+                    </div>
 
                     <div class="mt-4 pt-4 border-t border-blue-100 text-sm text-blue-900">
                         <div class="font-semibold">Next: point the subdomain to CircleCal</div>
@@ -149,10 +163,11 @@
                                 Do <span class="font-semibold">not</span> point your CNAME to the apex/root domain (example: <span class="font-mono break-all">circlecal.app</span>) — use the target shown above.
                             </div>
                             <div class="mt-2 text-gray-600">
-                                Note: You do <span class="font-semibold">not</span> need to use Cloudflare DNS for this. Cloudflare may still appear in error pages/headers because CircleCal’s hosting uses a Cloudflare edge.
+                                Cloudflare checks and provisions SSL for this hostname through CircleCal’s zone.
+                                Your registrar/DNS provider can still be external.
                             </div>
                             <div class="mt-2 text-gray-600">
-                                After DNS changes, HTTPS can take a few minutes to provision. If you see an SSL/Cloudflare page, wait and refresh.
+                                CircleCal polls Cloudflare status automatically. HTTPS usually becomes active within a few minutes after DNS propagates.
                             </div>
                         </div>
                     </div>

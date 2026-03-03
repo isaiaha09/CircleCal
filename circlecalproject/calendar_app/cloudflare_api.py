@@ -175,6 +175,35 @@ def create_custom_hostname(cfg: CloudflareApiConfig, hostname: str, *, custom_me
     return {}
 
 
+def get_custom_hostname(cfg: CloudflareApiConfig, custom_hostname_id: str) -> dict[str, Any]:
+    custom_hostname_id = (custom_hostname_id or "").strip()
+    if not custom_hostname_id:
+        return {}
+    payload = _request(cfg, "GET", f"/zones/{cfg.zone_id}/custom_hostnames/{custom_hostname_id}")
+    if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
+        return payload["result"]
+    return {}
+
+
+def list_custom_hostnames(cfg: CloudflareApiConfig, *, hostname: str | None = None, page: int = 1, per_page: int = 50) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {
+        "page": max(1, int(page or 1)),
+        "per_page": max(1, min(int(per_page or 50), 100)),
+    }
+    hostname_norm = (hostname or "").strip().lower().rstrip(".")
+    if hostname_norm:
+        params["hostname"] = hostname_norm
+
+    payload = _request(cfg, "GET", f"/zones/{cfg.zone_id}/custom_hostnames", params=params)
+    try:
+        rows = payload.get("result") if isinstance(payload, dict) else None
+    except Exception:
+        rows = None
+    if isinstance(rows, list):
+        return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
 def ensure_custom_hostname(cfg: CloudflareApiConfig, hostname: str, *, custom_metadata: dict[str, str] | None = None) -> str | None:
     """Create a custom hostname if it doesn't exist; returns its id."""
     existing_id = find_custom_hostname_id_by_hostname(cfg, hostname)
@@ -186,11 +215,103 @@ def ensure_custom_hostname(cfg: CloudflareApiConfig, hostname: str, *, custom_me
     return cid or None
 
 
+def get_custom_hostname_by_hostname(cfg: CloudflareApiConfig, hostname: str) -> dict[str, Any]:
+    hostname_norm = (hostname or "").strip().lower().rstrip(".")
+    if not hostname_norm:
+        return {}
+    rows = list_custom_hostnames(cfg, hostname=hostname_norm, page=1, per_page=50)
+    for row in rows:
+        if (row.get("hostname") or "").strip().lower().rstrip(".") == hostname_norm:
+            return row
+    return {}
+
+
 def delete_custom_hostname(cfg: CloudflareApiConfig, custom_hostname_id: str) -> None:
     custom_hostname_id = (custom_hostname_id or "").strip()
     if not custom_hostname_id:
         return
     _request(cfg, "DELETE", f"/zones/{cfg.zone_id}/custom_hostnames/{custom_hostname_id}")
+
+
+def extract_ssl_status(custom_hostname: dict[str, Any] | None) -> str:
+    if not isinstance(custom_hostname, dict):
+        return ""
+    try:
+        ssl = custom_hostname.get("ssl")
+        if isinstance(ssl, dict):
+            status = (ssl.get("status") or "").strip()
+            return status
+    except Exception:
+        pass
+    return ""
+
+
+def extract_dcv_records(custom_hostname: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Normalize Cloudflare DCV instructions into simple records for UI storage.
+
+    Record format:
+    - type: txt|cname|http|unknown
+    - name: DNS host/name (for DNS types)
+    - value: DNS value/target or HTTP body
+    - url: optional HTTP URL for http validation
+    """
+    if not isinstance(custom_hostname, dict):
+        return []
+
+    records: list[dict[str, str]] = []
+
+    def _add_record(rec_type: str, name: str = "", value: str = "", url: str = "") -> None:
+        row = {
+            "type": (rec_type or "unknown").strip().lower(),
+            "name": (name or "").strip(),
+            "value": (value or "").strip(),
+            "url": (url or "").strip(),
+        }
+        if row not in records:
+            records.append(row)
+
+    # Cloudflare may return ownership verification details on top-level.
+    ov = custom_hostname.get("ownership_verification")
+    if isinstance(ov, dict):
+        ov_type = (ov.get("type") or "").strip().lower()
+        _add_record(
+            "txt" if ov_type == "txt" else ("cname" if ov_type == "cname" else "unknown"),
+            name=str(ov.get("name") or ""),
+            value=str(ov.get("value") or ""),
+        )
+
+    ov_http = custom_hostname.get("ownership_verification_http")
+    if isinstance(ov_http, dict):
+        _add_record(
+            "http",
+            value=str(ov_http.get("http_body") or ""),
+            url=str(ov_http.get("http_url") or ""),
+        )
+
+    # SSL validation records are often nested under ssl.validation_records.
+    ssl = custom_hostname.get("ssl")
+    validation_records = []
+    if isinstance(ssl, dict):
+        validation_records = ssl.get("validation_records") or []
+
+    if isinstance(validation_records, list):
+        for row in validation_records:
+            if not isinstance(row, dict):
+                continue
+            txt_name = str(row.get("txt_name") or "")
+            txt_value = str(row.get("txt_value") or "")
+            cname_name = str(row.get("cname_name") or row.get("cname") or "")
+            cname_target = str(row.get("cname_target") or "")
+            http_url = str(row.get("http_url") or "")
+            http_body = str(row.get("http_body") or "")
+            if txt_name or txt_value:
+                _add_record("txt", name=txt_name, value=txt_value)
+            if cname_name or cname_target:
+                _add_record("cname", name=cname_name, value=cname_target)
+            if http_url or http_body:
+                _add_record("http", url=http_url, value=http_body)
+
+    return records
 
 
 def log_config_presence() -> None:
