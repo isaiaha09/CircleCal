@@ -646,6 +646,14 @@ def apply_service_update(request, org_slug, service_id):
     except Exception:
         can_use_pro_team = False
 
+    # Used for a Team-plan-specific rule later in the flow.
+    try:
+        from billing.utils import can_add_staff
+
+        is_team_plan = bool(can_add_staff(org))
+    except Exception:
+        is_team_plan = False
+
     if not payload.get('confirm'):
         return HttpResponseBadRequest('Must include confirm=true to apply changes')
 
@@ -4932,7 +4940,11 @@ def org_custom_domain_settings(request, org_slug):
                 cf_sync = sync_custom_hostname(org, create_if_missing=True)
                 if cf_sync.configured:
                     if cf_sync.error:
-                        messages.warning(request, 'Domain saved, but Cloudflare provisioning could not be started automatically yet. Try Verify in a minute.')
+                        messages.warning(
+                            request,
+                            'Domain saved, but Cloudflare provisioning could not be started automatically yet. '
+                            f'Try Verify in a minute. ({cf_sync.error})',
+                        )
                     else:
                         messages.success(request, 'Domain saved and Cloudflare provisioning started. Add the DNS records shown below, then click Verify.')
                 else:
@@ -4950,6 +4962,15 @@ def org_custom_domain_settings(request, org_slug):
 
             cf_cfg = get_cloudflare_config()
             if cf_cfg:
+                # Logs-only diagnostics to help debug environment/permission issues.
+                try:
+                    from calendar_app.cloudflare_api import log_api_check, log_config_presence
+
+                    log_config_presence()
+                    log_api_check(cf_cfg)
+                except Exception:
+                    pass
+
                 poll_result = poll_custom_hostname_until_active(
                     org,
                     interval_seconds=30,

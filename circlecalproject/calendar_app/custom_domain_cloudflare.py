@@ -9,6 +9,7 @@ from django.utils import timezone
 from accounts.models import Business
 from calendar_app.cloudflare_api import (
     CloudflareApiError,
+    ensure_fallback_origin,
     create_custom_hostname,
     extract_dcv_records,
     extract_ssl_status,
@@ -116,6 +117,15 @@ def sync_custom_hostname(
 
     created = False
     try:
+        # Cloudflare SaaS requires a fallback origin to be configured for custom
+        # hostnames to become active. Best-effort: keep it synced from env.
+        try:
+            if getattr(cfg, "fallback_origin", None):
+                ensure_fallback_origin(cfg, cfg.fallback_origin or "")
+        except Exception:
+            # Do not block hostname provisioning on fallback-origin sync errors.
+            pass
+
         cid = (getattr(org, "custom_domain_cloudflare_id", None) or "").strip()
         payload: dict = {}
 
