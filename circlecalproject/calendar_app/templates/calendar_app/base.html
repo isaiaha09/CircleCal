@@ -685,7 +685,7 @@
     {% block extra_head %}{% endblock %}
 </head>
 
-{% if request.GET.embed == '1' or request.custom_domain_organization %}
+{% if request.GET.embed == '1' or request.custom_domain_organization or request.hosted_subdomain_organization %}
 <body class="bg-transparent text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="1" data-cc-app="{% if cc_app_mode %}1{% else %}0{% endif %}">
 {% else %}
 <body class="{% if cc_app_mode %}bg-transparent{% else %}bg-blue-50{% endif %} text-gray-900" data-cc-home="{% if request.path == '/' %}1{% else %}0{% endif %}" data-cc-embed="0" data-cc-app="{% if cc_app_mode %}1{% else %}0{% endif %}">
@@ -706,7 +706,7 @@
     </script>
     {% endif %}
 
-    {% if request.GET.embed != '1' and not request.custom_domain_organization and not cc_app_mode %}
+    {% if request.GET.embed != '1' and not request.custom_domain_organization and not request.hosted_subdomain_organization and not cc_app_mode %}
     <header class="bg-white border-b shadow-sm relative z-50 cc-site-header">
         <div class="max-w-7xl mx-auto px-4 py-10 md:py-9">
             <div class="flex items-center relative">
