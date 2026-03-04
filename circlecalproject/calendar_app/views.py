@@ -4922,6 +4922,7 @@ def org_custom_domain_settings(request, org_slug):
             org.custom_domain_verified_at = None
             if not org.custom_domain_verification_token:
                 org.custom_domain_verification_token = secrets.token_urlsafe(16)
+            org.custom_domain_cloudflare_id = None
             org.custom_domain_cloudflare_ssl_status = None
             org.custom_domain_cloudflare_dcv_records = []
             org.custom_domain_cloudflare_last_checked_at = None
@@ -4932,6 +4933,7 @@ def org_custom_domain_settings(request, org_slug):
                     'custom_domain_verified',
                     'custom_domain_verified_at',
                     'custom_domain_verification_token',
+                    'custom_domain_cloudflare_id',
                     'custom_domain_cloudflare_ssl_status',
                     'custom_domain_cloudflare_dcv_records',
                     'custom_domain_cloudflare_last_checked_at',
@@ -4958,6 +4960,25 @@ def org_custom_domain_settings(request, org_slug):
             token = (org.custom_domain_verification_token or '').strip()
             if not domain or not token:
                 messages.error(request, 'Set a domain first.')
+                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
+
+            try:
+                import os
+
+                cf_token_present = bool((os.getenv('CLOUDFLARE_API_TOKEN') or os.getenv('CF_API_TOKEN') or '').strip())
+                cf_zone_present = bool((os.getenv('CLOUDFLARE_ZONE_ID') or os.getenv('CF_ZONE_ID') or '').strip())
+            except Exception:
+                cf_token_present = False
+                cf_zone_present = False
+
+            # If Cloudflare vars are partially configured, do not silently fall
+            # back to legacy Render attach. Surface the real configuration issue.
+            if cf_token_present != cf_zone_present:
+                messages.error(
+                    request,
+                    'Cloudflare custom-domain config is incomplete on the server. '
+                    'Set both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID, then click Verify again.',
+                )
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
             cf_cfg = get_cloudflare_config()
