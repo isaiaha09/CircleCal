@@ -169,7 +169,29 @@ def create_custom_hostname(cfg: CloudflareApiConfig, hostname: str, *, custom_me
     if custom_metadata:
         body["custom_metadata"] = custom_metadata
 
-    payload = _request(cfg, "POST", f"/zones/{cfg.zone_id}/custom_hostnames", json=body)
+    try:
+        payload = _request(cfg, "POST", f"/zones/{cfg.zone_id}/custom_hostnames", json=body)
+    except CloudflareApiError as exc:
+        # Some zones/accounts don't have entitlement for custom_metadata.
+        # Retry once without metadata so provisioning can proceed.
+        if custom_metadata:
+            try:
+                errs = exc.payload.get("errors") if isinstance(exc.payload, dict) else None
+            except Exception:
+                errs = None
+            code = None
+            if isinstance(errs, list) and errs:
+                try:
+                    code = errs[0].get("code")
+                except Exception:
+                    code = None
+            if int(code or 0) == 1413:
+                body.pop("custom_metadata", None)
+                payload = _request(cfg, "POST", f"/zones/{cfg.zone_id}/custom_hostnames", json=body)
+            else:
+                raise
+        else:
+            raise
     if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
         return payload["result"]
     return {}
@@ -333,7 +355,8 @@ def log_api_check(cfg: CloudflareApiConfig) -> None:
     """Logs-only: basic connectivity/auth check."""
     logger = logging.getLogger(__name__)
     try:
-        _request(cfg, "GET", "/user")
+        # Use a zone-scoped endpoint so standard zone API tokens pass.
+        _request(cfg, "GET", f"/zones/{cfg.zone_id}")
         logger.info("Cloudflare API auth check OK (zone_id=%s)", cfg.zone_id)
         try:
             print(f"CC_CLOUDFLARE_AUTH_CHECK ok zone_id={cfg.zone_id}")
