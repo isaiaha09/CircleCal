@@ -253,3 +253,45 @@ class TestPublicBookingEndpoints(TestCase):
         self.assertIsNotNone(created)
         self.assertEqual(created.participant_count, 2)
         self.assertEqual(float(created.total_price), 75.0)
+
+    def test_public_booking_rejects_outside_availability_hours(self):
+        start = timezone.make_aware(datetime(self.day.year, self.day.month, self.day.day, 15, 0, 0), timezone.get_fixed_timezone(0))
+        end = start + timedelta(minutes=30)
+
+        url = reverse('bookings:public_service_page', args=[self.org.slug, self.service.slug])
+        resp = self.client.post(url, {
+            'client_name': 'Tampered User',
+            'client_email': 'tampered@example.com',
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'service_slug': self.service.slug,
+            'participant_count': '1',
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Outside available hours.', resp.content.decode('utf-8', errors='ignore'))
+
+    def test_public_booking_rejects_non_public_service_override(self):
+        hidden_service = Service.objects.create(
+            organization=self.org,
+            name='Hidden Service',
+            slug=f'hidden-{uuid.uuid4().hex[:10]}',
+            duration=30,
+            price=0,
+            show_on_public_calendar=False,
+            is_active=True,
+        )
+
+        start = timezone.make_aware(datetime(self.day.year, self.day.month, self.day.day, 10, 0, 0), timezone.get_fixed_timezone(0))
+        end = start + timedelta(minutes=30)
+
+        url = reverse('bookings:public_service_page', args=[self.org.slug, self.service.slug])
+        resp = self.client.post(url, {
+            'client_name': 'Tampered User',
+            'client_email': 'tampered2@example.com',
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'service_slug': hidden_service.slug,
+            'participant_count': '1',
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Service is not available', resp.content.decode('utf-8', errors='ignore'))

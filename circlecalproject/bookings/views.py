@@ -33,6 +33,7 @@ from billing.utils import can_use_offline_payment_methods
 from bookings.models import build_offline_payment_instructions
 from billing.utils import can_use_offline_payment_methods
 from django.http import HttpResponse
+from django.views.decorators.cache import never_cache
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from . import ics as bookings_ics
 
@@ -3347,10 +3348,15 @@ def public_service_page(request, org_slug, service_slug):
         client_email = request.POST.get("client_email")
         start_str = request.POST.get("start")
         end_str = request.POST.get("end")
-        # Allow selecting a different service from the modal
+        # Allow selecting a different service from the public service picker.
+        # Must remain constrained to services that are public for this org.
         posted_service_slug = request.POST.get("service_slug")
         if posted_service_slug and posted_service_slug != service_slug:
-            service = Service.objects.filter(slug=posted_service_slug, organization=org).first()
+            service = Service.objects.filter(
+                slug=posted_service_slug,
+                organization=org,
+                show_on_public_calendar=True,
+            ).first()
             if not service:
                 return HttpResponseBadRequest("Service is not available")
 
@@ -3433,6 +3439,13 @@ def public_service_page(request, org_slug, service_slug):
                 except Exception:
                     pass
             return resp
+
+        # Availability-hours enforcement (weekly + per-date overrides).
+        # Prevents tampered POST payloads from booking a time that isn't valid
+        # for the selected service's availability rules.
+        within_hours = is_within_availability(org, start, end, service)
+        if not within_hours:
+            return HttpResponseBadRequest("Outside available hours.")
 
         # Determine if this POST is part of a reschedule flow by validating
         # the provided `reschedule_source`/`reschedule_token` before creating
@@ -4183,6 +4196,7 @@ def create_service(request, org_slug):
 
 
 @require_http_methods(["GET"])
+@never_cache
 def service_availability(request, org_slug, service_slug):
     """
     Returns a list of *AVAILABLE* time slots for a specific service.
@@ -5099,6 +5113,7 @@ def service_availability(request, org_slug, service_slug):
 
 
 @require_http_methods(["GET"])
+@never_cache
 def service_effective_settings(request, org_slug, service_slug):
     """Return the effective service settings for a given date.
 
@@ -5164,6 +5179,7 @@ def service_effective_settings(request, org_slug, service_slug):
 
 
 @require_http_methods(["GET"])
+@never_cache
 def batch_availability_summary(request, org_slug, service_slug):
     """Returns a daily availability summary for a date range.
     Query params: start, end (ISO 8601 date strings).
