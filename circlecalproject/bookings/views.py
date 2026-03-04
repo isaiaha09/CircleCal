@@ -3155,6 +3155,7 @@ def _build_public_service_page_context(
 
 
 
+@csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def public_service_page(request, org_slug, service_slug):
     """
