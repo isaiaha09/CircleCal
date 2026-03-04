@@ -66,6 +66,15 @@ def _is_embed_request(request) -> bool:
         return False
 
 
+def _mark_iframe_exempt(response, should_exempt: bool):
+    try:
+        if should_exempt and response is not None:
+            response.xframe_options_exempt = True
+    except Exception:
+        pass
+    return response
+
+
 def _is_app_webview_request(request) -> bool:
     try:
         ua = (request.META.get('HTTP_USER_AGENT') or '').lower()
@@ -3179,13 +3188,15 @@ def public_service_page(request, org_slug, service_slug):
     # Services not shown publicly should not be bookable or selectable on the public page.
     service = Service.objects.filter(slug=service_slug, organization=org, show_on_public_calendar=True).first()
     if not service:
-        return redirect(reverse('bookings:public_org_page', args=[org.slug]))
+        resp = redirect(reverse('bookings:public_org_page', args=[org.slug]))
+        return _mark_iframe_exempt(resp, is_embed)
 
     # Safety: if service requires facility resources but none are linked, treat as hidden.
     try:
         if bool(getattr(service, 'requires_facility_resources', False)):
             if not ServiceResource.objects.filter(service=service, resource__is_active=True).exists():
-                return redirect(reverse('bookings:public_org_page', args=[org.slug]))
+                resp = redirect(reverse('bookings:public_org_page', args=[org.slug]))
+                return _mark_iframe_exempt(resp, is_embed)
     except Exception:
         pass
 
@@ -3257,7 +3268,8 @@ def public_service_page(request, org_slug, service_slug):
         # Embedded widgets should not attempt same-origin CSRF-protected POSTs
         # inside third-party iframes; redirect the user to the full booking page.
         if is_embed and embed_breakout:
-            return redirect(reverse('bookings:public_service_page', args=[org.slug, service.slug]))
+            resp = redirect(reverse('bookings:public_service_page', args=[org.slug, service.slug]))
+            return _mark_iframe_exempt(resp, True)
 
         # Bot protection: verify Turnstile challenge on public bookings.
         try:
@@ -3666,7 +3678,8 @@ def public_service_page(request, org_slug, service_slug):
         success_url = reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id])
         if is_embed:
             success_url += '?embed=1'
-        return redirect(success_url)
+        resp = redirect(success_url)
+        return _mark_iframe_exempt(resp, is_embed)
         # Notify owner if this booking would violate service buffers (squished)
         try:
             if getattr(service, 'allow_squished_bookings', False):
@@ -3858,9 +3871,12 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
     service = get_object_or_404(Service, slug=service_slug, organization=org)
     intent = get_object_or_404(PublicBookingIntent, id=intent_id, organization=org, service=service)
 
+    is_embed = _is_embed_request(request)
+
     session_id = (request.GET.get('session_id') or '').strip()
     if not session_id or session_id != (getattr(intent, 'stripe_checkout_session_id', '') or ''):
-        return HttpResponseBadRequest('Invalid Stripe session.')
+        resp = HttpResponseBadRequest('Invalid Stripe session.')
+        return _mark_iframe_exempt(resp, is_embed)
 
     paid = False
     try:
@@ -3891,11 +3907,7 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         )
         ctx['error'] = 'Payment was not completed. No booking was created.'
         resp = render(request, 'public/public_service_page.html', ctx)
-        if request.GET.get('embed') == '1':
-            try:
-                resp.xframe_options_exempt = True
-            except Exception:
-                pass
+        _mark_iframe_exempt(resp, is_embed)
         return resp
 
     # Re-check conflicts at finalize time.
@@ -3919,11 +3931,7 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         )
         ctx['error'] = 'Sorry, that time was just booked. Please contact the business.'
         resp = render(request, 'public/public_service_page.html', ctx)
-        if request.GET.get('embed') == '1':
-            try:
-                resp.xframe_options_exempt = True
-            except Exception:
-                pass
+        _mark_iframe_exempt(resp, is_embed)
         return resp
 
     booking = Booking.objects.create(
@@ -4047,9 +4055,10 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
         pass
 
     success_url = reverse('bookings:booking_success', args=[org.slug, service.slug, booking.id])
-    if request.GET.get('embed') == '1':
+    if is_embed:
         success_url += '?embed=1'
-    return redirect(success_url)
+    resp = redirect(success_url)
+    return _mark_iframe_exempt(resp, is_embed)
 
 @require_http_methods(["GET"])
 def reschedule_booking(request, booking_id):
