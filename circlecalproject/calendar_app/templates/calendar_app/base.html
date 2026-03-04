@@ -856,7 +856,7 @@
         {% block content %}{% endblock %}
     </main>
 
-    {% if request.GET.embed != '1' and not request.custom_domain_organization and not cc_app_mode %}
+    {% if request.GET.embed != '1' and not request.custom_domain_organization and not request.hosted_subdomain_organization and not cc_app_mode %}
     <div id="cc-cookie-banner" class="hidden" style="position:fixed;left:0;right:0;bottom:0;z-index:10001;">
         <div class="bg-white border-t shadow-sm" style="padding-bottom: env(safe-area-inset-bottom);">
             <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -1886,7 +1886,7 @@
 
         
 
-    {% if request.GET.embed != '1' and not request.custom_domain_organization %}
+    {% if request.GET.embed != '1' and not request.custom_domain_organization and not request.hosted_subdomain_organization %}
     <!-- Footer -->
     <footer class="bg-white border-t mt-12 py-8">
         <div class="max-w-7xl mx-auto px-4">
