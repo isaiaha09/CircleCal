@@ -58,7 +58,7 @@ class Business(models.Model):
     embed_enabled = models.BooleanField(default=False)
     embed_key = models.CharField(max_length=64, blank=True, null=True, db_index=True)
 
-    # Custom domain support (Pro/Team add-on / Team feature).
+    # Booking subdomain support (Pro/Team add-on / Team feature).
     # Example: booking.example.com
     custom_domain = models.CharField(max_length=255, blank=True, null=True, unique=True, db_index=True)
     custom_domain_verification_token = models.CharField(max_length=64, blank=True, null=True)

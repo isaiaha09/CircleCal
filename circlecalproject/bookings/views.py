@@ -52,10 +52,14 @@ def _is_embed_request(request) -> bool:
     try:
         if (request.GET.get('embed') == '1') or (request.POST.get('embed') == '1'):
             return True
-        # Treat verified custom-domain traffic as embed mode.
+        # Treat verified subdomain traffic as embed mode.
         # This keeps the booking flow "widget-like" even when users land on
         # booking.<their-domain>.com without needing ?embed=1.
         if getattr(request, 'custom_domain_organization', None):
+            return True
+        # Hosted subdomain traffic should also remain embed-compatible without
+        # requiring embed query params on every navigation step.
+        if getattr(request, 'hosted_subdomain_organization', None):
             return True
         return False
     except Exception:
@@ -104,20 +108,10 @@ def _request_host_no_port(request) -> str:
 def _embed_breakout_required(request, org: Organization) -> bool:
     """Return True when the embed should break out to a top-level page.
 
-    CircleCal-hosted embeds (third-party to the customer's site) are brittle due
-    to modern third-party cookie restrictions. If the booking page is served
-    from a verified custom domain (booking.customer.com), keep the full flow
-    inside the iframe.
+    Subdomain-only mode: keep booking flows inside the iframe for both hosted
+    and customer subdomain traffic.
     """
-    host = _request_host_no_port(request)
-    try:
-        custom = (getattr(org, 'custom_domain', None) or '').strip().lower()
-        verified = bool(getattr(org, 'custom_domain_verified', False))
-        if verified and custom and host and host == custom:
-            return False
-    except Exception:
-        pass
-    return True
+    return False
 
 
 def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
@@ -125,14 +119,18 @@ def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
 
     Embed is a Pro/Team feature and requires a matching per-business embed key.
     """
-    # If this request is coming through a verified custom domain for this org,
-    # we don't require the embed key in the URL. (The custom domain itself is
+    # If this request is coming through a verified subdomain for this org,
+    # we don't require the embed key in the URL. (The subdomain itself is
     # the entitlement boundary.) We still enforce plan/subscription checks.
-    is_custom_domain_request = False
+    is_trusted_subdomain_request = False
     try:
-        is_custom_domain_request = bool(getattr(request, 'custom_domain_organization', None)) and (request.custom_domain_organization.id == org.id)
+        custom_org = getattr(request, 'custom_domain_organization', None)
+        hosted_org = getattr(request, 'hosted_subdomain_organization', None)
+        is_custom_match = bool(custom_org) and (custom_org.id == org.id)
+        is_hosted_match = bool(hosted_org) and (hosted_org.id == org.id)
+        is_trusted_subdomain_request = bool(is_custom_match or is_hosted_match)
     except Exception:
-        is_custom_domain_request = False
+        is_trusted_subdomain_request = False
 
     key = None
     try:
@@ -143,7 +141,7 @@ def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
     if not bool(getattr(org, 'embed_enabled', False)):
         return False, 'embed_disabled'
 
-    if not is_custom_domain_request:
+    if not is_trusted_subdomain_request:
         if not key:
             return False, 'missing_key'
         if (getattr(org, 'embed_key', None) or '') != key:
@@ -3039,7 +3037,7 @@ def _build_public_service_page_context(
 
     # Attach assigned member display names to services for client UI.
     # Populate these regardless of the `show_with_line` flag so embed/custom
-    # views and custom domains receive the same per-service metadata. The
+    # views and subdomains receive the same per-service metadata. The
     # template still controls whether the "With:" line is shown via
     # `show_with_line`.
     try:

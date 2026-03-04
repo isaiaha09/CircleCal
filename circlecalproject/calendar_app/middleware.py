@@ -102,7 +102,7 @@ class AdminUndoContextMiddleware:
 
 
 class CustomDomainMiddleware:
-    """Support verified per-business custom domains (e.g. booking.example.com).
+    """Support verified per-business booking subdomains (e.g. booking.example.com).
 
     This middleware:
     - Detects whether the request host matches a verified Business.custom_domain
@@ -118,7 +118,7 @@ class CustomDomainMiddleware:
         """Return the HTTP host without consulting Django's ALLOWED_HOSTS.
 
         We intentionally avoid request.get_host() here because it raises
-        DisallowedHost before we can auto-allow verified custom domains.
+        DisallowedHost before we can auto-allow verified booking subdomains.
         """
         try:
             raw = (request.META.get('HTTP_HOST') or request.META.get('SERVER_NAME') or '').strip()
@@ -187,7 +187,7 @@ class HostedSubdomainMiddleware:
     """Support CircleCal-hosted subdomains (e.g. <orgslug>.<base_domain>).
 
     This is intended to scale via wildcard DNS/cert and is distinct from
-    customer-owned custom domains.
+    customer-owned booking subdomains.
     """
 
     def __init__(self, get_response):
@@ -300,7 +300,7 @@ class CanonicalHostRedirectMiddleware:
       - CANONICAL_HOST (e.g. circlecal.app or www.circlecal.app)
       - CANONICAL_HOST_REDIRECT=1
 
-    It intentionally runs AFTER CustomDomainMiddleware so verified custom domains
+    It intentionally runs AFTER CustomDomainMiddleware so verified booking subdomains
     are not redirected away.
     """
 
@@ -324,7 +324,7 @@ class CanonicalHostRedirectMiddleware:
         if not enabled or not canonical_host:
             return self.get_response(request)
 
-        # Do not interfere with verified custom domains.
+        # Do not interfere with verified booking subdomains.
         if getattr(request, 'custom_domain_organization', None) is not None:
             return self.get_response(request)
 

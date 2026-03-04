@@ -186,7 +186,7 @@ class OrganizationAdmin(BaseAdmin):
         cf_status = (getattr(obj, "custom_domain_cloudflare_ssl_status", None) or "").strip() or "unknown"
         return f"{domain} • verified={verified} • cloudflare_ssl={cf_status}"
 
-    ops_custom_domain.short_description = "Custom domain"
+    ops_custom_domain.short_description = "Subdomain"
 
     @admin.display(description="CF SSL")
     def cloudflare_ssl_status(self, obj: Business) -> str:
@@ -274,7 +274,7 @@ class OrganizationAdmin(BaseAdmin):
                 pending += 1
 
         if total == 0:
-            self.message_user(request, "No custom domains selected.", level=messages.WARNING)
+            self.message_user(request, "No booking subdomains selected.", level=messages.WARNING)
             return
 
         level = messages.SUCCESS if errors == 0 else messages.WARNING

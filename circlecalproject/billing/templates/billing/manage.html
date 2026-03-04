@@ -980,11 +980,11 @@
 {% if show_custom_domain_addon_section %}
 <div class="max-w-4xl mx-auto mt-4 md:mt-6">
   <div class="bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-lg ring-1 ring-black/5 p-4 md:p-6">
-    <h2 class="text-xl font-semibold mb-2">Custom Domain Add-on</h2>
+    <h2 class="text-xl font-semibold mb-2">Subdomain Subscription</h2>
     {% if show_custom_domain_addon_cancel %}
-      <p class="text-xs md:text-sm text-gray-600 mb-4">Your custom domain add-on is currently enabled for <strong>{{ org.name }}</strong>.</p>
+      <p class="text-xs md:text-sm text-gray-600 mb-4">Your subdomain subscription is currently enabled for <strong>{{ org.name }}</strong>.</p>
     {% else %}
-      <p class="text-xs md:text-sm text-gray-600 mb-4">Your custom domain add-on is currently not active for <strong>{{ org.name }}</strong>. Historical invoice details are shown below.</p>
+      <p class="text-xs md:text-sm text-gray-600 mb-4">Your subdomain subscription is currently not active for <strong>{{ org.name }}</strong>. Historical invoice details are shown below.</p>
     {% endif %}
     <div class="text-sm text-gray-800 mb-4">
       <div>
@@ -1142,7 +1142,7 @@
 
     {% if show_custom_domain_addon_cancel %}
       <div class="flex items-center gap-3">
-        <button id="cancelCustomDomainAddonBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-red-700 text-white hover:bg-red-800">Cancel Custom Domain Add-on</button>
+        <button id="cancelCustomDomainAddonBtn" class="px-3 py-2 text-xs md:text-sm rounded bg-red-700 text-white hover:bg-red-800">Cancel Subdomain Subscription</button>
         <div id="customDomainAddonCancelStatus" class="text-xs text-gray-600"></div>
       </div>
     {% endif %}
@@ -1809,7 +1809,7 @@
     }
   });
 
-  // Custom-domain add-on invoice filters (same functionality pattern as primary invoices)
+  // Subdomain subscription invoice filters (same functionality pattern as primary invoices)
   (function initAddonInvoiceFilters(){
     const table = document.getElementById('customDomainAddonInvoicesTable');
     if (!table) return;
@@ -1987,10 +1987,10 @@
     applyAddonInvoiceFilters();
   })();
 
-  // Cancel custom-domain add-on (only present when enabled)
+  // Cancel subdomain subscription (only present when enabled)
   const cancelCustomDomainAddonBtn = document.getElementById('cancelCustomDomainAddonBtn');
   if (cancelCustomDomainAddonBtn) cancelCustomDomainAddonBtn.addEventListener('click', async () => {
-    if (!confirm('Cancel the Custom Domain add-on? This will disable custom domains for this organization.')) return;
+    if (!confirm('Cancel the Subdomain subscription? This will disable subdomain setup for this organization.')) return;
     const statusEl = document.getElementById('customDomainAddonCancelStatus');
     if (statusEl) statusEl.textContent = '';
     showLoading();
@@ -2008,7 +2008,7 @@
         showToast('error', msg, 6500);
         return;
       }
-      showToast('success', 'Custom Domain add-on canceled.', 4500);
+      showToast('success', 'Subdomain subscription canceled.', 4500);
       setTimeout(() => window.location.reload(), 600);
     } catch (e) {
       const msg = 'Failed to cancel add-on: ' + (e && e.message ? e.message : String(e));

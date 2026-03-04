@@ -30,7 +30,7 @@ class Command(BaseCommand):
 
         orgs = list(queryset.order_by("id")[:limit])
         if not orgs:
-            self.stdout.write(self.style.SUCCESS("No pending Cloudflare custom domains to poll."))
+            self.stdout.write(self.style.SUCCESS("No pending Cloudflare subdomains to poll."))
             return
 
         active_count = 0

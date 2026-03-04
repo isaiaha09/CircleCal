@@ -32,25 +32,25 @@
                                 <div class="text-sm text-gray-700 mt-1">Paste the iframe code into your website.</div>
                             </div>
                             <div class="bg-white border border-blue-100 rounded-xl p-4">
-                                <div class="text-sm font-bold text-blue-800">Custom domain (recommended)</div>
-                                <div class="text-sm text-gray-700 mt-1">Use a booking subdomain like <span class="font-mono break-all">booking.yoursite.com</span> so the booking flow can reliably stay inside the iframe.</div>
+                                <div class="text-sm font-bold text-blue-800">Hosted subdomain (subscription)</div>
+                                <div class="text-sm text-gray-700 mt-1">Use your CircleCal hosted subdomain (for example: <span class="font-mono break-all">yourbusiness.circlecal.app</span>) for reliable embedded booking.</div>
                             </div>
                         </div>
 
                         <div class="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                             <div class="text-sm text-gray-700">
-                                Set up your booking subdomain in Custom Domain settings.
+                                This is available with an active subscription. No website is required; if you have one, you can embed with iframe code.
                             </div>
-                            <a href="{% url 'calendar_app:org_custom_domain_settings' org.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">Custom domain settings →</a>
+                            <a href="{% url 'calendar_app:org_custom_domain_settings' org.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">Subdomain settings →</a>
                         </div>
 
-                        {% if org.custom_domain and org.custom_domain_verified %}
+                        {% if embed_services_embed_src %}
                             <div class="mt-3 pt-3 border-t border-blue-100 text-sm text-gray-700 min-w-0">
                                 <span class="font-semibold text-blue-800">Tip:</span>
-                                Once verified, use this as your iframe <span class="font-mono">src</span> (so the booking flow stays reliably embedded):
+                                Use this hosted-subdomain URL as your iframe <span class="font-mono">src</span> (so the booking flow stays embedded):
                                 <div class="mt-2 overflow-x-auto">
                                     {% if has_active_services %}
-                                        <span class="font-mono break-all">https://{{ org.custom_domain }}{% url 'bookings:public_org_page' org.slug %}?embed=1&key={{ embed_key|default:'' }}</span>
+                                        <span class="font-mono break-all">{{ embed_services_embed_src }}</span>
                                     {% else %}
                                         <span class="font-mono text-gray-500">Activate a service to view this URL</span>
                                     {% endif %}
@@ -201,7 +201,7 @@
     <div style="background:#fff; border-radius:12px; width:min(560px, 92vw); padding:18px 18px 16px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.25);">
         <div style="font-weight:800; font-size:1.05rem; margin-bottom:8px; color:#111827;">No active services</div>
         <div style="color:#374151; font-size:0.95rem; line-height:1.35; margin-bottom:14px;">
-            You don’t have any <span style="font-weight:800;">active</span> services yet. Activate at least 1 service to copy embeds/iframes or use a custom domain for embedding.
+            You don’t have any <span style="font-weight:800;">active</span> services yet. Activate at least 1 service to copy embeds/iframes for your hosted subdomain flow.
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
             <button id="ccNoActiveServicesCloseBtn" type="button" style="background:#e5e7eb; color:#111827; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">Close</button>
@@ -231,7 +231,7 @@
             const modal = document.getElementById('ccNoActiveServicesModal');
             const closeBtn = document.getElementById('ccNoActiveServicesCloseBtn');
             if (!modal || !closeBtn) {
-                alert('No active services. Activate at least 1 service to copy embeds/iframes or use custom domains.');
+                alert('No active services. Activate at least 1 service to copy embeds/iframes for hosted subdomain flow.');
                 return false;
             }
             modal.style.display = 'flex';
@@ -244,14 +244,14 @@
                 }, { once: true });
             }catch(e){}
         }catch(e){
-            alert('No active services. Activate at least 1 service to copy embeds/iframes or use custom domains.');
+            alert('No active services. Activate at least 1 service to copy embeds/iframes for hosted subdomain flow.');
         }
         return false;
     };
 
     window.ccCopyText = function(textareaId, message){
         try{
-            // Block embed/iframe/custom-domain copying until at least one service is active.
+            // Block embed/iframe/subdomain copying until at least one service is active.
             if (!window.CC_HAS_ACTIVE_SERVICES) {
                 window.ccPromptNoActiveServices && window.ccPromptNoActiveServices();
                 return;

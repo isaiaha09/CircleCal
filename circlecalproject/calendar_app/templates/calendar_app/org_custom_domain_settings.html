@@ -1,23 +1,18 @@
 {% extends "calendar_app/base.html" %}
-{% block title %}Custom Domain – {{ org.name }}{% endblock %}
+{% block title %}Subdomain Settings – {{ org.name }}{% endblock %}
 {% block main_class %}w-full max-w-none px-0 py-0 sm:max-w-6xl sm:mx-auto sm:px-4 sm:py-6 md:px-6 md:py-8{% endblock %}
 
 {% block content %}
 <div class="w-[95vw] mx-auto max-w-5xl px-0 py-8 box-border overflow-x-hidden sm:w-full sm:px-4">
     <div class="flex items-center justify-between mb-4">
-        <h1 class="text-2xl font-bold text-blue-700">Custom Domain</h1>
+        <h1 class="text-2xl font-bold text-blue-700">Subdomain Settings</h1>
         <a href="{% url 'calendar_app:dashboard' org.slug %}" class="text-sm text-blue-700 font-semibold hover:underline">← Back</a>
     </div>
 
     {% if not can_use_custom_domain %}
         <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
             <div class="font-semibold text-blue-900">Upgrade required</div>
-            <div class="text-blue-800 text-sm mt-1">Customer-owned custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).</div>
-            {% if can_use_hosted_subdomain %}
-                <div class="mt-3">
-                    <a href="{% url 'billing:embedded_custom_domain_addon_checkout_page' org_slug=org.slug %}" class="inline-flex items-center justify-center bg-blue-600 text-white font-semibold px-4 py-2 rounded-xl hover:bg-blue-700">Purchase custom-domain add-on</a>
-                </div>
-            {% endif %}
+            <div class="text-blue-800 text-sm mt-1">Subdomain settings require an active Pro or Team plan (not trial).</div>
         </div>
     {% endif %}
 
@@ -25,33 +20,57 @@
         <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mt-4">
             <h2 class="text-lg font-bold text-blue-700">CircleCal Hosted URL</h2>
             <p class="text-sm text-gray-600 mt-1">
-                This URL is included with your plan and works without any DNS setup from your side.
-                Use it directly or as the iframe source for embedded booking.
+                This URL is included with your plan and works without any DNS setup.
+                You do not need a website to use CircleCal — you can share this link directly with clients.
+                If you do have a website, you can optionally use it as the iframe source for embedded booking.
             </p>
             <div class="mt-3 font-mono text-xs bg-blue-50 border border-blue-100 rounded-xl p-3 break-all">{{ hosted_subdomain_url }}</div>
         </div>
     {% endif %}
 
     <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mt-4">
-        <h2 class="text-lg font-bold text-blue-700">Domain</h2>
+        <h2 class="text-lg font-bold text-blue-700">Standard Subdomain Setup</h2>
         <p class="text-sm text-gray-600 mt-1">
-            Use a subdomain like <span class="font-mono break-all">booking.yoursite.com</span>.
-            This does <span class="font-semibold">not</span> replace your website — it’s the URL your embedded booking widget loads from so bookings can stay inside your site.
+            CircleCal uses your standard hosted subdomain by default (for example: <span class="font-mono break-all">https://yourbusiness.circlecal.app</span>).
+            This is the recommended setup and does not require DNS, Cloudflare, or website ownership.
+        </p>
+
+        <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+            <div class="font-semibold">What to do</div>
+            <div class="mt-2 space-y-1 text-blue-800">
+                <div>1) Share your CircleCal hosted URL directly with clients.</div>
+                <div>2) Optionally paste your iframe embed code into your website (if you have one).</div>
+                <div>3) No DNS setup is required for standard subdomain usage.</div>
+                <div class="mt-2">Get your iframe code here: <a href="{% url 'calendar_app:services_page' org.slug %}" class="font-semibold underline">Services →</a></div>
+            </div>
+        </div>
+    </div>
+
+    {% if False %}
+
+    <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mt-4">
+        <h2 class="text-lg font-bold text-blue-700">Optional Branded Subdomain</h2>
+        <p class="text-sm text-gray-600 mt-1">
+            This step is optional. Use it only if you want a branded booking URL like <span class="font-mono break-all">booking.yoursite.com</span>.
+            If you skip this, your hosted CircleCal URL above still works for sharing and embeds.
         </p>
         <p class="text-sm text-gray-600 mt-2">
-            Setup has <span class="font-semibold">two DNS steps</span> at your domain provider:
+            Branded subdomain setup has <span class="font-semibold">two DNS steps</span> at your domain provider:
             (1) Cloudflare DCV verification record(s) (shown below), and
             (2) a <span class="font-mono">CNAME</span> so <span class="font-mono break-all">booking.yoursite.com</span> points to CircleCal.
         </p>
-        <p class="text-sm text-gray-600 mt-2 break-words">If you don’t own a domain yet, you’ll need to purchase one before you can set up a custom booking subdomain.</p>
+        <p class="text-sm text-gray-600 mt-2 break-words">No website is required. You only need to own a domain if you choose this branded subdomain option.</p>
 
         <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
-            <div class="font-semibold">Embed vs Custom Domain</div>
+            <div class="font-semibold">Embed vs Subdomain</div>
             <div class="mt-2 space-y-1 text-blue-800">
-                <div><span class="font-semibold">Embed</span> = the iframe code you paste into your website.</div>
-                <div><span class="font-semibold">Custom domain</span> = your booking subdomain pointing to CircleCal (recommended) so the booking flow stays reliably inside the iframe.</div>
+                <div><span class="font-semibold">Embed</span> = optional iframe code you can paste into your website (if you have one).</div>
+                <div><span class="font-semibold">Booking subdomain</span> = optional branded URL that points to CircleCal.</div>
                 <div class="mt-2 pt-2 border-t border-blue-100">
-                    <span class="font-semibold">Good to know:</span> Changing your business name or your public URL (slug) does <span class="font-semibold">not</span> require updating DNS or re-verifying your custom domain.
+                    <span class="font-semibold">No website?</span> Share your hosted CircleCal URL above — clients can still book normally.
+                </div>
+                <div>
+                    <span class="font-semibold">Good to know:</span> Changing your business name or your public URL (slug) does <span class="font-semibold">not</span> require updating DNS or re-verifying your booking subdomain.
                     You only need DNS changes if you change the actual subdomain (example: <span class="font-mono break-all">booking.yoursite.com</span> → <span class="font-mono break-all">schedule.yoursite.com</span>).
                 </div>
                 <div>
@@ -64,7 +83,7 @@
         <form method="post" class="mt-4">
             {% csrf_token %}
             <input type="hidden" name="action" value="set_domain" />
-            <label class="block text-sm font-semibold text-blue-800">Custom domain</label>
+            <label class="block text-sm font-semibold text-blue-800">Booking subdomain</label>
             <div class="flex flex-col sm:flex-row gap-2 mt-2">
                 <div class="flex flex-col sm:flex-row gap-2 flex-1 min-w-0">
                     <select name="custom_domain_prefix"
@@ -113,7 +132,7 @@
             {% if txt_name and txt_value %}
                 <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-6">
                     <div class="font-semibold text-blue-900">DNS verification (TXT)</div>
-                    <p class="text-sm text-gray-600 mt-1">Add this verification record so Cloudflare can validate your hostname:</p>
+                    <p class="text-sm text-gray-600 mt-1">Only for branded subdomain setup: add this verification record so Cloudflare can validate your hostname:</p>
                     <p class="text-sm text-gray-600 mt-2">
                         DNS dashboards vary:
                         some want the <span class="font-semibold">full record name</span>, others want only the <span class="font-semibold">Host/Name</span> part (without your root domain).
@@ -174,13 +193,14 @@
                 </div>
             {% endif %}
 
-            <form method="post" class="mt-4" onsubmit="return confirm('Remove this custom domain?');">
+            <form method="post" class="mt-4" onsubmit="return confirm('Remove this booking subdomain?');">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="remove_domain" />
-                <button type="submit" class="text-red-600 hover:text-red-800 font-semibold text-sm">Remove custom domain</button>
+                <button type="submit" class="text-red-600 hover:text-red-800 font-semibold text-sm">Remove booking subdomain</button>
             </form>
         {% endif %}
     </div>
+    {% endif %}
 
 </div>
 {% endblock %}

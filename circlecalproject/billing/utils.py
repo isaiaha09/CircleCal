@@ -15,7 +15,7 @@ def _is_stripe_managed_subscription(sub: Subscription | None) -> bool:
 
 
 def _can_use_pro_team_features_not_trial(org: Organization) -> bool:
-    """Feature gate for Embed Widget + Custom Domains.
+    """Feature gate for Embed Widget + Booking Subdomains.
 
     Business intent (per UI copy): requires an active Pro/Team plan (not trial).
 
@@ -56,18 +56,11 @@ def can_use_embed_widget(org: Organization) -> bool:
 
 
 def can_use_custom_domain(org: Organization) -> bool:
-    """Customer-owned custom domain feature gate.
+    """Subdomain feature gate (legacy name kept for compatibility).
 
-    Business intent:
-    - Pro/Team plan required (not Stripe trial)
-    - AND the custom-domain add-on must be enabled on the subscription
+    In subdomain-only mode, Pro/Team (not trial) is sufficient.
     """
-    if not _can_use_pro_team_features_not_trial(org):
-        return False
-    sub = get_subscription(org)
-    if not sub:
-        return False
-    return bool(getattr(sub, 'custom_domain_addon_enabled', False))
+    return can_use_hosted_subdomain(org)
 
 
 def can_use_hosted_subdomain(org: Organization) -> bool:

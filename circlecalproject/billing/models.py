@@ -108,7 +108,7 @@ class Subscription(models.Model):
     trial_end = models.DateTimeField(null=True, blank=True)
 
     # Add-ons
-    # Customer-owned custom domains (via an edge provider like Cloudflare for SaaS).
+    # Customer-owned booking subdomains (via an edge provider like Cloudflare for SaaS).
     # This is intentionally separate from plan tier so Pro/Team can include hosted
     # CircleCal subdomains while charging extra for customer-owned domains.
     custom_domain_addon_enabled = models.BooleanField(default=False)

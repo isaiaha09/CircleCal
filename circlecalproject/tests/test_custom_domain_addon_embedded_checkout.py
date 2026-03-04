@@ -46,7 +46,7 @@ class TestCustomDomainAddonEmbeddedCheckout(TestCase):
         url = reverse('billing:embedded_custom_domain_addon_checkout_page', kwargs={'org_slug': self.org.slug})
         r = self.client.get(url)
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, 'Custom-domain Add-on')
+        self.assertContains(r, 'Subdomain Subscription')
 
     def test_create_embedded_checkout_session_returns_client_secret(self):
         url = reverse('billing:create_embedded_custom_domain_addon_checkout_session', kwargs={'org_slug': self.org.slug})

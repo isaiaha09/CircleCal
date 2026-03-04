@@ -551,7 +551,7 @@ def create_checkout_session(request, org_slug, plan_id):
 
 @require_http_methods(["GET"])
 def create_custom_domain_addon_checkout_session(request, org_slug):
-    """Redirects to Stripe Checkout for the custom-domain add-on subscription."""
+    """Redirects to Stripe Checkout for the subdomain subscription."""
     import os
 
     org = get_object_or_404(Organization, slug=org_slug)
@@ -568,7 +568,7 @@ def create_custom_domain_addon_checkout_session(request, org_slug):
         from billing.utils import can_use_hosted_subdomain, get_subscription
 
         if not can_use_hosted_subdomain(org):
-            return HttpResponseBadRequest("Custom-domain add-on requires an active Pro or Team plan.")
+            return HttpResponseBadRequest("Subdomain subscription requires an active Pro or Team plan.")
 
         local_sub = get_subscription(org)
         if local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False):
@@ -578,7 +578,7 @@ def create_custom_domain_addon_checkout_session(request, org_slug):
 
     addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
     if not addon_price_id:
-        return HttpResponseBadRequest("Custom-domain add-on is not configured.")
+        return HttpResponseBadRequest("Subdomain subscription is not configured.")
 
     # Ensure Stripe customer exists
     _ensure_stripe_customer_id(org, getattr(request.user, 'email', None))
@@ -613,7 +613,7 @@ def create_custom_domain_addon_checkout_session(request, org_slug):
 
 @require_http_methods(["GET"])
 def embedded_custom_domain_addon_checkout_page(request, org_slug):
-    """Render embedded Stripe Checkout page for custom-domain add-on purchase."""
+    """Render embedded Stripe Checkout page for subdomain subscription purchase."""
     org = get_object_or_404(Organization, slug=org_slug)
 
     deny = _deny_in_app_billing(request)
@@ -705,7 +705,7 @@ def sync_custom_domain_addon_status(request, org_slug):
 @login_required
 @require_POST
 def cancel_custom_domain_addon_subscription(request, org_slug):
-    """Cancel the custom-domain add-on subscription (if present) and disable it locally."""
+    """Cancel the subdomain subscription (if present) and disable it locally."""
     org = get_object_or_404(Organization, slug=org_slug)
 
     deny = _deny_in_app_billing(request)
@@ -792,7 +792,7 @@ def cancel_custom_domain_addon_subscription(request, org_slug):
 @csrf_exempt
 @require_http_methods(["POST"])
 def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
-    """Create Stripe Embedded Checkout session for custom-domain add-on."""
+    """Create Stripe Embedded Checkout session for subdomain subscription."""
     import os
 
     org = get_object_or_404(Organization, slug=org_slug)
@@ -809,17 +809,17 @@ def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
         from billing.utils import can_use_hosted_subdomain, get_subscription
 
         if not can_use_hosted_subdomain(org):
-            return JsonResponse({"error": "Custom-domain add-on requires an active Pro or Team plan."}, status=400)
+            return JsonResponse({"error": "Subdomain subscription requires an active Pro or Team plan."}, status=400)
 
         local_sub = get_subscription(org)
         if local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False):
-            return JsonResponse({"error": "Custom-domain add-on is already enabled."}, status=400)
+            return JsonResponse({"error": "Subdomain subscription is already enabled."}, status=400)
     except Exception:
         return JsonResponse({"error": "Unable to verify subscription eligibility."}, status=400)
 
     addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
     if not addon_price_id:
-        return JsonResponse({"error": "Custom-domain add-on is not configured."}, status=400)
+        return JsonResponse({"error": "Subdomain subscription is not configured."}, status=400)
 
     _ensure_stripe_customer_id(org, getattr(request.user, 'email', None))
 
@@ -1188,7 +1188,7 @@ def stripe_webhook(request):
         subscription_id = data["id"]
         status = data["status"]  # active, canceled, past_due, etc.
 
-        # If this is the custom-domain add-on subscription, map lifecycle to the add-on flag.
+        # If this is the subdomain subscription, map lifecycle to the add-on flag.
         try:
             meta = data.get("metadata", {}) or {}
             purchase_type = (meta.get('purchase_type') or '').strip().lower()
@@ -2426,7 +2426,7 @@ def manage_billing(request, org_slug):
         except Exception:
             next_billing_iso = None
 
-    # ---- Custom Domain Add-on (separate Stripe subscription) ----
+    # ---- Subdomain Subscription (separate Stripe subscription) ----
     # This add-on is purchased as its own Stripe subscription. The main
     # invoice list above is scoped to the primary subscription, so add-on
     # invoices would otherwise not appear. When enabled, show its monthly

@@ -3058,7 +3058,7 @@ def about(request):
     features = [
         'Simple booking UI with powerful scheduling rules',
         'Public booking pages (per business/service) and embeddable widgets',
-        'Verified custom domains for branded booking pages',
+        'Verified booking subdomains for branded booking pages',
         'Customer self-serve links for cancellation/rescheduling plus calendar invites (.ics)',
         'Advanced availability: buffers, overrides, busy-time blocking, and per-service constraints',
         'Facility resources & scheduling (rooms/cages/etc.)',
@@ -3071,7 +3071,7 @@ def about(request):
     ]
     plans = [
         {'name': 'Free', 'desc': 'Basic booking features for solo users.'},
-        {'name': 'Pro', 'desc': 'Advanced booking features and embed/custom domains.'},
+        {'name': 'Pro', 'desc': 'Advanced booking features and embed/subdomain support.'},
         {'name': 'Team', 'desc': 'Resources and Team Scheduling.'},
     ]
     purpose = (
@@ -4803,11 +4803,11 @@ def org_custom_domain_settings(request, org_slug):
 
         if prefix not in _ALLOWED_CUSTOM_DOMAIN_PREFIXES:
             allowed = ', '.join([f"{p}." for p in sorted(_ALLOWED_CUSTOM_DOMAIN_PREFIXES)])
-            return False, f"Custom domain must start with one of: {allowed}"
+            return False, f"Booking subdomain must start with one of: {allowed}"
 
         # Block apex domains and two-label domains like booking.com.
         if '.' not in remainder:
-            return False, 'Custom domain must be a subdomain like booking.yoursite.com (apex/root domains are not allowed).'
+            return False, 'Booking URL must be a subdomain like booking.yoursite.com (apex/root domains are not allowed).'
 
         return True, ''
 
@@ -4855,12 +4855,12 @@ def org_custom_domain_settings(request, org_slug):
             try:
                 import logging
 
-                logging.getLogger(__name__).exception('Custom domain TXT verification failed unexpectedly')
+                logging.getLogger(__name__).exception('Subdomain TXT verification failed unexpectedly')
             except Exception:
                 pass
             return False
 
-    # Optional return state from custom-domain add-on checkout.
+    # Optional return state from legacy checkout flow.
     try:
         addon_state = (request.GET.get('addon') or '').strip().lower()
         if addon_state == 'success':
@@ -4873,15 +4873,15 @@ def org_custom_domain_settings(request, org_slug):
                 addon_enabled_now = False
 
             if addon_enabled_now:
-                messages.success(request, 'Custom-domain add-on purchase completed. You can now configure a customer-owned domain.')
+                messages.success(request, 'Setup update completed. You can now configure your booking subdomain.')
             else:
-                messages.warning(request, 'Payment completed, but add-on activation is still syncing. Refresh in a few seconds; if it persists, contact support.')
+                messages.warning(request, 'Setup update is still syncing. Refresh in a few seconds; if it persists, contact support.')
         elif addon_state == 'pending':
-            messages.warning(request, 'Payment completed, but add-on activation is still syncing. Refresh in a few seconds; if it persists, contact support.')
+            messages.warning(request, 'Setup update is still syncing. Refresh in a few seconds; if it persists, contact support.')
         elif addon_state == 'cancel':
-            messages.info(request, 'Custom-domain add-on checkout was canceled.')
+            messages.info(request, 'Setup checkout was canceled.')
         elif addon_state == 'already_enabled':
-            messages.info(request, 'Custom-domain add-on is already enabled for this account.')
+            messages.info(request, 'Subdomain setup is already enabled for this account.')
     except Exception:
         pass
 
@@ -4889,7 +4889,7 @@ def org_custom_domain_settings(request, org_slug):
         action = (request.POST.get('action') or '').strip()
 
         if action in {'set_domain', 'verify_domain'} and not can_use_custom_domain:
-            messages.error(request, 'Custom domains require the custom-domain add-on on an active Pro or Team plan (not trial).')
+            messages.error(request, 'Booking subdomain setup requires an active Pro or Team plan (not trial).')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
         if action == 'set_domain':
@@ -4976,7 +4976,7 @@ def org_custom_domain_settings(request, org_slug):
             if cf_token_present != cf_zone_present:
                 messages.error(
                     request,
-                    'Cloudflare custom-domain config is incomplete on the server. '
+                    'Cloudflare subdomain config is incomplete on the server. '
                     'Set both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID, then click Verify again.',
                 )
                 return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
@@ -4999,7 +4999,7 @@ def org_custom_domain_settings(request, org_slug):
                     create_if_missing=True,
                 )
                 if poll_result.active:
-                    messages.success(request, 'Domain is live! SSL status is active and bookings are served on your custom domain.')
+                    messages.success(request, 'Domain is live! SSL status is active and bookings are served on your booking subdomain.')
                 elif poll_result.error:
                     messages.warning(request, f'Domain status check ran, but Cloudflare returned an error: {poll_result.error}')
                 else:
@@ -5041,7 +5041,7 @@ def org_custom_domain_settings(request, org_slug):
                             import logging
 
                             logging.getLogger(__name__).warning(
-                                'Render auto-attach failed for custom domain %s (status=%s, payload=%s)',
+                                'Render auto-attach failed for subdomain %s (status=%s, payload=%s)',
                                 domain,
                                 getattr(exc, 'status_code', None),
                                 getattr(exc, 'payload', None),
@@ -5127,7 +5127,7 @@ def org_custom_domain_settings(request, org_slug):
                 'custom_domain_cloudflare_last_checked_at',
                 'custom_domain_cloudflare_last_error',
             ])
-            messages.success(request, 'Custom domain removed.')
+            messages.success(request, 'Booking subdomain removed.')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
 
@@ -6362,11 +6362,22 @@ def services_page(request, org_slug):
     # Pro/Team-only: public embed widget (iframe) using a revocable per-business key.
     embed_widget_available = False
     embed_services_embed_src = None
+    hosted_embed_origin = None
     try:
         from billing.utils import can_use_embed_widget
         embed_widget_available = bool(can_use_embed_widget(org))
     except Exception:
         embed_widget_available = False
+
+    try:
+        import os
+        from billing.utils import can_use_hosted_subdomain
+
+        base_domain = (getattr(settings, 'HOSTED_SUBDOMAIN_BASE', '') or os.getenv('HOSTED_SUBDOMAIN_BASE') or '').strip().lower().lstrip('.')
+        if base_domain and bool(can_use_hosted_subdomain(org)):
+            hosted_embed_origin = f"https://{(org.slug or '').strip().lower()}.{base_domain}"
+    except Exception:
+        hosted_embed_origin = None
 
     if embed_widget_available:
         try:
@@ -6381,15 +6392,21 @@ def services_page(request, org_slug):
 
         try:
             from django.urls import reverse
-            base = request.build_absolute_uri(reverse('bookings:public_org_page', args=[org.slug]))
+            org_path = reverse('bookings:public_org_page', args=[org.slug])
+            if hosted_embed_origin:
+                base = f"{hosted_embed_origin}{org_path}"
+            else:
+                base = request.build_absolute_uri(org_path)
             embed_services_embed_src = f"{base}?embed=1&key={getattr(org, 'embed_key', '')}"
 
             # Attach per-service embed src for template convenience.
             for service in services:
                 try:
-                    service_base = request.build_absolute_uri(
-                        reverse('bookings:public_service_page', args=[org.slug, service.slug])
-                    )
+                    service_path = reverse('bookings:public_service_page', args=[org.slug, service.slug])
+                    if hosted_embed_origin:
+                        service_base = f"{hosted_embed_origin}{service_path}"
+                    else:
+                        service_base = request.build_absolute_uri(service_path)
                     service.embed_src = f"{service_base}?embed=1&key={getattr(org, 'embed_key', '')}"
                 except Exception:
                     service.embed_src = None

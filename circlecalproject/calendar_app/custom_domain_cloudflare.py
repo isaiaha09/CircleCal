@@ -100,7 +100,7 @@ def sync_custom_hostname(
             ssl_status="",
             domain="",
             custom_hostname_id=None,
-            error="No custom domain set",
+            error="No booking subdomain set",
         )
 
     cfg = get_cloudflare_config()

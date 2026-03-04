@@ -30,7 +30,7 @@ requests==2.32.5
 stripe==14.0.1
 python-slugify==8.0.4
 
-# Custom domain verification (TXT lookup)
+# Subdomain verification (TXT lookup)
 dnspython==2.6.1
 
 # Avatars (image processing + moderation)

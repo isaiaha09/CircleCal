@@ -34,7 +34,7 @@ _allow_custom_domains = _env_bool("ALLOW_CUSTOM_DOMAINS", False)
 
 # Canonical hosts are the hostnames you control directly.
 # When ALLOW_CUSTOM_DOMAINS=1, we accept any Host at the Django layer and
-# validate it in CustomDomainMiddleware against this list + verified custom domains.
+# validate it in CustomDomainMiddleware against this list + verified booking subdomains.
 CANONICAL_HOSTS = _env_csv(
     "CANONICAL_HOSTS",
     [
@@ -48,7 +48,7 @@ CANONICAL_HOSTS = _env_csv(
 )
 
 if _allow_custom_domains:
-    # Keep Django's host protection enabled; verified custom domains are
+    # Keep Django's host protection enabled; verified booking subdomains are
     # auto-allowed at runtime by CustomDomainMiddleware.
     ALLOWED_HOSTS = CANONICAL_HOSTS
 else:

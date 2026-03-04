@@ -51,15 +51,15 @@ class UserWithDetailsChoiceField(forms.ModelMultipleChoiceField):
         org_name = org.name if org else 'No business'
         # Determine current plan
         plan_name = 'No subscription'
-        custom_domain_status = 'custom domain-disabled'
+        custom_domain_status = 'subdomain-disabled'
         try:
             if org and hasattr(org, 'subscription') and getattr(org.subscription, 'plan', None):
                 plan_name = org.subscription.plan.name
             if org and hasattr(org, 'subscription') and getattr(org.subscription, 'custom_domain_addon_enabled', False):
-                custom_domain_status = 'custom domain-enabled'
+                custom_domain_status = 'subdomain-enabled'
         except Exception:
             plan_name = 'No subscription'
-            custom_domain_status = 'custom domain-disabled'
+            custom_domain_status = 'subdomain-disabled'
 
         parts = [username]
         if full:
@@ -198,15 +198,15 @@ class DiscountCodeAdmin(admin.ModelAdmin):
             org_name = org.name if org else 'No business'
             # Determine current plan
             plan_name = 'No subscription'
-            custom_domain_status = 'custom domain-disabled'
+            custom_domain_status = 'subdomain-disabled'
             try:
                 if org and hasattr(org, 'subscription') and getattr(org.subscription, 'plan', None):
                     plan_name = org.subscription.plan.name
                 if org and hasattr(org, 'subscription') and getattr(org.subscription, 'custom_domain_addon_enabled', False):
-                    custom_domain_status = 'custom domain-enabled'
+                    custom_domain_status = 'subdomain-enabled'
             except Exception:
                 plan_name = 'No subscription'
-                custom_domain_status = 'custom domain-disabled'
+                custom_domain_status = 'subdomain-disabled'
 
             parts = [username]
             if full:
@@ -314,7 +314,7 @@ class DiscountCodeAdmin(admin.ModelAdmin):
     apply_to_users_period_end.short_description = 'PLAN — Apply discounts to selected users (period end/no proration)'
 
     def _find_custom_domain_addon_subscription_id(self, org):
-        """Return Stripe subscription id for custom-domain add-on for this org, if any."""
+        """Return Stripe subscription id for subdomain subscription for this org, if any."""
         import stripe
         from django.conf import settings
 
@@ -388,7 +388,7 @@ class DiscountCodeAdmin(admin.ModelAdmin):
                         continue
 
                     if not addon_sid:
-                        results.append(f"{d.code} -> {org.slug}: False (no custom-domain add-on subscription)")
+                        results.append(f"{d.code} -> {org.slug}: False (no subdomain subscription)")
                         continue
 
                     try:
@@ -422,14 +422,14 @@ class DiscountCodeAdmin(admin.ModelAdmin):
         self.message_user(request, "\n".join(results[:40]) if results else "No users/organizations found for selected discount codes.")
 
     def apply_to_users_custom_domain_addon_prorate(self, request, queryset):
-        """Admin action: apply selected DiscountCodes to custom-domain add-on subscriptions with proration."""
+        """Admin action: apply selected DiscountCodes to subdomain subscriptions with proration."""
         self._apply_to_users_custom_domain_addon(request, queryset, proration_behavior='create_prorations')
-    apply_to_users_custom_domain_addon_prorate.short_description = 'CUSTOM DOMAIN ADD-ON — Apply discounts to selected users (immediate/prorate)'
+    apply_to_users_custom_domain_addon_prorate.short_description = 'SUBDOMAIN SUBSCRIPTION — Apply discounts to selected users (immediate/prorate)'
 
     def apply_to_users_custom_domain_addon_period_end(self, request, queryset):
-        """Admin action: apply selected DiscountCodes to custom-domain add-on subscriptions at period end (no proration)."""
+        """Admin action: apply selected DiscountCodes to subdomain subscriptions at period end (no proration)."""
         self._apply_to_users_custom_domain_addon(request, queryset, proration_behavior='none')
-    apply_to_users_custom_domain_addon_period_end.short_description = 'CUSTOM DOMAIN ADD-ON — Apply discounts to selected users (period end/no proration)'
+    apply_to_users_custom_domain_addon_period_end.short_description = 'SUBDOMAIN SUBSCRIPTION — Apply discounts to selected users (period end/no proration)'
 
     actions = (
         'make_active',

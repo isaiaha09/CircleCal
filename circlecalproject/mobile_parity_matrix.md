@@ -44,7 +44,7 @@ Source of truth:
 - Team dashboard (invites, members, roles) (Team plan)
 - Facility resources management (Team plan)
 - Org refund settings
-- Org custom domain settings
+- Org subdomain settings
 
 ### Billing
 - Pricing pages + plan detail pages
@@ -104,7 +104,7 @@ Legend for **Parity**:
 | Audit export PDF/CSV | `/bus/<org>/bookings/audit/export/` | (none) | web-only | owner/admin | ❌ | Likely keep web-only. |
 | Bulk delete bookings | `/bus/<org>/bookings/bulk_delete/` | (none) | web-only | owner/admin | ❌ | Probably web-only for safety. |
 | Refund settings | `/bus/<org>/settings/refunds/` | (none) | web-only | owner/admin | ❌ | Candidate for mobile “view-only” initially. |
-| Custom domain settings | `/bus/<org>/settings/domain/` | (none) | web-only | owner/admin | ❌ | Keep web-only. |
+| Subdomain settings | `/bus/<org>/settings/domain/` | (none) | web-only | owner/admin | ❌ | Keep web-only. |
 | Public client booking flow | `/bus/<org>/service/<svc>/...` | (none) | server-rendered | n/a | ❌ | Likely stays web. |
 | Push notifications | (none historically) | implemented | `/api/v1/push/tokens/` + server sender | n/a | ✅ | Mobile-only advantage. |
 
