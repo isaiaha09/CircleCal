@@ -4711,16 +4711,28 @@ def org_custom_domain_settings(request, org_slug):
 
     can_use_custom_domain = False
     can_use_hosted_subdomain = False
+    can_purchase_booking_flow_bundle = False
+    booking_flow_bundle_enabled = False
     is_trialing = False
     try:
-        from billing.utils import can_use_custom_domain, can_use_hosted_subdomain, get_subscription
+        from billing.utils import (
+            can_purchase_booking_flow_bundle as _can_purchase_booking_flow_bundle,
+            can_use_custom_domain,
+            can_use_hosted_subdomain,
+            get_subscription,
+            has_booking_flow_bundle,
+        )
         sub = get_subscription(org)
         is_trialing = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        can_purchase_booking_flow_bundle = bool(_can_purchase_booking_flow_bundle(org))
+        booking_flow_bundle_enabled = bool(has_booking_flow_bundle(org))
         can_use_custom_domain = bool(can_use_custom_domain(org))
         can_use_hosted_subdomain = bool(can_use_hosted_subdomain(org))
     except Exception:
         can_use_custom_domain = False
         can_use_hosted_subdomain = False
+        can_purchase_booking_flow_bundle = False
+        booking_flow_bundle_enabled = False
 
     import secrets
     from django.utils import timezone
@@ -4873,7 +4885,7 @@ def org_custom_domain_settings(request, org_slug):
                 addon_enabled_now = False
 
             if addon_enabled_now:
-                messages.success(request, 'Setup update completed. You can now configure your booking subdomain.')
+                messages.success(request, 'Booking Flow Bundle activated. You can now configure hosted subdomain + embed flow.')
             else:
                 messages.warning(request, 'Setup update is still syncing. Refresh in a few seconds; if it persists, contact support.')
         elif addon_state == 'pending':
@@ -4881,7 +4893,7 @@ def org_custom_domain_settings(request, org_slug):
         elif addon_state == 'cancel':
             messages.info(request, 'Setup checkout was canceled.')
         elif addon_state == 'already_enabled':
-            messages.info(request, 'Subdomain setup is already enabled for this account.')
+            messages.info(request, 'Booking Flow Bundle is already enabled for this account.')
     except Exception:
         pass
 
@@ -4889,7 +4901,7 @@ def org_custom_domain_settings(request, org_slug):
         action = (request.POST.get('action') or '').strip()
 
         if action in {'set_domain', 'verify_domain'} and not can_use_custom_domain:
-            messages.error(request, 'Booking subdomain setup requires an active Pro or Team plan (not trial).')
+            messages.error(request, 'Booking Flow Bundle is required. It is available on active paid subscriptions and unavailable during trial.')
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
         if action == 'set_domain':
@@ -5247,6 +5259,8 @@ def org_custom_domain_settings(request, org_slug):
         'org': org,
         'can_use_custom_domain': can_use_custom_domain,
         'can_use_hosted_subdomain': can_use_hosted_subdomain,
+        'can_purchase_booking_flow_bundle': can_purchase_booking_flow_bundle,
+        'booking_flow_bundle_enabled': booking_flow_bundle_enabled,
         'is_trialing': is_trialing,
         'txt_name': txt_name,
         'txt_name_host': txt_name_host,
@@ -6359,15 +6373,30 @@ def services_page(request, org_slug):
         for s in services:
             s.assigned_names = []
 
-    # Pro/Team-only: public embed widget (iframe) using a revocable per-business key.
+    # Booking Flow Bundle: public embed widget (iframe) using a revocable per-business key.
     embed_widget_available = False
     embed_services_embed_src = None
     hosted_embed_origin = None
+    embed_bundle_can_purchase = False
+    embed_bundle_enabled = False
+    embed_bundle_is_trial = False
     try:
-        from billing.utils import can_use_embed_widget
+        from billing.utils import (
+            can_purchase_booking_flow_bundle,
+            can_use_embed_widget,
+            get_subscription,
+            has_booking_flow_bundle,
+        )
+        sub = get_subscription(org)
+        embed_bundle_is_trial = bool(sub and getattr(sub, 'status', '') == 'trialing')
+        embed_bundle_can_purchase = bool(can_purchase_booking_flow_bundle(org))
+        embed_bundle_enabled = bool(has_booking_flow_bundle(org))
         embed_widget_available = bool(can_use_embed_widget(org))
     except Exception:
         embed_widget_available = False
+        embed_bundle_can_purchase = False
+        embed_bundle_enabled = False
+        embed_bundle_is_trial = False
 
     try:
         import os
@@ -6423,6 +6452,9 @@ def services_page(request, org_slug):
         "embed_widget_available": embed_widget_available,
         "embed_services_embed_src": embed_services_embed_src,
         "embed_key": getattr(org, 'embed_key', None),
+        "embed_bundle_can_purchase": embed_bundle_can_purchase,
+        "embed_bundle_enabled": embed_bundle_enabled,
+        "embed_bundle_is_trial": embed_bundle_is_trial,
     })
 
 

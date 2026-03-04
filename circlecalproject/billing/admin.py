@@ -103,6 +103,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
         "organization",
         "plan",
         "status",
+        "custom_domain_addon_enabled",
         "start_date",
         "end_date",
         "billing_link",
@@ -110,6 +111,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
     )
     list_filter = ("status",)
     search_fields = ("organization__name", "plan__name", "stripe_subscription_id")
+    actions = ("enable_booking_flow_bundle", "disable_booking_flow_bundle")
 
     @admin.display(description="Billing")
     def billing_link(self, obj: Subscription) -> str:
@@ -121,6 +123,16 @@ class SubscriptionAdmin(admin.ModelAdmin):
         if slug in {"pro", "team"}:
             return "Manual (no Stripe sub)"
         return ""
+
+    @admin.action(description="Enable Booking Flow Bundle for selected subscriptions")
+    def enable_booking_flow_bundle(self, request, queryset):
+        updated = queryset.update(custom_domain_addon_enabled=True)
+        self.message_user(request, f"Enabled Booking Flow Bundle for {updated} subscription(s).")
+
+    @admin.action(description="Disable Booking Flow Bundle for selected subscriptions")
+    def disable_booking_flow_bundle(self, request, queryset):
+        updated = queryset.update(custom_domain_addon_enabled=False)
+        self.message_user(request, f"Disabled Booking Flow Bundle for {updated} subscription(s).")
 
 
 @admin.register(SubscriptionChange)

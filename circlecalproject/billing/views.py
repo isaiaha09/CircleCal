@@ -565,10 +565,10 @@ def create_custom_domain_addon_checkout_session(request, org_slug):
         return err
 
     try:
-        from billing.utils import can_use_hosted_subdomain, get_subscription
+        from billing.utils import can_purchase_booking_flow_bundle, get_subscription
 
-        if not can_use_hosted_subdomain(org):
-            return HttpResponseBadRequest("Subdomain subscription requires an active Pro or Team plan.")
+        if not can_purchase_booking_flow_bundle(org):
+            return HttpResponseBadRequest("Booking Flow Bundle requires an active paid subscription and is unavailable during trial.")
 
         local_sub = get_subscription(org)
         if local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False):
@@ -624,9 +624,9 @@ def embedded_custom_domain_addon_checkout_page(request, org_slug):
     if err:
         return err
 
-    from billing.utils import can_use_hosted_subdomain, get_subscription
+    from billing.utils import can_purchase_booking_flow_bundle, get_subscription
 
-    can_purchase = bool(can_use_hosted_subdomain(org))
+    can_purchase = bool(can_purchase_booking_flow_bundle(org))
     local_sub = get_subscription(org)
     already_enabled = bool(local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False))
 
@@ -806,10 +806,10 @@ def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
         return err
 
     try:
-        from billing.utils import can_use_hosted_subdomain, get_subscription
+        from billing.utils import can_purchase_booking_flow_bundle, get_subscription
 
-        if not can_use_hosted_subdomain(org):
-            return JsonResponse({"error": "Subdomain subscription requires an active Pro or Team plan."}, status=400)
+        if not can_purchase_booking_flow_bundle(org):
+            return JsonResponse({"error": "Booking Flow Bundle requires an active paid subscription and is unavailable during trial."}, status=400)
 
         local_sub = get_subscription(org)
         if local_sub and getattr(local_sub, 'custom_domain_addon_enabled', False):

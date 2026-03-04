@@ -11,8 +11,22 @@
 
     {% if not can_use_custom_domain %}
         <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <div class="font-semibold text-blue-900">Upgrade required</div>
-            <div class="text-blue-800 text-sm mt-1">Subdomain settings require an active Pro or Team plan (not trial).</div>
+            <div class="font-semibold text-blue-900">Booking Flow Bundle required</div>
+            {% if is_trialing %}
+                <div class="text-blue-800 text-sm mt-1">This bundle is unavailable during trial. Activate a paid subscription first, then purchase the Booking Flow Bundle.</div>
+            {% elif can_purchase_booking_flow_bundle %}
+                <div class="text-blue-800 text-sm mt-1">Your subscription is eligible. Purchase the Booking Flow Bundle to unlock hosted subdomain + embed flow.</div>
+                <div class="mt-3">
+                    <a href="{% url 'billing:embedded_custom_domain_addon_checkout_page' org.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">Purchase Booking Flow Bundle</a>
+                </div>
+            {% else %}
+                <div class="text-blue-800 text-sm mt-1">Requires an active paid subscription. Trial subscriptions are not eligible.</div>
+            {% endif %}
+        </div>
+    {% elif booking_flow_bundle_enabled %}
+        <div class="bg-green-50 border border-green-200 rounded-xl p-4">
+            <div class="font-semibold text-green-900">Booking Flow Bundle active</div>
+            <div class="text-green-800 text-sm mt-1">Hosted subdomain and embed flow are enabled for this business.</div>
         </div>
     {% endif %}
 
@@ -20,7 +34,7 @@
         <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mt-4">
             <h2 class="text-lg font-bold text-blue-700">CircleCal Hosted URL</h2>
             <p class="text-sm text-gray-600 mt-1">
-                This URL is included with your plan and works without any DNS setup.
+                This URL is included with your Booking Flow Bundle and works without any DNS setup.
                 You do not need a website to use CircleCal — you can share this link directly with clients.
                 If you do have a website, you can optionally use it as the iframe source for embedded booking.
             </p>

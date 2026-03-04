@@ -14,61 +14,74 @@ def _is_stripe_managed_subscription(sub: Subscription | None) -> bool:
     return bool(sub and getattr(sub, "stripe_subscription_id", None))
 
 
-def _can_use_pro_team_features_not_trial(org: Organization) -> bool:
-    """Feature gate for Embed Widget + Booking Subdomains.
+def _has_active_non_trial_subscription(org: Organization) -> bool:
+    """Return True when org has an active, non-trial subscription.
 
-    Business intent (per UI copy): requires an active Pro/Team plan (not trial).
-
-    Practical nuance:
-    - For Stripe-managed subscriptions, we enforce "not trial" and "active".
-    - For manually-administered subscriptions (no Stripe subscription id), treat
-      Pro/Team as eligible even if status wasn't perfectly updated in admin.
+    This is the purchase eligibility gate for the booking-flow bundle add-on.
+    It is intentionally plan-agnostic (Basic/Pro/Team all eligible), but trial
+    users are excluded.
     """
-
     sub = get_subscription(org)
-    slug = get_plan_slug(org)
-    if slug not in {PRO_SLUG, TEAM_SLUG}:
-        return False
     if sub is None:
         return False
 
+    if not getattr(sub, "plan", None):
+        return False
+
     status = (getattr(sub, "status", "") or "").lower()
+    if status in {"trialing", "canceled", "expired"}:
+        return False
+
     stripe_managed = _is_stripe_managed_subscription(sub)
 
     if stripe_managed:
-        # Stripe trials should not unlock these features.
-        if status == "trialing":
-            return False
         try:
             return bool(sub.is_active())
         except Exception:
             return True
 
-    # Manual/admin-assigned plan (no Stripe subscription id).
-    # Allow Pro/Team even if admin left status as trialing.
-    if status in {"canceled", "expired"}:
+    # Manual/admin-assigned subscription (no Stripe subscription id).
+    if getattr(sub, "active", None) is False:
         return False
     return True
 
 
+def can_purchase_booking_flow_bundle(org: Organization) -> bool:
+    """Whether org can purchase the booking-flow bundle add-on."""
+    return _has_active_non_trial_subscription(org)
+
+
+def has_booking_flow_bundle(org: Organization) -> bool:
+    """Whether booking-flow bundle is enabled for this org.
+
+    Bundle unlocks:
+    - Hosted subdomain flow
+    - Embed widget flow
+    - Subdomain settings access
+    """
+    if not _has_active_non_trial_subscription(org):
+        return False
+    sub = get_subscription(org)
+    return bool(sub and getattr(sub, "custom_domain_addon_enabled", False))
+
+
 def can_use_embed_widget(org: Organization) -> bool:
-    return _can_use_pro_team_features_not_trial(org)
+    return has_booking_flow_bundle(org)
 
 
 def can_use_custom_domain(org: Organization) -> bool:
     """Subdomain feature gate (legacy name kept for compatibility).
 
-    In subdomain-only mode, Pro/Team (not trial) is sufficient.
+    In bundle mode, access requires:
+    - active non-trial subscription (any plan), and
+    - booking-flow bundle add-on enabled.
     """
     return can_use_hosted_subdomain(org)
 
 
 def can_use_hosted_subdomain(org: Organization) -> bool:
-    """CircleCal-hosted subdomain feature gate.
-
-    This is the scalable default (wildcard DNS/cert) that ships with Pro/Team.
-    """
-    return _can_use_pro_team_features_not_trial(org)
+    """CircleCal-hosted subdomain feature gate."""
+    return has_booking_flow_bundle(org)
 
 
 def can_use_offline_payment_methods(org: Organization) -> bool:

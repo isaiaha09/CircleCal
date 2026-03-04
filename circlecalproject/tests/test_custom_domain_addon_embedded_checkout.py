@@ -23,9 +23,9 @@ class TestCustomDomainAddonEmbeddedCheckout(TestCase):
         Membership.objects.create(user=self.user, organization=self.org, role='owner', is_active=True)
 
         plan = Plan.objects.create(
-            name='Pro',
-            slug='pro',
-            description='Pro',
+            name='Basic',
+            slug='basic',
+            description='Basic',
             price=0,
             billing_period='monthly',
         )

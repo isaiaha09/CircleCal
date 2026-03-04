@@ -701,20 +701,20 @@
             {% if m.role == 'owner' or m.organization.owner_id == user.id %}
               <div class="mt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div class="text-xs text-gray-600">
-                  <div><span class="font-semibold text-blue-800">Embed:</span> optional iframe code for your website (if you have one)</div>
-                  <div><span class="font-semibold text-blue-800">Hosted subdomain:</span> included with subscription (for example: <span class="font-mono">yourbusiness.circlecal.app</span>)</div>
+                  <div><span class="font-semibold text-blue-800">Public booking URL Link:</span> Default link for public booking</div>
+                  <div><span class="font-semibold text-blue-800">Embed/Subdomain:</span> unlocked with Booking Flow Bundle + embedding functionality for your website (if you have one)</div>
                 </div>
                 <div class="flex flex-col items-stretch gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
                   {% if m.can_use_embed_widget %}
-                    <a href="{% url 'calendar_app:services_page' org_slug=m.organization.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Get embed code</a>
+                    <a href="{% url 'calendar_app:services_page' org_slug=m.organization.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Booking flow code</a>
                   {% else %}
-                    <button type="button" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Get embed code</button>
+                    <button type="button" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Booking flow code</button>
                   {% endif %}
 
                   {% if m.can_access_custom_domain_settings %}
-                    <a href="{% url 'calendar_app:org_custom_domain_settings' org_slug=m.organization.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Subdomain</a>
+                    <a href="{% url 'calendar_app:org_custom_domain_settings' org_slug=m.organization.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto">Bundle settings</a>
                   {% else %}
-                    <button type="button" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Subdomain</button>
+                    <button type="button" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto opacity-50 cursor-not-allowed" disabled aria-disabled="true">Bundle settings</button>
                   {% endif %}
                 </div>
               </div>
@@ -771,7 +771,7 @@
 
               {% if not m.can_use_embed_widget or not m.can_use_custom_domain %}
                 <div class="mt-2 text-xs text-gray-500">
-                  Embed + Subdomain require an active Pro/Team plan (not trial).
+                  Embed + Subdomain require an active paid subscription plus Booking Flow Bundle (not available during trial).
                   {% if not cc_app_mode %}
                     <a href="{% url 'calendar_app:pricing_page' m.organization.slug %}" class="text-blue-700 font-semibold underline">View pricing</a>
                   {% else %}

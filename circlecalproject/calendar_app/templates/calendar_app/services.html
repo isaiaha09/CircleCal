@@ -80,6 +80,23 @@
                 <p class="text-xs text-gray-500 mt-2">Tip: adjust <span class="font-mono">height</span> as needed for your page layout.</p>
             </div>
         </div>
+    {% else %}
+        <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mb-6">
+            <h2 class="text-lg font-bold text-blue-700">Embed widget</h2>
+            {% if embed_bundle_is_trial %}
+                <p class="text-sm text-gray-700 mt-2">The Booking Flow Bundle is unavailable during trial. Activate a paid subscription first, then purchase the bundle to unlock hosted subdomain + embed.</p>
+            {% elif embed_bundle_can_purchase %}
+                <p class="text-sm text-gray-700 mt-2">Your subscription is eligible. Purchase the Booking Flow Bundle to unlock hosted subdomain + embed flow.</p>
+                <div class="mt-4">
+                    <a href="{% url 'billing:embedded_custom_domain_addon_checkout_page' org.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">Purchase Booking Flow Bundle</a>
+                </div>
+            {% else %}
+                <p class="text-sm text-gray-700 mt-2">Embed + hosted subdomain require an active paid subscription and the Booking Flow Bundle.</p>
+                <div class="mt-4">
+                    <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">View pricing</a>
+                </div>
+            {% endif %}
+        </div>
     {% endif %}
 
     {% if services %}

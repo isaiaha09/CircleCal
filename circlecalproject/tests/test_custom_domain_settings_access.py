@@ -21,9 +21,9 @@ class TestCustomDomainSettingsAccess(TestCase):
         Membership.objects.create(user=self.user, organization=self.org, role='owner', is_active=True)
 
         plan = Plan.objects.create(
-            name='Pro',
-            slug='pro',
-            description='Pro',
+            name='Basic',
+            slug='basic',
+            description='Basic',
             price=0,
             billing_period='monthly',
         )
@@ -41,11 +41,12 @@ class TestCustomDomainSettingsAccess(TestCase):
         self.client.force_login(self.user)
 
     @override_settings(HOSTED_SUBDOMAIN_BASE='circlecal.app')
-    def test_page_loads_and_shows_hosted_url_without_custom_domain_addon(self):
+    def test_page_loads_and_shows_purchase_cta_without_custom_domain_addon(self):
         url = reverse('calendar_app:org_custom_domain_settings', kwargs={'org_slug': self.org.slug})
         r = self.client.get(url)
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, f'https://{self.org.slug}.circlecal.app')
+        self.assertNotContains(r, f'https://{self.org.slug}.circlecal.app')
+        self.assertContains(r, 'Purchase Booking Flow Bundle')
 
     def test_remove_domain_works_without_custom_domain_addon(self):
         self.org.custom_domain = 'booking.coachalvarez44.com'

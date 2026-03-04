@@ -261,7 +261,7 @@ class HostedSubdomainMiddleware:
         if not org:
             return self.get_response(request)
 
-        # Only Pro/Team should get the hosted-subdomain experience.
+        # Only orgs with Booking Flow Bundle should get hosted-subdomain experience.
         try:
             from billing.utils import can_use_hosted_subdomain
             eligible = bool(can_use_hosted_subdomain(org))
