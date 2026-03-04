@@ -1353,6 +1353,15 @@ def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int]
         start__lt=end_utc + buf_after_td,
     )
 
+    # Team-plan public calendars are service-independent unless a specific
+    # facility resource is being checked. This keeps submit-time overlap checks
+    # aligned with slot-generation behavior.
+    try:
+        if service is not None and resource_id is None and get_plan_slug(org) == TEAM_SLUG:
+            candidate_qs = candidate_qs.filter(service=service)
+    except Exception:
+        pass
+
     # When a resource is specified, only treat that resource as conflicting.
     # This enables discrete facility booking (cage/room) where different resources
     # can be booked concurrently.
@@ -3273,6 +3282,29 @@ def public_service_page(request, org_slug, service_slug):
             return ''
         return '/'.join(parts)
 
+    def _attach_service_payment_controls(ctx):
+        try:
+            svc_payment = {}
+            for s in services:
+                try:
+                    allow_stripe = bool(getattr(s, 'allow_stripe_payments', True))
+                except Exception:
+                    allow_stripe = True
+                allow_stripe = bool(allow_stripe and org_stripe_connected)
+                eff_off = _effective_offline_methods_for_service(s)
+                svc_payment[str(getattr(s, 'slug', ''))] = {
+                    'allow_stripe': bool(allow_stripe),
+                    'offline_methods': eff_off,
+                    'offline_label': _offline_methods_label(eff_off),
+                    'offline_allowed': bool(offline_methods_allowed and eff_off),
+                    'max_participants': int(getattr(s, 'max_participants', 1) or 1),
+                    'group_pricing': (getattr(s, 'group_pricing', None) or {}),
+                }
+            ctx['service_payment_controls'] = svc_payment
+        except Exception:
+            ctx['service_payment_controls'] = {}
+        return ctx
+
     embed_breakout = _embed_breakout_required(request, org) if is_embed else False
 
     if request.method == "POST":
@@ -3298,6 +3330,7 @@ def public_service_page(request, org_slug, service_slug):
                         offline_methods=offline_methods,
                         offline_instructions=offline_instructions,
                     )
+                    ctx = _attach_service_payment_controls(ctx)
                     ctx['error'] = err or 'Security check failed. Please try again.'
                     resp = render(request, "public/public_service_page.html", ctx, status=400)
                     if is_embed:
@@ -3365,6 +3398,7 @@ def public_service_page(request, org_slug, service_slug):
                 offline_methods=offline_methods,
                 offline_instructions=offline_instructions,
             )
+            ctx = _attach_service_payment_controls(ctx)
             if remaining_for_slot <= 0:
                 ctx["error"] = "Sorry, that time is fully booked. Please choose another slot."
             else:
@@ -3390,6 +3424,7 @@ def public_service_page(request, org_slug, service_slug):
                 offline_methods=offline_methods,
                 offline_instructions=offline_instructions,
             )
+            ctx = _attach_service_payment_controls(ctx)
             ctx["error"] = "Sorry, that time was just booked. Please choose another slot."
             resp = render(request, "public/public_service_page.html", ctx)
             if is_embed:
@@ -3717,28 +3752,7 @@ def public_service_page(request, org_slug, service_slug):
         offline_methods=offline_methods,
         offline_instructions=offline_instructions,
     )
-
-    # Per-service payment method controls (for client-side toggling when the service dropdown changes)
-    try:
-        svc_payment = {}
-        for s in services:
-            try:
-                allow_stripe = bool(getattr(s, 'allow_stripe_payments', True))
-            except Exception:
-                allow_stripe = True
-            allow_stripe = bool(allow_stripe and org_stripe_connected)
-            eff_off = _effective_offline_methods_for_service(s)
-            svc_payment[str(getattr(s, 'slug', ''))] = {
-                'allow_stripe': bool(allow_stripe),
-                'offline_methods': eff_off,
-                'offline_label': _offline_methods_label(eff_off),
-                'offline_allowed': bool(offline_methods_allowed and eff_off),
-                'max_participants': int(getattr(s, 'max_participants', 1) or 1),
-                'group_pricing': (getattr(s, 'group_pricing', None) or {}),
-            }
-        ctx['service_payment_controls'] = svc_payment
-    except Exception:
-        ctx['service_payment_controls'] = {}
+    ctx = _attach_service_payment_controls(ctx)
 
     resp = render(request, "public/public_service_page.html", ctx)
     if is_embed:
