@@ -59,10 +59,14 @@ def has_booking_flow_bundle(org: Organization) -> bool:
     - Embed widget flow
     - Subdomain settings access
     """
-    if not _has_active_non_trial_subscription(org):
-        return False
     sub = get_subscription(org)
-    return bool(sub and getattr(sub, "custom_domain_addon_enabled", False))
+    # Admin manual override: toggling this flag on should immediately unlock
+    # the bundle even without an active paid Stripe-managed subscription.
+    if sub and bool(getattr(sub, "custom_domain_addon_enabled", False)):
+        return True
+
+    # Otherwise, no bundle access.
+    return False
 
 
 def can_use_embed_widget(org: Organization) -> bool:

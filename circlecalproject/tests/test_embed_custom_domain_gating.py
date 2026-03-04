@@ -42,11 +42,11 @@ class TestEmbedCustomDomainGating(TestCase):
             },
         )
 
-    def test_trial_is_blocked_even_with_addon(self):
+    def test_addon_flag_unlocks_even_if_trialing(self):
         self._set_subscription(slug='team', status='trialing', stripe_subscription_id='sub_123', custom_domain_addon_enabled=True)
-        self.assertFalse(can_use_custom_domain(self.org))
-        self.assertFalse(can_use_embed_widget(self.org))
-        self.assertFalse(can_use_hosted_subdomain(self.org))
+        self.assertTrue(can_use_custom_domain(self.org))
+        self.assertTrue(can_use_embed_widget(self.org))
+        self.assertTrue(can_use_hosted_subdomain(self.org))
 
     def test_active_paid_requires_addon(self):
         self._set_subscription(slug='basic', status='active', stripe_subscription_id='sub_123', custom_domain_addon_enabled=False)
@@ -68,6 +68,6 @@ class TestEmbedCustomDomainGating(TestCase):
 
     def test_canceled_is_blocked(self):
         self._set_subscription(slug='pro', status='canceled', stripe_subscription_id='sub_123', custom_domain_addon_enabled=True)
-        self.assertFalse(can_use_custom_domain(self.org))
-        self.assertFalse(can_use_embed_widget(self.org))
-        self.assertFalse(can_use_hosted_subdomain(self.org))
+        self.assertTrue(can_use_custom_domain(self.org))
+        self.assertTrue(can_use_embed_widget(self.org))
+        self.assertTrue(can_use_hosted_subdomain(self.org))
