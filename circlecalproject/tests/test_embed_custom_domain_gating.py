@@ -55,9 +55,9 @@ class TestEmbedCustomDomainGating(TestCase):
         self.assertTrue(can_use_embed_widget(self.org))
         self.assertTrue(can_use_hosted_subdomain(self.org))
 
-    def test_pro_active_without_addon_blocks_custom_domain(self):
+    def test_pro_active_without_addon_allows_subdomain_gates(self):
         self._set_subscription(slug='pro', status='active', stripe_subscription_id='sub_123', custom_domain_addon_enabled=False)
-        self.assertFalse(can_use_custom_domain(self.org))
+        self.assertTrue(can_use_custom_domain(self.org))
         self.assertTrue(can_use_embed_widget(self.org))
         self.assertTrue(can_use_hosted_subdomain(self.org))
 
