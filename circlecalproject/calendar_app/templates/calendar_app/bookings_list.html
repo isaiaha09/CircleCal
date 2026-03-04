@@ -417,7 +417,7 @@
       <button type="button" id="ccScopeBtn" class="filter-btn cc-scope-btn" aria-haspopup="listbox" aria-expanded="false"></button>
       <div id="ccScopeMenu" class="cc-scope-menu" role="listbox" aria-label="Service scope" hidden></div>
     </div>
-    {% if user_org_role != 'staff' %}
+    {% if can_manage_bookings_controls %}
       <button id="deleteSelectedBtn" class="btn-sm btn-delete" onclick="deleteSelected()" style="display:none; margin-left:8px;">Delete selected</button>
     {% endif %}
   </div>
@@ -427,7 +427,7 @@
     <table class="bookings-table">
     <thead>
       <tr>
-        <th style="padding:8px; text-align:left; font-weight:600;"><input type="checkbox" id="selectAllBookings"/></th>
+        <th style="padding:8px; text-align:left; font-weight:600;">{% if can_manage_bookings_controls %}<input type="checkbox" id="selectAllBookings"/>{% endif %}</th>
         <th>Date & Time</th>
         <th>Booking ID</th>
         <th>Client</th>
@@ -451,7 +451,7 @@
           data-payment-method="{{ booking.payment_method|default:'' }}"
           data-offline-method="{{ booking.offline_payment_method|default:'' }}"
           data-search="{{ booking.client_name|lower }} {{ booking.client_email|lower }} {{ booking.public_ref|default:''|lower }} {{ booking.id }}">
-          <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="{{ booking.id }}" style="margin-right:8px;"/></td>
+          <td style="padding:8px;">{% if can_manage_bookings_controls %}<input type="checkbox" class="bookingRowCb" value="{{ booking.id }}" style="margin-right:8px;"/>{% endif %}</td>
           <td>
             {% timezone organization.timezone %}
               <div style="font-weight: 600;">{{ booking.start|date:"M d, Y" }}</div>
@@ -525,16 +525,18 @@
             {% endfor %}
         </select>
       </div>
+      {% if can_manage_bookings_controls %}
       <div class="cc-audit-right" style="display:flex;gap:8px; align-items:center;">
         <button class="btn-sm btn-view" id="exportAuditBtn">Export (PDF)</button>
         <button class="btn-sm btn-delete" id="deleteAuditBtn">Delete selected</button>
       </div>
+      {% endif %}
     </div>
     <div class="table-wrapper">
       <table class="bookings-table" style="width:100%;">
       <thead>
             <tr style="background:#f8f9fa;">
-              <th style="padding:8px; text-align:left; font-weight:600;"><input type="checkbox" id="auditSelectAll" /></th>
+              <th style="padding:8px; text-align:left; font-weight:600;">{% if can_manage_bookings_controls %}<input type="checkbox" id="auditSelectAll" />{% endif %}</th>
               <th style="padding:8px; text-align:left; font-weight:600;">Event</th>
               <th style="padding:8px; text-align:left; font-weight:600;">Date &amp; Time</th>
               <th style="padding:8px; text-align:left; font-weight:600;">Booking ID</th>
@@ -549,7 +551,7 @@
           {% for a in audit_entries %}
               {% comment %}Compute a compact label for dataset (mirror displayed label){% endcomment %}
               <tr data-audit-id="{{ a.id }}" data-event-type="{{ a.event_type|default:''|escapejs }}" data-label="{% if a.event_type == 'deleted' and a.start and a.start < now %}successful{% else %}{{ a.event_type|default:''|escapejs }}{% endif %}" data-service-name="{{ a.service.name|default:''|escapejs }}" data-client="{{ a.client_name|default:''|lower|escapejs }}" data-public-ref="{% with ref=a.booking_snapshot.public_ref %}{{ ref|default:a.booking_id }}{% endwith %}">
-                <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="{{ a.id }}" style="margin-right:8px;" /></td>
+                <td style="padding:8px;">{% if can_manage_bookings_controls %}<input type="checkbox" class="auditRowCb" value="{{ a.id }}" style="margin-right:8px;" />{% endif %}</td>
                 <td style="padding:8px;">
                   {% if a.event_type == 'deleted' and a.start and a.start < now %}
                     Successful
@@ -706,6 +708,7 @@
 const orgSlug = "{{ organization.slug }}";
 const csrftoken = '{{ csrf_token }}';
 const ORG_NAME = "{{ organization.name|escapejs }}";
+const CAN_MANAGE_BOOKINGS = {{ can_manage_bookings_controls|yesno:"true,false" }};
 // Polling: track last-seen server time to fetch new bookings
 let lastSeen = "{{ now|date:'c' }}";
 const POLL_INTERVAL_MS = 15000; // 15 seconds
@@ -1167,7 +1170,7 @@ function insertBookingRow(b, toTop=true) {
     newTr.setAttribute('data-offline-method', (b.offline_payment_method || b.offlineMethod || ''));
   }catch(e){ newTr.setAttribute('data-payment-method',''); newTr.setAttribute('data-offline-method',''); }
   newTr.innerHTML = `
-    <td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${bid}" style="margin-right:8px;"/></td>
+    ${CAN_MANAGE_BOOKINGS ? `<td style="padding:8px;"><input type="checkbox" class="bookingRowCb" value="${bid}" style="margin-right:8px;"/></td>` : `<td style="padding:8px;"></td>`}
     <td>
       <div style="font-weight:600;">${b.start_date || ''}</div>
       <div style="font-size:13px; color:#6c757d;">${stripLeadingZeroFromTime(b.time_range || '')}</div>
@@ -1580,7 +1583,7 @@ function insertAuditRow(item){
     if (!label) label = item.event_type ? (item.event_type.charAt(0).toUpperCase() + item.event_type.slice(1)) : '';
     let bookingDisplay = (item.snapshot && item.snapshot.public_ref) ? item.snapshot.public_ref : (item.public_ref || item.booking_id || '-');
     tr.innerHTML = `
-      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}" style="margin-right:8px;" /></td>
+      ${CAN_MANAGE_BOOKINGS ? `<td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${item.id}" style="margin-right:8px;" /></td>` : `<td style="padding:8px;"></td>`}
       <td style="padding:8px;">${label}</td>
       <td style="padding:8px;">${startHtml}</td>
       <td style="padding:8px;">${bookingDisplay}</td>
@@ -1715,7 +1718,7 @@ async function deleteBooking(id, date, clientName, skipConfirm = false) {
     const normalizedTime = startTimeText ? stripLeadingZeroFromTime(startTimeText) : '';
     const startHtmlOpt = (normalizedDate || normalizedTime) ? (`<div style="font-weight:600;">${normalizedDate}</div><div style="font-size:13px;color:#6c757d;">${normalizedTime || '&nbsp;'}</div>`) : '-';
     tempTr.innerHTML = `
-      <td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${tempId}" style="margin-right:8px;" /></td>
+      ${CAN_MANAGE_BOOKINGS ? `<td style="padding:8px;"><input type="checkbox" class="auditRowCb" value="${tempId}" style="margin-right:8px;" /></td>` : `<td style="padding:8px;"></td>`}
       <td style="padding:8px;">${optimisticLabel}</td>
       <td style="padding:8px;">${startHtmlOpt}</td>
       <td style="padding:8px;">${(row && row.dataset && row.dataset.publicRef) ? row.dataset.publicRef : '-'}</td>

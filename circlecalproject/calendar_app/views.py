@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from datetime import timedelta
 from bookings.emails import send_booking_confirmation
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.core.mail import send_mail, EmailMultiAlternatives
 from django.template.loader import render_to_string
 from calendar_app.forms import ContactForm
@@ -8604,6 +8604,39 @@ def delete_service(request, org_slug, service_id):
     return redirect("calendar_app:services_page", org_slug=org.slug)
 
 
+def _current_membership_for_org(org, user):
+    try:
+        return Membership.objects.filter(organization=org, user=user, is_active=True).first()
+    except Exception:
+        return None
+
+
+def _staff_assigned_service_ids(org, user, membership=None):
+    """Service ids formally assigned to a staff member via ServiceAssignment."""
+    ids = set()
+
+    try:
+        from bookings.models import ServiceAssignment
+        mids = []
+        if membership and getattr(membership, 'id', None):
+            mids = [int(membership.id)]
+        elif user and getattr(user, 'id', None):
+            mids = list(
+                Membership.objects.filter(organization=org, user=user, is_active=True)
+                .values_list('id', flat=True)
+            )
+        if mids:
+            assigned = ServiceAssignment.objects.filter(
+                service__organization=org,
+                membership_id__in=[int(x) for x in mids],
+            ).values_list('service_id', flat=True)
+            ids.update(int(x) for x in assigned if x is not None)
+    except Exception:
+        pass
+
+    return sorted(ids)
+
+
 @login_required
 @require_roles(['owner', 'admin', 'manager', 'staff'])
 def bookings_list(request, org_slug):
@@ -8611,6 +8644,12 @@ def bookings_list(request, org_slug):
     Display all bookings for this organization.
     """
     org = request.organization
+    membership = _current_membership_for_org(org, request.user)
+    user_org_role = (
+        getattr(membership, 'role', None)
+        or ('owner' if getattr(org, 'owner_id', None) == getattr(request.user, 'id', None) else '')
+    )
+    can_manage_bookings_controls = user_org_role in {'owner', 'admin', 'manager'}
 
     # Base querysets
     bookings_qs = Booking.objects.filter(
@@ -8622,8 +8661,41 @@ def bookings_list(request, org_slug):
     audit_qs = AuditBooking.objects.filter(organization=org).select_related('service').order_by('-created_at')
 
     services = Service.objects.filter(organization=org)
+
+    staff_allowed_service_ids = []
+    if user_org_role == 'staff':
+        staff_allowed_service_ids = _staff_assigned_service_ids(org, request.user, membership)
+        bookings_qs = bookings_qs.filter(
+            Q(assigned_user=request.user) | Q(service_id__in=staff_allowed_service_ids)
+        )
+
+        # Service filter options: assigned services plus services from directly-assigned bookings.
+        direct_service_ids = []
+        try:
+            direct_service_ids = list(
+                Booking.objects.filter(
+                    organization=org,
+                    assigned_user=request.user,
+                    is_blocking=False,
+                    service__isnull=False,
+                ).values_list('service_id', flat=True).distinct()
+            )
+        except Exception:
+            direct_service_ids = []
+        visible_service_ids = sorted(set([int(x) for x in (staff_allowed_service_ids + direct_service_ids) if x is not None]))
+        services = services.filter(id__in=visible_service_ids)
+
+        if staff_allowed_service_ids:
+            audit_qs = audit_qs.filter(service_id__in=staff_allowed_service_ids)
+        else:
+            audit_qs = audit_qs.none()
+
+    members_base_qs = Membership.objects.filter(organization=org, is_active=True)
+    if user_org_role == 'staff' and membership and getattr(membership, 'id', None):
+        members_base_qs = members_base_qs.filter(id=membership.id)
+
     members_list = list(
-        Membership.objects.filter(organization=org, is_active=True)
+        members_base_qs
         .values('id', 'user__first_name', 'user__last_name', 'user__email')
         .order_by('user__first_name', 'user__last_name', 'user__email')
     )
@@ -8652,6 +8724,18 @@ def bookings_list(request, org_slug):
     # - All services: no scope param (or empty)
     # - Service scope: scope=svc:<service_id>
     # - Member scope: scope=<membership_id> (filters to services assigned to that member)
+    if selected_scope:
+        if user_org_role == 'staff':
+            if selected_scope.startswith('svc:'):
+                raw_id = selected_scope[4:].strip()
+                if (not raw_id.isdigit()) or (int(raw_id) not in set(staff_allowed_service_ids)):
+                    selected_scope = ''
+            elif selected_scope.isdigit():
+                if not (membership and str(getattr(membership, 'id', '')) == selected_scope):
+                    selected_scope = ''
+            else:
+                selected_scope = ''
+
     if selected_scope:
         if selected_scope.startswith('svc:'):
             raw_id = selected_scope[4:].strip()
@@ -8759,6 +8843,8 @@ def bookings_list(request, org_slug):
         "organization": org,
         "bookings": bookings_qs,
         "services": services,
+        "user_org_role": user_org_role,
+        "can_manage_bookings_controls": can_manage_bookings_controls,
         "members_list": members_list,
         "scope_member_options": scope_member_options,
         "scope_service_member_options": scope_service_member_options,
@@ -8780,6 +8866,11 @@ def bookings_recent(request, org_slug):
       since: ISO8601 timestamp (e.g. 2025-12-13T15:00:00Z)
     """
     org = request.organization
+    membership = _current_membership_for_org(org, request.user)
+    user_org_role = (
+        getattr(membership, 'role', None)
+        or ('owner' if getattr(org, 'owner_id', None) == getattr(request.user, 'id', None) else '')
+    )
     since_raw = request.GET.get('since')
     try:
         if since_raw:
@@ -8795,6 +8886,9 @@ def bookings_recent(request, org_slug):
         return HttpResponseBadRequest('Invalid since timestamp')
 
     qs = Booking.objects.filter(organization=org, is_blocking=False, service__isnull=False, created_at__gt=since_dt).select_related('service').order_by('created_at')
+    if user_org_role == 'staff':
+        staff_allowed_service_ids = _staff_assigned_service_ids(org, request.user, membership)
+        qs = qs.filter(Q(assigned_user=request.user) | Q(service_id__in=staff_allowed_service_ids))
 
     items = []
     try:
@@ -8865,6 +8959,18 @@ def booking_payment_details(request, org_slug, booking_id):
     """
     org = request.organization
     booking = get_object_or_404(Booking, id=booking_id, organization=org)
+    membership = _current_membership_for_org(org, request.user)
+    user_org_role = (
+        getattr(membership, 'role', None)
+        or ('owner' if getattr(org, 'owner_id', None) == getattr(request.user, 'id', None) else '')
+    )
+    if user_org_role == 'staff':
+        staff_allowed_service_ids = set(_staff_assigned_service_ids(org, request.user, membership))
+        service_id = getattr(booking, 'service_id', None)
+        directly_assigned = (getattr(booking, 'assigned_user_id', None) == getattr(request.user, 'id', None))
+        service_allowed = bool(service_id and int(service_id) in staff_allowed_service_ids)
+        if not (directly_assigned or service_allowed):
+            return HttpResponseForbidden('Not allowed to view payment details for this booking.')
 
     payment_method = (getattr(booking, 'payment_method', '') or '').lower()
     offline_payment_method = getattr(booking, 'offline_payment_method', '') or ''
@@ -9277,9 +9383,20 @@ def bookings_audit_list(request, org_slug):
       - per_page (int)
     """
     org = request.organization
+    membership = _current_membership_for_org(org, request.user)
+    user_org_role = (
+        getattr(membership, 'role', None)
+        or ('owner' if getattr(org, 'owner_id', None) == getattr(request.user, 'id', None) else '')
+    )
     page = int(request.GET.get('page', 1))
     per_page = int(request.GET.get('per_page', 25))
     qs = AuditBooking.objects.filter(organization=org).order_by('-created_at')
+    if user_org_role == 'staff':
+        staff_allowed_service_ids = _staff_assigned_service_ids(org, request.user, membership)
+        if staff_allowed_service_ids:
+            qs = qs.filter(service_id__in=staff_allowed_service_ids)
+        else:
+            qs = qs.none()
     # support incremental polling: ?since=ISO8601
     since_raw = request.GET.get('since')
     if since_raw:
@@ -9350,7 +9467,18 @@ def bookings_audit_list(request, org_slug):
 def bookings_audit_for_booking(request, org_slug, booking_id):
     """Return audit entries for a specific original booking id."""
     org = request.organization
+    membership = _current_membership_for_org(org, request.user)
+    user_org_role = (
+        getattr(membership, 'role', None)
+        or ('owner' if getattr(org, 'owner_id', None) == getattr(request.user, 'id', None) else '')
+    )
     qs = AuditBooking.objects.filter(organization=org, booking_id=booking_id).order_by('-created_at')
+    if user_org_role == 'staff':
+        staff_allowed_service_ids = _staff_assigned_service_ids(org, request.user, membership)
+        if staff_allowed_service_ids:
+            qs = qs.filter(service_id__in=staff_allowed_service_ids)
+        else:
+            qs = qs.none()
     items = []
     try:
         org_tz_name = getattr(org, 'timezone', None) or 'UTC'
@@ -9568,7 +9696,7 @@ def bookings_audit_undo(request, org_slug):
 
 
 @login_required
-@require_roles(['owner', 'admin', 'manager', 'staff'])
+@require_roles(['owner', 'admin', 'manager'])
 def bookings_audit_export(request, org_slug):
     """Export selected audit entries.
 
