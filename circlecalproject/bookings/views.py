@@ -117,10 +117,20 @@ def _request_host_no_port(request) -> str:
 def _embed_breakout_required(request, org: Organization) -> bool:
     """Return True when the embed should break out to a top-level page.
 
-    Subdomain-only mode: keep booking flows inside the iframe for both hosted
-    and customer subdomain traffic.
+    Policy:
+    - Trusted hosted/custom subdomain traffic for this org stays fully in-iframe.
+    - Traditional embeds (key-based iframe on arbitrary host) should break out.
     """
-    return False
+    try:
+        custom_org = getattr(request, 'custom_domain_organization', None)
+        hosted_org = getattr(request, 'hosted_subdomain_organization', None)
+        is_custom_match = bool(custom_org) and (custom_org.id == org.id)
+        is_hosted_match = bool(hosted_org) and (hosted_org.id == org.id)
+        is_trusted_subdomain_request = bool(is_custom_match or is_hosted_match)
+        return not is_trusted_subdomain_request
+    except Exception:
+        # Fail safe: break out for unknown contexts.
+        return True
 
 
 def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
