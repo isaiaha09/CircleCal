@@ -238,6 +238,61 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Centered service selector styles */
+  .cc-public-select {
+    flex: 1;
+    min-width: 120px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    background-color: #fff;
+    color: #111;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .cc-public-select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+    border-color: #2563eb;
+  }
+  .cc-chip-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 38px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    background: #fff;
+    min-width: 230px;
+    flex: 1;
+  }
+  .cc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #eef6ff;
+    color: #0b5cff;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 0.82rem;
+    line-height: 1.2;
+  }
+  .cc-chip-x {
+    border: 0;
+    background: transparent;
+    color: #0840c6;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0 2px;
+    line-height: 1;
+  }
+  .cc-chip-empty {
+    color: #6b7280;
+    font-size: 0.82rem;
+  }
   #mainServiceSelect {
     flex: 1;
     min-width: 120px;
@@ -389,6 +444,18 @@
   </div>
 
   {% if services or service %}
+    {% if team_member_filter_enabled %}
+      <div class="service-dropdown-row" style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:10px; position:relative; z-index:21; flex-wrap:wrap;">
+        <label id="mainTeamMemberLabel" for="mainTeamPartnerSelect" class="font-medium text-gray-700">Choose member:</label>
+        <div id="mainTeamMembersDisplay" class="cc-chip-wrap" aria-live="polite"></div>
+        <div id="mainTeamPartnerWrap" style="display:none; align-items:center; gap:8px; flex:1; min-width:220px;">
+          <label id="mainTeamPartnerLabel" for="mainTeamPartnerSelect" class="font-medium text-gray-700">With:</label>
+          <select id="mainTeamPartnerSelect" class="cc-public-select">
+            <option value="">Select a team member</option>
+          </select>
+        </div>
+      </div>
+    {% endif %}
     <div class="service-dropdown-row" style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:18px; position:relative; z-index:20;">
       <label for="mainServiceSelect" class="font-medium text-gray-700">Service:</label>
       <select id="mainServiceSelect" class="px-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
@@ -428,6 +495,7 @@
     <div id="mainSvcTitle" class="modal-title" style="margin-bottom:6px;"></div>
     {% if show_with_line %}<div><strong>With:</strong> <span id="mainSvcTeam"></span></div>{% endif %}
     <div><strong>Description:</strong> <span id="mainSvcDesc"></span></div>
+    <div><strong>Location:</strong> <span id="mainSvcLocation"></span></div>
     <div><strong>Duration:</strong> <span id="mainSvcDuration"></span> minutes</div>
     <div><strong>Price:</strong> $<span id="mainSvcPrice"></span></div>
     <div><strong>Refunds:</strong>
@@ -445,6 +513,7 @@
     SERVICE_MAP["{{ s.slug }}"] = {
       name: "{{ s.name|escapejs }}",
       description: "{{ s.description|default:""|escapejs }}",
+      location_display: "{{ s.location_display|default:""|escapejs }}",
       duration: {{ s.duration|default:0 }},
       price: {{ s.price|default:0 }},
       max_participants: {{ s.max_participants|default:1 }},
@@ -467,6 +536,7 @@
     const mainServiceSelect = document.getElementById("mainServiceSelect");
     const mainServiceDetails = document.getElementById("mainServiceDetails");
     const mainSvcDesc = document.getElementById("mainSvcDesc");
+    const mainSvcLocation = document.getElementById("mainSvcLocation");
     const mainSvcDuration = document.getElementById("mainSvcDuration");
     const mainSvcPrice = document.getElementById("mainSvcPrice");
     const mainSvcRefundLine = document.getElementById("mainSvcRefundLine");
@@ -484,6 +554,7 @@
       const mainSvcTitle = document.getElementById('mainSvcTitle');
       if (mainSvcTitle) mainSvcTitle.textContent = d.name;
       mainSvcDesc.textContent = d.description || "—";
+      if (mainSvcLocation) mainSvcLocation.textContent = d.location_display || "—";
       mainSvcDuration.textContent = d.duration || 0;
       mainSvcPrice.textContent = (typeof d.price === 'number') ? d.price.toFixed(2) : d.price;
       // Populate assigned team members (read from the select option dataset when present)
@@ -650,6 +721,7 @@
         <div><strong>Name:</strong> <span id="svcName">{{ service.name }}</span></div>
         {% if show_with_line %}<div><strong>With:</strong> <span id="svcTeam"></span></div>{% endif %}
         <div><strong>Description:</strong> <span id="svcDesc">{{ service.description|default:"—" }}</span></div>
+        <div><strong>Location:</strong> <span id="svcLocation">{{ service.location_display|default:"—" }}</span></div>
         <div><strong>Duration:</strong> <span id="svcDuration">{{ service.duration }}</span> minutes</div>
         <div><strong>Price:</strong> $<span id="svcPrice">{{ service.price }}</span></div>
         <!-- Client-facing modal intentionally omits buffer/increment/fixed/allow settings -->
@@ -757,6 +829,11 @@
 {% endif %}
 
 {{ service_payment_controls|json_script:"service-payment-controls" }}
+{{ team_member_options|json_script:"team-member-options" }}
+{{ services_by_member|json_script:"services-by-member" }}
+{{ collaborator_members_by_member|json_script:"collaborator-members-by-member" }}
+{{ services_by_member_pair|json_script:"services-by-member-pair" }}
+{{ unassigned_service_slugs|json_script:"unassigned-service-slugs" }}
 
 <script>
 // Global variable to track booked slots during this session
@@ -1010,12 +1087,307 @@ document.addEventListener("DOMContentLoaded", async function () {
     (document.getElementById('service-payment-controls') || {}).textContent || '{}'
   );
 
+  const TEAM_MEMBER_FILTER_ENABLED = {{ team_member_filter_enabled|yesno:"true,false" }};
+  const TEAM_MEMBER_OPTIONS = JSON.parse((document.getElementById('team-member-options') || {}).textContent || '[]');
+  const SERVICES_BY_MEMBER = JSON.parse((document.getElementById('services-by-member') || {}).textContent || '{}');
+  const UNASSIGNED_SERVICE_SLUGS = JSON.parse((document.getElementById('unassigned-service-slugs') || {}).textContent || '[]');
+
+  const mainTeamMemberLabel = document.getElementById('mainTeamMemberLabel');
+  const mainTeamMembersDisplay = document.getElementById('mainTeamMembersDisplay');
+  const mainTeamPartnerWrap = document.getElementById('mainTeamPartnerWrap');
+  const mainTeamPartnerLabel = document.getElementById('mainTeamPartnerLabel');
+  const mainTeamPartnerSelect = document.getElementById('mainTeamPartnerSelect');
+
+  const TEAM_MEMBER_LABEL_BY_ID = (() => {
+    try {
+      const out = {};
+      for (const tm of (TEAM_MEMBER_OPTIONS || [])) {
+        const id = String((tm && tm.id) || '');
+        if (!id) continue;
+        out[id] = String((tm && tm.label) || id);
+      }
+      return out;
+    } catch (e) {
+      return {};
+    }
+  })();
+
+  const serviceOptionsMaster = (function () {
+    try {
+      if (!mainServiceSelectForCalendar) return [];
+      return Array.from(mainServiceSelectForCalendar.options || []).map((o) => ({
+        value: String(o.value || ''),
+        label: String(o.textContent || '').trim(),
+        assignedNames: String((o.dataset && o.dataset.assignedNames) || ''),
+      })).filter((x) => !!x.value);
+    } catch (e) {
+      return [];
+    }
+  })();
+
+  let selectedTeamMembers = [];
+  let selectedOtherServicesOnly = false;
+
+  function _ccAllTeamMemberIds() {
+    return Object.keys(TEAM_MEMBER_LABEL_BY_ID || {});
+  }
+
+  function _ccServiceSetForMember(mid) {
+    try {
+      const arr = Array.isArray(SERVICES_BY_MEMBER[String(mid)]) ? SERVICES_BY_MEMBER[String(mid)] : [];
+      return new Set(arr.map((x) => String(x)));
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function _ccIntersectionSet(a, b) {
+    const out = new Set();
+    for (const v of a) {
+      if (b.has(v)) out.add(v);
+    }
+    return out;
+  }
+
+  function _ccCurrentAllowedSetFromSelectedMembers() {
+    if (!selectedTeamMembers.length) {
+      return new Set(serviceOptionsMaster.map((x) => String(x.value)));
+    }
+    let running = null;
+    for (const mid of selectedTeamMembers) {
+      const setForMember = _ccServiceSetForMember(mid);
+      running = running === null ? setForMember : _ccIntersectionSet(running, setForMember);
+    }
+    return running || new Set();
+  }
+
+  function _ccCurrentAllowedSlugs() {
+    if (!TEAM_MEMBER_FILTER_ENABLED) {
+      return serviceOptionsMaster.map((x) => x.value);
+    }
+
+    if (selectedOtherServicesOnly) {
+      return Array.isArray(UNASSIGNED_SERVICE_SLUGS) ? UNASSIGNED_SERVICE_SLUGS.slice() : [];
+    }
+    if (!selectedTeamMembers.length) {
+      return serviceOptionsMaster.map((x) => x.value);
+    }
+    return Array.from(_ccCurrentAllowedSetFromSelectedMembers());
+  }
+
+  function _ccCandidateMembersForAlsoWith() {
+    if (!TEAM_MEMBER_FILTER_ENABLED || selectedOtherServicesOnly) return [];
+
+    const selectedSet = new Set(selectedTeamMembers.map((x) => String(x)));
+    const baseAllowed = _ccCurrentAllowedSetFromSelectedMembers();
+    const out = [];
+    for (const mid of _ccAllTeamMemberIds()) {
+      if (selectedSet.has(String(mid))) continue;
+      if (!selectedTeamMembers.length) {
+        out.push(String(mid));
+        continue;
+      }
+      const candidateAllowed = _ccIntersectionSet(baseAllowed, _ccServiceSetForMember(mid));
+      if (candidateAllowed.size > 0) out.push(String(mid));
+    }
+    out.sort((a, b) => {
+      const la = String(TEAM_MEMBER_LABEL_BY_ID[a] || a).toLowerCase();
+      const lb = String(TEAM_MEMBER_LABEL_BY_ID[b] || b).toLowerCase();
+      return la.localeCompare(lb);
+    });
+    return out;
+  }
+
+  function _ccRenderTeamMemberChips() {
+    if (!mainTeamMembersDisplay) return;
+    mainTeamMembersDisplay.innerHTML = '';
+
+    if (selectedOtherServicesOnly) {
+      const span = document.createElement('span');
+      span.className = 'cc-chip';
+      span.textContent = 'Other services (unassigned)';
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'cc-chip-x';
+      x.textContent = 'x';
+      x.title = 'Clear';
+      x.setAttribute('aria-label', 'Remove selection');
+      x.addEventListener('click', () => {
+        selectedOtherServicesOnly = false;
+        _ccRefreshTeamFilteringUi();
+      });
+      span.appendChild(x);
+      mainTeamMembersDisplay.appendChild(span);
+      return;
+    }
+
+    if (!selectedTeamMembers.length) {
+      const empty = document.createElement('span');
+      empty.className = 'cc-chip-empty';
+      empty.textContent = 'No team member selected';
+      mainTeamMembersDisplay.appendChild(empty);
+      return;
+    }
+
+    for (const mid of selectedTeamMembers) {
+      const chip = document.createElement('span');
+      chip.className = 'cc-chip';
+      chip.textContent = String(TEAM_MEMBER_LABEL_BY_ID[String(mid)] || mid);
+
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'cc-chip-x';
+      x.textContent = 'x';
+      x.title = 'Remove';
+      x.setAttribute('aria-label', `Remove ${TEAM_MEMBER_LABEL_BY_ID[String(mid)] || mid}`);
+      x.addEventListener('click', () => {
+        selectedTeamMembers = selectedTeamMembers.filter((v) => String(v) !== String(mid));
+        _ccRefreshTeamFilteringUi();
+      });
+
+      chip.appendChild(x);
+      mainTeamMembersDisplay.appendChild(chip);
+    }
+  }
+
+  function _ccRefreshAlsoWithSelect() {
+    if (!mainTeamPartnerWrap || !mainTeamPartnerSelect || !mainTeamPartnerLabel) return;
+    const candidates = _ccCandidateMembersForAlsoWith();
+
+    if (!selectedOtherServicesOnly && selectedTeamMembers.length > 0 && !candidates.length) {
+      mainTeamPartnerWrap.style.display = 'none';
+      return;
+    }
+
+    mainTeamPartnerWrap.style.display = 'inline-flex';
+    if (selectedOtherServicesOnly || !selectedTeamMembers.length) {
+      mainTeamPartnerLabel.textContent = 'Choose member:';
+    } else {
+      mainTeamPartnerLabel.textContent = selectedTeamMembers.length >= 2 ? 'Also with:' : 'With:';
+    }
+
+    while (mainTeamPartnerSelect.options.length) mainTeamPartnerSelect.remove(0);
+    const base = document.createElement('option');
+    base.value = '';
+    base.textContent = (!selectedOtherServicesOnly && selectedTeamMembers.length > 0) ? 'Select teammate' : 'Select a team member';
+    base.selected = true;
+    mainTeamPartnerSelect.appendChild(base);
+    mainTeamPartnerSelect.disabled = false;
+
+    if (selectedOtherServicesOnly || !selectedTeamMembers.length) {
+      const allOpt = document.createElement('option');
+      allOpt.value = '__all__';
+      allOpt.textContent = 'All team members';
+      mainTeamPartnerSelect.appendChild(allOpt);
+    }
+
+    const membersToRender = (selectedOtherServicesOnly || !selectedTeamMembers.length)
+      ? _ccAllTeamMemberIds()
+      : candidates;
+
+    for (const mid of membersToRender) {
+      if (!selectedOtherServicesOnly && !selectedTeamMembers.length && selectedTeamMembers.includes(String(mid))) continue;
+      const o = document.createElement('option');
+      o.value = String(mid);
+      o.textContent = String(TEAM_MEMBER_LABEL_BY_ID[String(mid)] || mid);
+      mainTeamPartnerSelect.appendChild(o);
+    }
+
+    if (selectedOtherServicesOnly || !selectedTeamMembers.length) {
+      const otherOpt = document.createElement('option');
+      otherOpt.value = '__other__';
+      otherOpt.textContent = 'Other services (unassigned)';
+      mainTeamPartnerSelect.appendChild(otherOpt);
+    }
+  }
+
+  function _ccRefreshTeamFilteringUi() {
+    if (mainTeamMemberLabel) {
+      const count = selectedTeamMembers.length;
+      mainTeamMemberLabel.textContent = (count >= 2 || selectedOtherServicesOnly) ? 'Choose members:' : 'Choose member:';
+    }
+    _ccRenderTeamMemberChips();
+    _ccRefreshAlsoWithSelect();
+    _ccRebuildServiceSelects();
+  }
+
+  function _ccRebuildServiceSelects() {
+    if (!mainServiceSelectForCalendar || !serviceSelect) return;
+
+    const allowedSet = new Set(_ccCurrentAllowedSlugs().map((x) => String(x)));
+    const filtered = serviceOptionsMaster.filter((x) => allowedSet.has(String(x.value)));
+    const prev = String(mainServiceSelectForCalendar.value || '');
+
+    function fillSelect(sel) {
+      while (sel.options.length) sel.remove(0);
+      for (const opt of filtered) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        o.dataset.assignedNames = opt.assignedNames || '';
+        sel.appendChild(o);
+      }
+      if (!filtered.length) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = 'No services available for this selection';
+        sel.appendChild(empty);
+        sel.disabled = true;
+      } else {
+        sel.disabled = false;
+      }
+    }
+
+    fillSelect(mainServiceSelectForCalendar);
+    fillSelect(serviceSelect);
+
+    let next = '';
+    if (filtered.find((x) => x.value === prev)) {
+      next = prev;
+    } else if (filtered.length) {
+      next = filtered[0].value;
+    }
+
+    if (next) {
+      mainServiceSelectForCalendar.value = next;
+      serviceSelect.value = next;
+      window.selectedServiceSlug = next;
+      mainServiceSelectForCalendar.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      window.selectedServiceSlug = '';
+      try {
+        dayGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#6b7280; padding:16px;">No services available for this team member selection.</div>';
+      } catch (e) {}
+    }
+  }
+
+  if (TEAM_MEMBER_FILTER_ENABLED && mainTeamPartnerSelect) {
+    mainTeamPartnerSelect.addEventListener('change', (e) => {
+      const val = String((e && e.target && e.target.value) || '');
+      if (!val) return;
+
+      if (val === '__all__') {
+        selectedOtherServicesOnly = false;
+        selectedTeamMembers = [];
+      } else if (val === '__other__') {
+        selectedTeamMembers = [];
+        selectedOtherServicesOnly = true;
+      } else {
+        selectedOtherServicesOnly = false;
+        if (!selectedTeamMembers.includes(val)) selectedTeamMembers.push(val);
+      }
+      _ccRefreshTeamFilteringUi();
+    });
+
+    _ccRefreshTeamFilteringUi();
+  }
+
   // Ensure we always have a deterministic service slug for calendar fetches.
   // (Avoids occasional "all disabled" renders when the selected slug isn't set yet.)
   try {
     const initialSlug = (mainServiceSelectForCalendar && mainServiceSelectForCalendar.value)
       ? mainServiceSelectForCalendar.value
-      : (window.selectedServiceSlug || '{{ service.slug }}');
+      : (window.selectedServiceSlug || '');
     window.selectedServiceSlug = initialSlug;
   } catch (e) {}
 
@@ -1208,7 +1580,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   if (paymentSection) {
     paymentSection.addEventListener('change', function (e) {
       try {
-        const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '{{ service.slug }}');
+        const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '');
         updatePaymentSectionForServiceSlug(slug);
         _refreshOfflineQrDisplay();
       } catch (err) {}
@@ -1294,9 +1666,20 @@ document.addEventListener("DOMContentLoaded", async function () {
           const el = document.getElementById('mainServiceSelect');
           if (el && el.value) return el.value;
         } catch (e) {}
-        return window.selectedServiceSlug || '{{ service.slug }}';
+        return window.selectedServiceSlug || '';
       })();
       window.selectedServiceSlug = activeServiceSlug;
+
+      if (!activeServiceSlug) {
+        monthHeader.innerText = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
+        dayGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#6b7280; padding:16px;">Select a team member/service to view availability.</div>';
+        requestAnimationFrame(() => {
+          if (myToken !== renderToken) return;
+          dayGrid.classList.remove('is-fading');
+          monthHeader.classList.remove('is-fading');
+        });
+        return;
+      }
 
       // Fade out current view first; only clear after fade completes.
       dayGrid.classList.add('is-fading');
@@ -1564,9 +1947,14 @@ document.addEventListener("DOMContentLoaded", async function () {
   // Fetch availability from server and show time circles for selected day
   async function openTimeModal(year, month, day, dateKey) {
     try { window.__ccSelectedSlotRemaining = null; } catch (e) {}
+    const selectedServiceSlug = (window.selectedServiceSlug || (mainServiceSelectForCalendar && mainServiceSelectForCalendar.value) || '').trim();
+    if (!selectedServiceSlug) {
+      try { showToast('error', 'Select a service first.'); } catch (e) {}
+      return;
+    }
     // Default the booking modal to the service currently selected on the calendar.
     try {
-      const selectedSlug = window.selectedServiceSlug || '{{ service.slug }}';
+      const selectedSlug = selectedServiceSlug;
       if (serviceSelect && selectedSlug) {
         const d = SERVICE_MAP[selectedSlug] || {};
         let selectedName = d.name || selectedSlug;
@@ -1692,7 +2080,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       let previewIncrement = 30;
       let eff = null; // effective settings from server
       try {
-        const svcSlugLocal = window.selectedServiceSlug || '{{ service.slug }}';
+        const svcSlugLocal = window.selectedServiceSlug || selectedServiceSlug;
         const effUrl = "{% url 'bookings:service_effective_settings' org.slug 'SERVICE_SLUG' %}".replace('SERVICE_SLUG', svcSlugLocal) + '?date=' + encodeURIComponent(toIsoLocal(rangeStartDate).split('T')[0]);
         const effResp = await fetch(effUrl, { cache: 'no-store' });
         if (effResp.ok) {
@@ -1707,7 +2095,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
       try {
         if (!eff) {
-          const svc = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+          const svc = SERVICE_MAP[window.selectedServiceSlug || selectedServiceSlug] || {};
           if (typeof svc.time_increment_minutes === 'number') previewIncrement = svc.time_increment_minutes;
           const rawPreview = localStorage.getItem('client_view_settings');
           if (rawPreview) {
@@ -1723,6 +2111,10 @@ document.addEventListener("DOMContentLoaded", async function () {
         svcName.textContent = d.name;
         if (serviceSelectedDisplay) serviceSelectedDisplay.textContent = d.name || slug;
         svcDesc.textContent = d.description || "—";
+        try {
+          const svcLocation = document.getElementById('svcLocation');
+          if (svcLocation) svcLocation.textContent = d.location_display || '—';
+        } catch (e) { /* ignore */ }
         svcDuration.textContent = d.duration || 0;
         let participants = 1;
         try {
@@ -1768,7 +2160,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
       if (participantCountInput && participantCountInput.dataset.ccModalBound !== '1') {
         participantCountInput.addEventListener('input', () => {
-          const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
+          const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '');
           syncParticipantCapacityForService(slug);
           updateServiceDetails(slug);
           updatePaymentSectionForServiceSlug(slug);
@@ -1778,7 +2170,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       // Include edge buffer preference (prefer server setting, allow local override)
       const edgeVal2 = (function(){
         try {
-          const raw = localStorage.getItem('edge_buffers_' + (window.selectedServiceSlug || '{{ service.slug }}'));
+          const raw = localStorage.getItem('edge_buffers_' + (window.selectedServiceSlug || ''));
           if (raw === '1' || raw === 'true') return 1;
           if (raw === '0' || raw === 'false') return 0;
         } catch (e) {}
@@ -1787,10 +2179,10 @@ document.addEventListener("DOMContentLoaded", async function () {
       })();
       // If service enforces fixed increments, don't send `inc` so server uses duration+buffer
       // Determine whether server indicates use_fixed_increment; prefer eff if present
-      const svcPreview = SERVICE_MAP[window.selectedServiceSlug || '{{ service.slug }}'] || {};
+      const svcPreview = SERVICE_MAP[window.selectedServiceSlug || selectedServiceSlug] || {};
       const useFixed = (eff && typeof eff.use_fixed_increment === 'boolean') ? eff.use_fixed_increment : !!svcPreview.use_fixed_increment;
       const previewIncQuery = (useFixed ? '' : `&inc=${previewIncrement}`);
-      const svcSlug = serviceSelect.value || window.selectedServiceSlug || '{{ service.slug }}';
+      const svcSlug = serviceSelect.value || window.selectedServiceSlug || selectedServiceSlug;
       let allowEndsForAvail = false;
       try {
         allowEndsForAvail = (eff && typeof eff.allow_ends_after_availability === 'boolean') ? !!eff.allow_ends_after_availability : !!svcPreview.allow_ends_after_availability;
@@ -1984,7 +2376,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                   window.__ccSelectedSlotRemaining = null;
                 }
                 try {
-                  const selectedSlug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
+                  const selectedSlug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '');
                   syncParticipantCapacityForService(selectedSlug);
                 } catch (e) {}
                 circle.dataset.slotKey = slotKey;
@@ -2049,7 +2441,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
 
       try {
-        const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : '{{ service.slug }}';
+        const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '');
         const d = SERVICE_MAP[slug] || {};
         const serviceMax = Math.max(1, Number(d.max_participants || 1) || 1);
         const slotRemaining = parseRemainingCapacity(window.__ccSelectedSlotRemaining);

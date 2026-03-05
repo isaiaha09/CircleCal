@@ -305,7 +305,7 @@ def stripe_express_return_to_app(request):
 @login_required
 @require_http_methods(["GET"])
 def stripe_express_dashboard(request, org_slug):
-    """Redirect owner/admin into Stripe's Express Dashboard for this connected account.
+    """Redirect an owner into Stripe's Express Dashboard for this connected account.
 
     Uses Stripe's login link API so the user doesn't need to already be logged into Stripe.
     """

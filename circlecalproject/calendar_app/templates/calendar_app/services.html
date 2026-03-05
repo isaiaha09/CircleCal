@@ -18,6 +18,7 @@
         </a>
     </div>
 
+    {% if is_owner_for_org %}
     {% if embed_widget_available and embed_services_embed_src %}
         <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mb-6">
             <div class="flex items-start justify-between gap-3">
@@ -80,23 +81,73 @@
                 <p class="text-xs text-gray-500 mt-2">Tip: adjust <span class="font-mono">height</span> as needed for your page layout.</p>
             </div>
         </div>
+    {% elif show_default_public_booking_links %}
+        <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mb-6">
+            <h2 class="text-lg font-bold text-blue-700">Public booking URL links</h2>
+            <p class="text-sm text-gray-700 mt-2">Share your default CircleCal booking links while hosted subdomain/embed is not enabled.</p>
+
+            <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <div class="text-sm font-semibold text-blue-800">Business booking page URL</div>
+                <div class="mt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                        id="ccPublicOrgUrl"
+                        type="text"
+                        readonly
+                        value="{{ org_public_booking_url|default:'' }}"
+                        class="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white text-gray-700"
+                    />
+                    <button
+                        type="button"
+                        class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto"
+                        onclick="window.ccCopyRawText && window.ccCopyRawText('ccPublicOrgUrl', 'Public booking URL copied to clipboard.')"
+                    >Copy URL</button>
+                </div>
+            </div>
+
+            {% if services %}
+            <div class="mt-4 rounded-xl border border-blue-100 bg-white p-4">
+                <div class="text-sm font-semibold text-blue-800 mb-2">Service booking page URLs</div>
+                <div class="space-y-2">
+                    {% for service in services %}
+                        {% if service.public_booking_url %}
+                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <input
+                                id="ccPublicServiceUrl-{{ service.id }}"
+                                type="text"
+                                readonly
+                                value="{{ service.public_booking_url }}"
+                                class="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700"
+                            />
+                            <button
+                                type="button"
+                                class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm w-full sm:w-auto"
+                                onclick="window.ccCopyRawText && window.ccCopyRawText('ccPublicServiceUrl-{{ service.id }}', '{{ service.name|escapejs }} URL copied to clipboard.')"
+                            >Copy</button>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="mt-4 text-xs text-gray-600">
+                {% if embed_bundle_is_trial %}
+                    The Booking Flow Bundle is unavailable during trial. Activate a paid subscription first, then purchase the bundle to unlock hosted subdomain + embed.
+                {% elif embed_bundle_can_purchase %}
+                    Want hosted subdomain + embed? You can purchase the Booking Flow Bundle from billing.
+                    <a href="{% url 'billing:embedded_custom_domain_addon_checkout_page' org.slug %}" class="text-blue-700 font-semibold underline">Purchase Booking Flow Bundle</a>
+                {% else %}
+                    Embed + hosted subdomain require an active paid subscription and the Booking Flow Bundle.
+                    <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="text-blue-700 font-semibold underline">View pricing</a>
+                {% endif %}
+            </div>
+        </div>
     {% else %}
         <div class="bg-white border border-blue-100 rounded-xl p-6 shadow-lg mb-6">
             <h2 class="text-lg font-bold text-blue-700">Embed widget</h2>
-            {% if embed_bundle_is_trial %}
-                <p class="text-sm text-gray-700 mt-2">The Booking Flow Bundle is unavailable during trial. Activate a paid subscription first, then purchase the bundle to unlock hosted subdomain + embed.</p>
-            {% elif embed_bundle_can_purchase %}
-                <p class="text-sm text-gray-700 mt-2">Your subscription is eligible. Purchase the Booking Flow Bundle to unlock hosted subdomain + embed flow.</p>
-                <div class="mt-4">
-                    <a href="{% url 'billing:embedded_custom_domain_addon_checkout_page' org.slug %}" class="btn-primary inline-flex items-center justify-center px-4 py-2 text-sm">Purchase Booking Flow Bundle</a>
-                </div>
-            {% else %}
-                <p class="text-sm text-gray-700 mt-2">Embed + hosted subdomain require an active paid subscription and the Booking Flow Bundle.</p>
-                <div class="mt-4">
-                    <a href="{% url 'calendar_app:pricing_page' org.slug %}" class="btn-ghost inline-flex items-center justify-center px-4 py-2 text-sm">View pricing</a>
-                </div>
-            {% endif %}
+            <p class="text-sm text-gray-700 mt-2">Embed/subdomain is enabled for this business.</p>
         </div>
+    {% endif %}
     {% endif %}
 
     {% if services %}
@@ -315,6 +366,42 @@
                 el.select();
                 try{ document.execCommand('copy'); }catch(e){}
             }catch(e){}
+            showToast(message || 'Copied to clipboard.');
+        }catch(e){}
+    };
+
+    // Copy helper for plain URL inputs (no active-service requirement).
+    window.ccCopyRawText = function(inputId, message){
+        function showToast(msg){
+            try{
+                const toast = document.getElementById('ccCopyToast');
+                const text = document.getElementById('ccCopyToastText');
+                if (!toast || !text) return;
+                text.textContent = msg || 'Copied to clipboard.';
+                toast.classList.remove('hidden');
+                window.clearTimeout(window.__ccCopyToastTimer);
+                window.__ccCopyToastTimer = window.setTimeout(function(){
+                    try{ toast.classList.add('hidden'); }catch(e){}
+                }, 2200);
+            }catch(e){}
+        }
+
+        try{
+            const el = document.getElementById(inputId);
+            if (!el) return;
+            const value = el.value || el.textContent || '';
+
+            if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(value).then(function(){
+                    showToast(message || 'Copied to clipboard.');
+                }).catch(function(){
+                    try{ el.focus(); el.select(); document.execCommand('copy'); }catch(e){}
+                    showToast(message || 'Copied to clipboard.');
+                });
+                return;
+            }
+
+            try{ el.focus(); el.select(); document.execCommand('copy'); }catch(e){}
             showToast(message || 'Copied to clipboard.');
         }catch(e){}
     };

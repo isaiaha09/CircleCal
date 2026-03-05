@@ -15,6 +15,13 @@ def generate_public_ref(n=8):
     return ''.join(secrets.choice(_PUBLIC_REF_ALPHABET) for _ in range(n))
 
 class Service(models.Model):
+    LOCATION_TYPE_ADDRESS = 'address'
+    LOCATION_TYPE_OTHER = 'other'
+    LOCATION_TYPE_CHOICES = [
+        (LOCATION_TYPE_ADDRESS, 'Address'),
+        (LOCATION_TYPE_OTHER, 'Other'),
+    ]
+
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="services"
     )
@@ -23,6 +30,11 @@ class Service(models.Model):
     slug = models.SlugField(unique=True)
 
     description = models.TextField(blank=True)
+
+    # Optional service location shown to clients in booking flows and notifications.
+    location_type = models.CharField(max_length=16, choices=LOCATION_TYPE_CHOICES, blank=True, default='')
+    location_full_address = models.TextField(blank=True, default='')
+    location_other = models.TextField(blank=True, default='')
 
     duration = models.PositiveIntegerField(help_text="Duration in minutes")
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
@@ -117,6 +129,20 @@ class Service(models.Model):
             pass
 
         return (base_price * Decimal(qty)).quantize(Decimal('0.01'))
+
+    @property
+    def location_display(self) -> str:
+        """Return the best client-facing location string for this service."""
+        ltype = (getattr(self, 'location_type', '') or '').strip().lower()
+        addr = (getattr(self, 'location_full_address', '') or '').strip()
+        other = (getattr(self, 'location_other', '') or '').strip()
+
+        if ltype == self.LOCATION_TYPE_ADDRESS:
+            return addr
+        if ltype == self.LOCATION_TYPE_OTHER:
+            return other
+        # Backward-compatible fallback if type was not set but text exists.
+        return addr or other
 
     def __str__(self):
         try:

@@ -2899,6 +2899,7 @@ select:hover, input[type="time"]:hover, input[type="number"]:hover {
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Client:</strong> <span id="clientName"></span></p>
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Lesson Type:</strong> <span id="lessonType"></span></p>
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Time:</strong> <span id="lessonTime"></span></p>
+    <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Location:</strong> <span id="bookingLocation"></span></p>
             <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Participants:</strong> <span id="bookingParticipants"></span></p>
             <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Booking Total:</strong> <span id="bookingTotal"></span></p>
       <p style="margin:8px 0; color:var(--gray-700);"><strong style="color:var(--gray-900); font-weight:600;">Payment:</strong> <span id="paymentMethod"></span></p>
@@ -10948,6 +10949,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('clientName').textContent = xp.client_name || 'Unknown';
             document.getElementById('lessonType').textContent = xp.service_name || xp.lesson_type || event.title || 'N/A';
             document.getElementById('lessonTime').textContent = `${event.start.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - ${event.end.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+            document.getElementById('bookingLocation').textContent = (xp.service_location_display || xp.service_location || xp.location || '').trim() || '—';
             const participantsRaw = Number(
                 (xp.participant_count !== undefined ? xp.participant_count : xp.participantCount) || 1
             );
@@ -11198,6 +11200,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     document.getElementById('lessonTime').textContent = 'Invalid time';
                 }
+                    document.getElementById('bookingLocation').textContent = (xp.service_location_display || xp.service_location || xp.location || '').trim() || '—';
 
                 const participantsRaw = Number(
                     (xp.participant_count !== undefined ? xp.participant_count : xp.participantCount) || 1

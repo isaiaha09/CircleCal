@@ -1135,6 +1135,8 @@ def booking_to_event(bk: Booking):
         if bk.service is not None:
             event['extendedProps']['service_id'] = bk.service_id
             event['extendedProps']['service_name'] = getattr(bk.service, 'name', None)
+            event['extendedProps']['service_location'] = getattr(bk.service, 'location_display', '')
+            event['extendedProps']['service_location_display'] = getattr(bk.service, 'location_display', '')
             event['extendedProps']['service_slug'] = bk.service.slug
             event['extendedProps']['service_buffer_after'] = int(getattr(bk.service, 'buffer_after', 0))
             event['extendedProps']['service_allow_ends_after_availability'] = bool(getattr(bk.service, 'allow_ends_after_availability', False))
@@ -3095,6 +3097,113 @@ def _build_public_service_page_context(
             s.assigned_names = ''
         service.assigned_names = ''
 
+    # Team-plan-only public filtering metadata:
+    # - team_member_options: members who have at least one assigned public service
+    # - services_by_member: member_id -> [service_slug]
+    # - collaborator_members_by_member: member_id -> [member_id,...] sharing any service
+    # - services_by_member_pair: "min:max" -> [service_slug] for duo filtering
+    # - unassigned_service_slugs: services with no assigned members
+    team_member_options = []
+    services_by_member = {}
+    collaborator_members_by_member = {}
+    services_by_member_pair = {}
+    unassigned_service_slugs = []
+    if bool(show_with_line):
+        try:
+            from .models import ServiceAssignment
+
+            service_ids = [int(getattr(s, 'id', 0) or 0) for s in services if getattr(s, 'id', None)]
+            service_slug_by_id = {int(s.id): str(s.slug) for s in services if getattr(s, 'id', None)}
+
+            ass_rows = list(
+                ServiceAssignment.objects
+                .filter(service_id__in=service_ids, membership__is_active=True)
+                .select_related('membership__user__profile', 'membership__user', 'membership', 'service')
+            )
+
+            member_label_by_id = {}
+            mids_by_service_id = {}
+            for sa in ass_rows:
+                try:
+                    mid = int(getattr(sa, 'membership_id', 0) or 0)
+                    sid = int(getattr(sa, 'service_id', 0) or 0)
+                except Exception:
+                    continue
+                if not mid or not sid:
+                    continue
+
+                mids_by_service_id.setdefault(sid, set()).add(mid)
+
+                if mid not in member_label_by_id:
+                    user = getattr(getattr(sa, 'membership', None), 'user', None)
+                    label = ''
+                    try:
+                        profile = getattr(user, 'profile', None)
+                        if profile and getattr(profile, 'display_name', None):
+                            label = str(profile.display_name or '').strip()
+                        if not label:
+                            full = (user.get_full_name() if user and getattr(user, 'get_full_name', None) else '') or ''
+                            label = str(full).strip()
+                        if not label:
+                            label = str(getattr(user, 'email', '') or '').strip()
+                    except Exception:
+                        label = str(getattr(user, 'email', '') or '').strip()
+                    member_label_by_id[mid] = label or f"Member {mid}"
+
+            for sid, slug in service_slug_by_id.items():
+                mids = sorted(list(mids_by_service_id.get(sid, set())))
+                if not mids:
+                    unassigned_service_slugs.append(slug)
+                    continue
+
+                for mid in mids:
+                    services_by_member.setdefault(str(mid), []).append(slug)
+
+                if len(mids) >= 2:
+                    for i in range(len(mids)):
+                        for j in range(i + 1, len(mids)):
+                            a = int(mids[i])
+                            b = int(mids[j])
+                            collaborator_members_by_member.setdefault(str(a), set()).add(str(b))
+                            collaborator_members_by_member.setdefault(str(b), set()).add(str(a))
+                            key = f"{min(a, b)}:{max(a, b)}"
+                            services_by_member_pair.setdefault(key, []).append(slug)
+
+            for mkey in list(services_by_member.keys()):
+                seen = set()
+                deduped = []
+                for slug in services_by_member.get(mkey, []):
+                    if slug in seen:
+                        continue
+                    seen.add(slug)
+                    deduped.append(slug)
+                services_by_member[mkey] = deduped
+
+            for pkey in list(services_by_member_pair.keys()):
+                seen = set()
+                deduped = []
+                for slug in services_by_member_pair.get(pkey, []):
+                    if slug in seen:
+                        continue
+                    seen.add(slug)
+                    deduped.append(slug)
+                services_by_member_pair[pkey] = deduped
+
+            for mkey in list(collaborator_members_by_member.keys()):
+                collaborator_members_by_member[mkey] = sorted(list(collaborator_members_by_member.get(mkey, set())), key=lambda x: member_label_by_id.get(int(x), ''))
+
+            team_member_options = [
+                {'id': str(mid), 'label': member_label_by_id.get(mid, f"Member {mid}")}
+                for mid in sorted(member_label_by_id.keys(), key=lambda k: member_label_by_id.get(k, ''))
+                if str(mid) in services_by_member
+            ]
+        except Exception:
+            team_member_options = []
+            services_by_member = {}
+            collaborator_members_by_member = {}
+            services_by_member_pair = {}
+            unassigned_service_slugs = []
+
     # Attach effective client-facing refund policy text for consistent rendering
     # across public surfaces (service info icon, modal details, etc.).
     try:
@@ -3164,6 +3273,12 @@ def _build_public_service_page_context(
         "turnstile_enabled": turnstile_enabled,
         "turnstile_site_key": turnstile_site_key,
         "service_weekly_map_json": json.dumps(service_weekly_map),
+        "team_member_filter_enabled": bool(show_with_line),
+        "team_member_options": team_member_options,
+        "services_by_member": services_by_member,
+        "collaborator_members_by_member": collaborator_members_by_member,
+        "services_by_member_pair": services_by_member_pair,
+        "unassigned_service_slugs": unassigned_service_slugs,
         # Support reschedule GET params to prefill client info and attach reschedule metadata
         'reschedule_source': request.GET.get('reschedule_source') or request.GET.get('source'),
         'reschedule_token': request.GET.get('reschedule_token') or request.GET.get('token'),

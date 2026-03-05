@@ -455,6 +455,50 @@
           <p class="mt-2 text-xs text-gray-500">Mention outcomes and any prerequisites.</p>
         </div>
 
+        <div class="section-card" id="serviceLocationCard">
+          <div class="section-title">Service Location</div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700" for="location_type">Location type</label>
+            <select id="location_type" name="location_type" class="cc-field mt-1 w-full">
+              <option value="" {% if request.POST.location_type == '' %}selected{% endif %}>No location specified</option>
+              <option value="address" {% if request.POST.location_type == 'address' %}selected{% endif %}>Full address</option>
+              <option value="other" {% if request.POST.location_type == 'other' %}selected{% endif %}>Other (Zoom, Discord, phone, etc.)</option>
+            </select>
+          </div>
+          <div id="location_address_wrap" class="mt-4" style="display:none;">
+            <label class="block text-sm font-medium text-gray-700" for="location_full_address">Full address</label>
+            <textarea id="location_full_address" name="location_full_address" rows="3" class="cc-field mt-1 w-full" placeholder="123 Main St, Suite 400, Miami, FL 33101">{{ request.POST.location_full_address|default:'' }}</textarea>
+          </div>
+          <div id="location_other_wrap" class="mt-4" style="display:none;">
+            <label class="block text-sm font-medium text-gray-700" for="location_other">Other location details</label>
+            <textarea id="location_other" name="location_other" rows="3" class="cc-field mt-1 w-full" placeholder="Zoom link, Discord channel, call-in details, etc.">{{ request.POST.location_other|default:'' }}</textarea>
+          </div>
+          <p class="mt-2 text-xs text-gray-500">This appears in the public booking modal, confirmation page, and booking notifications.</p>
+        </div>
+        <script>
+          (function(){
+            const typeEl = document.getElementById('location_type');
+            const addrWrap = document.getElementById('location_address_wrap');
+            const otherWrap = document.getElementById('location_other_wrap');
+            const addrEl = document.getElementById('location_full_address');
+            const otherEl = document.getElementById('location_other');
+            if (!typeEl || !addrWrap || !otherWrap) return;
+
+            function syncLocationFields(){
+              const val = (typeEl.value || '').toLowerCase();
+              const showAddr = val === 'address';
+              const showOther = val === 'other';
+              addrWrap.style.display = showAddr ? '' : 'none';
+              otherWrap.style.display = showOther ? '' : 'none';
+              if (addrEl) addrEl.required = showAddr;
+              if (otherEl) otherEl.required = showOther;
+            }
+
+            typeEl.addEventListener('change', syncLocationFields);
+            syncLocationFields();
+          })();
+        </script>
+
         <div class="section-card cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
           <div class="section-title">Payment Methods</div>
           <div>

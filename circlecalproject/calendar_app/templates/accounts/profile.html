@@ -592,7 +592,7 @@
     {% endif %}
   </div>
 
-  {% if organization and user_org_role != 'staff' %}
+  {% if organization and is_owner_for_org %}
   <div class="mt-6 bg-white border border-blue-100 rounded-xl p-6 shadow-lg max-w-5xl mx-auto">
     <div class="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>

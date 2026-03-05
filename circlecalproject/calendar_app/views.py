@@ -952,6 +952,37 @@ def apply_service_update(request, org_slug, service_id):
             fields['description'] = (payload.get('description') or '').strip()
         except Exception:
             pass
+    if 'location_type' in payload:
+        try:
+            raw_lt = (payload.get('location_type') or '').strip().lower()
+            if raw_lt in {'address', 'other'}:
+                fields['location_type'] = raw_lt
+            else:
+                fields['location_type'] = ''
+        except Exception:
+            pass
+    if 'location_full_address' in payload:
+        try:
+            fields['location_full_address'] = (payload.get('location_full_address') or '').strip()
+        except Exception:
+            pass
+    if 'location_other' in payload:
+        try:
+            fields['location_other'] = (payload.get('location_other') or '').strip()
+        except Exception:
+            pass
+
+    try:
+        if any(k in payload for k in ('location_type', 'location_full_address', 'location_other')):
+            eff_type = fields.get('location_type', (getattr(svc, 'location_type', '') or '').strip().lower())
+            eff_addr = fields.get('location_full_address', (getattr(svc, 'location_full_address', '') or '').strip())
+            eff_other = fields.get('location_other', (getattr(svc, 'location_other', '') or '').strip())
+            if eff_type == 'address' and not eff_addr:
+                return JsonResponse({'status': 'error', 'error': 'Enter a full address for this service location.'}, status=400)
+            if eff_type == 'other' and not eff_other:
+                return JsonResponse({'status': 'error', 'error': 'Enter a location value for the "Other" location option.'}, status=400)
+    except Exception:
+        pass
 
     # Numeric fields
     if 'price' in payload:
@@ -6320,7 +6351,27 @@ def services_page(request, org_slug):
     List all services for this organization (internal management page).
     """
     org = request.organization
+    membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
+    is_owner_for_org = bool((getattr(org, 'owner_id', None) == getattr(request.user, 'id', None)) or (membership and membership.role == 'owner'))
     services = list(Service.objects.filter(organization=org).order_by('name'))
+
+    # Default public booking URLs (owner-facing fallback when embed/subdomain bundle is not enabled).
+    org_public_booking_url = None
+    try:
+        from django.urls import reverse
+
+        org_public_path = reverse('bookings:public_org_page', args=[org.slug])
+        org_public_booking_url = request.build_absolute_uri(org_public_path)
+        for service in services:
+            try:
+                service_public_path = reverse('bookings:public_service_page', args=[org.slug, service.slug])
+                service.public_booking_url = request.build_absolute_uri(service_public_path)
+            except Exception:
+                service.public_booking_url = None
+    except Exception:
+        org_public_booking_url = None
+        for service in services:
+            service.public_booking_url = None
 
     has_active_services = False
     try:
@@ -6373,74 +6424,75 @@ def services_page(request, org_slug):
         for s in services:
             s.assigned_names = []
 
-    # Booking Flow Bundle: public embed widget (iframe) using a revocable per-business key.
+    # Booking Flow Bundle (owner-only): public embed widget (iframe) using a revocable per-business key.
     embed_widget_available = False
     embed_services_embed_src = None
     hosted_embed_origin = None
     embed_bundle_can_purchase = False
     embed_bundle_enabled = False
     embed_bundle_is_trial = False
-    try:
-        from billing.utils import (
-            can_purchase_booking_flow_bundle,
-            can_use_embed_widget,
-            get_subscription,
-            has_booking_flow_bundle,
-        )
-        sub = get_subscription(org)
-        embed_bundle_is_trial = bool(sub and getattr(sub, 'status', '') == 'trialing')
-        embed_bundle_can_purchase = bool(can_purchase_booking_flow_bundle(org))
-        embed_bundle_enabled = bool(has_booking_flow_bundle(org))
-        embed_widget_available = bool(can_use_embed_widget(org))
-    except Exception:
-        embed_widget_available = False
-        embed_bundle_can_purchase = False
-        embed_bundle_enabled = False
-        embed_bundle_is_trial = False
-
-    try:
-        import os
-        from billing.utils import can_use_hosted_subdomain
-
-        base_domain = (getattr(settings, 'HOSTED_SUBDOMAIN_BASE', '') or os.getenv('HOSTED_SUBDOMAIN_BASE') or '').strip().lower().lstrip('.')
-        if base_domain and bool(can_use_hosted_subdomain(org)):
-            hosted_embed_origin = f"https://{(org.slug or '').strip().lower()}.{base_domain}"
-    except Exception:
-        hosted_embed_origin = None
-
-    if embed_widget_available:
+    if is_owner_for_org:
         try:
-            import secrets
-            if not getattr(org, 'embed_key', None):
-                org.embed_key = secrets.token_urlsafe(24)
-            if not getattr(org, 'embed_enabled', False):
-                org.embed_enabled = True
-            org.save(update_fields=['embed_key', 'embed_enabled'])
+            from billing.utils import (
+                can_purchase_booking_flow_bundle,
+                can_use_embed_widget,
+                get_subscription,
+                has_booking_flow_bundle,
+            )
+            sub = get_subscription(org)
+            embed_bundle_is_trial = bool(sub and getattr(sub, 'status', '') == 'trialing')
+            embed_bundle_can_purchase = bool(can_purchase_booking_flow_bundle(org))
+            embed_bundle_enabled = bool(has_booking_flow_bundle(org))
+            embed_widget_available = bool(can_use_embed_widget(org))
         except Exception:
-            pass
+            embed_widget_available = False
+            embed_bundle_can_purchase = False
+            embed_bundle_enabled = False
+            embed_bundle_is_trial = False
 
         try:
-            from django.urls import reverse
-            org_path = reverse('bookings:public_org_page', args=[org.slug])
-            if hosted_embed_origin:
-                base = f"{hosted_embed_origin}{org_path}"
-            else:
-                base = request.build_absolute_uri(org_path)
-            embed_services_embed_src = f"{base}?embed=1&key={getattr(org, 'embed_key', '')}"
+            import os
+            from billing.utils import can_use_hosted_subdomain
 
-            # Attach per-service embed src for template convenience.
-            for service in services:
-                try:
-                    service_path = reverse('bookings:public_service_page', args=[org.slug, service.slug])
-                    if hosted_embed_origin:
-                        service_base = f"{hosted_embed_origin}{service_path}"
-                    else:
-                        service_base = request.build_absolute_uri(service_path)
-                    service.embed_src = f"{service_base}?embed=1&key={getattr(org, 'embed_key', '')}"
-                except Exception:
-                    service.embed_src = None
+            base_domain = (getattr(settings, 'HOSTED_SUBDOMAIN_BASE', '') or os.getenv('HOSTED_SUBDOMAIN_BASE') or '').strip().lower().lstrip('.')
+            if base_domain and bool(can_use_hosted_subdomain(org)):
+                hosted_embed_origin = f"https://{(org.slug or '').strip().lower()}.{base_domain}"
         except Exception:
-            embed_services_embed_src = None
+            hosted_embed_origin = None
+
+        if embed_widget_available:
+            try:
+                import secrets
+                if not getattr(org, 'embed_key', None):
+                    org.embed_key = secrets.token_urlsafe(24)
+                if not getattr(org, 'embed_enabled', False):
+                    org.embed_enabled = True
+                org.save(update_fields=['embed_key', 'embed_enabled'])
+            except Exception:
+                pass
+
+            try:
+                from django.urls import reverse
+                org_path = reverse('bookings:public_org_page', args=[org.slug])
+                if hosted_embed_origin:
+                    base = f"{hosted_embed_origin}{org_path}"
+                else:
+                    base = request.build_absolute_uri(org_path)
+                embed_services_embed_src = f"{base}?embed=1&key={getattr(org, 'embed_key', '')}"
+
+                # Attach per-service embed src for template convenience.
+                for service in services:
+                    try:
+                        service_path = reverse('bookings:public_service_page', args=[org.slug, service.slug])
+                        if hosted_embed_origin:
+                            service_base = f"{hosted_embed_origin}{service_path}"
+                        else:
+                            service_base = request.build_absolute_uri(service_path)
+                        service.embed_src = f"{service_base}?embed=1&key={getattr(org, 'embed_key', '')}"
+                    except Exception:
+                        service.embed_src = None
+            except Exception:
+                embed_services_embed_src = None
 
     return render(request, "calendar_app/services.html", {
         "org": org,
@@ -6449,9 +6501,12 @@ def services_page(request, org_slug):
         "can_add_more_services": can_add_more_services,
         "show_upgrade_modal": bool(upgrade_prompt == 'service_limit'),
         "upgrade_prompt_reason": upgrade_prompt,
+        "is_owner_for_org": is_owner_for_org,
+        "show_default_public_booking_links": bool(is_owner_for_org and not embed_bundle_enabled),
+        "org_public_booking_url": org_public_booking_url,
         "embed_widget_available": embed_widget_available,
         "embed_services_embed_src": embed_services_embed_src,
-        "embed_key": getattr(org, 'embed_key', None),
+        "embed_key": getattr(org, 'embed_key', None) if is_owner_for_org else None,
         "embed_bundle_can_purchase": embed_bundle_can_purchase,
         "embed_bundle_enabled": embed_bundle_enabled,
         "embed_bundle_is_trial": embed_bundle_is_trial,
@@ -6722,6 +6777,9 @@ def create_service(request, org_slug):
         name = (request.POST.get("name") or "").strip()
         slug_input = (request.POST.get("slug") or "").strip()
         description = (request.POST.get("description") or "").strip()
+        location_type = (request.POST.get('location_type') or '').strip().lower()
+        location_full_address = (request.POST.get('location_full_address') or '').strip()
+        location_other = (request.POST.get('location_other') or '').strip()
 
         duration_raw = request.POST.get("duration")
         price_raw = request.POST.get("price")
@@ -6756,6 +6814,17 @@ def create_service(request, org_slug):
             if max_booking_days_raw is None or str(max_booking_days_raw).strip() == "":
                 has_errors = True
                 messages.error(request, "Max advance is required.")
+
+        if not has_errors:
+            if location_type and location_type not in {'address', 'other'}:
+                has_errors = True
+                messages.error(request, "Select a valid location type.")
+            if location_type == 'address' and not location_full_address:
+                has_errors = True
+                messages.error(request, "Please enter the full service address.")
+            if location_type == 'other' and not location_other:
+                has_errors = True
+                messages.error(request, "Please enter where this service takes place.")
 
         if not has_errors:
             # Require at-least-one assigned member for every service
@@ -7032,6 +7101,9 @@ def create_service(request, org_slug):
                     name=name,
                     slug=slug,
                     description=description,
+                    location_type=(location_type if location_type in {'address', 'other'} else ''),
+                    location_full_address=location_full_address,
+                    location_other=location_other,
                     duration=duration,
                     price=price,
                     buffer_before=buffer_before,
@@ -7387,6 +7459,9 @@ def edit_service(request, org_slug, service_id):
     if request.method == "POST":
         name = (request.POST.get("name") or "").strip()
         description = (request.POST.get("description") or "").strip()
+        location_type = (request.POST.get('location_type') or '').strip().lower()
+        location_full_address = (request.POST.get('location_full_address') or '').strip()
+        location_other = (request.POST.get('location_other') or '').strip()
 
         duration_raw = request.POST.get("duration")
         price_raw = request.POST.get("price")
@@ -7476,6 +7551,15 @@ def edit_service(request, org_slug, service_id):
             if max_booking_days_raw is None or str(max_booking_days_raw).strip() == "":
                 has_errors = True
                 messages.error(request, "Max advance is required.")
+        if location_type and location_type not in {'address', 'other'}:
+            has_errors = True
+            messages.error(request, "Select a valid location type.")
+        if location_type == 'address' and not location_full_address:
+            has_errors = True
+            messages.error(request, "Please enter the full service address.")
+        if location_type == 'other' and not location_other:
+            has_errors = True
+            messages.error(request, "Please enter where this service takes place.")
 
         if has_errors:
             return redirect("calendar_app:edit_service", org_slug=org.slug, service_id=service.id)
@@ -7545,6 +7629,12 @@ def edit_service(request, org_slug, service_id):
 
                 service.name = name
                 service.description = description
+                try:
+                    service.location_type = (location_type if location_type in {'address', 'other'} else '')
+                    service.location_full_address = location_full_address
+                    service.location_other = location_other
+                except Exception:
+                    pass
                 service.duration = duration
                 service.price = price
                 service.buffer_before = buffer_before
@@ -8929,6 +9019,7 @@ def bookings_recent(request, org_slug):
             'booking_id': b.id,
             'public_ref': getattr(b, 'public_ref', None),
             'service_name': b.service.name if b.service else None,
+            'service_location': (b.service.location_display if b.service else ''),
             'service_id': b.service.id if b.service else None,
             'duration': (int(b.service.duration) if (b.service and getattr(b.service, 'duration', None) is not None) else (None if not (b.start and b.end) else int((b.end - b.start).total_seconds()/60))),
             'service_price': (float(b.service.price) if (b.service and getattr(b.service, 'price', None) is not None) else None),

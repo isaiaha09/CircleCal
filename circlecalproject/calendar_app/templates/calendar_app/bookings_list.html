@@ -444,6 +444,7 @@
         <tr data-booking-id="{{ booking.id }}" data-public-ref="{{ booking.public_ref|default:'' }}" 
           data-status="{% if booking.start <= now and booking.end >= now %}ongoing{% elif booking.start.date == today %}today{% elif booking.start < now %}past{% else %}upcoming{% endif %}"
           data-service-id="{{ booking.service.id|default:'' }}"
+          data-location="{{ booking.service.location_display|default:''|escapejs }}"
           data-service-price="{{ booking.service.price|default:'' }}"
           data-refund-policy="{% if booking.service.refunds_allowed %}{% if booking.service.refund_policy_text %}{{ booking.service.refund_policy_text|escapejs }}{% elif booking.service.refund_cutoff_hours|default:0 <= 0 %}Refunds are permitted up to the appointment time.{% else %}Refunds permitted except within {{ booking.service.refund_cutoff_hours }} hour{% if booking.service.refund_cutoff_hours != 1 %}s{% endif %} of the appointment.{% endif %}{% else %}Refunds are not permitted for this service.{% endif %}"
           data-participant-count="{{ booking.participant_count|default:1 }}"
@@ -615,6 +616,10 @@
       <div>
         <div class="cc-booking-modal-label">Service:</div>
         <div id="modalService" class="cc-booking-modal-value"></div>
+      </div>
+      <div>
+        <div class="cc-booking-modal-label">Location:</div>
+        <div id="modalLocation" class="cc-booking-modal-value"></div>
       </div>
       <div>
         <div class="cc-booking-modal-label">Duration:</div>
@@ -987,6 +992,7 @@ function viewBooking(id) {
   }
 
   document.getElementById('modalService').textContent = (cells[4] ? cells[4].textContent : '') || '';
+  document.getElementById('modalLocation').textContent = (row.dataset.location || '').trim() || '—';
   document.getElementById('modalDuration').textContent = (cells[5] ? cells[5].textContent : '') || '';
   // Show service price if available (data attribute on row)
   const priceVal = row.dataset.servicePrice;
@@ -1128,6 +1134,9 @@ function insertBookingRow(b, toTop=true) {
   newTr.setAttribute('data-public-ref', b.public_ref || '');
   newTr.setAttribute('data-status', status);
   newTr.setAttribute('data-service-id', b.service_id || '');
+  try {
+    newTr.setAttribute('data-location', (b.service_location || b.location || '').toString());
+  } catch (e) { newTr.setAttribute('data-location', ''); }
   // Expose service price on the row so the "View" modal can show the charge
   try{
     const svcPrice = (b.service_price !== undefined && b.service_price !== null) ? String(b.service_price) : (b.price !== undefined && b.price !== null ? String(b.price) : '');

@@ -318,10 +318,10 @@ def profile_view(request):
 			except Exception:
 				can_use_offline_payment_methods = False
 
-			# Stripe connected account link (test vs live)
+			# Stripe connected account links are owner-only.
 			try:
 				acct_id = getattr(org, 'stripe_connect_account_id', None)
-				if acct_id:
+				if acct_id and is_owner_for_org:
 					secret = str(getattr(settings, 'STRIPE_SECRET_KEY', '') or '')
 					is_test = secret.startswith('sk_test')
 					base = 'https://dashboard.stripe.com/test/connect/accounts/' if is_test else 'https://dashboard.stripe.com/connect/accounts/'
@@ -330,6 +330,9 @@ def profile_view(request):
 						stripe_express_dashboard_url = reverse('billing:stripe_express_dashboard', kwargs={'org_slug': org.slug})
 					except Exception:
 						stripe_express_dashboard_url = None
+				else:
+					stripe_connected_account_url = None
+					stripe_express_dashboard_url = None
 			except Exception:
 				stripe_connected_account_url = None
 				stripe_express_dashboard_url = None
