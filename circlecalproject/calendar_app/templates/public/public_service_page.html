@@ -446,7 +446,7 @@
   {% if services or service %}
     {% if team_member_filter_enabled %}
       <div class="service-dropdown-row" style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:10px; position:relative; z-index:21; flex-wrap:wrap;">
-        <label id="mainTeamMemberLabel" for="mainTeamPartnerSelect" class="font-medium text-gray-700">Choose member:</label>
+        <label id="mainTeamMemberLabel" for="mainTeamPartnerSelect" class="font-medium text-gray-700">Team Member:</label>
         <div id="mainTeamMembersDisplay" class="cc-chip-wrap" aria-live="polite"></div>
         <div id="mainTeamPartnerWrap" style="display:none; align-items:center; gap:8px; flex:1; min-width:220px;">
           <label id="mainTeamPartnerLabel" for="mainTeamPartnerSelect" class="font-medium text-gray-700">With:</label>
@@ -1127,6 +1127,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   let selectedTeamMembers = [];
   let selectedOtherServicesOnly = false;
+  let _ccSyncingServiceSelect = false;
 
   function _ccAllTeamMemberIds() {
     return Object.keys(TEAM_MEMBER_LABEL_BY_ID || {});
@@ -1173,6 +1174,30 @@ document.addEventListener("DOMContentLoaded", async function () {
       return serviceOptionsMaster.map((x) => x.value);
     }
     return Array.from(_ccCurrentAllowedSetFromSelectedMembers());
+  }
+
+  function _ccAssignedMemberIdsForServiceSlug(slug) {
+    const serviceSlug = String(slug || '');
+    if (!serviceSlug) return [];
+    const out = [];
+    for (const mid of _ccAllTeamMemberIds()) {
+      if (_ccServiceSetForMember(mid).has(serviceSlug)) out.push(String(mid));
+    }
+    out.sort((a, b) => {
+      const la = String(TEAM_MEMBER_LABEL_BY_ID[a] || a).toLowerCase();
+      const lb = String(TEAM_MEMBER_LABEL_BY_ID[b] || b).toLowerCase();
+      return la.localeCompare(lb);
+    });
+    return out;
+  }
+
+  function _ccAutoPopulateMembersFromSelectedService(serviceSlug) {
+    if (!TEAM_MEMBER_FILTER_ENABLED) return;
+    if (selectedOtherServicesOnly || selectedTeamMembers.length > 0) return;
+    const assignedIds = _ccAssignedMemberIdsForServiceSlug(serviceSlug);
+    if (!assignedIds.length) return;
+    selectedTeamMembers = assignedIds;
+    _ccRefreshTeamFilteringUi();
   }
 
   function _ccCandidateMembersForAlsoWith() {
@@ -1254,6 +1279,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (!mainTeamPartnerWrap || !mainTeamPartnerSelect || !mainTeamPartnerLabel) return;
     const candidates = _ccCandidateMembersForAlsoWith();
 
+    // If a member is already selected and there are no collaborator options,
+    // hide the secondary selector (With/Also with + dropdown).
     if (!selectedOtherServicesOnly && selectedTeamMembers.length > 0 && !candidates.length) {
       mainTeamPartnerWrap.style.display = 'none';
       return;
@@ -1274,7 +1301,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     mainTeamPartnerSelect.appendChild(base);
     mainTeamPartnerSelect.disabled = false;
 
-    if (selectedOtherServicesOnly || !selectedTeamMembers.length) {
+    if (selectedOtherServicesOnly || !selectedTeamMembers.length || !candidates.length) {
       const allOpt = document.createElement('option');
       allOpt.value = '__all__';
       allOpt.textContent = 'All team members';
@@ -1293,7 +1320,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       mainTeamPartnerSelect.appendChild(o);
     }
 
-    if (selectedOtherServicesOnly || !selectedTeamMembers.length) {
+    if (selectedOtherServicesOnly || !selectedTeamMembers.length || !candidates.length) {
       const otherOpt = document.createElement('option');
       otherOpt.value = '__other__';
       otherOpt.textContent = 'Other services (unassigned)';
@@ -1304,7 +1331,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   function _ccRefreshTeamFilteringUi() {
     if (mainTeamMemberLabel) {
       const count = selectedTeamMembers.length;
-      mainTeamMemberLabel.textContent = (count >= 2 || selectedOtherServicesOnly) ? 'Choose members:' : 'Choose member:';
+      mainTeamMemberLabel.textContent = (count >= 2 || selectedOtherServicesOnly) ? 'Team Members:' : 'Team Member:';
     }
     _ccRenderTeamMemberChips();
     _ccRefreshAlsoWithSelect();
@@ -1352,7 +1379,12 @@ document.addEventListener("DOMContentLoaded", async function () {
       mainServiceSelectForCalendar.value = next;
       serviceSelect.value = next;
       window.selectedServiceSlug = next;
-      mainServiceSelectForCalendar.dispatchEvent(new Event('change', { bubbles: true }));
+      _ccSyncingServiceSelect = true;
+      try {
+        mainServiceSelectForCalendar.dispatchEvent(new Event('change', { bubbles: true }));
+      } finally {
+        _ccSyncingServiceSelect = false;
+      }
     } else {
       window.selectedServiceSlug = '';
       try {
@@ -2566,9 +2598,15 @@ document.addEventListener("DOMContentLoaded", async function () {
   if (mainServiceSelect) {
     mainServiceSelect.addEventListener('change', function (e) {
       window.selectedServiceSlug = e.target.value;
+      if (!_ccSyncingServiceSelect) {
+        _ccAutoPopulateMembersFromSelectedService(e.target.value);
+      }
       // Always re-render current month/year for the newly selected service.
       generateCalendar(currentMonth, currentYear);
     });
+
+    // Team plan: if a service is selected before any member, auto-fill assigned members.
+    _ccAutoPopulateMembersFromSelectedService(mainServiceSelect.value);
   }
 
   // No service selection impacts availability at this stage; service is chosen in the booking form
