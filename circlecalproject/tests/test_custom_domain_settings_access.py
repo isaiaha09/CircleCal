@@ -8,7 +8,7 @@ from accounts.models import Business, Membership
 from billing.models import Plan, Subscription
 
 
-class TestCustomDomainSettingsAccess(TestCase):
+class TestHostedSubdomainSettingsAccess(TestCase):
     def setUp(self):
         User = get_user_model()
         self.user = User.objects.create_user(username=f'u{uuid.uuid4().hex[:8]}', password='pass')
@@ -48,7 +48,7 @@ class TestCustomDomainSettingsAccess(TestCase):
         self.assertNotContains(r, f'https://{self.org.slug}.circlecal.app')
         self.assertContains(r, 'Purchase Booking Flow Bundle')
 
-    def test_remove_domain_works_without_custom_domain_addon(self):
+    def test_remove_domain_action_is_disabled_without_custom_domain_addon(self):
         self.org.custom_domain = 'booking.coachalvarez44.com'
         self.org.custom_domain_verified = True
         self.org.custom_domain_verification_token = 'tok123'
@@ -57,8 +57,9 @@ class TestCustomDomainSettingsAccess(TestCase):
         url = reverse('calendar_app:org_custom_domain_settings', kwargs={'org_slug': self.org.slug})
         r = self.client.post(url, {'action': 'remove_domain'}, follow=True)
         self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Branded custom-domain management is currently disabled')
 
         self.org.refresh_from_db()
-        self.assertIsNone(self.org.custom_domain)
-        self.assertFalse(self.org.custom_domain_verified)
-        self.assertIsNone(self.org.custom_domain_verification_token)
+        self.assertEqual(self.org.custom_domain, 'booking.coachalvarez44.com')
+        self.assertTrue(self.org.custom_domain_verified)
+        self.assertEqual(self.org.custom_domain_verification_token, 'tok123')
