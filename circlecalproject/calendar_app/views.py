@@ -4734,7 +4734,7 @@ def org_refund_settings(request, org_slug):
 @require_http_methods(["GET", "POST"])
 @require_roles(["owner"])
 def org_custom_domain_settings(request, org_slug):
-    """Allow eligible orgs to verify and use a customer-owned booking domain."""
+    """Show hosted subdomain/embed settings for booking flow bundle users."""
     org = get_object_or_404(Organization, slug=org_slug)
 
     membership = Membership.objects.filter(user=request.user, organization=org, is_active=True).first()
@@ -4765,32 +4765,7 @@ def org_custom_domain_settings(request, org_slug):
         can_purchase_booking_flow_bundle = False
         booking_flow_bundle_enabled = False
 
-    import secrets
-    from django.utils import timezone
-
-    from calendar_app.render_api import (
-        RenderApiError,
-        ensure_custom_domain_attached,
-        get_render_config,
-        delete_custom_domain,
-        log_auth_diagnostics,
-        log_config_presence,
-    )
-
-    from calendar_app.cloudflare_api import (
-        delete_custom_hostname,
-        find_custom_hostname_id_by_hostname,
-        get_cloudflare_config,
-    )
-    from calendar_app.custom_domain_cloudflare import poll_custom_hostname_until_active, sync_custom_hostname
-
-    def _normalize_domain(raw: str) -> str:
-        d = (raw or '').strip()
-        d = d.replace('https://', '').replace('http://', '').strip()
-        d = d.split('/', 1)[0].strip()
-        d = d.split(':', 1)[0].strip()
-        return d.lower()
-
+    _DEFAULT_CUSTOM_DOMAIN_PREFIX = 'booking'
     _ALLOWED_CUSTOM_DOMAIN_PREFIXES = {
         'booking',
         'schedule',
@@ -4800,108 +4775,6 @@ def org_custom_domain_settings(request, org_slug):
         'meeting',
         'call',
     }
-
-    _DEFAULT_CUSTOM_DOMAIN_PREFIX = 'booking'
-
-    def _is_valid_hostname(hostname: str) -> bool:
-        """Validate a DNS hostname (ASCII only).
-
-        We intentionally keep this strict: only letters, digits, and hyphens in
-        labels; labels must not start/end with hyphens.
-        """
-        try:
-            import re
-
-            h = (hostname or '').strip().lower()
-            if not h or len(h) > 253:
-                return False
-            if h.endswith('.'):
-                h = h[:-1]
-            if not h or '..' in h:
-                return False
-
-            labels = h.split('.')
-            if len(labels) < 2:
-                return False
-            label_re = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$', re.IGNORECASE)
-            for lb in labels:
-                if not lb or len(lb) > 63:
-                    return False
-                if not label_re.match(lb):
-                    return False
-            return True
-        except Exception:
-            return False
-
-    def _validate_custom_domain(domain: str) -> tuple[bool, str]:
-        d = (domain or '').strip().lower().rstrip('.')
-        if not d:
-            return False, 'Enter a domain like booking.yoursite.com'
-        if not _is_valid_hostname(d):
-            return False, 'Enter a valid domain like booking.yoursite.com'
-
-        parts = d.split('.')
-        prefix = parts[0]
-        remainder = '.'.join(parts[1:])
-
-        if prefix not in _ALLOWED_CUSTOM_DOMAIN_PREFIXES:
-            allowed = ', '.join([f"{p}." for p in sorted(_ALLOWED_CUSTOM_DOMAIN_PREFIXES)])
-            return False, f"Booking subdomain must start with one of: {allowed}"
-
-        # Block apex domains and two-label domains like booking.com.
-        if '.' not in remainder:
-            return False, 'Booking URL must be a subdomain like booking.yoursite.com (apex/root domains are not allowed).'
-
-        return True, ''
-
-    def _check_txt(domain: str, token: str) -> bool:
-        """Check TXT record _circlecal-verify.<domain> contains token.
-
-        Uses the system resolver first, then falls back to public resolvers.
-        """
-        try:
-            import dns.resolver
-
-            qname = f"_circlecal-verify.{domain}."
-            resolver = dns.resolver.Resolver(configure=True)
-
-            def _matches(answers) -> bool:
-                for rdata in answers:
-                    try:
-                        # dnspython may expose bytes in rdata.strings
-                        parts = getattr(rdata, 'strings', None)
-                        if parts:
-                            value = b''.join(parts).decode('utf-8', errors='ignore')
-                        else:
-                            value = str(rdata).strip('"')
-                        if token and token in (value or ''):
-                            return True
-                    except Exception:
-                        continue
-                return False
-
-            # Try: system DNS, then Cloudflare+Google.
-            for nameservers in (None, ['1.1.1.1', '8.8.8.8']):
-                try:
-                    if nameservers is not None:
-                        resolver.nameservers = nameservers
-                    answers = resolver.resolve(qname, 'TXT', lifetime=5)
-                    if _matches(answers):
-                        return True
-                except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.resolver.Timeout):
-                    continue
-                except Exception:
-                    continue
-
-            return False
-        except Exception:
-            try:
-                import logging
-
-                logging.getLogger(__name__).exception('Subdomain TXT verification failed unexpectedly')
-            except Exception:
-                pass
-            return False
 
     # Optional return state from legacy checkout flow.
     try:
@@ -4931,246 +4804,15 @@ def org_custom_domain_settings(request, org_slug):
     if request.method == "POST":
         action = (request.POST.get('action') or '').strip()
 
-        if action in {'set_domain', 'verify_domain'} and not can_use_custom_domain:
-            messages.error(request, 'Booking Flow Bundle is required. It is available on active paid subscriptions and unavailable during trial.')
-            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-        if action == 'set_domain':
-            # UI supports either:
-            # - legacy single input: custom_domain=booking.yoursite.com
-            # - new split inputs: custom_domain_prefix=booking, custom_domain_root=yoursite.com
-            raw_prefix = (request.POST.get('custom_domain_prefix') or '').strip().lower()
-            raw_root = (request.POST.get('custom_domain_root') or '').strip()
-            legacy_full = (request.POST.get('custom_domain') or '').strip()
-
-            if raw_root:
-                # Normalize root similarly to full domain (strip scheme/paths/ports)
-                root = _normalize_domain(raw_root).lstrip('.')
-                prefix = raw_prefix or _DEFAULT_CUSTOM_DOMAIN_PREFIX
-                new_domain = f"{prefix}.{root}" if root else ''
-            else:
-                new_domain = _normalize_domain(legacy_full)
-
-            if not new_domain:
-                messages.error(request, 'Enter a domain like booking.yoursite.com')
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            ok, err = _validate_custom_domain(new_domain)
-            if not ok:
-                messages.error(request, err)
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            org.custom_domain = new_domain
-            org.custom_domain_verified = False
-            org.custom_domain_verified_at = None
-            if not org.custom_domain_verification_token:
-                org.custom_domain_verification_token = secrets.token_urlsafe(16)
-            org.custom_domain_cloudflare_id = None
-            org.custom_domain_cloudflare_ssl_status = None
-            org.custom_domain_cloudflare_dcv_records = []
-            org.custom_domain_cloudflare_last_checked_at = None
-            org.custom_domain_cloudflare_last_error = None
-            try:
-                org.save(update_fields=[
-                    'custom_domain',
-                    'custom_domain_verified',
-                    'custom_domain_verified_at',
-                    'custom_domain_verification_token',
-                    'custom_domain_cloudflare_id',
-                    'custom_domain_cloudflare_ssl_status',
-                    'custom_domain_cloudflare_dcv_records',
-                    'custom_domain_cloudflare_last_checked_at',
-                    'custom_domain_cloudflare_last_error',
-                ])
-                cf_sync = sync_custom_hostname(org, create_if_missing=True)
-                if cf_sync.configured:
-                    if cf_sync.error:
-                        messages.warning(
-                            request,
-                            'Domain saved, but Cloudflare provisioning could not be started automatically yet. '
-                            f'Try Verify in a minute. ({cf_sync.error})',
-                        )
-                    else:
-                        messages.success(request, 'Domain saved and Cloudflare provisioning started. Add the DNS records shown below, then click Verify.')
-                else:
-                    messages.success(request, 'Domain saved. Add the TXT record and click Verify.')
-            except Exception:
-                messages.error(request, 'Could not save domain. It may already be in use.')
-            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-        if action == 'verify_domain':
-            domain = (org.custom_domain or '').strip().lower()
-            token = (org.custom_domain_verification_token or '').strip()
-            if not domain or not token:
-                messages.error(request, 'Set a domain first.')
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            try:
-                import os
-
-                cf_token_present = bool((os.getenv('CLOUDFLARE_API_TOKEN') or os.getenv('CF_API_TOKEN') or '').strip())
-                cf_zone_present = bool((os.getenv('CLOUDFLARE_ZONE_ID') or os.getenv('CF_ZONE_ID') or '').strip())
-            except Exception:
-                cf_token_present = False
-                cf_zone_present = False
-
-            # If Cloudflare vars are partially configured, do not silently fall
-            # back to legacy Render attach. Surface the real configuration issue.
-            if cf_token_present != cf_zone_present:
-                messages.error(
-                    request,
-                    'Cloudflare subdomain config is incomplete on the server. '
-                    'Set both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID, then click Verify again.',
-                )
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            cf_cfg = get_cloudflare_config()
-            if cf_cfg:
-                # Logs-only diagnostics to help debug environment/permission issues.
-                try:
-                    from calendar_app.cloudflare_api import log_api_check, log_config_presence
-
-                    log_config_presence()
-                    log_api_check(cf_cfg)
-                except Exception:
-                    pass
-
-                poll_result = poll_custom_hostname_until_active(
-                    org,
-                    interval_seconds=30,
-                    max_attempts=4,
-                    create_if_missing=True,
-                )
-                if poll_result.active:
-                    messages.success(request, 'Domain is live! SSL status is active and bookings are served on your booking subdomain.')
-                elif poll_result.error:
-                    messages.warning(request, f'Domain status check ran, but Cloudflare returned an error: {poll_result.error}')
-                else:
-                    status_label = poll_result.ssl_status or 'pending_validation'
-                    messages.info(request, f'Domain status is {status_label}. Keep DNS in place; CircleCal will continue polling until SSL is active.')
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            # TXT verification requires dnspython in the runtime environment.
-            # If it's missing, fail with a clear message (otherwise users see a
-            # confusing "TXT record not found" error even when DNS is correct).
-            try:
-                import dns.resolver  # noqa: F401
-            except Exception:
-                messages.error(
-                    request,
-                    'DNS verification is temporarily unavailable on the server. Please contact support if this persists.',
-                )
-                return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-            ok = _check_txt(domain, token)
-            if ok:
-                org.custom_domain_verified = True
-                org.custom_domain_verified_at = timezone.now()
-                org.save(update_fields=['custom_domain_verified', 'custom_domain_verified_at'])
-                # Fallback: legacy Render integration (optional)
-                cfg = get_render_config()
-                if cfg:
-                    try:
-                        # Logs-only: show whether env vars look present on the running instance.
-                        log_config_presence()
-                        # Logs-only: helps distinguish invalid creds (401) from other failures.
-                        log_auth_diagnostics(cfg)
-                        ensure_custom_domain_attached(cfg, domain)
-                        messages.success(request, 'Domain verified! HTTPS is now being provisioned for this domain (this can take a few minutes).')
-                    except RenderApiError as exc:
-                        # Keep CircleCal verification successful even if provider API fails.
-                        messages.success(request, 'Domain verified!')
-                        try:
-                            import logging
-
-                            logging.getLogger(__name__).warning(
-                                'Render auto-attach failed for subdomain %s (status=%s, payload=%s)',
-                                domain,
-                                getattr(exc, 'status_code', None),
-                                getattr(exc, 'payload', None),
-                            )
-                        except Exception:
-                            pass
-
-                        try:
-                            print(
-                                'CC_RENDER_AUTO_ATTACH_FAIL '
-                                f'domain={domain} status={getattr(exc, "status_code", None)} '
-                                f'payload={getattr(exc, "payload", None)!r}'
-                            )
-                        except Exception:
-                            pass
-
-                        messages.warning(
-                            request,
-                            'Automatic HTTPS provisioning could not be started due to a server configuration issue. Please contact support.',
-                        )
-                    except Exception:
-                        messages.success(request, 'Domain verified!')
-                        messages.warning(request, 'Automatic HTTPS provisioning could not be started due to an unexpected error.')
-                else:
-                    messages.success(request, 'Domain verified!')
-                    messages.warning(
-                        request,
-                        'Next step: CircleCal will now provision HTTPS for this domain. '
-                        'If it does not start working within 10–20 minutes, contact support.',
-                    )
-            else:
-                messages.error(request, 'TXT record not found yet. DNS can take a few minutes to propagate.')
-            return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
-
-        if action == 'remove_domain':
-            prev_domain = (org.custom_domain or '').strip().lower()
-
-            # Best-effort provider cleanup (do not block removal).
-            try:
-                cf_cfg = get_cloudflare_config()
-                if cf_cfg and prev_domain:
-                    try:
-                        cid = (getattr(org, 'custom_domain_cloudflare_id', None) or '').strip() or None
-                        if not cid:
-                            cid = find_custom_hostname_id_by_hostname(cf_cfg, prev_domain)
-                        if cid:
-                            delete_custom_hostname(cf_cfg, cid)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            try:
-                cfg = get_render_config()
-                if cfg and prev_domain:
-                    try:
-                        delete_custom_domain(cfg, prev_domain)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            org.custom_domain = None
-            org.custom_domain_verified = False
-            org.custom_domain_verified_at = None
-            org.custom_domain_verification_token = None
-            try:
-                org.custom_domain_cloudflare_id = None
-                org.custom_domain_cloudflare_ssl_status = None
-                org.custom_domain_cloudflare_dcv_records = []
-                org.custom_domain_cloudflare_last_checked_at = None
-                org.custom_domain_cloudflare_last_error = None
-            except Exception:
-                pass
-            org.save(update_fields=[
-                'custom_domain',
-                'custom_domain_verified',
-                'custom_domain_verified_at',
-                'custom_domain_verification_token',
-                'custom_domain_cloudflare_id',
-                'custom_domain_cloudflare_ssl_status',
-                'custom_domain_cloudflare_dcv_records',
-                'custom_domain_cloudflare_last_checked_at',
-                'custom_domain_cloudflare_last_error',
-            ])
-            messages.success(request, 'Booking subdomain removed.')
+        # Legacy branded-domain actions were backed by Cloudflare custom-hostname
+        # APIs. They are intentionally disabled while keeping hosted subdomain and
+        # embed bundle settings active.
+        if action in {'set_domain', 'verify_domain', 'remove_domain'}:
+            messages.info(
+                request,
+                'Branded custom-domain management is currently disabled. '
+                'Use the CircleCal hosted subdomain and embed options on this page.',
+            )
             return redirect('calendar_app:org_custom_domain_settings', org_slug=org.slug)
 
 
@@ -5194,67 +4836,8 @@ def org_custom_domain_settings(request, org_slug):
             txt_name_host = None
             cname_host = None
 
-    # Prefer Cloudflare-provided DCV instructions if present.
-    if isinstance(cf_dcv_records, list) and cf_dcv_records:
-        for row in cf_dcv_records:
-            if not isinstance(row, dict):
-                continue
-            row_type = (row.get('type') or '').strip().lower()
-            row_name = (row.get('name') or '').strip()
-            row_value = (row.get('value') or '').strip()
-
-            if row_type == 'txt' and row_name and row_value and not (txt_name and txt_value):
-                txt_name = row_name
-                txt_value = row_value
-                try:
-                    cd = (org.custom_domain or '').strip().lower().rstrip('.')
-                    if cd and row_name.lower().endswith(f".{cd}"):
-                        txt_name_host = row_name[: -(len(cd) + 1)]
-                except Exception:
-                    pass
-
-            if row_type == 'cname' and row_value and not cname_target:
-                cname_target = row_value
-                if row_name:
-                    try:
-                        cd = (org.custom_domain or '').strip().lower().rstrip('.')
-                        rn = row_name.strip().lower().rstrip('.')
-                        if cd and rn == cd:
-                            cname_host = cd.split('.', 1)[0]
-                        elif cd and rn.endswith(f".{cd}"):
-                            cname_host = rn[: -(len(cd) + 1)]
-                        elif rn:
-                            cname_host = rn
-                    except Exception:
-                        pass
-
+    # Keep legacy context values for template compatibility.
     render_enabled = False
-    try:
-        cfg = get_render_config()
-        render_enabled = bool(cfg)
-
-        # Prefer an explicit CNAME target for customer setup instructions.
-        # This keeps the UI provider-agnostic (customers don't need Render).
-        try:
-            import os
-            from urllib.parse import urlparse
-
-            raw = (os.getenv('CUSTOM_DOMAIN_CNAME_TARGET') or '').strip()
-            if raw:
-                if '://' in raw:
-                    host = (urlparse(raw).hostname or '').strip()
-                else:
-                    host = raw
-                cname_target = host.lower() if host else cname_target
-        except Exception:
-            pass
-
-        # Final fallback so the UI always shows something concrete.
-        if not cname_target:
-            cname_target = 'circlecalbookingcalendarapp.onrender.com'
-    except Exception:
-        # Render API is optional; keep the page working even if it errors.
-        render_enabled = bool(get_render_config())
 
     # Pre-fill split inputs for the form.
     custom_domain_prefix = _DEFAULT_CUSTOM_DOMAIN_PREFIX
