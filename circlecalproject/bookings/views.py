@@ -1354,7 +1354,7 @@ def _has_overlap(org, start_dt, end_dt, service=None, resource_id: Optional[int]
         organization=org,
         is_blocking=False,
         start__lt=end_utc + buf_after_td,
-    )
+    ).exclude(service__isnull=True)
 
     # Team-plan public calendars are service-independent unless a specific
     # facility resource is being checked. This keeps submit-time overlap checks
