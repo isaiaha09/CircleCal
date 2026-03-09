@@ -16,6 +16,33 @@ from bookings.models import (
 )
 
 
+def _build_calendar_event_payload(booking) -> tuple[str, str, str]:
+    """Return title, details, and location strings for calendar links."""
+    title = (getattr(getattr(booking, 'service', None), 'name', None) or getattr(booking, 'title', 'Booking') or 'Booking').strip()
+
+    org_name = (getattr(getattr(booking, 'organization', None), 'name', '') or '').strip()
+    public_ref = (getattr(booking, 'public_ref', '') or '').strip()
+
+    service = getattr(booking, 'service', None)
+    location = ''
+    try:
+        location = (getattr(service, 'location_display', '') or '').strip()
+    except Exception:
+        location = ''
+    if not location:
+        location = org_name
+
+    detail_lines = []
+    if org_name:
+        detail_lines.append(f"Booking at {org_name}")
+    if location and location != org_name:
+        detail_lines.append(f"Location: {location}")
+    if public_ref:
+        detail_lines.append(f"Ref: {public_ref}")
+
+    return title, "\n".join(detail_lines), location
+
+
 def _abs_url(url: str) -> str:
     """Return an absolute URL suitable for email HTML."""
     try:
@@ -215,30 +242,38 @@ def _build_group_booking_context(booking) -> dict:
 def _build_calendar_quick_links(booking) -> dict:
     """Build Outlook Web + Google Calendar deep links for a booking."""
     try:
-        dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        title, details, location = _build_calendar_event_payload(booking)
+        org_tz_name = (getattr(getattr(booking, 'organization', None), 'timezone', '') or '').strip() or getattr(settings, 'TIME_ZONE', 'UTC')
 
-        title = (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking'))
-        org_name = getattr(booking.organization, 'name', '')
-        ref = getattr(booking, 'public_ref', '')
+        start_utc = booking.start.astimezone(datetime.timezone.utc)
+        end_utc = booking.end.astimezone(datetime.timezone.utc)
+        dtstart = start_utc.strftime('%Y%m%dT%H%M%SZ')
+        dtend = end_utc.strftime('%Y%m%dT%H%M%SZ')
 
-        gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
+        # Use the TEMPLATE render route because Google preserves it across the
+        # login redirect, while /eventedit can drop users on the calendar home.
+        gcal_base = 'https://calendar.google.com/calendar/render'
         g_params = {
+            'action': 'TEMPLATE',
             'text': title,
             'dates': f"{dtstart}/{dtend}",
-            'details': f"Booking at {org_name}\\nRef: {ref}",
-            'location': org_name,
+            'details': details,
+            'location': location,
+            'ctz': org_tz_name,
         }
-        google_calendar_url = gcal_base + '&' + urlencode(g_params)
+        google_calendar_url = gcal_base + '?' + urlencode(g_params)
 
-        outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
+        # Use the Microsoft 365 deeplink so both Outlook.com and work/school
+        # accounts land on the event compose screen instead of the calendar home page.
+        outlook_base = 'https://outlook.office.com/calendar/0/deeplink/compose'
         outlook_params = {
+            'path': '/calendar/action/compose',
             'rru': 'addevent',
             'subject': title,
-            'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'body': f"Booking at {org_name}\\nRef: {ref}",
-            'location': org_name,
+            'startdt': start_utc.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'enddt': end_utc.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'body': details,
+            'location': location,
         }
         outlook_web_url = outlook_base + '?' + urlencode(outlook_params)
         return {
@@ -852,36 +887,11 @@ def send_owner_booking_notification(booking):
         token = signer.sign(str(booking.id))
         base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
         context['ics_url'] = f"{base_url}{reverse('bookings:booking_ics', args=[booking.id])}?token={quote(token)}"
-        try:
-            dtstart = booking.start.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-            dtend = booking.end.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-            # Google Calendar link
-            gcal_base = 'https://www.google.com/calendar/render?action=TEMPLATE'
-            g_params = {
-                'text': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
-                'dates': f"{dtstart}/{dtend}",
-                'details': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
-                'location': getattr(booking.organization, 'name', ''),
-            }
-            context['google_calendar_url'] = gcal_base + '&' + urlencode(g_params)
-
-            # Outlook Web deeplink
-            outlook_base = 'https://outlook.live.com/calendar/0/deeplink/compose'
-            outlook_params = {
-                'rru': 'addevent',
-                'subject': (getattr(booking.service, 'name', None) or getattr(booking, 'title', 'Booking')),
-                'startdt': booking.start.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                'enddt': booking.end.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                'body': f"Booking at {getattr(booking.organization, 'name', '')}\\nRef: {getattr(booking, 'public_ref', '')}",
-                'location': getattr(booking.organization, 'name', ''),
-            }
-            context['outlook_web_url'] = outlook_base + '?' + urlencode(outlook_params)
-        except Exception:
-            context['google_calendar_url'] = ''
-            context['outlook_web_url'] = ''
+        context.update(_build_calendar_quick_links(booking))
     except Exception:
         context['ics_url'] = ''
         context['google_calendar_url'] = ''
+        context['outlook_web_url'] = ''
 
     logger = logging.getLogger(__name__)
     html_content = render_to_string('bookings/emails/booking_owner_notification.html', context)

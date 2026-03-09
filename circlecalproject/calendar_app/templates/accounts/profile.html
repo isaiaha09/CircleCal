@@ -989,6 +989,14 @@
     .timezone-select select#id_timezone:focus,
     .timezone-select select[name="timezone"]:focus { box-shadow: 0 10px 30px rgba(79,70,229,0.12); border-color:#6366f1; }
 
+    .cropper-container,
+    .cropper-canvas,
+    .cropper-drag-box,
+    .cropper-face,
+    .cropper-view-box {
+      touch-action: none;
+    }
+
     /* Mobile: keep everything inside the ~95vw container */
     @media (max-width: 640px) {
       /* Let the outer wrapper control width; form should simply fill it. */
@@ -1195,9 +1203,9 @@
         setTimeout(() => {
           cropper = new Cropper(imgEl, {
             aspectRatio: 1,
-            // Keep the crop strictly within the image canvas (prevents empty areas)
-            viewMode: 2,
-            // Fixed crop circle that fills the modal; user moves/zooms the image behind it.
+            // Keep the crop inside the image canvas while leaving some room so
+            // panning works without the user having to zoom first.
+            viewMode: 1,
             dragMode: 'move',
             cropBoxMovable: false,
             cropBoxResizable: false,
@@ -1205,9 +1213,12 @@
             guides: false,
             center: true,
             background: false,
-            autoCropArea: 1,
+            autoCropArea: 0.86,
             movable: true,
             zoomable: true,
+            zoomOnTouch: true,
+            zoomOnWheel: true,
+            wheelZoomRatio: 0.08,
             scalable: false,
             rotatable: false,
             responsive: true,
@@ -1218,15 +1229,17 @@
               if (face) face.style.borderRadius = '9999px';
               if (viewBox) viewBox.style.borderRadius = '9999px';
 
-              // Ensure the crop box starts as large as possible (full-bleed)
+              // Start slightly inset so the image can be repositioned right away.
               try {
                 const container = cropper.getContainerData();
+                const cropSize = Math.max(180, Math.floor(Math.min(container.width, container.height) * 0.86));
                 cropper.setCropBoxData({
-                  left: 0,
-                  top: 0,
-                  width: container.width,
-                  height: container.height,
+                  left: Math.max(0, (container.width - cropSize) / 2),
+                  top: Math.max(0, (container.height - cropSize) / 2),
+                  width: cropSize,
+                  height: cropSize,
                 });
+                cropper.setDragMode('move');
               } catch (e) {}
             }
           });
