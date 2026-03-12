@@ -556,7 +556,7 @@
           <div class="grid sm:grid-cols-2 gap-6">
             <div>
               <label class="block text-sm font-medium text-gray-700">Duration (minutes)</label>
-              <input name="duration" type="number" min="1" value="60"
+              <input name="duration" type="number" min="1" value="{{ request.POST.duration|default:60 }}"
                 class="cc-field mt-1 w-full" />
               <p class="mt-2 text-xs text-gray-500">Total time blocked per booking.</p>
             </div>
@@ -564,7 +564,7 @@
               <label class="block text-sm font-medium text-gray-700">Price (USD)</label>
               <div class="relative mt-1">
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm select-none">$</span>
-                <input name="price" type="number" step="0.01" value="0" min="0"
+                <input name="price" type="number" step="0.01" value="{{ request.POST.price|default:0 }}" min="0"
                   class="cc-field cc-has-prefix w-full" />
               </div>
               <p class="mt-2 text-xs text-gray-500">Set to 0 for free / included services.</p>
@@ -594,7 +594,7 @@
               <!-- Prep buffer removed: buffer_before is deprecated and not used by availability/overlap logic -->
               <label class="block text-sm font-medium text-gray-700">Buffer Time Post-Service Appointment (minutes)</label>
               <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}">
-                <input name="buffer_after" type="number" value="0" min="0" {% if not can_use_pro_team %}disabled{% endif %}
+                <input name="buffer_after" type="number" value="{{ request.POST.buffer_after|default:0 }}" min="0" {% if not can_use_pro_team %}disabled{% endif %}
                   class="cc-field mt-1 w-full" />
                 {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock data-cc-plan="pro" role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
               </div>
@@ -606,7 +606,7 @@
               <div class="mt-2">
                 <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
                   <label class="inline-flex items-center">
-                    <input type="checkbox" name="allow_ends_after_availability" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                    <input type="checkbox" name="allow_ends_after_availability" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if request.POST.allow_ends_after_availability %}checked{% endif %} {% if not can_use_pro_team %}disabled{% endif %}>
                     <span class="ml-2 text-sm text-gray-700">Allow clients to book a slot that starts inside availability even if the appointment ends after the availability window.</span>
                   </label>
                   {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock data-cc-plan="pro" role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
@@ -652,13 +652,13 @@
           <div class="mt-4 grid grid-cols-1 gap-3">
             <div>
               <label class="block text-sm font-medium text-gray-700">Client slot increment (minutes)</label>
-              <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="30" min="5" class="cc-field mt-1 w-40">
+              <input id="time_increment_minutes" name="time_increment_minutes" type="number" value="{{ request.POST.time_increment_minutes|default:30 }}" min="5" class="cc-field mt-1 w-40">
               <p class="mt-1 text-xs text-gray-500">This controls the visible client slot increment. When <em>Use fixed increments</em> is enabled, this value is ignored.</p>
             </div>
             <div>
               <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
                 <label class="inline-flex items-center">
-                  <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                  <input type="checkbox" name="use_fixed_increment" id="use_fixed_increment" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if request.POST.use_fixed_increment %}checked{% endif %} {% if not can_use_pro_team %}disabled{% endif %}>
                   <span class="ml-2 text-sm text-gray-700">Use fixed increments (service duration + buffer)</span>
                 </label>
                 {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock data-cc-plan="pro" role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
@@ -668,7 +668,7 @@
             <div>
               <div class="cc-adv-lock-wrap {% if not can_use_pro_team %}cc-adv-locked{% endif %}" style="display:inline-block;">
                 <label class="inline-flex items-center">
-                  <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if not can_use_pro_team %}disabled{% endif %}>
+                  <input type="checkbox" name="allow_squished_bookings" id="allow_squished_bookings" value="1" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" {% if request.POST.allow_squished_bookings %}checked{% endif %} {% if not can_use_pro_team %}disabled{% endif %}>
                   <span class="ml-2 text-sm text-gray-700">Allow squished bookings (permit slots that violate buffers)</span>
                 </label>
                 {% if not can_use_pro_team %}<div class="cc-adv-lock-overlay" data-cc-adv-lock data-cc-plan="pro" role="button" tabindex="0" aria-label="Upgrade required"></div>{% endif %}
@@ -677,6 +677,120 @@
             </div>
           </div>
         </div>
+
+        <script>
+          (function(){
+            function debounce(fn, wait){
+              let timeoutId = null;
+              return function(){
+                const args = arguments;
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(function(){ fn.apply(null, args); }, wait);
+              };
+            }
+
+            function syncCreateServiceAvailabilityUi(data){
+              try{
+                const editor = document.getElementById('svcAvailEditor');
+                window.__ccWeeklyServiceConstraints = {
+                  days: (data.days || []).map(function(day){
+                    return { remaining: (day && day.remaining) ? day.remaining : [] };
+                  })
+                };
+                if (!editor) return;
+
+                for (let ui = 0; ui < 7; ui++){
+                  const day = (data.days || [])[ui] || {};
+                  const allowedEmpty = !!day.allowed_empty;
+                  const allowedText = (day.allowed_ranges_text || '').trim();
+                  const labelEl = editor.querySelector('.cc-allowed-label[data-ui="' + ui + '"]');
+                  if (labelEl){
+                    labelEl.textContent = 'Allowed (client-facing): ' + (allowedText || '—');
+                  }
+
+                  const hidden = editor.querySelector('input.svc-avail-hidden[data-ui="' + ui + '"]');
+                  const meta = editor.querySelector('.cc-svc-day-meta[data-ui="' + ui + '"]');
+                  const hasSvc = !!(hidden && (hidden.value || '').trim());
+                  const hardLock = allowedEmpty && !hasSvc;
+                  const noRemaining = allowedEmpty && hasSvc;
+                  const card = hidden ? (hidden.closest('.border') || hidden.closest('div')) : null;
+                  if (card){
+                    card.classList.toggle('cc-svc-day-locked', hardLock);
+                  }
+                  if (meta){
+                    meta.setAttribute('data-allowed-empty', allowedEmpty ? '1' : '0');
+                    meta.setAttribute('data-hard-lock', hardLock ? '1' : '0');
+                    meta.setAttribute('data-no-remaining', noRemaining ? '1' : '0');
+                  }
+
+                  if (allowedEmpty && hidden && hasSvc){
+                    try {
+                      hidden.value = '';
+                      hidden.dispatchEvent(new Event('input', { bubbles: true }));
+                      hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                    } catch (e) { /* ignore */ }
+                  }
+                }
+              }catch(e){ /* ignore */ }
+            }
+
+            async function refreshCreateServiceAvailabilityConstraints(){
+              try{
+                const form = document.querySelector('form.cc-form');
+                if (!form) return;
+                const url = new URL("{% url 'calendar_app:service_availability_constraints' org.slug %}", window.location.origin);
+
+                form.querySelectorAll('input[name="assigned_members"]').forEach(function(el){
+                  const value = String(el.value || '').trim();
+                  if (value) url.searchParams.append('member_ids', value);
+                });
+
+                const durationEl = form.querySelector('input[name="duration"]');
+                const bufferAfterEl = form.querySelector('input[name="buffer_after"]');
+                const incrementEl = document.getElementById('time_increment_minutes');
+                const useFixedEl = document.getElementById('use_fixed_increment');
+                const squishedEl = document.getElementById('allow_squished_bookings');
+                const endsAfterEl = form.querySelector('input[name="allow_ends_after_availability"]');
+
+                if (durationEl) url.searchParams.set('duration', String(durationEl.value || ''));
+                url.searchParams.set('buffer_before', '0');
+                if (bufferAfterEl) url.searchParams.set('buffer_after', String(bufferAfterEl.value || '0'));
+                if (incrementEl) url.searchParams.set('time_increment_minutes', String(incrementEl.value || '30'));
+                url.searchParams.set('use_fixed_increment', (useFixedEl && useFixedEl.checked) ? '1' : '0');
+                url.searchParams.set('allow_squished_bookings', (squishedEl && squishedEl.checked) ? '1' : '0');
+                url.searchParams.set('allow_ends_after_availability', (endsAfterEl && endsAfterEl.checked) ? '1' : '0');
+
+                const resp = await fetch(url.toString(), { credentials: 'same-origin' });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                syncCreateServiceAvailabilityUi(data);
+              }catch(e){ /* ignore */ }
+            }
+
+            document.addEventListener('DOMContentLoaded', function(){
+              try{
+                window.ccRefreshCreateServiceAvailabilityConstraints = refreshCreateServiceAvailabilityConstraints;
+                const form = document.querySelector('form.cc-form');
+                if (!form) return;
+                const debouncedRefresh = debounce(refreshCreateServiceAvailabilityConstraints, 120);
+                [
+                  'input[name="duration"]',
+                  'input[name="buffer_after"]',
+                  '#time_increment_minutes',
+                  '#use_fixed_increment',
+                  '#allow_squished_bookings',
+                  'input[name="allow_ends_after_availability"]'
+                ].forEach(function(selector){
+                  const el = form.querySelector(selector);
+                  if (!el) return;
+                  el.addEventListener('input', debouncedRefresh);
+                  el.addEventListener('change', debouncedRefresh);
+                });
+                refreshCreateServiceAvailabilityConstraints();
+              }catch(e){ /* ignore */ }
+            });
+          })();
+        </script>
 
         <script>
           (function(){
@@ -854,71 +968,6 @@
                   }
                 }
 
-                async function refreshServiceAvailabilityConstraints(){
-                  try{
-                    const editor = document.getElementById('svcAvailEditor');
-
-                    const url = new URL("{% url 'calendar_app:service_availability_constraints' org.slug %}", window.location.origin);
-                    for (const id of selected){ url.searchParams.append('member_ids', String(id)); }
-
-                    const resp = await fetch(url.toString(), { credentials: 'same-origin' });
-                    if (!resp.ok) return;
-                    const data = await resp.json();
-
-                    try{
-                      window.__ccWeeklyServiceConstraints = { days: (data.days || []).map(function(d){ return { remaining: (d && d.remaining) ? d.remaining : [] }; }) };
-                    } catch(e){ /* ignore */ }
-
-                    if (!editor) return;
-                    for (let ui = 0; ui < 7; ui++){
-                      const day = (data.days || [])[ui] || {};
-                      const allowedEmpty = !!day.allowed_empty;
-                      const allowedText = (day.allowed_ranges_text || '').trim();
-
-                      const labelEl = editor.querySelector('.cc-allowed-label[data-ui="' + ui + '"]');
-                      if (labelEl){
-                        const shown = allowedText ? allowedText : '—';
-                        labelEl.textContent = 'Allowed (client-facing): ' + shown;
-                      }
-
-                      const hidden = editor.querySelector('input.svc-avail-hidden[data-ui="' + ui + '"]');
-                      const hasSvc = !!(hidden && (hidden.value || '').trim());
-
-                      const card = hidden ? (hidden.closest('.border') || hidden.closest('div')) : null;
-                      // If there is *no allowed time at all* for the selected assignees on this day,
-                      // force the day to Unavailable (prevents keeping stale ranges).
-                      const hardLock = allowedEmpty;
-                      if (card){
-                        card.classList.toggle('cc-svc-day-locked', hardLock);
-                      }
-
-                      if (allowedEmpty){
-                        try{
-                          if (hidden && hasSvc){
-                            hidden.value = '';
-                            try{ hidden.dispatchEvent(new Event('input', { bubbles: true })); }catch(e){}
-                            try{ hidden.dispatchEvent(new Event('change', { bubbles: true })); }catch(e){}
-                          }
-                          const dayEditor = editor.querySelector('.svc-day-editor[data-ui="' + ui + '"]');
-                          if (dayEditor){
-                            const cb = dayEditor.querySelector('input.svc-unavail');
-                            if (cb) cb.checked = true;
-                            const ranges = dayEditor.querySelector('.svc-ranges');
-                            if (ranges) ranges.innerHTML = '';
-                          }
-                        }catch(e){ /* ignore */ }
-                      }
-
-                      const meta = editor.querySelector('.cc-svc-day-meta[data-ui="' + ui + '"]');
-                      if (meta){
-                        meta.setAttribute('data-allowed-empty', allowedEmpty ? '1' : '0');
-                        meta.setAttribute('data-hard-lock', hardLock ? '1' : '0');
-                        meta.setAttribute('data-no-remaining', (allowedEmpty && hasSvc) ? '1' : '0');
-                      }
-                    }
-                  }catch(e){ /* ignore */ }
-                }
-
                 for (const it of list.querySelectorAll('.member-item')){
                   const id = it.getAttribute('data-id');
                   const indicator = it.querySelector('.select-indicator');
@@ -930,7 +979,7 @@
                         else { selected.add(id); indicator.textContent = '✓'; it.classList.add('bg-blue-50'); }
                       updateLabel();
                       syncHiddenInputs();
-                      refreshServiceAvailabilityConstraints();
+                      if (window.ccRefreshCreateServiceAvailabilityConstraints) window.ccRefreshCreateServiceAvailabilityConstraints();
                     });
                 }
 
@@ -972,7 +1021,7 @@
                       }
                       updateLabel();
                       syncHiddenInputs();
-                      refreshServiceAvailabilityConstraints();
+                      if (window.ccRefreshCreateServiceAvailabilityConstraints) window.ccRefreshCreateServiceAvailabilityConstraints();
                       e.stopPropagation();
                       e.preventDefault();
                     }
@@ -983,9 +1032,9 @@
                 syncHiddenInputs();
                 // Ensure the time picker constraints sync after the availability editor exists.
                 if (document.readyState === 'loading') {
-                  document.addEventListener('DOMContentLoaded', function(){ refreshServiceAvailabilityConstraints(); }, { once: true });
+                  document.addEventListener('DOMContentLoaded', function(){ if (window.ccRefreshCreateServiceAvailabilityConstraints) window.ccRefreshCreateServiceAvailabilityConstraints(); }, { once: true });
                 } else {
-                  refreshServiceAvailabilityConstraints();
+                  if (window.ccRefreshCreateServiceAvailabilityConstraints) window.ccRefreshCreateServiceAvailabilityConstraints();
                 }
               }catch(e){ console.warn('member dropdown failed', e); }
             })();

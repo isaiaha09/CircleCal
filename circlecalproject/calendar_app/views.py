@@ -1520,6 +1520,87 @@ def _service_schedule_signature(service):
         return (0, 0, 0, 0, False, False, False)
 
 
+def _coerce_schedule_signature_bool(value):
+    try:
+        if isinstance(value, bool):
+            return value
+        return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+    except Exception:
+        return False
+
+
+def _build_service_schedule_signature_from_payload(payload=None, *, defaults=None, current_service=None):
+    """Return a scheduling signature for a proposed service configuration.
+
+    This is primarily used during create-service flows where there is no saved
+    Service row yet, but we still need to decide whether the proposed service is
+    scheduling-compatible with existing services.
+    """
+    defaults = defaults or {}
+
+    def _fallback_int(key, hard_default):
+        if current_service is not None:
+            try:
+                return int(getattr(current_service, key, hard_default) or hard_default)
+            except Exception:
+                pass
+        try:
+            return int(defaults.get(key, hard_default) or hard_default)
+        except Exception:
+            return hard_default
+
+    def _fallback_bool(key, hard_default=False):
+        if current_service is not None:
+            try:
+                return bool(getattr(current_service, key, hard_default))
+            except Exception:
+                pass
+        try:
+            return bool(defaults.get(key, hard_default))
+        except Exception:
+            return hard_default
+
+    def _get_int(key, hard_default):
+        fallback = _fallback_int(key, hard_default)
+        if payload is None:
+            return fallback
+        try:
+            raw = payload.get(key, None)
+        except Exception:
+            raw = None
+        if raw in (None, ''):
+            return fallback
+        try:
+            return int(raw)
+        except Exception:
+            return fallback
+
+    def _get_bool(key, hard_default=False):
+        fallback = _fallback_bool(key, hard_default)
+        if payload is None:
+            return fallback
+        try:
+            has_key = key in payload
+        except Exception:
+            has_key = False
+        if not has_key:
+            return fallback
+        try:
+            return _coerce_schedule_signature_bool(payload.get(key, None))
+        except Exception:
+            return fallback
+
+    return (
+        _get_int('duration', 60),
+        _get_int('buffer_before', 0),
+        _get_int('buffer_after', 0),
+        _get_int('time_increment_minutes', 30),
+        _get_bool('use_fixed_increment', False),
+        _get_bool('allow_squished_bookings', False),
+        _get_bool('allow_ends_after_availability', False),
+    )
+
+
 def _effective_member_weekly_map(org, membership_id):
     """Return the member's effective weekly map (member-specific if present, else org defaults)."""
     try:
@@ -1682,7 +1763,7 @@ def _effective_common_weekly_map(org, membership_ids):
     return common
 
 
-def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, exclude_service_id=None):
+def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, exclude_service_id=None, proposed_signature=None):
     """Return UI weekly map for a shared/group service: common member availability minus members' other services.
 
     This is a *weekly partitioning* constraint. It subtracts other services' effective weekly maps
@@ -1709,16 +1790,14 @@ def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, ex
     except Exception:
         ex_id = None
 
-    my_sig = None
-    my_ts = None
+    my_sig = tuple(proposed_signature) if proposed_signature is not None else None
     if ex_id is not None:
         try:
             my_svc = Service.objects.filter(organization=org, id=ex_id).first()
             if my_svc is not None:
                 my_sig = _service_schedule_signature(my_svc)
-                my_ts = getattr(my_svc, 'signature_updated_at', None)
         except Exception:
-            my_sig, my_ts = None, None
+            my_sig = None
 
     # This helper is used for shared/group services (2+ assignees). In that context,
     # members' other services always reserve time regardless of signature compatibility
@@ -1809,7 +1888,7 @@ def _effective_common_weekly_map_minus_other_services(org, membership_ids, *, ex
     return common
 
 
-def _effective_org_weekly_map_minus_other_services(org, *, exclude_service_id=None, only_active=True):
+def _effective_org_weekly_map_minus_other_services(org, *, exclude_service_id=None, only_active=True, proposed_signature=None):
     """Return UI weekly map for Pro/solo org scope: org weekly availability minus other services.
 
     This is a weekly partitioning constraint for solo (non-team) plans.
@@ -1822,7 +1901,7 @@ def _effective_org_weekly_map_minus_other_services(org, *, exclude_service_id=No
     except Exception:
         ex_id = None
 
-    my_sig = None
+    my_sig = tuple(proposed_signature) if proposed_signature is not None else None
     my_ts = None
     if ex_id is not None:
         try:
@@ -4984,8 +5063,25 @@ def service_availability_constraints(request, org_slug):
     Query params:
       - member_ids: repeated, membership IDs
       - exclude_service_id: optional service id to exclude from partitioning
+      - duration, buffer_before, buffer_after, time_increment_minutes,
+        use_fixed_increment, allow_squished_bookings,
+        allow_ends_after_availability: proposed create/edit settings used to
+        determine scheduling compatibility before the service is saved
     """
     org = request.organization
+
+    proposed_signature = _build_service_schedule_signature_from_payload(
+        request.GET,
+        defaults={
+            'duration': 60,
+            'buffer_before': 0,
+            'buffer_after': 0,
+            'time_increment_minutes': 30,
+            'use_fixed_increment': False,
+            'allow_squished_bookings': False,
+            'allow_ends_after_availability': False,
+        },
+    )
 
     # Determine Team vs Pro/solo behavior.
     is_team_plan = False
@@ -5038,6 +5134,7 @@ def service_availability_constraints(request, org_slug):
                     org,
                     desired_assignee_ids,
                     exclude_service_id=exclude_service_id,
+                    proposed_signature=proposed_signature,
                 )
             else:
                 # Team product rule: no assignees => facility-owned service can be configured
@@ -5048,6 +5145,7 @@ def service_availability_constraints(request, org_slug):
                 allowed_map = _effective_org_weekly_map_minus_other_services(
                     org,
                     exclude_service_id=exclude_service_id,
+                    proposed_signature=proposed_signature,
                 )
             else:
                 allowed_map = org_map
@@ -6191,6 +6289,18 @@ def create_service(request, org_slug):
         # Build availability editor rows.
         org_map = _build_org_weekly_map(org)
         weekday_labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        proposed_signature = _build_service_schedule_signature_from_payload(
+            request.POST if request.method == 'POST' else None,
+            defaults={
+                'duration': 60,
+                'buffer_before': 0,
+                'buffer_after': 0,
+                'time_increment_minutes': 30,
+                'use_fixed_increment': False,
+                'allow_squished_bookings': False,
+                'allow_ends_after_availability': False,
+            },
+        )
 
         # For create: show remaining availability as guidance/constraints, but do NOT
         # auto-populate the service's weekly availability. New services should start
@@ -6221,6 +6331,7 @@ def create_service(request, org_slug):
                         org,
                         list(desired_assignee_ids),
                         exclude_service_id=None,
+                        proposed_signature=proposed_signature,
                     )
                 else:
                     # Team product rule: no assignees => allow full-week service setup.
@@ -6229,7 +6340,11 @@ def create_service(request, org_slug):
                 # Pro/solo: constrain to org remaining availability when the plan supports it;
                 # otherwise fall back to org defaults.
                 if can_use_pro_team:
-                    allowed_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=None)
+                    allowed_map = _effective_org_weekly_map_minus_other_services(
+                        org,
+                        exclude_service_id=None,
+                        proposed_signature=proposed_signature,
+                    )
                 else:
                     allowed_map = org_map
         except Exception:
@@ -6450,6 +6565,18 @@ def create_service(request, org_slug):
                 # Group booking controls (Pro/Team only)
                 max_participants = 1
                 group_pricing = {}
+                proposed_signature = _build_service_schedule_signature_from_payload(
+                    request.POST,
+                    defaults={
+                        'duration': duration,
+                        'buffer_before': buffer_before,
+                        'buffer_after': (buffer_after if can_use_pro_team else 0),
+                        'time_increment_minutes': 30,
+                        'use_fixed_increment': False,
+                        'allow_squished_bookings': False,
+                        'allow_ends_after_availability': False,
+                    },
+                )
                 if can_use_pro_team:
                     try:
                         raw_max_participants = request.POST.get('max_participants')
@@ -6564,14 +6691,23 @@ def create_service(request, org_slug):
                                 # - 1+ assignees: service must fit within remaining common availability
                                 # - Team + 0 assignees: allow full-week service setup
                                 if desired_assignee_ids:
-                                    allowed_ui_map = _effective_common_weekly_map_minus_other_services(org, list(desired_assignee_ids), exclude_service_id=None)
+                                    allowed_ui_map = _effective_common_weekly_map_minus_other_services(
+                                        org,
+                                        list(desired_assignee_ids),
+                                        exclude_service_id=None,
+                                        proposed_signature=proposed_signature,
+                                    )
                                     _enforce_service_windows_within_ui_allowed_map(allowed_ui_map, cleaned_rows)
                                 else:
                                     if is_team_plan:
                                         # Team product rule: no assignees are not constrained by org remaining map here.
                                         pass
                                     elif can_use_pro_team:
-                                        allowed_ui_map = _effective_org_weekly_map_minus_other_services(org, exclude_service_id=None)
+                                        allowed_ui_map = _effective_org_weekly_map_minus_other_services(
+                                            org,
+                                            exclude_service_id=None,
+                                            proposed_signature=proposed_signature,
+                                        )
                                         _enforce_service_windows_within_ui_allowed_map(
                                             allowed_ui_map,
                                             cleaned_rows,
