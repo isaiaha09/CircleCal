@@ -20,7 +20,6 @@ import { BillingScreen } from './src/screens/BillingScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
 import { PlansScreen } from './src/screens/PlansScreen';
 import { PortalPlaceholderScreen } from './src/screens/PortalPlaceholderScreen';
-import { ProfileScreen } from './src/screens/ProfileScreen';
 import { ResourcesScreen } from './src/screens/ResourcesScreen';
 import { ScheduleScreen } from './src/screens/ScheduleScreen';
 import { StaffScreen } from './src/screens/StaffScreen';
@@ -780,16 +779,10 @@ export default function App() {
         </Stack.Screen>
 
         <Stack.Screen name="Profile" options={{ title: 'Profile' }}>
-          {({ navigation, route }) => (
-            <ProfileScreen
+          {({ navigation }) => (
+            <WebAppScreen
+              initialPath={'/accounts/profile/?cc_app=1'}
               onSignedOut={() => navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] })}
-              forceNameCompletion={!!route.params?.forceName}
-              onRequiredProfileCompleted={() =>
-                navigation.reset({ index: 0, routes: [{ name: 'WebApp', params: { initialPath: '/post-login/?cc_app=1' } } as any] })
-              }
-              onOpenBusinesses={() => navigation.navigate('Businesses')}
-              onOpenBilling={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Billing', { orgSlug })}
-              onOpenPlans={({ orgSlug }: { orgSlug: string }) => navigation.navigate('Plans', { orgSlug })}
             />
           )}
         </Stack.Screen>

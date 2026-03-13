@@ -24,7 +24,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { API_BASE_URL } from '../config';
 import type { ApiError } from '../lib/api';
-import { apiGetBookings, apiGetMobileSsoLink, apiGetProfileOverview } from '../lib/api';
+import { apiGetBookings, apiGetMobileSsoLink, apiGetProfileOverview, apiUpdateMobileSessionPreference } from '../lib/api';
 
 const CC_LOGO = require('../../assets/cc-header-logo.png');
 import {
@@ -32,8 +32,12 @@ import {
   clearPostStripeMessage,
   getActiveOrgSlug,
   getPostStripeMessage,
+  getStayLoggedInPreference,
+  setAccessToken,
   setActiveOrgSlug,
   setPostSignOutMessage,
+  setRefreshToken,
+  setStayLoggedInPreference,
   signOut,
 } from '../lib/auth';
 import { unregisterPushTokenBestEffort } from '../lib/push';
@@ -68,6 +72,10 @@ type WebMessageBillingSummary = {
   json?: any;
   error?: string;
 };
+
+type WebMessageStayLoggedIn =
+  | { type: 'CC_APP_STAY_LOGGED_IN_GET' }
+  | { type: 'CC_APP_STAY_LOGGED_IN_SET'; value: boolean };
 
 type Props = {
   initialPath?: string;
@@ -318,6 +326,25 @@ function buildBillingSummaryFetchJs(orgSlug: string): string {
         }
       });
   } catch(e) {}
+  return true;
+})();
+`;
+}
+
+function buildStayLoggedInDispatchJs(args: { ok: boolean; value?: boolean; error?: string }): string {
+  const payload = JSON.stringify({
+    ok: !!args.ok,
+    value: !!args.value,
+    error: args.error ? String(args.error) : '',
+  });
+  return `
+(function(){
+  try {
+    var detail = ${payload};
+    if (window && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('cc:mobile-stay-logged-in', { detail: detail }));
+    }
+  } catch (e) {}
   return true;
 })();
 `;
@@ -1759,6 +1786,37 @@ export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
             try {
               msg = JSON.parse(raw);
             } catch {
+              return;
+            }
+            const stayMsg = msg as WebMessageStayLoggedIn;
+            if (stayMsg && stayMsg.type === 'CC_APP_STAY_LOGGED_IN_GET') {
+              (async () => {
+                try {
+                  const value = await getStayLoggedInPreference();
+                  webviewRef.current?.injectJavaScript(buildStayLoggedInDispatchJs({ ok: true, value }));
+                } catch (e) {
+                  const message = String((e as any)?.message || 'Unable to load mobile setting.');
+                  webviewRef.current?.injectJavaScript(buildStayLoggedInDispatchJs({ ok: false, error: message }));
+                }
+              })().catch(() => undefined);
+              return;
+            }
+            if (stayMsg && stayMsg.type === 'CC_APP_STAY_LOGGED_IN_SET') {
+              (async () => {
+                try {
+                  const nextValue = !!stayMsg.value;
+                  const nextSession = await apiUpdateMobileSessionPreference({ stayLoggedIn: nextValue });
+                  await Promise.all([
+                    setStayLoggedInPreference(nextValue),
+                    setAccessToken(nextSession.access),
+                    setRefreshToken(nextSession.refresh),
+                  ]);
+                  webviewRef.current?.injectJavaScript(buildStayLoggedInDispatchJs({ ok: true, value: nextValue }));
+                } catch (e) {
+                  const message = String((e as any)?.message || 'Unable to update mobile setting.');
+                  webviewRef.current?.injectJavaScript(buildStayLoggedInDispatchJs({ ok: false, error: message }));
+                }
+              })().catch(() => undefined);
               return;
             }
             const m = msg as WebMessageBillingSummary;

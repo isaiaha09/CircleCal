@@ -1,0 +1,35 @@
+# EAS Build ignore rules
+#
+# This repo contains both the Django backend and a mobile (Expo) app.
+# For EAS mobile builds we only need the Expo project files; excluding backend
+# and large local assets keeps uploads small and avoids archive extraction issues.
+
+# Backend / server project (not needed for Expo builds)
+circlecalproject/**
+
+# Large generated/static directories and local state
+**/__pycache__/**
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/**
+**/.mypy_cache/**
+**/.ruff_cache/**
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/.venv/**
+
+# Django collected static/media (often huge)
+**/staticfiles/**
+**/media/**
+
+# Local migration backups (not needed for builds)
+**/migrations-backup*/**
+
+# Screenshot and store-submission assets (not needed for builds)
+mobile/medical_theme-screenshots/**
+mobile/CircleCal app Submission Android/**
+mobile/CircleCal app submission Apple/**
+
+# Local inspection output
+mobile/.eas_inspect_archive/**

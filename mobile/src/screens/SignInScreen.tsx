@@ -15,6 +15,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   clearActiveOrgSlug,
+  getStayLoggedInPreference,
   signOut,
   setAccessToken,
   setRefreshToken,
@@ -83,6 +84,7 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
     setSubmitting(true);
     setError(null);
     try {
+      const stayLoggedIn = await getStayLoggedInPreference();
       // 2FA-aware mobile endpoint.
       // Step 1: username/password. If user has 2FA enabled, server returns otp_required.
       // Step 2: include otp to receive JWT tokens.
@@ -91,6 +93,7 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
         {
           username: identifier.trim(),
           password,
+          stay_logged_in: stayLoggedIn,
           ...(otpRequired ? { otp: otpCode.trim() } : null),
         }
       );

@@ -191,6 +191,19 @@ export async function apiUnregisterPushToken(args: { token: string }): Promise<{
   return apiDelete('/api/v1/push/tokens/', { token: args.token });
 }
 
+export type MobileSessionResponse = {
+  refresh: string;
+  access: string;
+  otp_required?: boolean;
+  stay_logged_in?: boolean;
+};
+
+export async function apiUpdateMobileSessionPreference(args: { stayLoggedIn: boolean }): Promise<MobileSessionResponse> {
+  return apiPost('/api/v1/auth/mobile/session/', {
+    stay_logged_in: args.stayLoggedIn,
+  });
+}
+
 export type ApiProfileResponse = {
   user: {
     id: number;

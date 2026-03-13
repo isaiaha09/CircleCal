@@ -16,11 +16,12 @@
   </style>
 
   <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-    <h1 class="text-2xl font-bold text-blue-700 w-full text-center sm:w-auto sm:text-left">Your Profile</h1>
+    <div class="w-full sm:w-auto">
+      <h1 class="text-2xl font-bold text-blue-700 w-full text-center sm:w-auto sm:text-left">Your Profile</h1>
+    </div>
     <button type="button" class="save-profile-btn btn-primary py-2 px-3 text-sm w-full sm:w-auto">Save Changes</button>
   </div>
 
-  {% if cc_app_mode %}
   {% if not user.first_name or not user.last_name or stripe_connect_modal_enabled and stripe_connect_start_url %}
   <div class="w-full mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
     <div class="font-bold mb-1">Mobile setup steps</div>
@@ -43,7 +44,6 @@
       {% endif %}
     </ol>
   </div>
-  {% endif %}
   {% endif %}
 
   {# Require First/Last Name before leaving Profile (until saved). #}
@@ -498,6 +498,81 @@
       <div class="profile-preferences bg-gray-50 rounded-lg p-4">
         <h3 class="text-sm font-semibold text-blue-800 mb-3">Preferences</h3>
         <div class="flex flex-col gap-3">
+          {% if cc_app_mode %}
+          <label class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-gray-800">Stay signed in on this device</div>
+              <div id="ccMobileStayLoggedInHint" class="text-xs text-gray-500 mt-1">This setting applies to the mobile app only.</div>
+            </div>
+            <div>
+              <input id="ccMobileStayLoggedInToggle" type="checkbox" aria-label="Stay signed in on this device" />
+            </div>
+          </label>
+          <script>
+            (function () {
+              function initMobileStayLoggedIn() {
+                var toggle = document.getElementById('ccMobileStayLoggedInToggle');
+                var hint = document.getElementById('ccMobileStayLoggedInHint');
+                if (!toggle || !hint) return;
+
+                function setUi(opts) {
+                  var loading = !!(opts && opts.loading);
+                  var enabled = !!(opts && opts.enabled);
+                  var message = (opts && typeof opts.message === 'string') ? opts.message : '';
+                  toggle.disabled = loading;
+                  toggle.checked = enabled;
+                  if (message) hint.textContent = message;
+                }
+
+                function postMessage(msg) {
+                  try {
+                    if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                      window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+                      return true;
+                    }
+                  } catch (err) {}
+                  return false;
+                }
+
+                window.addEventListener('cc:mobile-stay-logged-in', function (ev) {
+                  var detail = (ev && ev.detail) || {};
+                  if (!detail.ok) {
+                    setUi({ loading: false, enabled: toggle.checked, message: detail.error || 'Could not update the mobile setting.' });
+                    return;
+                  }
+                  var enabled = !!detail.value;
+                  setUi({
+                    loading: false,
+                    enabled: enabled,
+                    message: enabled
+                      ? 'You will stay signed in on this mobile device until you turn this off or log out.'
+                      : 'The mobile app will use the standard mobile session length.'
+                  });
+                });
+
+                toggle.addEventListener('change', function () {
+                  var next = !!toggle.checked;
+                  setUi({ loading: true, enabled: next, message: 'Saving mobile setting…' });
+                  if (!postMessage({ type: 'CC_APP_STAY_LOGGED_IN_SET', value: next })) {
+                    setUi({ loading: false, enabled: !next, message: 'This setting is only available inside the CircleCal mobile app.' });
+                  }
+                });
+
+                setUi({ loading: true, enabled: false, message: 'Loading mobile setting…' });
+                if (!postMessage({ type: 'CC_APP_STAY_LOGGED_IN_GET' })) {
+                  setUi({ loading: false, enabled: false, message: 'This setting is only available inside the CircleCal mobile app.' });
+                }
+              }
+
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initMobileStayLoggedIn);
+              } else {
+                initMobileStayLoggedIn();
+              }
+            })();
+          </script>
+          {% endif %}
+
           <label class="flex items-center justify-between">
             <div>
               <div class="text-sm font-medium text-gray-800">Email Alerts</div>

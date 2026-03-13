@@ -6,6 +6,7 @@ const ACTIVE_ORG_SLUG_KEY = 'cc_active_org_slug';
 const PUSH_TOKEN_KEY = 'cc_push_token';
 const POST_SIGNOUT_MESSAGE_KEY = 'cc_post_signout_message';
 const POST_STRIPE_MESSAGE_KEY = 'cc_post_stripe_message';
+const STAY_LOGGED_IN_KEY = 'cc_mobile_stay_logged_in';
 
 export async function getAccessToken(): Promise<string | null> {
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
@@ -81,4 +82,17 @@ export async function setPostStripeMessage(message: string): Promise<void> {
 
 export async function clearPostStripeMessage(): Promise<void> {
   await SecureStore.deleteItemAsync(POST_STRIPE_MESSAGE_KEY);
+}
+
+export async function getStayLoggedInPreference(): Promise<boolean> {
+  try {
+    const raw = await SecureStore.getItemAsync(STAY_LOGGED_IN_KEY);
+    return String(raw || '').trim().toLowerCase() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export async function setStayLoggedInPreference(value: boolean): Promise<void> {
+  await SecureStore.setItemAsync(STAY_LOGGED_IN_KEY, value ? 'true' : 'false');
 }

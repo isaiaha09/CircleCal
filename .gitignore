@@ -14,3 +14,18 @@ web-build/
 .env.*
 !circlecalproject/.env.example
 *.local
+
+# Django local artifacts (do not ship)
+circlecalproject/db.sqlite3
+circlecalproject/db.sqlite.back
+circlecalproject/staticfiles/
+circlecalproject/media/
+
+# Mobile marketing / store-submission assets (not part of app build)
+mobile/medical_theme-screenshots/
+mobile/CircleCal app Submission Android/
+mobile/CircleCal app submission Apple/
+mobile/assets/google-play-feature-graphic-1024x500.png
+
+# Local EAS inspection output
+mobile/.eas_inspect_archive*/

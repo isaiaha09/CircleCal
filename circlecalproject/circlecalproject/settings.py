@@ -45,6 +45,11 @@ TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', '1').strip().lower() in ('1',
 # Server-side sending is best-effort and should be explicitly enabled.
 EXPO_PUSH_ENABLED = os.getenv('EXPO_PUSH_ENABLED', '0').strip().lower() in ('1', 'true', 'yes', 'on')
 EXPO_PUSH_URL = os.getenv('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send').strip() or 'https://exp.host/--/api/v2/push/send'
+MOBILE_AUTH_REFRESH_LIFETIME_DAYS = max(1, int(os.getenv('MOBILE_AUTH_REFRESH_LIFETIME_DAYS', '1') or '1'))
+MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS = max(
+    MOBILE_AUTH_REFRESH_LIFETIME_DAYS,
+    int(os.getenv('MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS', '36500') or '36500'),
+)
 
 # Cloudinary is configured via environment variables (e.g. CLOUDINARY_URL).
 # No Django setting is required; our storage adapter reads env vars directly.
@@ -62,6 +67,7 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
     'localhost',
     # Allow ngrok-hosted dev tunnels.
+    
     '.ngrok-free.app',
     '.ngrok-free.dev',
     '.ngrok.io',

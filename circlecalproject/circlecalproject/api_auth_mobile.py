@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
+
 try:
-    from rest_framework.permissions import AllowAny
+    from rest_framework.permissions import AllowAny, IsAuthenticated
     from rest_framework.response import Response
     from rest_framework.views import APIView
 except Exception as exc:  # pragma: no cover
@@ -23,6 +27,34 @@ except Exception:  # pragma: no cover
     RefreshToken = None  # type: ignore[assignment]
 
 
+def _as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    try:
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    except Exception:
+        return False
+
+
+def _mobile_refresh_lifetime(stay_logged_in: bool) -> timedelta:
+    if stay_logged_in:
+        days = int(getattr(settings, "MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS", 36500) or 36500)
+    else:
+        days = int(getattr(settings, "MOBILE_AUTH_REFRESH_LIFETIME_DAYS", 1) or 1)
+    return timedelta(days=max(1, days))
+
+
+def _issue_mobile_tokens_for_user(user, *, stay_logged_in: bool) -> dict[str, object]:
+    refresh = RefreshToken.for_user(user)
+    refresh.set_exp(lifetime=_mobile_refresh_lifetime(stay_logged_in))
+    return {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "otp_required": False,
+        "stay_logged_in": bool(stay_logged_in),
+    }
+
+
 class MobileTokenView(APIView):
     """JWT token obtain endpoint with optional 2FA enforcement.
 
@@ -41,6 +73,7 @@ class MobileTokenView(APIView):
         username = str((request.data or {}).get("username") or "").strip()
         password = str((request.data or {}).get("password") or "")
         otp = str((request.data or {}).get("otp") or "").strip().replace(" ", "")
+        stay_logged_in = _as_bool((request.data or {}).get("stay_logged_in"))
 
         if not username or not password:
             return Response({"detail": "Missing username or password."}, status=400)
@@ -78,11 +111,17 @@ class MobileTokenView(APIView):
         if RefreshToken is None:
             return Response({"detail": "JWT auth is not available on this server."}, status=500)
 
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "otp_required": False,
-            }
-        )
+        return Response(_issue_mobile_tokens_for_user(user, stay_logged_in=stay_logged_in))
+
+
+class MobileSessionView(APIView):
+    """Rotate the authenticated mobile session tokens with the requested persistence."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if RefreshToken is None:
+            return Response({"detail": "JWT auth is not available on this server."}, status=500)
+
+        stay_logged_in = _as_bool((request.data or {}).get("stay_logged_in"))
+        return Response(_issue_mobile_tokens_for_user(request.user, stay_logged_in=stay_logged_in))
