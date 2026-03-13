@@ -734,7 +734,9 @@
       </div>
 
       <label class="block text-sm text-gray-700 mb-1" for="participantCountInput">How many clients are joining this booking?</label>
-      <input type="number" id="participantCountInput" name="participant_count" min="1" max="1" step="1" inputmode="numeric" pattern="[0-9]*" value="1" class="w-full mb-2 px-3 py-2 text-base rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+      <select id="participantCountInput" name="participant_count" class="w-full mb-2 px-3 py-2 text-base rounded border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        <option value="1">1</option>
+      </select>
       <p id="participantCountHint" class="text-xs text-gray-500 mb-4">This service allows up to 1 client per booking.</p>
       <p id="participantSlotAvailability" class="text-xs text-amber-700 mb-4" style="display:none;"></p>
 
@@ -1461,7 +1463,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (bookNowBtn) bookNowBtn.disabled = false;
     const participants = (() => {
       try {
-        const n = Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1);
+        const n = getSelectedParticipantCount();
         if (!Number.isFinite(n) || n < 1) return 1;
         return Math.floor(n);
       } catch (e) { return 1; }
@@ -1584,33 +1586,48 @@ document.addEventListener("DOMContentLoaded", async function () {
     }
   }
 
-  function clampParticipantCountValue(opts) {
+  function getSelectedParticipantCount() {
+    try {
+      if (!participantCountInput) return 1;
+      const parsed = Number(String(participantCountInput.value || '').trim());
+      if (!Number.isFinite(parsed) || parsed < 1) return 1;
+      return Math.floor(parsed);
+    } catch (e) {
+      return 1;
+    }
+  }
+
+  function syncParticipantCountOptions(slug) {
     try {
       if (!participantCountInput) return 1;
 
-      const options = opts || {};
-      const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '');
       const allowedNow = getAllowedParticipantCountForService(slug);
       const upperBound = Math.max(1, allowedNow);
-      const raw = String(participantCountInput.value || '').trim();
+      const previous = getSelectedParticipantCount();
+      const nextValue = Math.min(Math.max(1, previous), upperBound);
 
-      if (!raw) {
-        if (options.commitEmpty) participantCountInput.value = String(upperBound);
-        return upperBound;
+      while (participantCountInput.options.length) participantCountInput.remove(0);
+
+      if (allowedNow <= 0) {
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '0';
+        emptyOpt.textContent = '0';
+        participantCountInput.appendChild(emptyOpt);
+        participantCountInput.value = '0';
+        participantCountInput.disabled = true;
+        return 0;
       }
 
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) {
-        if (options.commitInvalid !== false) participantCountInput.value = String(upperBound);
-        return upperBound;
+      for (let count = 1; count <= upperBound; count++) {
+        const opt = document.createElement('option');
+        opt.value = String(count);
+        opt.textContent = String(count);
+        participantCountInput.appendChild(opt);
       }
 
-      const normalized = Math.max(1, Math.floor(parsed));
-      const clamped = Math.min(normalized, upperBound);
-      if (options.commit || clamped !== parsed) {
-        participantCountInput.value = String(clamped);
-      }
-      return clamped;
+      participantCountInput.disabled = false;
+      participantCountInput.value = String(nextValue);
+      return nextValue;
     } catch (e) {
       return 1;
     }
@@ -1625,23 +1642,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       const bookNowBtn = document.getElementById('bookNowBtn');
       const slotAvailEl = document.getElementById('participantSlotAvailability');
 
-      if (participantCountInput) {
-        const upperBound = Math.max(1, allowedNow);
-        const isFocused = document.activeElement === participantCountInput;
-        participantCountInput.min = '1';
-        participantCountInput.max = String(upperBound);
-        participantCountInput.step = '1';
-        participantCountInput.inputMode = 'numeric';
-        participantCountInput.pattern = '[0-9]*';
-        participantCountInput.disabled = allowedNow <= 0;
-
-        const raw = String(participantCountInput.value || '').trim();
-        const parsed = Number(raw);
-        const exceedsUpperBound = raw && Number.isFinite(parsed) && Math.floor(parsed) > upperBound;
-        if (!isFocused || exceedsUpperBound || allowedNow <= 0) {
-          clampParticipantCountValue({ commit: !isFocused || exceedsUpperBound || allowedNow <= 0, commitEmpty: !isFocused || allowedNow <= 0 });
-        }
-      }
+      syncParticipantCountOptions(slug);
       if (participantCountHint) {
         participantCountHint.textContent = `This service allows up to ${maxP} client${maxP === 1 ? '' : 's'} per booking.`;
       }
@@ -2206,7 +2207,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         let participants = 1;
         try {
           const maxP = Math.max(1, Number(d.max_participants || 1) || 1);
-          participants = Math.max(1, Math.floor(Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1) || 1));
+          participants = getSelectedParticipantCount();
           if (participants > maxP) participants = maxP;
         } catch (e) { participants = 1; }
         try {
@@ -2251,24 +2252,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           updateServiceDetails(slug);
           updatePaymentSectionForServiceSlug(slug);
         };
-        participantCountInput.addEventListener('input', () => {
-          const slug = (serviceSelect && serviceSelect.value) ? serviceSelect.value : (window.selectedServiceSlug || '');
-          const upperBound = Math.max(1, getAllowedParticipantCountForService(slug));
-          const raw = String(participantCountInput.value || '').trim();
-          if (raw) {
-            const parsed = Number(raw);
-            if (Number.isFinite(parsed) && Math.floor(parsed) > upperBound) {
-              participantCountInput.value = String(upperBound);
-            }
-          }
-          refreshParticipantDrivenUi();
-        });
         participantCountInput.addEventListener('change', () => {
-          clampParticipantCountValue({ commit: true, commitEmpty: true });
-          refreshParticipantDrivenUi();
-        });
-        participantCountInput.addEventListener('blur', () => {
-          clampParticipantCountValue({ commit: true, commitEmpty: true });
           refreshParticipantDrivenUi();
         });
         participantCountInput.dataset.ccModalBound = '1';
@@ -2552,7 +2536,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         const serviceMax = Math.max(1, Number(d.max_participants || 1) || 1);
         const slotRemaining = parseRemainingCapacity(window.__ccSelectedSlotRemaining);
         const allowedNow = (slotRemaining === null) ? serviceMax : Math.max(0, Math.min(serviceMax, slotRemaining));
-        const requested = Math.max(1, Math.floor(Number(participantCountInput && participantCountInput.value ? participantCountInput.value : 1) || 1));
+        const requested = getSelectedParticipantCount();
         if (allowedNow <= 0) {
           e.preventDefault();
           try {
@@ -2563,7 +2547,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         }
         if (requested > allowedNow) {
           e.preventDefault();
-          if (participantCountInput) participantCountInput.value = String(allowedNow);
+          syncParticipantCountOptions(slug);
           try { if (typeof showToast === 'function') showToast('warning', `Only ${allowedNow} slot${allowedNow === 1 ? '' : 's'} left for that time. Max you can book now is ${allowedNow}.`); } catch (_) {}
           return;
         }
