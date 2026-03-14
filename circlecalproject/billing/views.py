@@ -23,6 +23,8 @@ import traceback
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core import signing
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -129,9 +131,17 @@ def stripe_connect_start(request, org_slug):
     try:
         acct_id = getattr(org, 'stripe_connect_account_id', None)
         if not acct_id:
+            owner_email = (getattr(request.user, 'email', None) or '').strip()
+            if not owner_email:
+                raise ValueError('Your CircleCal account email is missing. Update your email in Profile and try again.')
+            try:
+                validate_email(owner_email)
+            except ValidationError:
+                raise ValueError('Your CircleCal account email is invalid. Update your email in Profile and try again.')
+
             acct = stripe.Account.create(
                 type='express',
-                email=request.user.email,
+                email=owner_email,
                 metadata={'organization_id': str(org.id), 'org_slug': str(org.slug)},
                 capabilities={
                     'card_payments': {'requested': True},

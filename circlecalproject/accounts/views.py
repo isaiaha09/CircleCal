@@ -23,6 +23,8 @@ from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.core import signing
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.views.decorators.csrf import csrf_exempt
 
 try:
@@ -422,6 +424,14 @@ def profile_view(request):
 		email = request.POST.get("email")
 		first_name = request.POST.get("first_name")
 		last_name = request.POST.get("last_name")
+		if email is not None:
+			email = email.strip()
+			if email:
+				try:
+					validate_email(email)
+				except ValidationError:
+					messages.error(request, "Please enter a valid email address.")
+					return redirect("accounts:profile")
 		if username:
 			user.username = username
 		if email is not None:
