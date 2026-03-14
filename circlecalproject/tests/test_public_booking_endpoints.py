@@ -132,6 +132,21 @@ class TestPublicBookingEndpoints(TestCase):
         self.assertEqual(summary[day2], False)
         self.assertEqual(summary[day3], False)
 
+    def test_batch_availability_summary_includes_tomorrow_when_max_booking_days_is_one(self):
+        self.service.max_booking_days = 1
+        self.service.min_notice_hours = 0
+        self.service.save(update_fields=['max_booking_days', 'min_notice_hours'])
+
+        day_start = datetime(self.day.year, self.day.month, self.day.day, 0, 0, 0)
+        range_end = day_start + timedelta(days=1)
+
+        url = reverse('bookings:batch_availability_summary', args=[self.org.slug, self.service.slug])
+        resp = self.client.get(url, {'start': self._iso_z(day_start), 'end': self._iso_z(range_end)})
+        self.assertEqual(resp.status_code, 200)
+
+        summary = resp.json()
+        self.assertEqual(summary[self.day.isoformat()], True)
+
     def test_public_busy_includes_bookings_in_range(self):
         b_start = timezone.make_aware(datetime(self.day.year, self.day.month, self.day.day, 10, 0, 0), timezone.get_fixed_timezone(0))
         b_end = b_start + timedelta(minutes=30)

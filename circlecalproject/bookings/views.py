@@ -5334,10 +5334,12 @@ def batch_availability_summary(request, org_slug, service_slug):
     summary = {}
     current = range_start.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Calculate the max booking date (max_booking_days from today)
+    # Calculate the exclusive upper bound for bookable dates.
+    # If max_booking_days is 1, clients should still be able to book tomorrow,
+    # so the day-level summary must allow dates through tomorrow's end.
     now_org = timezone.now().astimezone(org_tz)
     today_midnight = now_org.replace(hour=0, minute=0, second=0, microsecond=0)
-    max_booking_date = today_midnight + timedelta(days=service.max_booking_days)
+    max_booking_date = today_midnight + timedelta(days=(service.max_booking_days + 1))
     earliest_allowed = now_org + timedelta(hours=service.min_notice_hours)
     
     # Trial limit: cap max_booking_date to trial_end if org is on active trial
