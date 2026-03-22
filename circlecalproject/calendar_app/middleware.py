@@ -1,9 +1,10 @@
 # calendar_app/middleware.py
+import logging
 import os
 import sys
 from django.shortcuts import redirect
 from django.http import HttpResponseBadRequest, HttpResponsePermanentRedirect
-from django.db import connection
+from django.db import connection, DatabaseError
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from accounts.models import Business as Organization, Membership
@@ -12,6 +13,9 @@ from billing.models import Subscription, Plan
 from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
+
+
+logger = logging.getLogger(__name__)
 
 
 class AppModeMiddleware:
@@ -492,14 +496,26 @@ class OrganizationMiddleware:
                 trial_days = 31
                 start_dt = timezone.now()
                 trial_end = start_dt + timezone.timedelta(days=trial_days)
-                sub = Subscription.objects.create(
-                    organization=org,
-                    plan=basic_plan,
-                    status="trialing",
-                    active=False,
-                    start_date=start_dt,
-                    trial_end=trial_end,
-                )
+                try:
+                    sub = Subscription.objects.create(
+                        organization=org,
+                        plan=basic_plan,
+                        status="trialing",
+                        active=False,
+                        start_date=start_dt,
+                        trial_end=trial_end,
+                    )
+                except DatabaseError:
+                    # Best-effort only: this middleware runs after downstream
+                    # middlewares have already handled the request, so a failed
+                    # backfill must not turn a normal page load into a 500.
+                    logger.warning(
+                        "Skipping subscription auto-provision for org_id=%s on path=%s because the database rejected the insert.",
+                        getattr(org, 'id', None),
+                        getattr(request, 'path', ''),
+                        exc_info=True,
+                    )
+                    sub = None
 
             # If trial expired and not active, redirect to pricing unless already there
             # Also show a one-time post-login message when applicable.
@@ -518,7 +534,7 @@ class OrganizationMiddleware:
                 except Exception:
                     pass
 
-            if sub.status == "trialing" and sub.trial_end and timezone.now() >= sub.trial_end:
+            if sub and sub.status == "trialing" and sub.trial_end and timezone.now() >= sub.trial_end:
                 # Allow pricing, embedded checkout, and auth pages
                 allow_paths = [
                     f"/bus/{org.slug}/pricing/",
