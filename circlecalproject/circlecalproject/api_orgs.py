@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from accounts.models import Business, Membership
+from .api_org_access import list_accessible_orgs
 
 try:
     from rest_framework.permissions import IsAuthenticated
@@ -19,22 +19,4 @@ class OrgsListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        memberships = (
-            Membership.objects.filter(user=request.user, is_active=True)
-            .select_related("organization")
-            .order_by("organization__name")
-        )
-
-        orgs = []
-        for m in memberships:
-            org: Business = m.organization
-            orgs.append(
-                {
-                    "id": org.id,
-                    "slug": org.slug,
-                    "name": org.name,
-                    "role": m.role,
-                }
-            )
-
-        return Response({"orgs": orgs})
+        return Response({"orgs": list_accessible_orgs(user=request.user)})

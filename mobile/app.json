@@ -2,7 +2,7 @@
   "expo": {
     "name": "CircleCal",
     "slug": "circlecal",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/appicon.png",
     "userInterfaceStyle": "light",

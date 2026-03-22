@@ -74,3 +74,24 @@ class ApiCrossOrgSecurityTests(TestCase):
         )
 
         self.assertEqual(resp.status_code, 403)
+
+    def test_owner_without_membership_still_appears_in_org_api_and_profile_api(self):
+        user = User.objects.create_user(username='owner-c', email='c@example.com', password='pw')
+        org = Business.objects.create(name='Org C', slug=f'org-c-{uuid.uuid4().hex[:6]}', owner=user)
+
+        self.client.force_login(user)
+
+        orgs_resp = self.client.get('/api/v1/orgs/')
+        self.assertEqual(orgs_resp.status_code, 200)
+        self.assertEqual(orgs_resp.json()['orgs'], [
+            {
+                'id': org.id,
+                'slug': org.slug,
+                'name': org.name,
+                'role': 'owner',
+            }
+        ])
+
+        profile_resp = self.client.get(f'/api/v1/profile/overview/?org={org.slug}')
+        self.assertEqual(profile_resp.status_code, 200)
+        self.assertEqual(profile_resp.json()['org_overview']['membership']['role'], 'owner')

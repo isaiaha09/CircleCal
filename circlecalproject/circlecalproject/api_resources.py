@@ -5,6 +5,7 @@ from django.utils.text import slugify
 
 from accounts.models import Business, Membership
 from bookings.models import FacilityResource, ServiceResource
+from .api_org_access import resolve_org_and_membership
 
 try:
     from rest_framework.exceptions import ValidationError
@@ -19,23 +20,7 @@ except Exception as exc:  # pragma: no cover
 
 
 def _get_org_and_membership(*, user, org_param: str | None):
-    if not org_param:
-        raise ValidationError({"org": "This query param is required (org slug or id)."})
-
-    org: Business | None
-    if str(org_param).isdigit():
-        org = Business.objects.filter(id=int(org_param)).first()
-    else:
-        org = Business.objects.filter(slug=str(org_param)).first()
-
-    if not org:
-        raise ValidationError({"org": "Unknown organization."})
-
-    membership = Membership.objects.filter(user=user, organization=org, is_active=True).first()
-    if not membership:
-        raise ValidationError({"detail": "You do not have access to this organization."})
-
-    return org, membership
+    return resolve_org_and_membership(user=user, org_param=org_param)
 
 
 def _require_resource_manager(membership: Membership):

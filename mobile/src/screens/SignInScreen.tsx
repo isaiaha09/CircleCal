@@ -24,7 +24,7 @@ import {
   clearPostStripeMessage,
 } from '../lib/auth';
 import type { ApiError } from '../lib/api';
-import { apiGetMobileSsoLink, apiGetOrgs, apiGetProfileOverview, apiPost } from '../lib/api';
+import { apiGetMobileSsoLink, apiGetOrgs, apiPost } from '../lib/api';
 import { registerPushTokenIfPossible } from '../lib/push';
 import { API_BASE_URL } from '../config';
 
@@ -104,32 +104,25 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
       // Best-effort: register device token for push notifications.
       await registerPushTokenIfPossible();
 
-      // Owners: keep the onboarding inside an in-app browser until Stripe is connected.
-      // This mirrors the web experience where /post-login/ routes the user to the next
-      // onboarding step (create business, connect Stripe, etc.).
+      // Owners: only force the browser onboarding flow when the account still has
+      // no business. Existing owner accounts should be able to enter the app even
+      // when Stripe Connect is incomplete or has been handled manually by admins.
       if (mode === 'owner') {
         let needsStripe = false;
         try {
           const orgsResp = await apiGetOrgs();
           const orgs = orgsResp?.orgs ?? [];
-          const isOwnerAnywhere = orgs.length === 0 || orgs.some((o) => String((o as any)?.role || '').toLowerCase() === 'owner');
+          const ownedOrgs = orgs.filter(
+            (org) => String((org as any)?.role || '').toLowerCase() === 'owner'
+          );
 
-          // Correction: only force Stripe/onboarding for true owners.
-          // If this account is not an owner anywhere (e.g. admin/staff), allow normal sign-in.
-          if (!isOwnerAnywhere) {
+          // Non-owner accounts use the normal in-app flow.
+          if (orgs.length > 0 && ownedOrgs.length === 0) {
             onSignedIn();
             return;
           }
 
-          const orgSlug = orgs[0]?.slug ?? null;
-          if (!orgSlug) {
-            needsStripe = true; // no business yet -> onboarding needed
-          } else {
-            const overview = await apiGetProfileOverview({ org: orgSlug });
-            const stripe = (overview as any)?.org_overview?.stripe;
-            const connected = !!(stripe?.connect_charges_enabled || stripe?.connect_payouts_enabled);
-            needsStripe = !connected;
-          }
+          needsStripe = orgs.length === 0;
         } catch {
           // If we can't determine status, do not block login.
           needsStripe = false;
@@ -174,7 +167,7 @@ export function SignInScreen({ mode, onSignedIn }: Props) {
             } catch {
               // ignore
             }
-            setError('Please finish setup (create business + connect Stripe) to continue.');
+            setError('Please finish setup to continue.');
             return;
           } catch {
             await signOut();

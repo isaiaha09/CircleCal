@@ -358,6 +358,7 @@ export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
   const progressAnim = useRef(new Animated.Value(0)).current;
   const moreAnim = useRef(new Animated.Value(0)).current;
   const morePanY = useRef(new Animated.Value(0)).current;
+  const lastAvatarRefreshAtRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
@@ -613,6 +614,13 @@ export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
       cancelled = true;
     };
   }, [activeOrgSlug]);
+
+  const refreshProfileBadgeSoon = useCallback(() => {
+    const now = Date.now();
+    if ((now - lastAvatarRefreshAtRef.current) < 1500) return;
+    lastAvatarRefreshAtRef.current = now;
+    refreshProfileBadge();
+  }, [refreshProfileBadge]);
 
   useEffect(() => {
     return refreshProfileBadge();
@@ -1254,14 +1262,23 @@ export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
                     <Image source={CC_LOGO} style={styles.searchLogo} />
                     <Text style={styles.searchTitle}>Search</Text>
                   </View>
-                  <Pressable
-                    style={styles.searchCloseBtn}
-                    onPress={closeSearch}
-                    accessibilityRole="button"
-                    accessibilityLabel="Close search"
-                  >
-                    <Ionicons name="close" size={24} color={theme.colors.muted} />
-                  </Pressable>
+                  <View style={styles.searchHeaderRight}>
+                    <View style={styles.searchAvatarChip}>
+                      {avatarUrl ? (
+                        <Image source={{ uri: avatarUrl }} style={styles.searchAvatarImg} />
+                      ) : (
+                        <Text style={styles.searchAvatarInitials}>{userInitials}</Text>
+                      )}
+                    </View>
+                    <Pressable
+                      style={styles.searchCloseBtn}
+                      onPress={closeSearch}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close search"
+                    >
+                      <Ionicons name="close" size={24} color={theme.colors.muted} />
+                    </Pressable>
+                  </View>
                 </View>
 
                 <Pressable style={styles.searchInputWrap} onPress={() => {}}>
@@ -1747,6 +1764,7 @@ export function WebAppScreen({ initialPath, skipSso, onSignedOut }: Props) {
           }}
           onNavigationStateChange={(nav) => {
             setCurrentUrl(nav.url || '');
+            refreshProfileBadgeSoon();
 
             // If user logs out from the web UI, reflect it in native.
             try {
@@ -2020,8 +2038,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   searchHeaderLeft: { flexDirection: 'row', alignItems: 'center' },
+  searchHeaderRight: { flexDirection: 'row', alignItems: 'center' },
   searchLogo: { width: 32, height: 32, resizeMode: 'contain', marginRight: 10 },
   searchTitle: { fontSize: 18, fontWeight: '900', color: '#111827' },
+  searchAvatarChip: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    marginRight: 8,
+  },
+  searchAvatarImg: { width: 34, height: 34, borderRadius: 999 },
+  searchAvatarInitials: { color: theme.colors.primary, fontWeight: '900', fontSize: 12 },
   searchCloseBtn: {
     width: 42,
     height: 42,
