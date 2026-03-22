@@ -1,4 +1,5 @@
 from accounts.models import Business as Organization
+from django.db import DatabaseError
 from billing.models import Subscription
 
 BASIC_SLUG = "basic"
@@ -110,7 +111,7 @@ def can_use_resources(org: Organization) -> bool:
 def get_subscription(org: Organization) -> Subscription | None:
     try:
         return org.subscription
-    except Subscription.DoesNotExist:  # type: ignore[attr-defined]
+    except (Subscription.DoesNotExist, DatabaseError):  # type: ignore[attr-defined]
         return None
 
 

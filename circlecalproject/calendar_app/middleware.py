@@ -388,22 +388,53 @@ class OrganizationMiddleware:
         # 1. Default: no org yet
         request.organization = None
 
-        # 2. Detect /bus/<slug>/ in the URL
+        # 2. Detect /bus/<slug>/ anywhere in the URL path so prefixed routes
+        # like /billing/bus/<slug>/... still resolve the active organization.
         path_parts = request.path.strip('/').split('/')
-        if len(path_parts) >= 2 and path_parts[0] == 'bus':
-            slug = path_parts[1]
+        bus_index = None
+        try:
+            bus_index = path_parts.index('bus')
+        except ValueError:
+            bus_index = None
+
+        if bus_index is not None and len(path_parts) > (bus_index + 1):
+            slug = path_parts[bus_index + 1]
             try:
                 org = Organization.objects.get(slug=slug)
                 request.organization = org
             except Organization.DoesNotExist:
                 request.organization = None
 
-        # 3. Fallback: user's first organization
+        # 3. Fallback: prefer the user's session-selected organization on
+        # non-org pages (home/profile/choose-business), then fall back to the
+        # first active membership deterministically.
         else:
             if request.user.is_authenticated:
-                membership = request.user.memberships.select_related('organization').first()
+                memberships = request.user.memberships.filter(is_active=True).select_related('organization')
+                membership = None
+                try:
+                    active_org_id = int(request.session.get('cc_active_org_id') or 0)
+                except Exception:
+                    active_org_id = 0
+                if active_org_id:
+                    membership = memberships.filter(organization_id=active_org_id).first()
+                if membership is None:
+                    membership = memberships.order_by('id').first()
                 if membership:
                     request.organization = membership.organization
+
+        # Persist the current organization choice for non-org pages so the
+        # shared navbar stays stable for multi-business users.
+        if request.user.is_authenticated and request.organization is not None:
+            try:
+                if Membership.objects.filter(
+                    user=request.user,
+                    organization=request.organization,
+                    is_active=True,
+                ).exists():
+                    request.session['cc_active_org_id'] = int(request.organization.id)
+            except Exception:
+                pass
 
         # 4. ✅ ATTACH user_has_role TO THE REQUEST OBJECT HERE
         request.user_has_role = lambda roles, org=request.organization: user_has_role(
@@ -487,7 +518,7 @@ class OrganizationMiddleware:
         if request.user.is_authenticated and org:
             try:
                 sub = org.subscription
-            except Subscription.DoesNotExist:
+            except (Subscription.DoesNotExist, DatabaseError):
                 sub = None
 
             # Auto-provision trial subscription if missing
