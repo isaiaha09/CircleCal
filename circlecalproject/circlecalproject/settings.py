@@ -327,6 +327,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'calendar_app.context_processors.navigation_context',
                 # Expose current membership role for the active organization
                 'calendar_app.context_processors.current_membership_role',
                 # App-webview flags (native app vs browser/PWA)

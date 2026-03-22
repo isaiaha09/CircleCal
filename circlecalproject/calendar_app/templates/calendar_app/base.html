@@ -735,11 +735,11 @@
 
                 <!-- Desktop Navigation -->
                 {% if request.user.is_authenticated %}
-                    {% if request.organization %}
+                    {% if nav_organization %}
                         {# If the current user's role for this org is staff/manager, show a restricted navbar #}
-                        {% if user_org_role == 'staff' or user_org_role == 'manager' %}
+                        {% if nav_user_org_role == 'staff' or nav_user_org_role == 'manager' %}
                             <nav class="cc-desktop-nav items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
+                                <a href="{% url 'calendar_app:dashboard' nav_organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                     {% csrf_token %}
                                     <button type="submit" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-base lg:text-lg">Logout</button>
@@ -747,16 +747,16 @@
                             </nav>
                         {% else %}
                                                         <nav class="cc-desktop-nav items-center justify-end ml-auto space-x-6 text-lg lg:text-xl">
-                                <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
-                                {% if user_org_role == 'owner' %}
+                                <a href="{% url 'calendar_app:calendar' nav_organization.slug %}" class="text-gray-700 hover:text-blue-600">Calendar</a>
+                                <a href="{% url 'calendar_app:dashboard' nav_organization.slug %}" class="text-gray-700 hover:text-blue-600">Dashboard</a>
+                                {% if nav_user_org_role == 'owner' %}
                                   {% if cc_app_mode %}
-                                  <a href="{% url 'calendar_app:app_plans_page' request.organization.slug %}?cc_app=1" class="text-gray-700 hover:text-blue-600">Plans</a>
+                                  <a href="{% url 'calendar_app:app_plans_page' nav_organization.slug %}?cc_app=1" class="text-gray-700 hover:text-blue-600">Plans</a>
                                   {% else %}
-                                  <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
+                                  <a href="{% url 'calendar_app:pricing_page' nav_organization.slug %}" class="text-gray-700 hover:text-blue-600">Pricing</a>
                                   {% endif %}
                                 {% endif %}
-                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
+                                <a href="{% url 'calendar_app:team_dashboard' nav_organization.slug %}" class="text-gray-700 hover:text-blue-600">Staff</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="text-gray-700 hover:text-blue-600">Switch</a>
                                 <form action="{% url 'accounts:logout' %}" method="post" class="inline">
                                     {% csrf_token %}
@@ -795,20 +795,20 @@
                 <nav class="mt-4 h-[calc(100%-3rem)] flex flex-col justify-between">
                     <div class="space-y-2">
                         {% if request.user.is_authenticated %}
-                        {% if request.organization %}
-                            {% if user_org_role == 'staff' or user_org_role == 'manager' %}
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
+                        {% if nav_organization %}
+                            {% if nav_user_org_role == 'staff' or nav_user_org_role == 'manager' %}
+                                <a href="{% url 'calendar_app:dashboard' nav_organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
                             {% else %}
-                                <a href="{% url 'calendar_app:dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
-                                <a href="{% url 'calendar_app:calendar' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Calendar</a>
-                                                                {% if user_org_role == 'owner' %}
+                                <a href="{% url 'calendar_app:dashboard' nav_organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Dashboard</a>
+                                <a href="{% url 'calendar_app:calendar' nav_organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Calendar</a>
+                                                                {% if nav_user_org_role == 'owner' %}
                                                                     {% if cc_app_mode %}
-                                                                    <a href="{% url 'calendar_app:app_plans_page' request.organization.slug %}?cc_app=1" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Plans</a>
+                                                                    <a href="{% url 'calendar_app:app_plans_page' nav_organization.slug %}?cc_app=1" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Plans</a>
                                                                     {% else %}
-                                                                    <a href="{% url 'calendar_app:pricing_page' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
+                                                                    <a href="{% url 'calendar_app:pricing_page' nav_organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Pricing</a>
                                                                     {% endif %}
                                                                 {% endif %}
-                                <a href="{% url 'calendar_app:team_dashboard' request.organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Team</a>
+                                <a href="{% url 'calendar_app:team_dashboard' nav_organization.slug %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Team</a>
                                 <a href="{% url 'calendar_app:choose_business' %}" class="block w-full px-4 py-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow transition text-gray-700 hover:text-blue-600">Switch Business</a>
                             {% endif %}
                         {% else %}
