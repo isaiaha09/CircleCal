@@ -2388,7 +2388,6 @@ def create_booking(request, org_slug):
     return JsonResponse(resp)
 
 
-@csrf_exempt
 @require_http_methods(['POST'])
 @require_roles(['owner', 'admin', 'manager'])
 def batch_create(request, org_slug):
@@ -2831,7 +2830,6 @@ def batch_create(request, org_slug):
     return JsonResponse({'status': 'ok', 'created': created})
 
 
-@csrf_exempt
 @require_http_methods(['POST'])
 @require_roles(['owner', 'admin', 'manager'])
 def batch_delete(request, org_slug):

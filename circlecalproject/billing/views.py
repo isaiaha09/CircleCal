@@ -799,7 +799,6 @@ def cancel_custom_domain_addon_subscription(request, org_slug):
     })
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def create_embedded_custom_domain_addon_checkout_session(request, org_slug):
     """Create Stripe Embedded Checkout session for subdomain subscription."""
@@ -1406,9 +1405,6 @@ def embedded_checkout_page(request, org_slug, plan_id):
     })
 
 
-from django.views.decorators.csrf import csrf_exempt
-
-@csrf_exempt
 @require_http_methods(["POST"])
 def create_embedded_subscription(request, org_slug, plan_id):
     """Create an incomplete subscription and return client_secret for Payment Element."""
@@ -1638,7 +1634,6 @@ def preview_embedded_initial_invoice(request, org_slug, subscription_id):
     }, safe=False)
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def sync_subscription_from_stripe(request, org_slug, subscription_id):
     """Sync Stripe subscription data into the local Subscription model.

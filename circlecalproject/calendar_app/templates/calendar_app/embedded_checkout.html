@@ -446,8 +446,10 @@
         return;
       }
 
+      const csrftoken = getCookie('csrftoken');
       const res = await fetch("{% url 'billing:create_embedded_subscription' organization.slug plan.id %}", {
         method: "POST",
+        headers: { 'X-CSRFToken': csrftoken },
         credentials: "same-origin",
       });
 

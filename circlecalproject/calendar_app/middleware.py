@@ -3,6 +3,7 @@ import os
 import sys
 from django.shortcuts import redirect
 from django.http import HttpResponseBadRequest, HttpResponsePermanentRedirect
+from django.db import connection
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from accounts.models import Business as Organization, Membership
@@ -624,6 +625,64 @@ class OrganizationMiddleware:
                         return redirect(reverse('accounts:profile'))
 
         return response
+
+
+class PostgresRLSContextMiddleware:
+    """Set PostgreSQL session variables used by tenant RLS policies.
+
+    This is a no-op on non-PostgreSQL backends. Values are always reset after
+    the request so persistent DB connections do not leak tenant context across
+    requests.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def _set_config(self, name: str, value: str):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT set_config(%s, %s, false)", [name, value])
+
+    def __call__(self, request):
+        if getattr(connection, 'vendor', '') != 'postgresql':
+            return self.get_response(request)
+
+        user_id = ''
+        org_id = ''
+        bypass = '0'
+
+        try:
+            user = getattr(request, 'user', None)
+            if user is not None and getattr(user, 'is_authenticated', False):
+                user_id = str(int(getattr(user, 'id', 0) or 0))
+                if bool(getattr(user, 'is_superuser', False)) or bool(getattr(user, 'is_staff', False)):
+                    bypass = '1'
+        except Exception:
+            user_id = ''
+            bypass = '0'
+
+        try:
+            org = (
+                getattr(request, 'organization', None)
+                or getattr(request, 'custom_domain_organization', None)
+                or getattr(request, 'hosted_subdomain_organization', None)
+            )
+            if org is not None:
+                org_id = str(int(getattr(org, 'id', 0) or 0))
+        except Exception:
+            org_id = ''
+
+        try:
+            self._set_config('circlecal.current_user_id', user_id)
+            self._set_config('circlecal.current_org_id', org_id)
+            self._set_config('circlecal.rls_bypass', bypass)
+            return self.get_response(request)
+        finally:
+            try:
+                self._set_config('circlecal.current_user_id', '')
+                self._set_config('circlecal.current_org_id', '')
+                self._set_config('circlecal.rls_bypass', '0')
+            except Exception:
+                pass
 
 
 class UserTimezoneMiddleware:

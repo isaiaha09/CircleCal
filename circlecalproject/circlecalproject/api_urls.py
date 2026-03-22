@@ -66,11 +66,13 @@ urlpatterns = [
 
 # JWT endpoints (optional): only register if SimpleJWT is installed.
 try:
-    from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+    from rest_framework_simplejwt.views import TokenRefreshView
     from .api_auth_mobile import MobileSessionView, MobileTokenView
 
     urlpatterns += [
-        path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+        # Route the generic token endpoint through the OTP-aware mobile view so
+        # API clients cannot bypass 2FA by calling SimpleJWT directly.
+        path("auth/token/", MobileTokenView.as_view(), name="token_obtain_pair"),
         path("auth/mobile/token/", MobileTokenView.as_view(), name="token_obtain_pair_mobile"),
         path("auth/mobile/session/", MobileSessionView.as_view(), name="token_mobile_session"),
         path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

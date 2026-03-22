@@ -197,6 +197,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'calendar_app.middleware.OrganizationMiddleware',
+    'calendar_app.middleware.PostgresRLSContextMiddleware',
     # Place timezone middleware AFTER OrganizationMiddleware
     'calendar_app.middleware.UserTimezoneMiddleware',
 ]
