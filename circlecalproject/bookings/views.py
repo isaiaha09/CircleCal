@@ -466,12 +466,13 @@ def _member_effective_windows_for_date(org, membership, date_obj, org_tz):
             availability_windows.append((bk_start, bk_end))
 
     # Member-scoped per-date availability overrides replace the day's default
-    # weekly windows for that member.
+    # weekly windows for that member and take precedence over member-scoped
+    # blocking overrides on the same day.
     if availability_windows:
-        base = [] if blocking_full_day else _merge_dt_windows(availability_windows)
+        base = _merge_dt_windows(availability_windows)
     else:
         base = [] if blocking_full_day else _merge_dt_windows(weekly)
-    if blocking_windows:
+    if blocking_windows and not availability_windows:
         base = _subtract_dt_windows(base, _merge_dt_windows(blocking_windows))
     return base
 
