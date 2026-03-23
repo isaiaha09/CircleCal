@@ -62,6 +62,18 @@ def _abs_url(url: str) -> str:
     return base + '/' + u
 
 
+def _build_signed_booking_url(view_name, booking_id, *, token=None, base_url=None) -> str:
+    """Return an absolute URL for a signed public booking endpoint."""
+    signed_token = token
+    if not signed_token:
+        signer = TimestampSigner()
+        signed_token = signer.sign(str(booking_id))
+
+    base = (base_url or getattr(settings, 'SITE_URL', 'https://circlecal.app') or 'https://circlecal.app').rstrip('/')
+    path = reverse(view_name, args=[booking_id])
+    return f"{base}{path}?{urlencode({'token': signed_token})}"
+
+
 def _user_display_name(user) -> str:
     """Best-effort display name for client-facing messages."""
     if not user:
@@ -495,10 +507,8 @@ def send_booking_confirmation(booking):
     
     signer = TimestampSigner()
     token = signer.sign(str(booking.id))
-    cancel_path = reverse('bookings:cancel_booking', args=[booking.id])
-    reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
     base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
-    cancel_url = f"{base_url}{cancel_path}?token={token}"
+    cancel_url = _build_signed_booking_url('bookings:cancel_booking', booking.id, token=token, base_url=base_url)
     # Make the reschedule button in the confirmation email behave like the cancel button
     # so clients must cancel first before rescheduling. Point reschedule_url to cancel_url.
     reschedule_url = cancel_url
@@ -509,7 +519,7 @@ def send_booking_confirmation(booking):
             'site_url': getattr(settings, 'SITE_URL', 'https://circlecal.app'),
         'cancel_url': cancel_url,
         'reschedule_url': reschedule_url,
-        'ics_url': f"{base_url}{reverse('bookings:booking_ics', args=[booking.id])}?token={quote(token)}",
+        'ics_url': _build_signed_booking_url('bookings:booking_ics', booking.id, token=token, base_url=base_url),
         'payment_method': payment_method,
         'refund_policy_text_effective': build_service_refund_policy_text(getattr(booking, 'service', None)),
         'stripe_card_brand': '',
@@ -674,9 +684,8 @@ def send_booking_cancellation(booking, refund_info=None):
     
     signer = TimestampSigner()
     token = signer.sign(str(booking.id))
-    reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
     base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
-    reschedule_url = f"{base_url}{reschedule_path}?token={token}"
+    reschedule_url = _build_signed_booking_url('bookings:reschedule_booking', booking.id, token=token, base_url=base_url)
 
     context = {
         'booking': booking,
@@ -739,9 +748,8 @@ def send_internal_booking_cancellation_notification(booking, refund_info=None):
         if booking_id:
             signer = TimestampSigner()
             token = signer.sign(str(booking_id))
-            reschedule_path = reverse('bookings:reschedule_booking', args=[booking_id])
             base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
-            reschedule_url = f"{base_url}{reschedule_path}?token={token}"
+            reschedule_url = _build_signed_booking_url('bookings:reschedule_booking', booking_id, token=token, base_url=base_url)
     except Exception:
         reschedule_url = None
 
@@ -886,7 +894,7 @@ def send_owner_booking_notification(booking):
         signer = TimestampSigner()
         token = signer.sign(str(booking.id))
         base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
-        context['ics_url'] = f"{base_url}{reverse('bookings:booking_ics', args=[booking.id])}?token={quote(token)}"
+        context['ics_url'] = _build_signed_booking_url('bookings:booking_ics', booking.id, token=token, base_url=base_url)
         context.update(_build_calendar_quick_links(booking))
     except Exception:
         context['ics_url'] = ''
@@ -1022,10 +1030,8 @@ def send_booking_rescheduled(new_booking, old_booking_id=None):
     try:
         signer = TimestampSigner()
         token = signer.sign(str(booking.id))
-        cancel_path = reverse('bookings:cancel_booking', args=[booking.id])
-        reschedule_path = reverse('bookings:reschedule_booking', args=[booking.id])
         base_url = getattr(settings, 'SITE_URL', 'https://circlecal.app')
-        cancel_url = f"{base_url}{cancel_path}?token={token}"
+        cancel_url = _build_signed_booking_url('bookings:cancel_booking', booking.id, token=token, base_url=base_url)
         # For consistency, make reschedule button point to cancel flow (require cancel first)
         reschedule_url = cancel_url
         context.update({'cancel_url': cancel_url, 'reschedule_url': reschedule_url})

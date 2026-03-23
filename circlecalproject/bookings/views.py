@@ -8,8 +8,10 @@ from django.utils.timezone import make_aware
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
+from django.db import connection
 from django.db.models import Q, Count, Sum
 from typing import Optional
+from contextlib import contextmanager
 from accounts.models import Business as Organization
 from accounts.models import Membership
 from bookings.models import Service
@@ -340,6 +342,48 @@ def _intersect_dt_windows(a, b):
         else:
             j += 1
     return _merge_dt_windows(out)
+
+
+@contextmanager
+def _signed_public_booking_scope():
+    """Temporarily bypass Postgres RLS for signed public booking endpoints."""
+    if getattr(connection, 'vendor', '') != 'postgresql':
+        yield
+        return
+
+    with connection.cursor() as cursor:
+        try:
+            cursor.execute("SELECT set_config(%s, %s, false)", ['circlecal.current_user_id', ''])
+            cursor.execute("SELECT set_config(%s, %s, false)", ['circlecal.current_org_id', ''])
+            cursor.execute("SELECT set_config(%s, %s, false)", ['circlecal.rls_bypass', '1'])
+            yield
+        finally:
+            cursor.execute("SELECT set_config(%s, %s, false)", ['circlecal.current_user_id', ''])
+            cursor.execute("SELECT set_config(%s, %s, false)", ['circlecal.current_org_id', ''])
+            cursor.execute("SELECT set_config(%s, %s, false)", ['circlecal.rls_bypass', '0'])
+
+
+def _get_signed_public_booking(booking_id):
+    with _signed_public_booking_scope():
+        return (
+            Booking.objects
+            .select_related('organization', 'service')
+            .filter(id=booking_id)
+            .first()
+        )
+
+
+def _get_signed_public_audit_booking(booking_id):
+    from .models import AuditBooking
+
+    with _signed_public_booking_scope():
+        return (
+            AuditBooking.objects
+            .select_related('organization', 'service')
+            .filter(booking_id=booking_id)
+            .order_by('-created_at')
+            .first()
+        )
 
 
 def _subtract_dt_windows(allowed, blocked):
@@ -1599,7 +1643,7 @@ def cancel_booking(request, booking_id):
     Expects query param `token` which is a signed value of the booking_id.
     Tokens are time-limited to 7 days.
     """
-    token = request.GET.get("token")
+    token = request.GET.get("token") or request.POST.get("token")
     if not token:
         return render(request, "bookings/booking_cancel_invalid.html", status=400)
 
@@ -1613,7 +1657,9 @@ def cancel_booking(request, booking_id):
     except BadSignature:
         return render(request, "bookings/booking_cancel_invalid.html", status=400)
 
-    booking = get_object_or_404(Booking, id=booking_id)
+    booking = _get_signed_public_booking(booking_id)
+    if not booking:
+        return render(request, "bookings/booking_cancel_invalid.html", status=400)
     # Prevent cancelling blocking events
     if booking.is_blocking:
         return render(request, "bookings/booking_cancel_invalid.html", status=400)
@@ -1754,7 +1800,8 @@ def cancel_booking(request, booking_id):
             pass
 
         try:
-            booking.delete()
+            with _signed_public_booking_scope():
+                booking.delete()
         except Exception:
             # If delete fails for DB reasons, still render the page with refund_info
             pass
@@ -2160,7 +2207,6 @@ def booking_ics(request, booking_id):
     """
     token = request.GET.get('token')
     signer = TimestampSigner()
-    booking = get_object_or_404(Booking, id=booking_id)
 
     authorized = False
     # token check (time-limited to 30 days)
@@ -2171,6 +2217,13 @@ def booking_ics(request, booking_id):
                 authorized = True
         except (BadSignature, SignatureExpired):
             authorized = False
+
+    if authorized:
+        booking = _get_signed_public_booking(booking_id)
+        if not booking:
+            return HttpResponse(status=404)
+    else:
+        booking = get_object_or_404(Booking, id=booking_id)
 
     # staff/owner membership check
     if not authorized and request.user and request.user.is_authenticated:
@@ -4255,11 +4308,7 @@ def reschedule_booking(request, booking_id):
         return HttpResponseBadRequest('Invalid or expired token')
 
     # Try to locate booking or audit snapshot (in case booking was deleted)
-    from .models import AuditBooking
-    try:
-        bk = Booking.objects.filter(id=booking_id).first()
-    except Exception:
-        bk = None
+    bk = _get_signed_public_booking(booking_id)
 
     service_slug = None
     org_slug = None
@@ -4272,7 +4321,7 @@ def reschedule_booking(request, booking_id):
         client_email = bk.client_email or ''
     else:
         # Try audit snapshot
-        ab = AuditBooking.objects.filter(booking_id=booking_id).order_by('-created_at').first()
+        ab = _get_signed_public_audit_booking(booking_id)
         if ab:
             service_slug = ab.service.slug if ab.service else None
             org_slug = ab.organization.slug if ab.organization else None
