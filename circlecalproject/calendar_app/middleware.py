@@ -199,6 +199,42 @@ class HostedSubdomainMiddleware:
         self.get_response = get_response
 
     @staticmethod
+    def _set_rls_config(name: str, value: str):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT set_config(%s, %s, false)", [name, value])
+
+    @classmethod
+    def _hosted_subdomain_eligible(cls, org):
+        try:
+            from billing.utils import can_use_hosted_subdomain
+        except Exception:
+            return False
+
+        if getattr(connection, 'vendor', '') != 'postgresql':
+            try:
+                return bool(can_use_hosted_subdomain(org))
+            except Exception:
+                return False
+
+        # Hosted-subdomain routing runs before PostgresRLSContextMiddleware.
+        # Seed the org read context temporarily so entitlement reads match the
+        # pre-RLS behavior for anonymous public booking requests.
+        try:
+            cls._set_rls_config('circlecal.current_user_id', '')
+            cls._set_rls_config('circlecal.current_org_id', str(int(getattr(org, 'id', 0) or 0)))
+            cls._set_rls_config('circlecal.rls_bypass', '0')
+            return bool(can_use_hosted_subdomain(org))
+        except Exception:
+            return False
+        finally:
+            try:
+                cls._set_rls_config('circlecal.current_user_id', '')
+                cls._set_rls_config('circlecal.current_org_id', '')
+                cls._set_rls_config('circlecal.rls_bypass', '0')
+            except Exception:
+                pass
+
+    @staticmethod
     def _raw_host_without_port(request):
         try:
             raw = (request.META.get('HTTP_HOST') or request.META.get('SERVER_NAME') or '').strip()
@@ -267,11 +303,7 @@ class HostedSubdomainMiddleware:
             return self.get_response(request)
 
         # Only orgs with Booking Flow Bundle should get hosted-subdomain experience.
-        try:
-            from billing.utils import can_use_hosted_subdomain
-            eligible = bool(can_use_hosted_subdomain(org))
-        except Exception:
-            eligible = False
+        eligible = self._hosted_subdomain_eligible(org)
 
         if not eligible:
             # If a non-eligible org is hit by subdomain, send users to canonical.
