@@ -465,13 +465,14 @@ def _member_effective_windows_for_date(org, membership, date_obj, org_tz):
         else:
             availability_windows.append((bk_start, bk_end))
 
-    # Semantics: green availability overrides are *additive*.
-    # To intentionally narrow a day, apply a full-day block then add green windows.
-    base = [] if blocking_full_day else _merge_dt_windows(weekly)
+    # Member-scoped per-date availability overrides replace the day's default
+    # weekly windows for that member.
+    if availability_windows:
+        base = [] if blocking_full_day else _merge_dt_windows(availability_windows)
+    else:
+        base = [] if blocking_full_day else _merge_dt_windows(weekly)
     if blocking_windows:
         base = _subtract_dt_windows(base, _merge_dt_windows(blocking_windows))
-    if availability_windows:
-        base = _merge_dt_windows(list(base) + list(_merge_dt_windows(availability_windows)))
     return base
 
 
@@ -1934,18 +1935,34 @@ def is_within_availability(org, start_dt, end_dt, service=None):
             except Exception:
                 pass
 
-    # 4. Org-scoped availability override allows slot (subject to member blocking above)
+    # 4. Org-scoped availability overrides define the day's overall ceiling.
+    # A service must still satisfy its own weekly/service rules within that ceiling.
+    org_override_allows_slot = False
     for avs, ave in (org_avail_windows or []):
         if timezone.is_naive(avs):
             avs = make_aware(avs, org_tz)
         if timezone.is_naive(ave):
             ave = make_aware(ave, org_tz)
         if avs <= start_dt and (end_dt <= ave or (service and getattr(service, 'allow_ends_after_availability', False) and start_dt < ave)):
-            if service is not None and is_shared_service:
-                allowed = _shared_service_allowed_windows_for_date(org, service, start_dt.astimezone(org_tz).date(), org_tz)
-                if not _slot_within_any_dt_window(start_dt, end_dt, allowed, allow_ends_after=bool(getattr(service, 'allow_ends_after_availability', False))):
-                    return False
-            return True
+            org_override_allows_slot = True
+            if service is None:
+                return True
+            break
+
+    if org_avail_windows and not org_override_allows_slot:
+        return False
+
+    # For solo assigned services, member-scoped availability overrides define the
+    # member's day ceiling. If any exist for the assignee, the slot must be inside
+    # one of them; do not fall back to weekly windows outside those overrides.
+    if service is not None and assignee_users and (not is_shared_service) and len(assignee_users) == 1:
+        try:
+            solo_uid = getattr(assignee_users[0], 'id', None)
+        except Exception:
+            solo_uid = None
+        solo_member_avail = member_avail_by_uid.get(solo_uid, []) if solo_uid else []
+        if solo_member_avail and not _any_member_available_override():
+            return False
 
     # 5. Member-scoped availability override can allow slot even if not in service/org overrides.
     # For shared services this means "at least one member explicitly marked available".
@@ -4420,7 +4437,8 @@ def service_availability(request, org_slug, service_slug):
     ) if assignee_users else Booking.objects.none()
 
     blocking_full_day = False
-    availability_override_windows = []  # list of (start,end) datetimes in org timezone
+    org_availability_override_windows = []
+    service_availability_override_windows = []
 
     # 1) Service/org scoped full-day blocks always win
     for bk in service_override_qs:
@@ -4430,7 +4448,10 @@ def service_availability(request, org_slug, service_slug):
             if bk_start_org <= day_start_candidate and bk_end_org >= day_end_candidate:
                 blocking_full_day = True
         else:
-            availability_override_windows.append((bk_start_org, bk_end_org))
+            if isinstance(getattr(bk, 'client_name', None), str) and bk.client_name.startswith('scope:svc:'):
+                service_availability_override_windows.append((bk_start_org, bk_end_org))
+            else:
+                org_availability_override_windows.append((bk_start_org, bk_end_org))
 
     # 2) Member scoped full-day blocks only win when everyone is blocked
     member_full_day_blocked = set()
@@ -4515,9 +4536,11 @@ def service_availability(request, org_slug, service_slug):
     except Exception:
         debug_avail = False
 
-    # Build base windows (override windows supersede weekly windows)
-    if availability_override_windows:
-        base_windows = [(ov_start.astimezone(org_tz), ov_end.astimezone(org_tz)) for ov_start, ov_end in availability_override_windows]
+    # Build base windows.
+    # - Service-scoped overrides remain authoritative for that service.
+    # - Org-scoped overrides constrain the service by intersection.
+    if service_availability_override_windows:
+        base_windows = [(ov_start.astimezone(org_tz), ov_end.astimezone(org_tz)) for ov_start, ov_end in service_availability_override_windows]
     else:
         # First, allow a frozen per-date weekly window snapshot to override
         # current weekly availability. This preserves the exact windows that were
@@ -4635,6 +4658,23 @@ def service_availability(request, org_slug, service_slug):
                             w_start = original_range_start.replace(hour=w.start_time.hour, minute=w.start_time.minute, second=0, microsecond=0)
                             w_end = original_range_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
                             base_windows.append((w_start, w_end))
+
+        if org_availability_override_windows:
+            base_windows = _intersect_dt_windows(
+                base_windows,
+                [(ov_start.astimezone(org_tz), ov_end.astimezone(org_tz)) for ov_start, ov_end in org_availability_override_windows],
+            )
+
+        if (not service_availability_override_windows) and len(assignee_users) == 1:
+            try:
+                solo_mem = Membership.objects.filter(organization=org, user=assignee_users[0], is_active=True).first()
+            except Exception:
+                solo_mem = None
+            try:
+                member_allowed = _member_effective_windows_for_date(org, solo_mem, original_range_start.date(), org_tz) if solo_mem else []
+            except Exception:
+                member_allowed = []
+            base_windows = _intersect_dt_windows(base_windows, member_allowed)
 
     # Apply shared/group service constraints: intersection of member availability
     # minus member other-services weekly partitions.
@@ -4908,7 +4948,7 @@ def service_availability(request, org_slug, service_slug):
                             continue
 
                 # Weekly availability enforcement (solo/unassigned)
-                if (not is_shared_service) and (not availability_override_windows) and (not is_within_availability(org, slot_start, slot_end, service)):
+                if (not is_shared_service) and (not service_availability_override_windows) and (not is_within_availability(org, slot_start, slot_end, service)):
                     slot_start += slot_increment
                     continue
 
@@ -5021,7 +5061,7 @@ def service_availability(request, org_slug, service_slug):
                             continue
 
                 # Weekly availability enforcement (solo/unassigned)
-                if (not is_shared_service) and (not availability_override_windows) and (not is_within_availability(org, slot_start, slot_end, service)):
+                if (not is_shared_service) and (not service_availability_override_windows) and (not is_within_availability(org, slot_start, slot_end, service)):
                     slot_start += slot_increment
                     continue
 
@@ -5412,7 +5452,8 @@ def batch_availability_summary(request, org_slug, service_slug):
             users=assignee_users,
         ) if assignee_users else Booking.objects.none()
 
-        availability_override_windows = []
+        org_availability_override_windows = []
+        service_availability_override_windows = []
         full_block = False
 
         # 1) Service/org scoped blocks + availability windows
@@ -5435,7 +5476,10 @@ def batch_availability_summary(request, org_slug, service_slug):
                     full_block = True
             else:
                 if bk_end_org > bk_start_org:
-                    availability_override_windows.append((bk_start_org, bk_end_org))
+                    if isinstance(getattr(bk, 'client_name', None), str) and bk.client_name.startswith('scope:svc:'):
+                        service_availability_override_windows.append((bk_start_org, bk_end_org))
+                    else:
+                        org_availability_override_windows.append((bk_start_org, bk_end_org))
 
         # 2) Member scoped full-day blocks
         member_full_day_blocked = set()
@@ -5487,15 +5531,16 @@ def batch_availability_summary(request, org_slug, service_slug):
                     pass
 
         # Determine effective weekly windows for this day:
-        # 1) availability override windows (if any)
+        # 1) service-scoped availability override windows (if any)
         # 2) per-date freeze weekly_windows (only when bookings exist)
         # 3) service-specific weekly windows
         # 4) org weekly windows
         # 5) legacy: if org has no weekly rows at all, treat as fully available
+        # 6) if org-scoped availability overrides exist, constrain by intersection
         base_windows = []
 
-        if availability_override_windows:
-            base_windows = [(s, e) for (s, e) in availability_override_windows if e > s]
+        if service_availability_override_windows:
+            base_windows = [(s, e) for (s, e) in service_availability_override_windows if e > s]
         else:
             freeze = None
             try:
@@ -5570,6 +5615,23 @@ def batch_availability_summary(request, org_slug, service_slug):
                                     we = day_start.replace(hour=w.end_time.hour, minute=w.end_time.minute, second=0, microsecond=0)
                                     if we > ws:
                                         base_windows.append((ws, we))
+
+            if org_availability_override_windows:
+                base_windows = _intersect_dt_windows(
+                    base_windows,
+                    [(s, e) for (s, e) in org_availability_override_windows if e > s],
+                )
+
+            if (not service_availability_override_windows) and len(assignee_users) == 1:
+                try:
+                    solo_mem = Membership.objects.filter(organization=org, user=assignee_users[0], is_active=True).first()
+                except Exception:
+                    solo_mem = None
+                try:
+                    member_allowed = _member_effective_windows_for_date(org, solo_mem, day_start.date(), org_tz) if solo_mem else []
+                except Exception:
+                    member_allowed = []
+                base_windows = _intersect_dt_windows(base_windows, member_allowed)
 
         # If no base windows, day cannot be available.
         if is_shared_service:

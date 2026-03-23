@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import time
+from datetime import datetime, time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
@@ -205,6 +205,111 @@ class TestMemberBlockGuardrailForSoloBookings(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
+
+class TestMemberAvailabilityOverrideCeilingForSoloServices(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.client = Client()
+
+        self.owner = User.objects.create_user(username='owner', email='owner@example.com', password='pass')
+        self.org = Business.objects.create(name='Org', slug=f'org-{uuid.uuid4().hex[:8]}', owner=self.owner)
+        Membership.objects.create(user=self.owner, organization=self.org, role='owner', is_active=True)
+
+        plan = Plan.objects.create(name='Team', slug='team', description='Team', price=0, billing_period='monthly')
+        Subscription.objects.update_or_create(
+            organization=self.org,
+            defaults={'plan': plan, 'status': 'active', 'active': True},
+        )
+
+        self.staff_user = User.objects.create_user(username='solo-staff', email='solo-staff@example.com', password='pass')
+        self.staff_mem = Membership.objects.create(user=self.staff_user, organization=self.org, role='staff', is_active=True)
+
+        MemberWeeklyAvailability.objects.create(
+            membership=self.staff_mem,
+            weekday=0,
+            start_time=time(9, 0),
+            end_time=time(17, 0),
+            is_active=True,
+        )
+
+        self.solo_svc = Service.objects.create(
+            organization=self.org,
+            name='Solo',
+            slug=f'solo-{uuid.uuid4().hex[:6]}',
+            duration=60,
+            max_booking_days=5000,
+        )
+        ServiceAssignment.objects.create(service=self.solo_svc, membership=self.staff_mem)
+        ServiceWeeklyAvailability.objects.create(
+            service=self.solo_svc,
+            weekday=0,
+            start_time=time(9, 0),
+            end_time=time(17, 0),
+            is_active=True,
+        )
+
+        self.client.force_login(self.owner)
+
+    def test_member_date_override_replaces_weekly_for_solo_assigned_service(self):
+        date_str = '2030-01-07'  # Monday
+
+        for payload in (
+            {
+                'dates': [date_str],
+                'start_time': '09:00',
+                'end_time': '11:00',
+                'target': str(self.staff_mem.id),
+            },
+            {
+                'dates': [date_str],
+                'start_time': '14:00',
+                'end_time': '17:00',
+                'target': str(self.staff_mem.id),
+            },
+        ):
+            resp = self.client.post(
+                f'/bus/{self.org.slug}/bookings/batch_create/',
+                data=json.dumps(payload),
+                content_type='application/json',
+                HTTP_HOST='127.0.0.1',
+            )
+            self.assertEqual(resp.status_code, 200)
+
+        start_param = f'{date_str}T00:00:00'
+        end_param = f'{date_str}T23:59:59'
+
+        resp = self.client.get(
+            f'/bus/{self.org.slug}/services/{self.solo_svc.slug}/availability/?start={start_param}&end={end_param}',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp.status_code, 200)
+        slots = resp.json()
+        self.assertTrue(slots)
+
+        slot_hours = {datetime.fromisoformat(slot['start']).hour for slot in slots}
+        self.assertTrue(slot_hours.issubset({9, 10, 14, 15, 16}))
+        self.assertNotIn(11, slot_hours)
+        self.assertNotIn(12, slot_hours)
+        self.assertNotIn(13, slot_hours)
+
+        summary = self.client.get(
+            f'/bus/{self.org.slug}/services/{self.solo_svc.slug}/availability/batch/?start={date_str}T00:00:00&end={date_str}T23:59:59',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(summary.status_code, 200)
+        self.assertTrue(summary.json().get(date_str))
+
+        from django.utils import timezone
+        from bookings.views import is_within_availability
+
+        org_tz = timezone.get_current_timezone()
+        allowed_start = timezone.make_aware(datetime(2030, 1, 7, 9, 0, 0), org_tz)
+        allowed_end = timezone.make_aware(datetime(2030, 1, 7, 10, 0, 0), org_tz)
+        blocked_start = timezone.make_aware(datetime(2030, 1, 7, 12, 0, 0), org_tz)
+        blocked_end = timezone.make_aware(datetime(2030, 1, 7, 13, 0, 0), org_tz)
+
+        self.assertTrue(is_within_availability(self.org, allowed_start, allowed_end, service=self.solo_svc))
+        self.assertFalse(is_within_availability(self.org, blocked_start, blocked_end, service=self.solo_svc))
 
 class TestServiceBlockGuardrailForBookings(TestCase):
     def setUp(self):

@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import datetime, time, timedelta
 import json
 import uuid
 
@@ -237,3 +237,76 @@ class TestPerDateOverrideGuardrails(TestCase):
             HTTP_HOST='127.0.0.1',
         )
         self.assertEqual(resp3.status_code, 200)
+
+    def test_org_scoped_date_override_intersects_each_service_partition(self):
+        today = datetime.now().date()
+        days_until_monday = (0 - today.weekday()) % 7
+        if days_until_monday == 0:
+            days_until_monday = 7
+        target_date = today + timedelta(days=days_until_monday)
+
+        morning_payload = {
+            'dates': [target_date.isoformat()],
+            'start_time': '09:00',
+            'end_time': '11:00',
+        }
+        evening_payload = {
+            'dates': [target_date.isoformat()],
+            'start_time': '14:00',
+            'end_time': '17:00',
+        }
+
+        resp1 = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(morning_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp1.status_code, 200)
+
+        resp2 = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps(evening_payload),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp2.status_code, 200)
+
+        start_param = f'{target_date.isoformat()}T00:00:00'
+        end_param = f'{target_date.isoformat()}T23:59:59'
+
+        resp_a = self.client.get(
+            f'/bus/{self.org.slug}/services/{self.svc_a.slug}/availability/?start={start_param}&end={end_param}',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp_a.status_code, 200)
+        slots_a = resp_a.json()
+        self.assertTrue(slots_a)
+
+        resp_b = self.client.get(
+            f'/bus/{self.org.slug}/services/{self.svc_b.slug}/availability/?start={start_param}&end={end_param}',
+            HTTP_HOST='127.0.0.1',
+        )
+        self.assertEqual(resp_b.status_code, 200)
+        slots_b = resp_b.json()
+        self.assertTrue(slots_b)
+
+        a_hours = {datetime.fromisoformat(slot['start']).hour for slot in slots_a}
+        b_hours = {datetime.fromisoformat(slot['start']).hour for slot in slots_b}
+
+        self.assertTrue(a_hours.issubset({9, 10}))
+        self.assertTrue(b_hours.issubset({14, 15, 16}))
+
+        from django.utils import timezone
+        from bookings.views import is_within_availability
+
+        org_tz = timezone.get_current_timezone()
+        a_allowed_start = timezone.make_aware(datetime(target_date.year, target_date.month, target_date.day, 9, 0, 0), org_tz)
+        a_allowed_end = timezone.make_aware(datetime(target_date.year, target_date.month, target_date.day, 10, 0, 0), org_tz)
+        b_allowed_start = timezone.make_aware(datetime(target_date.year, target_date.month, target_date.day, 14, 0, 0), org_tz)
+        b_allowed_end = timezone.make_aware(datetime(target_date.year, target_date.month, target_date.day, 15, 0, 0), org_tz)
+
+        self.assertTrue(is_within_availability(self.org, a_allowed_start, a_allowed_end, service=self.svc_a))
+        self.assertFalse(is_within_availability(self.org, a_allowed_start, a_allowed_end, service=self.svc_b))
+        self.assertFalse(is_within_availability(self.org, b_allowed_start, b_allowed_end, service=self.svc_a))
+        self.assertTrue(is_within_availability(self.org, b_allowed_start, b_allowed_end, service=self.svc_b))
