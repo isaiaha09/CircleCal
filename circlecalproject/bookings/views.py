@@ -30,6 +30,7 @@ from calendar_app.permissions import require_roles
 from billing.utils import get_subscription
 from billing.utils import get_plan_slug, TEAM_SLUG, PRO_SLUG
 from billing.utils import can_use_offline_payment_methods
+from billing.utils import can_use_embed_widget
 from bookings.models import build_offline_payment_instructions
 from billing.utils import can_use_offline_payment_methods
 from django.http import HttpResponse
@@ -168,20 +169,24 @@ def _validate_embed_access(request, org: Organization) -> tuple[bool, str]:
             return False, 'invalid_key'
 
     try:
+        if can_use_embed_widget(org):
+            return True, 'ok'
+
         plan_slug = get_plan_slug(org)
-        if plan_slug not in {PRO_SLUG, TEAM_SLUG}:
-            return False, 'plan_required'
         sub = get_subscription(org)
+
         if not sub:
             return False, 'no_subscription'
         if getattr(sub, 'status', '') == 'trialing':
             return False, 'trial_not_eligible'
-        # Ensure billing is active (best-effort)
+        if plan_slug not in {PRO_SLUG, TEAM_SLUG}:
+            return False, 'plan_required'
         try:
             if callable(getattr(sub, 'is_active', None)) and (not sub.is_active()):
                 return False, 'subscription_inactive'
         except Exception:
             pass
+        return False, 'plan_required'
     except Exception:
         return False, 'unknown'
 

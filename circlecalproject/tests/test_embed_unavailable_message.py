@@ -18,7 +18,7 @@ class TestEmbedUnavailableMessage(TestCase):
             embed_key='abc123',
         )
 
-    def _set_subscription(self, *, slug: str, status: str = 'active', stripe_subscription_id=None):
+    def _set_subscription(self, *, slug: str, status: str = 'active', stripe_subscription_id=None, custom_domain_addon_enabled: bool = False):
         plan = Plan.objects.create(
             name=slug.title(),
             slug=slug,
@@ -33,6 +33,7 @@ class TestEmbedUnavailableMessage(TestCase):
                 'status': status,
                 'stripe_subscription_id': stripe_subscription_id,
                 'active': True,
+                'custom_domain_addon_enabled': custom_domain_addon_enabled,
             },
         )
 
@@ -51,3 +52,15 @@ class TestEmbedUnavailableMessage(TestCase):
         r = self.client.get(url + '?embed=1&key=wrong')
         self.assertContains(r, 'Booking widget unavailable')
         self.assertContains(r, 'This embed link is invalid or has been rotated.')
+
+    def test_manual_embed_override_allows_public_embed(self):
+        self._set_subscription(
+            slug='basic',
+            status='canceled',
+            stripe_subscription_id='sub_123',
+            custom_domain_addon_enabled=True,
+        )
+        url = reverse('bookings:public_org_page', args=[self.org.slug])
+        r = self.client.get(url + '?embed=1&key=abc123')
+        self.assertEqual(r.status_code, 200)
+        self.assertNotContains(r, 'Booking widget unavailable')
