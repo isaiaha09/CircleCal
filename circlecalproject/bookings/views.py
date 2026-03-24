@@ -686,6 +686,22 @@ def _org_effective_windows_for_date(org, date_obj, org_tz):
     return base
 
 
+def _service_partition_signature(service):
+    """Return the scheduling signature used for availability partition compatibility."""
+    try:
+        return (
+            int(getattr(service, 'duration', 0) or 0),
+            int(getattr(service, 'buffer_before', 0) or 0),
+            int(getattr(service, 'buffer_after', 0) or 0),
+            int(getattr(service, 'time_increment_minutes', 0) or 0),
+            bool(getattr(service, 'use_fixed_increment', False)),
+            bool(getattr(service, 'allow_squished_bookings', False)),
+            bool(getattr(service, 'allow_ends_after_availability', False)),
+        )
+    except Exception:
+        return (0, 0, 0, 0, False, False, False)
+
+
 def _pro_other_service_windows_for_date(org, exclude_service_id: int, date_obj, org_tz):
     """Return dt windows occupied by other active services on Pro for a date.
 
@@ -694,12 +710,25 @@ def _pro_other_service_windows_for_date(org, exclude_service_id: int, date_obj, 
     - prefer per-date availability overrides for a service if present
     - else use explicit service-weekly windows for that weekday
     - full-day per-date blocks free the day
+    - same-signature services are scheduling-compatible and can share windows
+    - only earlier-priority incompatible services reserve time against this service
     """
     blocked = []
+    my_sig = None
+    my_ts = None
     try:
-        qs = Service.objects.filter(organization=org, is_active=True, show_on_public_calendar=True).exclude(id=int(exclude_service_id))
+        my_svc = Service.objects.filter(organization=org, id=int(exclude_service_id)).first()
+        if my_svc is not None:
+            my_sig = _service_partition_signature(my_svc)
+            my_ts = getattr(my_svc, 'signature_updated_at', None)
     except Exception:
-        qs = Service.objects.filter(organization=org, show_on_public_calendar=True).exclude(id=int(exclude_service_id))
+        my_sig = None
+        my_ts = None
+
+    try:
+        qs = Service.objects.filter(organization=org, is_active=True).exclude(id=int(exclude_service_id))
+    except Exception:
+        qs = Service.objects.filter(organization=org).exclude(id=int(exclude_service_id))
 
     try:
         other_services = list(qs)
@@ -707,6 +736,32 @@ def _pro_other_service_windows_for_date(org, exclude_service_id: int, date_obj, 
         other_services = []
 
     for osvc in other_services:
+        try:
+            if my_sig is not None and _service_partition_signature(osvc) == my_sig:
+                continue
+        except Exception:
+            pass
+
+        try:
+            os_ts = getattr(osvc, 'signature_updated_at', None)
+            if my_ts is not None and os_ts is not None:
+                if os_ts > my_ts:
+                    continue
+                if os_ts == my_ts:
+                    try:
+                        if int(getattr(osvc, 'id', 0) or 0) > int(exclude_service_id):
+                            continue
+                    except Exception:
+                        pass
+            else:
+                try:
+                    if int(getattr(osvc, 'id', 0) or 0) > int(exclude_service_id):
+                        continue
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         try:
             other_blocked, other_override_windows = _service_scoped_per_date_windows(org, int(osvc.id), date_obj, org_tz)
         except Exception:

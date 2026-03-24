@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -10,7 +10,7 @@ from django.test import Client, TestCase
 
 from accounts.models import Business, Membership
 from billing.models import Plan, Subscription
-from bookings.models import Booking, Service
+from bookings.models import Booking, Service, ServiceWeeklyAvailability, WeeklyAvailability
 
 
 class OverrideBatchEndpointTests(TestCase):
@@ -105,3 +105,54 @@ class OverrideBatchEndpointTests(TestCase):
         self.assertEqual(data['created'], [])
         self.assertEqual(len(data['failures']), 1)
         self.assertIn('db create failed', data['failures'][0]['reason'])
+
+    def test_batch_create_allows_same_signature_service_overlap_on_pro(self):
+        other_service = Service.objects.create(
+            organization=self.org,
+            name='Pitching',
+            slug=f'pitching-{uuid.uuid4().hex[:6]}',
+            duration=self.service.duration,
+            buffer_before=self.service.buffer_before,
+            buffer_after=self.service.buffer_after,
+            time_increment_minutes=self.service.time_increment_minutes,
+            use_fixed_increment=self.service.use_fixed_increment,
+            allow_squished_bookings=self.service.allow_squished_bookings,
+            allow_ends_after_availability=self.service.allow_ends_after_availability,
+            max_booking_days=5000,
+            is_active=True,
+            show_on_public_calendar=True,
+        )
+        self.service.show_on_public_calendar = True
+        self.service.save(update_fields=['show_on_public_calendar'])
+
+        WeeklyAvailability.objects.create(
+            organization=self.org,
+            weekday=3,
+            start_time=time(9, 0),
+            end_time=time(21, 0),
+            is_active=True,
+        )
+        ServiceWeeklyAvailability.objects.create(
+            service=other_service,
+            weekday=3,
+            start_time=time(9, 0),
+            end_time=time(21, 0),
+            is_active=True,
+        )
+
+        resp = self.client.post(
+            f'/bus/{self.org.slug}/bookings/batch_create/',
+            data=json.dumps({
+                'dates': ['2030-03-07'],
+                'start_time': '17:30',
+                'end_time': '21:00',
+                'target': f'svc:{self.service.id}',
+            }),
+            content_type='application/json',
+            HTTP_HOST='127.0.0.1',
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.content.decode('utf-8'))
+        self.assertEqual(data.get('status'), 'ok')
+        self.assertEqual(len(data.get('created') or []), 1)
