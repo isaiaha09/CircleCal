@@ -228,6 +228,9 @@ def _can_use_per_date_overrides(org: Organization) -> bool:
         return False
 
 
+ORG_OVERRIDE_TARGET = '__org__'
+
+
 def _trial_single_active_service(org: Organization) -> bool:
     """True when trial onboarding should use Calendar (org weekly) availability.
 
@@ -2487,6 +2490,7 @@ def batch_create(request, org_slug):
         return HttpResponseBadRequest('`dates`, `start_time`, and `end_time` are required')
 
     created = []
+    failures = []
     # Use organization's configured timezone for per-date overrides so public calendar matches
     try:
         tz = ZoneInfo(getattr(org, 'timezone', getattr(settings, 'TIME_ZONE', 'UTC')))
@@ -2900,8 +2904,25 @@ def batch_create(request, org_slug):
         try:
             bk = Booking.objects.create(**create_kwargs)
         except Exception as e:
+            failures.append({
+                'date': dobj.isoformat(),
+                'start_time': start_time,
+                'end_time': end_time,
+                'target': target,
+                'reason': str(e),
+            })
             continue
         created.append(booking_to_event(bk))
+
+    if failures:
+        return JsonResponse(
+            {
+                'error': 'Some per-date overrides could not be saved.',
+                'created': created,
+                'failures': failures,
+            },
+            status=500 if not created else 400,
+        )
 
     return JsonResponse({'status': 'ok', 'created': created})
 
@@ -2939,9 +2960,12 @@ def batch_delete(request, org_slug):
 
     resolved_target_service_id = None
     resolved_target_user = None
+    resolved_target_is_org = False
     try:
         if target:
-            if isinstance(target, str) and target.startswith('svc:'):
+            if target == ORG_OVERRIDE_TARGET:
+                resolved_target_is_org = True
+            elif isinstance(target, str) and target.startswith('svc:'):
                 resolved_target_service_id = int(str(target).split(':', 1)[1])
             else:
                 mid = int(target)
@@ -2951,6 +2975,7 @@ def batch_delete(request, org_slug):
     except Exception:
         resolved_target_service_id = None
         resolved_target_user = None
+        resolved_target_is_org = False
 
     deleted = 0
     # Delete only per-date overrides (service is NULL) that overlap the given day in org timezone
@@ -2980,6 +3005,8 @@ def batch_delete(request, org_slug):
                 qs = qs.filter(client_name__startswith=f'scope:svc:{int(resolved_target_service_id)}')
             elif resolved_target_user is not None:
                 qs = qs.filter(assigned_user=resolved_target_user)
+            elif resolved_target_is_org:
+                qs = qs.filter(assigned_user__isnull=True).exclude(client_name__startswith='scope:svc:')
         except Exception:
             pass
 

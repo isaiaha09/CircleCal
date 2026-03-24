@@ -6405,6 +6405,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return null;
         }
 
+        const CC_ORG_OVERRIDE_TARGET = '__org__';
+
         function purgeOptimisticPerDateEvents() {
             try {
                 if (!calendar || typeof calendar.getEvents !== 'function') return;
@@ -9334,9 +9336,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                     const dateSet = new Set((dateList || []).map(String));
                                     const t = String(target || '');
                                     if (!t || !dateSet.size) return;
+                                    const isOrg = t === CC_ORG_OVERRIDE_TARGET;
                                     const isSvc = t.startsWith('svc:');
                                     const svcId = isSvc ? t.slice(4) : null;
-                                    const memId = !isSvc ? t : null;
+                                    const memId = (!isSvc && !isOrg) ? t : null;
 
                                     (calendar.getEvents() || []).forEach(ev => {
                                         try {
@@ -9349,7 +9352,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                             if (!dateSet.has(dateStr)) return;
 
                                             let matches = false;
-                                            if (isSvc) {
+                                            if (isOrg) {
+                                                const assignedSvc = xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null;
+                                                const assignedMembership = (xp.assigned_membership_id != null) ? String(xp.assigned_membership_id) : (xp.assigned_membership != null ? String(xp.assigned_membership) : null);
+                                                const assignedUser = (xp.assigned_user_id != null) ? String(xp.assigned_user_id) : null;
+                                                matches = !assignedSvc && !assignedMembership && !assignedUser;
+                                            } else if (isSvc) {
                                                 const assignedSvc = xp.assigned_scope_service_id || xp.assigned_scope_service || xp.assigned_service_id || xp.service_id || null;
                                                 if (assignedSvc != null && String(assignedSvc) === String(svcId)) matches = true;
                                             } else {
@@ -9628,16 +9636,32 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Determine owning scope for this override (membership id or svc:<id>) so Reset deletes the correct record.
                     let owningTarget = null;
                     try {
+                        const assignedSvc = props.assigned_scope_service_id || props.assigned_scope_service || null;
+                        const assignedMembership = props.assigned_membership_id != null ? String(props.assigned_membership_id) : (props.assigned_membership != null ? String(props.assigned_membership) : null);
+                        const assignedUser = props.assigned_user_id != null ? String(props.assigned_user_id) : null;
                         if (!SELECTED_MEMBER) {
-                            owningTarget = null;
+                            if (assignedSvc != null) {
+                                owningTarget = `svc:${String(assignedSvc)}`;
+                            } else if (assignedMembership != null) {
+                                owningTarget = String(assignedMembership);
+                            } else if (assignedUser != null && Array.isArray(MEMBERS)) {
+                                const m = MEMBERS.find(mm => {
+                                    try {
+                                        const uid = (mm.user__id || mm.user_id || (mm.user && (mm.user.id || mm.user.pk)) || null);
+                                        return uid != null && String(uid) === assignedUser;
+                                    } catch (e) { return false; }
+                                });
+                                owningTarget = (m && m.id != null) ? String(m.id) : null;
+                            } else {
+                                owningTarget = CC_ORG_OVERRIDE_TARGET;
+                            }
                         } else if (isServiceScope) {
-                            const assignedSvc = props.assigned_scope_service_id || props.assigned_scope_service || null;
                             if (assignedSvc && String(assignedSvc) === String(currentServiceId)) {
                                 owningTarget = `svc:${currentServiceId}`;
-                            } else if (props.assigned_membership_id != null) {
-                                owningTarget = String(props.assigned_membership_id);
-                            } else if (props.assigned_user_id != null && Array.isArray(MEMBERS)) {
-                                const uId = String(props.assigned_user_id);
+                            } else if (assignedMembership != null) {
+                                owningTarget = String(assignedMembership);
+                            } else if (assignedUser != null && Array.isArray(MEMBERS)) {
+                                const uId = String(assignedUser);
                                 const m = MEMBERS.find(mm => {
                                     try {
                                         const uid = (mm.user__id || mm.user_id || (mm.user && (mm.user.id || mm.user.pk)) || null);
@@ -9803,9 +9827,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             } catch (e) { /* ignore */ }
                             // Remove per-date background events for this DATE in the current SCOPE.
                             try {
+                                const isOrgTarget = overrideTarget === CC_ORG_OVERRIDE_TARGET;
                                 const isSvcTarget = !!(overrideTarget && String(overrideTarget).startsWith('svc:'));
                                 const svcId = isSvcTarget ? String(overrideTarget).slice(4) : null;
-                                const membershipId = (!isSvcTarget && overrideTarget) ? String(overrideTarget) : null;
+                                const membershipId = (!isSvcTarget && !isOrgTarget && overrideTarget) ? String(overrideTarget) : null;
                                 const userId = membershipId ? getSelectedUserIdForMembership(membershipId) : null;
                                 (calendar.getEvents() || []).forEach(ev => {
                                     try {
@@ -9815,7 +9840,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                         if (!s || !String(s).startsWith(d)) return;
 
                                         const xp = ev.extendedProps || {};
-                                        if (isSvcTarget) {
+                                        if (isOrgTarget) {
+                                            const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || (xp.client_name && String(xp.client_name).replace('scope:svc:','')) || null);
+                                            const assignedMembershipId = xp.assigned_membership_id || null;
+                                            const assignedUserId = xp.assigned_user_id || null;
+                                            if (assignedSvc || assignedMembershipId || assignedUserId) return;
+                                        } else if (isSvcTarget) {
                                             const assignedSvc = (xp.assigned_scope_service_id || xp.assigned_scope_service || (xp.client_name && String(xp.client_name).replace('scope:svc:','')) || null);
                                             if (!assignedSvc || String(assignedSvc) !== String(svcId)) return;
                                         } else {
@@ -12878,11 +12908,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     const delRes = await fetch(`/bus/${orgSlug}/bookings/batch_delete/`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken }, body: JSON.stringify({ dates: dates, target: overrideTarget })
                     });
-                    // ignore result details — we'll refetch after creating
+                    const delData = await delRes.json().catch(() => null);
+                    if (!delRes.ok) {
+                        const msg = (delData && (delData.error || delData.message)) || `Server returned ${delRes.status}`;
+                        alert('Error clearing existing overrides: ' + msg);
+                        try { await calendar.refetchEvents(); } catch(e){}
+                        try { updateUnavailableDays(); } catch(e){}
+                        return;
+                    }
                 } catch (e) { /* ignore delete errors */ }
 
-                    // Now create each (already unique+validated) range for each selected date
-                    for (const r of ranges) {
+                let saveFailure = null;
+
+                // Now create each (already unique+validated) range for each selected date
+                for (const r of ranges) {
                     try {
                         const overrideTarget = (ccOverrideTarget() || null);
                         // optimistic UI addition
@@ -12895,11 +12934,25 @@ document.addEventListener('DOMContentLoaded', function() {
                             body: JSON.stringify({ dates: dates, start_time: r.start, end_time: r.end, target: overrideTarget })
                         });
                         const data = await res.json().catch(() => null);
-                        if (!res.ok) {
-                            const msg = (data && (data.error || data.message)) || `Server returned ${res.status}`;
-                            console.warn('Error creating range', r, msg);
+                        const createdCount = Array.isArray(data && data.created) ? data.created.length : 0;
+                        if (!res.ok || createdCount !== dates.length) {
+                            const countMsg = (!res.ok || createdCount === dates.length)
+                                ? ''
+                                : ` Expected ${dates.length} saved override(s), got ${createdCount}.`;
+                            const msg = ((data && (data.error || data.message)) || `Server returned ${res.status}`) + countMsg;
+                            console.warn('Error creating range', r, msg, data);
+                            saveFailure = msg;
+                            break;
                         }
                     } catch (err) { console.error('range create failed', err); }
+                }
+
+                if (saveFailure) {
+                    try { purgeOptimisticPerDateEvents(); } catch (e) {}
+                    try { await calendar.refetchEvents(); } catch(e){}
+                    try { updateUnavailableDays(); } catch(e){}
+                    alert('Error saving overrides: ' + saveFailure);
+                    return;
                 }
 
                 try { await calendar.refetchEvents(); } catch(e){}
