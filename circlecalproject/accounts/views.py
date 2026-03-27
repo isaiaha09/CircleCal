@@ -471,6 +471,13 @@ def profile_view(request):
 		form = ProfileForm(request.POST, request.FILES, instance=profile)
 		if form.is_valid():
 			form.save()
+			try:
+				stripe_configured = bool(getattr(settings, 'STRIPE_SECRET_KEY', None))
+				needs_connect_after_save = bool(org is not None) and bool(is_owner_for_org) and stripe_configured and not bool(getattr(org, 'stripe_connect_charges_enabled', False))
+				if needs_connect_after_save:
+					request.session['cc_auto_open_stripe_connect_modal'] = True
+			except Exception:
+				pass
 			messages.success(request, "Profile updated successfully.")
 			return redirect("accounts:profile")
 		else:
