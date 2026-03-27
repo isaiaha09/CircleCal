@@ -3205,13 +3205,9 @@ def post_login_redirect(request):
     memberships = Membership.objects.filter(user=request.user, is_active=True).select_related("organization")
     count = memberships.count()
 
-    # If user's profile is incomplete, staff/manager accounts may be required
-    # to complete Profile before continuing. Owners/admins should proceed.
-    try:
-        prof = request.user.profile
-        profile_complete = bool(prof.avatar or (prof.timezone and prof.timezone != 'UTC'))
-    except Exception:
-        profile_complete = False
+    first_name = (getattr(request.user, 'first_name', '') or '').strip()
+    last_name = (getattr(request.user, 'last_name', '') or '').strip()
+    name_complete = bool(first_name and last_name)
 
     # App-mode propagation:
     # - WebView requests have CircleCalApp UA.
@@ -3255,9 +3251,22 @@ def post_login_redirect(request):
         org = m.organization
         role = (getattr(m, 'role', '') or '').lower()
 
-        # Only enforce Profile completion for staff/manager.
-        if (role in ['staff', 'manager']) and (not profile_complete):
+        if not name_complete:
             return _redirect_named('accounts:profile')
+
+        try:
+            is_owner_admin = bool(getattr(org, 'owner_id', None) == getattr(request.user, 'id', None)) or (role in ['owner', 'admin'])
+            stripe_configured = bool(getattr(settings, 'STRIPE_SECRET_KEY', None))
+            connected = bool(getattr(org, 'stripe_connect_charges_enabled', False)) and bool(getattr(org, 'stripe_connect_account_id', None))
+            if is_owner_admin and stripe_configured and not connected:
+                try:
+                    request.session['cc_auto_open_stripe_connect_modal'] = True
+                except Exception:
+                    pass
+                return _redirect_named('accounts:profile')
+        except Exception:
+            pass
+
         return _redirect_named('calendar_app:dashboard', org_slug=org.slug)
 
     return _redirect_named('calendar_app:choose_business')

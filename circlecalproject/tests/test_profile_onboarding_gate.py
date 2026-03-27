@@ -71,13 +71,13 @@ class ProfileOnboardingGateTests(TestCase):
             HTTP_HOST='127.0.0.1',
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertContains(response, 'Profile updated successfully.')
+        self.assertContains(response, 'Continue to Stripe')
+        self.assertContains(response, 'setTimeout(function () {')
+
+    def test_post_login_redirect_sends_owner_without_name_to_profile(self):
+        response = self.client.get(reverse('calendar_app:post_login'), HTTP_HOST='127.0.0.1')
+
+        self.assertEqual(response.status_code, HTTPStatus.FOUND)
         self.assertEqual(response.url, reverse('accounts:profile'))
-        self.assertTrue(self.client.session.get('cc_auto_open_stripe_connect_modal'))
-
-        follow_up = self.client.get(reverse('accounts:profile'), HTTP_HOST='127.0.0.1')
-
-        self.assertEqual(follow_up.status_code, 200)
-        self.assertContains(follow_up, 'Continue to Stripe')
-        self.assertContains(follow_up, 'setTimeout(function () {')
-        self.assertNotIn('cc_auto_open_stripe_connect_modal', self.client.session)

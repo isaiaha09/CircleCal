@@ -471,14 +471,61 @@ def profile_view(request):
 		form = ProfileForm(request.POST, request.FILES, instance=profile)
 		if form.is_valid():
 			form.save()
+			stripe_connect_start_url = None
+			stripe_connect_modal_enabled = False
+			stripe_connect_modal_auto_open = False
 			try:
 				stripe_configured = bool(getattr(settings, 'STRIPE_SECRET_KEY', None))
 				needs_connect_after_save = bool(org is not None) and bool(is_owner_for_org) and stripe_configured and not bool(getattr(org, 'stripe_connect_charges_enabled', False))
 				if needs_connect_after_save:
-					request.session['cc_auto_open_stripe_connect_modal'] = True
+					stripe_connect_modal_enabled = True
+					stripe_connect_modal_auto_open = True
+					stripe_connect_start_url = reverse('billing:stripe_connect_start', kwargs={'org_slug': org.slug})
+					try:
+						ua = (request.META.get('HTTP_USER_AGENT') or '')
+						is_app = (
+							('circlecalapp' in ua.lower())
+							or (request.GET.get('cc_app') == '1')
+							or (request.COOKIES.get('cc_app') == '1')
+							or bool(request.session.get('cc_app_flow'))
+						)
+						if is_app and stripe_connect_start_url and ('cc_app=1' not in stripe_connect_start_url):
+							joiner = '&' if ('?' in stripe_connect_start_url) else '?'
+							stripe_connect_start_url = f"{stripe_connect_start_url}{joiner}cc_app=1"
+					except Exception:
+						pass
 			except Exception:
 				pass
 			messages.success(request, "Profile updated successfully.")
+			if stripe_connect_modal_enabled and stripe_connect_start_url:
+				activities = LoginActivity.objects.filter(user=user).only('timestamp','ip_address','user_agent')[:5]
+				sub = None
+				if org is not None:
+					try:
+						sub = Subscription.objects.select_related('plan').get(organization=org)
+					except Subscription.DoesNotExist:
+						sub = None
+				form = ProfileForm(instance=profile)
+				return render(request, "accounts/profile.html", {
+					"form": form,
+					"user": user,
+					"two_factor_enabled": two_factor_enabled,
+					"activities": activities,
+					"subscription": sub,
+					"organization": org,
+					"memberships": _annotate_membership_plan_features(Membership.objects.filter(user=user).select_related('organization')),
+					"pending_invites": Invite.objects.filter(email=user.email, accepted=False).select_related('organization') if user.email else [],
+					"is_owner_for_org": is_owner_for_org,
+					"org_offline_venmo": org_offline_venmo,
+					"org_offline_zelle": org_offline_zelle,
+					"can_use_offline_payment_methods": can_use_offline_payment_methods,
+					"owner_receives_staff_booking_push_notifications_enabled": owner_receives_staff_booking_push_notifications_enabled,
+					"stripe_connected_account_url": stripe_connected_account_url,
+					"stripe_express_dashboard_url": stripe_express_dashboard_url,
+					"stripe_connect_modal_enabled": stripe_connect_modal_enabled,
+					"stripe_connect_start_url": stripe_connect_start_url,
+					"stripe_connect_modal_auto_open": stripe_connect_modal_auto_open,
+				})
 			return redirect("accounts:profile")
 		else:
 			# Surface validation errors to the user
