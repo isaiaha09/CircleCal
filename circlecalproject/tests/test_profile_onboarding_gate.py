@@ -57,6 +57,36 @@ class ProfileOnboardingGateTests(TestCase):
         self.assertEqual(response.status_code, HTTPStatus.FOUND)
         self.assertEqual(response.url, reverse('accounts:profile'))
 
+    def test_profile_request_primes_rls_user_context_before_org_resolution(self):
+        request = self.factory.get(reverse('accounts:profile'), HTTP_HOST='127.0.0.1')
+        request.user = self.user
+        session_middleware = SessionMiddleware(lambda req: HttpResponse('OK'))
+        session_middleware.process_request(request)
+        request.session['cc_active_org_id'] = self.org.id
+        request.session.save()
+
+        seen = []
+
+        def capture_set_config(name, value):
+            seen.append((name, value))
+
+        middleware = OrganizationMiddleware(lambda req: HttpResponse('OK'))
+        with patch('calendar_app.middleware.connection.vendor', 'postgresql'), patch.object(middleware, '_set_rls_config', side_effect=capture_set_config):
+            response = middleware(request)
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertEqual(getattr(request, 'organization', None), self.org)
+        self.assertEqual(seen[:3], [
+            ('circlecal.current_user_id', str(self.user.id)),
+            ('circlecal.rls_bypass', '0'),
+            ('circlecal.current_org_id', ''),
+        ])
+        self.assertEqual(seen[-3:], [
+            ('circlecal.current_user_id', ''),
+            ('circlecal.current_org_id', ''),
+            ('circlecal.rls_bypass', '0'),
+        ])
+
     def test_successful_profile_save_auto_opens_stripe_modal(self):
         response = self.client.post(
             reverse('accounts:profile'),
