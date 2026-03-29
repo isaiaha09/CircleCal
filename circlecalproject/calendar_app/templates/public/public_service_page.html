@@ -419,7 +419,7 @@
   // widgets we browse availability here, but complete booking on the full page.
   window.CC_IS_EMBED = {{ is_embed|yesno:"true,false" }};
   window.CC_EMBED_BREAKOUT = {{ embed_breakout|yesno:"true,false" }};
-  window.CC_TOP_BOOK_URL = "{% url 'bookings:public_service_page' org.slug service.slug %}";
+  window.CC_TOP_BOOK_URL = "{{ top_level_public_service_url|escapejs }}";
 </script>
 
 <div class="calendar-container" style="position:relative;">

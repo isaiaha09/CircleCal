@@ -187,6 +187,40 @@ class TestPublicBookingEndpoints(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(self.service.name, resp.content.decode('utf-8', errors='ignore'))
 
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        TURNSTILE_SITE_KEY='test-site-key',
+        TURNSTILE_SECRET_KEY='test-secret-key',
+    )
+    def test_public_service_page_hides_turnstile_for_explicit_embed_app_requests(self):
+        url = reverse('bookings:public_service_page', args=[self.org.slug, self.service.slug])
+
+        web_resp = self.client.get(url, HTTP_USER_AGENT='Mozilla/5.0')
+        self.assertEqual(web_resp.status_code, 200)
+        self.assertContains(web_resp, 'id="bookingTurnstile"')
+
+        app_resp = self.client.get(url, {'cc_embed_app': '1'}, HTTP_USER_AGENT='Mozilla/5.0')
+        self.assertEqual(app_resp.status_code, 200)
+        self.assertNotContains(app_resp, 'id="bookingTurnstile"')
+
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        TURNSTILE_SITE_KEY='test-site-key',
+        TURNSTILE_SECRET_KEY='test-secret-key',
+    )
+    def test_public_service_page_hides_turnstile_for_circlecal_app_user_agent(self):
+        url = reverse('bookings:public_service_page', args=[self.org.slug, self.service.slug])
+        resp = self.client.get(url, HTTP_USER_AGENT='Mozilla/5.0 CircleCalApp-iOS')
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'id="bookingTurnstile"')
+
+    def test_public_service_page_breakout_url_preserves_explicit_embed_app_flag(self):
+        url = reverse('bookings:public_service_page', args=[self.org.slug, self.service.slug])
+        resp = self.client.get(url, {'cc_embed_app': '1'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('top_level_public_service_url', resp.context)
+        self.assertIn('cc_embed_app=1', resp.context['top_level_public_service_url'])
+
     def test_group_capacity_keeps_slot_available_until_full(self):
         self.service.max_participants = 3
         self.service.group_pricing = {'2': '75.00', '3': '100.00'}

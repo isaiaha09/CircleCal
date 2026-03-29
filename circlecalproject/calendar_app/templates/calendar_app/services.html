@@ -79,6 +79,7 @@
                     {% if not has_active_services %}disabled aria-disabled="true"{% endif %}
                 >{% if has_active_services %}&lt;iframe src=&quot;{{ embed_services_embed_src }}&quot; style=&quot;width:100%;height:900px;border:0;&quot; loading=&quot;lazy&quot;&gt;&lt;/iframe&gt;{% else %}Activate at least 1 service to copy embed code.{% endif %}</textarea>
                 <p class="text-xs text-gray-500 mt-2">Tip: adjust <span class="font-mono">height</span> as needed for your page layout.</p>
+                <p class="text-xs text-gray-500 mt-2">If this iframe is loaded inside your own iOS/Android app WebView, append <span class="font-mono">&amp;cc_embed_app=1</span> to the iframe <span class="font-mono">src</span> to disable the Turnstile challenge for that native-app embed flow.</p>
             </div>
         </div>
     {% elif show_default_public_booking_links %}
@@ -231,6 +232,7 @@
                                             class="w-full mt-2 text-xs bg-gray-50 text-gray-800 border border-blue-100 rounded-xl p-3 font-mono"
                                             {% if not has_active_services %}disabled aria-disabled="true"{% endif %}
                                         >{% if has_active_services %}&lt;iframe src=&quot;{{ service.embed_src }}&quot; style=&quot;width:100%;height:900px;border:0;&quot; loading=&quot;lazy&quot;&gt;&lt;/iframe&gt;{% else %}Activate at least 1 service to copy embed code.{% endif %}</textarea>
+                                        <p class="text-xs text-gray-500 mt-2">Native app WebView embed: append <span class="font-mono">&amp;cc_embed_app=1</span> to this iframe <span class="font-mono">src</span> to suppress Turnstile in the host app.</p>
                                     </div>
                                 </div>
                             </details>

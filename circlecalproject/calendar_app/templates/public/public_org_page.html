@@ -49,7 +49,7 @@
             {% endif %}
           </div>
 
-          <a href="{% url 'bookings:public_service_page' org.slug service.slug %}"
+           <a href="{% url 'bookings:public_service_page' org.slug service.slug %}{{ embed_query_suffix }}"
              {% if is_embed and embed_breakout %}target="_top"{% endif %}
              class="btn-primary w-full inline-block text-center py-3">View availability</a>
         </div>

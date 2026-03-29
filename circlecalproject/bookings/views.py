@@ -39,6 +39,7 @@ from django.http import HttpResponse
 from django.views.decorators.cache import never_cache
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from . import ics as bookings_ics
+from urllib.parse import urlencode
 
 try:
     from circlecalproject.bot_protection import (
@@ -79,6 +80,42 @@ def _mark_iframe_exempt(response, should_exempt: bool):
     return response
 
 
+def _is_explicit_embed_app_request(request) -> bool:
+    """Detect host apps that explicitly mark an embedded native-app WebView."""
+    try:
+        if request.META.get('HTTP_X_CC_EMBED_APP') == '1':
+            return True
+        if (request.GET.get('cc_embed_app') == '1') or (request.POST.get('cc_embed_app') == '1'):
+            return True
+        if request.COOKIES.get('cc_embed_app') == '1':
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _get_public_booking_passthrough_params(request, *, include_embed: bool) -> dict[str, str]:
+    params: dict[str, str] = {}
+    try:
+        if include_embed:
+            params['embed'] = '1'
+            key = (request.GET.get('key') or request.POST.get('key') or '').strip()
+            if key:
+                params['key'] = key
+        if _is_explicit_embed_app_request(request):
+            params['cc_embed_app'] = '1'
+    except Exception:
+        return {}
+    return params
+
+
+def _append_query_params(url: str, params: dict[str, str]) -> str:
+    if not params:
+        return url
+    joiner = '&' if '?' in url else '?'
+    return f"{url}{joiner}{urlencode(params)}"
+
+
 def _is_app_webview_request(request) -> bool:
     try:
         ua = (request.META.get('HTTP_USER_AGENT') or '').lower()
@@ -89,8 +126,11 @@ def _is_app_webview_request(request) -> bool:
     if 'circlecalapp' in ua:
         return True
     try:
-        # Optional explicit app signal (if sent by native clients).
-        return (request.META.get('HTTP_X_CC_APP') == '1')
+        if request.META.get('HTTP_X_CC_APP') == '1':
+            return True
+        if _is_explicit_embed_app_request(request):
+            return True
+        return False
     except Exception:
         return False
 
@@ -3125,6 +3165,13 @@ def public_org_page(request, org_slug):
     org = get_object_or_404(Organization, slug=org_slug)
     is_embed = _is_embed_request(request)
     embed_breakout = _embed_breakout_required(request, org) if is_embed else False
+    embed_query_suffix = ''
+    try:
+        passthrough = _get_public_booking_passthrough_params(request, include_embed=is_embed)
+        if passthrough:
+            embed_query_suffix = f"?{urlencode(passthrough)}"
+    except Exception:
+        embed_query_suffix = ''
     if is_embed:
         ok, _reason = _validate_embed_access(request, org)
         if not ok:
@@ -3184,7 +3231,7 @@ def public_org_page(request, org_slug):
     except Exception:
         for s in services:
             s.assigned_names = ''
-    resp = render(request, "public/public_org_page.html", {"org": org, "services": services, "is_embed": is_embed, "embed_breakout": embed_breakout})
+    resp = render(request, "public/public_org_page.html", {"org": org, "services": services, "is_embed": is_embed, "embed_breakout": embed_breakout, "embed_query_suffix": embed_query_suffix})
     if is_embed:
         try:
             resp.xframe_options_exempt = True
@@ -3208,6 +3255,10 @@ def _build_public_service_page_context(
 
     is_embed = _is_embed_request(request)
     embed_breakout = _embed_breakout_required(request, org) if is_embed else False
+    top_level_public_service_url = _append_query_params(
+        reverse('bookings:public_service_page', args=[org.slug, service.slug]),
+        _get_public_booking_passthrough_params(request, include_embed=False),
+    )
     org_stripe_connected = bool(getattr(org, 'stripe_connect_account_id', None)) and bool(getattr(org, 'stripe_connect_charges_enabled', False))
 
     # GET - add trial context for banner
@@ -3428,6 +3479,8 @@ def _build_public_service_page_context(
         "offline_instructions": offline_instructions,
         "turnstile_enabled": turnstile_enabled,
         "turnstile_site_key": turnstile_site_key,
+        "cc_embed_app_mode": _is_explicit_embed_app_request(request),
+        "top_level_public_service_url": top_level_public_service_url,
         "service_weekly_map_json": json.dumps(service_weekly_map),
         "team_member_filter_enabled": bool(show_with_line),
         "team_member_options": team_member_options,
@@ -3456,6 +3509,8 @@ def public_service_page(request, org_slug, service_slug):
     """
     org = get_object_or_404(Organization, slug=org_slug)
     is_embed = _is_embed_request(request)
+    embed_passthrough_params = _get_public_booking_passthrough_params(request, include_embed=is_embed)
+    top_level_passthrough_params = _get_public_booking_passthrough_params(request, include_embed=False)
 
     if is_embed:
         ok, _reason = _validate_embed_access(request, org)
@@ -3480,14 +3535,14 @@ def public_service_page(request, org_slug, service_slug):
     # Services not shown publicly should not be bookable or selectable on the public page.
     service = Service.objects.filter(slug=service_slug, organization=org, show_on_public_calendar=True).first()
     if not service:
-        resp = redirect(reverse('bookings:public_org_page', args=[org.slug]))
+        resp = redirect(_append_query_params(reverse('bookings:public_org_page', args=[org.slug]), embed_passthrough_params))
         return _mark_iframe_exempt(resp, is_embed)
 
     # Safety: if service requires facility resources but none are linked, treat as hidden.
     try:
         if bool(getattr(service, 'requires_facility_resources', False)):
             if not ServiceResource.objects.filter(service=service, resource__is_active=True).exists():
-                resp = redirect(reverse('bookings:public_org_page', args=[org.slug]))
+                resp = redirect(_append_query_params(reverse('bookings:public_org_page', args=[org.slug]), embed_passthrough_params))
                 return _mark_iframe_exempt(resp, is_embed)
     except Exception:
         pass
@@ -3583,7 +3638,7 @@ def public_service_page(request, org_slug, service_slug):
         # Embedded widgets should not attempt same-origin CSRF-protected POSTs
         # inside third-party iframes; redirect the user to the full booking page.
         if is_embed and embed_breakout:
-            resp = redirect(reverse('bookings:public_service_page', args=[org.slug, service.slug]))
+            resp = redirect(_append_query_params(reverse('bookings:public_service_page', args=[org.slug, service.slug]), top_level_passthrough_params))
             return _mark_iframe_exempt(resp, True)
 
         # Bot protection: verify Turnstile challenge on public bookings.
@@ -3842,6 +3897,8 @@ def public_service_page(request, org_slug, service_slug):
                     return_url = site_url.rstrip('/') + return_path + '?session_id={CHECKOUT_SESSION_ID}' + ('&embed=1' if is_embed else '')
                 else:
                     return_url = request.build_absolute_uri(return_path) + '?session_id={CHECKOUT_SESSION_ID}' + ('&embed=1' if is_embed else '')
+                if _is_explicit_embed_app_request(request):
+                    return_url += '&cc_embed_app=1'
 
                 # Create the Checkout Session ON the connected account (direct charge).
                 # This ensures Stripe processing fees are charged to the business, not the platform.
@@ -4005,9 +4062,10 @@ def public_service_page(request, org_slug, service_slug):
         except Exception:
             pass
 
-        success_url = reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id])
-        if is_embed:
-            success_url += '?embed=1'
+        success_url = _append_query_params(
+            reverse("bookings:booking_success", args=[org.slug, service.slug, booking.id]),
+            embed_passthrough_params,
+        )
         resp = redirect(success_url)
         return _mark_iframe_exempt(resp, is_embed)
         # Notify owner if this booking would violate service buffers (squished)
@@ -4363,9 +4421,10 @@ def public_stripe_return(request, org_slug, service_slug, intent_id: int):
     except Exception:
         pass
 
-    success_url = reverse('bookings:booking_success', args=[org.slug, service.slug, booking.id])
-    if is_embed:
-        success_url += '?embed=1'
+    success_url = _append_query_params(
+        reverse('bookings:booking_success', args=[org.slug, service.slug, booking.id]),
+        _get_public_booking_passthrough_params(request, include_embed=is_embed),
+    )
     resp = redirect(success_url)
     return _mark_iframe_exempt(resp, is_embed)
 
