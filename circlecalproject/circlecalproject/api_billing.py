@@ -6,6 +6,7 @@ from django.urls import reverse
 from accounts.models import Business, Membership
 from billing.models import PaymentMethod, Plan
 from .api_org_access import resolve_org_and_membership
+from .api_throttles import BillingReadThrottle, BillingWriteBurstThrottle, BillingWriteSustainedThrottle
 
 try:
     import stripe
@@ -77,6 +78,7 @@ class BillingSummaryView(APIView):
     """Org-scoped billing summary for mobile."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [BillingReadThrottle]
 
     def get(self, request):
         org, membership = _get_org_and_membership(user=request.user, org_param=request.query_params.get("org"))
@@ -201,6 +203,7 @@ class BillingPlansView(APIView):
     """List active plans (used by mobile to show upgrade options)."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [BillingReadThrottle]
 
     def get(self, request):
         _deny_in_app_billing(request)
@@ -230,6 +233,7 @@ class BillingPortalSessionView(APIView):
     """Create a Stripe Billing Portal session URL for this org."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [BillingWriteBurstThrottle, BillingWriteSustainedThrottle]
 
     def post(self, request):
         _deny_in_app_billing(request)
@@ -258,6 +262,7 @@ class BillingCheckoutSessionView(APIView):
     """Create a Stripe Checkout session URL to subscribe/upgrade to a plan."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [BillingWriteBurstThrottle, BillingWriteSustainedThrottle]
 
     def post(self, request):
         _deny_in_app_billing(request)
@@ -310,6 +315,7 @@ class BillingPlanHealthView(APIView):
     """Lightweight health check so we can confirm default plans exist in production."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [BillingReadThrottle]
 
     def get(self, request):
         # Requires org context mainly to keep the API consistent with the rest of mobile endpoints.
@@ -350,6 +356,7 @@ class StripeExpressDashboardLinkView(APIView):
     """Create a one-time Stripe Express Dashboard login link for the connected account."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [BillingWriteBurstThrottle, BillingWriteSustainedThrottle]
 
     def post(self, request):
         # Stripe Express Dashboard is not a subscription purchase/upgrade flow.

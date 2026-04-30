@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.utils import timezone
 
 from accounts.push import push_enabled
@@ -16,6 +17,7 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 from accounts.models import PushDevice
+from .api_throttles import PushStatusThrottle, PushWriteThrottle
 
 
 class PushStatusView(APIView):
@@ -25,6 +27,7 @@ class PushStatusView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [PushStatusThrottle]
 
     def get(self, request):
         qs = PushDevice.objects.filter(user=request.user)
@@ -52,6 +55,7 @@ class PushTokensView(APIView):
     """Register/unregister Expo push tokens for the authenticated user."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [PushWriteThrottle]
 
     def post(self, request):
         token = None
@@ -85,6 +89,15 @@ class PushTokensView(APIView):
                 'last_seen_at': timezone.now(),
             },
         )
+
+        max_devices = int(getattr(settings, 'MAX_ACTIVE_PUSH_DEVICES_PER_USER', 5) or 5)
+        extra_ids = list(
+            PushDevice.objects.filter(user=request.user, is_active=True)
+            .order_by('-last_seen_at', '-id')
+            .values_list('id', flat=True)[max_devices:]
+        )
+        if extra_ids:
+            PushDevice.objects.filter(id__in=extra_ids).update(is_active=False)
 
         return Response({'ok': True, 'device_id': dev.id})
 

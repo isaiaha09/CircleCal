@@ -15,6 +15,7 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 from django.contrib.auth import authenticate
+from .api_throttles import MobileAuthBurstThrottle, MobileAuthSustainedThrottle, MobileSessionThrottle
 
 try:
     from django_otp import devices_for_user
@@ -68,6 +69,7 @@ class MobileTokenView(APIView):
 
     permission_classes = [AllowAny]
     authentication_classes: list[type] = []
+    throttle_classes = [MobileAuthBurstThrottle, MobileAuthSustainedThrottle]
 
     def post(self, request):
         username = str((request.data or {}).get("username") or "").strip()
@@ -118,6 +120,7 @@ class MobileSessionView(APIView):
     """Rotate the authenticated mobile session tokens with the requested persistence."""
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [MobileSessionThrottle]
 
     def post(self, request):
         if RefreshToken is None:

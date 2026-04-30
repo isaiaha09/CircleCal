@@ -45,10 +45,11 @@ TURNSTILE_ENABLED = os.getenv('TURNSTILE_ENABLED', '1').strip().lower() in ('1',
 # Server-side sending is best-effort and should be explicitly enabled.
 EXPO_PUSH_ENABLED = os.getenv('EXPO_PUSH_ENABLED', '0').strip().lower() in ('1', 'true', 'yes', 'on')
 EXPO_PUSH_URL = os.getenv('EXPO_PUSH_URL', 'https://exp.host/--/api/v2/push/send').strip() or 'https://exp.host/--/api/v2/push/send'
+MAX_ACTIVE_PUSH_DEVICES_PER_USER = max(1, int(os.getenv('MAX_ACTIVE_PUSH_DEVICES_PER_USER', '5') or '5'))
 MOBILE_AUTH_REFRESH_LIFETIME_DAYS = max(1, int(os.getenv('MOBILE_AUTH_REFRESH_LIFETIME_DAYS', '1') or '1'))
 MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS = max(
     MOBILE_AUTH_REFRESH_LIFETIME_DAYS,
-    int(os.getenv('MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS', '36500') or '36500'),
+    int(os.getenv('MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS', '30') or '30'),
 )
 
 # Cloudinary is configured via environment variables (e.g. CLOUDINARY_URL).
@@ -228,6 +229,16 @@ if 'rest_framework' in _api_apps:
         'DEFAULT_PERMISSION_CLASSES': [
             'rest_framework.permissions.AllowAny',
         ],
+        'DEFAULT_THROTTLE_RATES': {
+            'mobile_auth_burst': os.getenv('DRF_THROTTLE_MOBILE_AUTH_BURST', '5/minute'),
+            'mobile_auth_sustained': os.getenv('DRF_THROTTLE_MOBILE_AUTH_SUSTAINED', '30/hour'),
+            'mobile_session_rotate': os.getenv('DRF_THROTTLE_MOBILE_SESSION_ROTATE', '20/hour'),
+            'push_status': os.getenv('DRF_THROTTLE_PUSH_STATUS', '60/hour'),
+            'push_write': os.getenv('DRF_THROTTLE_PUSH_WRITE', '20/hour'),
+            'billing_read': os.getenv('DRF_THROTTLE_BILLING_READ', '60/hour'),
+            'billing_write_burst': os.getenv('DRF_THROTTLE_BILLING_WRITE_BURST', '5/minute'),
+            'billing_write_sustained': os.getenv('DRF_THROTTLE_BILLING_WRITE_SUSTAINED', '20/hour'),
+        },
     }
 
 ROOT_URLCONF = 'circlecalproject.urls'

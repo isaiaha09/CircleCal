@@ -1,8 +1,12 @@
 import json
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
+
+from circlecalproject.api_auth_mobile import _mobile_refresh_lifetime
 
 
 User = get_user_model()
@@ -49,3 +53,26 @@ class ApiAuthSecurityTests(TestCase):
         self.assertIn('access', body)
         self.assertIn('refresh', body)
         self.assertFalse(body.get('otp_required', False))
+
+    def test_stay_logged_in_refresh_lifetime_defaults_to_30_days(self):
+        with patch('circlecalproject.api_auth_mobile.settings.MOBILE_AUTH_REFRESH_LIFETIME_DAYS', 1), patch(
+            'circlecalproject.api_auth_mobile.settings.MOBILE_AUTH_STAY_LOGGED_IN_REFRESH_LIFETIME_DAYS', 30
+        ):
+            self.assertEqual(_mobile_refresh_lifetime(True).days, 30)
+
+    @override_settings(REST_FRAMEWORK={'DEFAULT_THROTTLE_RATES': {'mobile_auth_burst': '1/minute', 'mobile_auth_sustained': '10/hour'}})
+    def test_generic_token_endpoint_is_throttled(self):
+        cache.clear()
+        resp1 = self.client.post(
+            '/api/v1/auth/token/',
+            data=json.dumps({'username': self.user.username, 'password': 'bad-pass'}),
+            content_type='application/json',
+        )
+        resp2 = self.client.post(
+            '/api/v1/auth/token/',
+            data=json.dumps({'username': self.user.username, 'password': 'bad-pass'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp1.status_code, 401)
+        self.assertEqual(resp2.status_code, 429)

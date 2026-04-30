@@ -3,6 +3,7 @@ from __future__ import annotations
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.core.files.images import get_image_dimensions
 from django.urls import reverse
 from django.utils import timezone
 
@@ -296,6 +297,33 @@ class ProfileAvatarUploadView(APIView):
         f = request.FILES.get("avatar")
         if not f:
             raise ValidationError({"avatar": "File required (form field name: avatar)."})
+
+        max_bytes = int(getattr(settings, "MAX_PROFILE_AVATAR_BYTES", 5 * 1024 * 1024) or (5 * 1024 * 1024))
+        if int(getattr(f, "size", 0) or 0) > max_bytes:
+            raise ValidationError({"avatar": f"Avatar must be {max_bytes // (1024 * 1024)} MB or smaller."})
+
+        content_type = str(getattr(f, "content_type", "") or "").strip().lower()
+        allowed_types = tuple(
+            str(item).strip().lower()
+            for item in (getattr(settings, "ALLOWED_PROFILE_AVATAR_CONTENT_TYPES", ()) or ())
+            if str(item).strip()
+        )
+        if content_type and allowed_types and content_type not in allowed_types:
+            raise ValidationError({"avatar": "Unsupported image type. Use JPG, PNG, WebP, or GIF."})
+
+        try:
+            width, height = get_image_dimensions(f)
+            if not width or not height:
+                raise ValidationError({"avatar": "Upload a valid image file."})
+        except ValidationError:
+            raise
+        except Exception:
+            raise ValidationError({"avatar": "Upload a valid image file."})
+        finally:
+            try:
+                f.seek(0)
+            except Exception:
+                pass
 
         profile.avatar = f
         profile.avatar_updated_at = timezone.now()

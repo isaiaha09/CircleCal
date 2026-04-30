@@ -82,10 +82,14 @@ def send_push_to_user(*, user, title: str, body: str, data: dict[str, Any] | Non
     if not push_enabled():
         return 0
 
+    max_devices = max(1, int(getattr(settings, "MAX_ACTIVE_PUSH_DEVICES_PER_USER", 5) or 5))
+
     # Pull current active tokens.
     tokens = list(
         PushDevice.objects.filter(user=user, is_active=True)
+        .order_by('-last_seen_at', '-id')
         .values_list("token", flat=True)
+        [:max_devices]
     )
 
     if not tokens:

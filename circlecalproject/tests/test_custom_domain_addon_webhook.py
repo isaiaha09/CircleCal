@@ -141,3 +141,40 @@ class TestCustomDomainAddonWebhook(TestCase):
 
         self.sub.refresh_from_db()
         self.assertFalse(self.sub.custom_domain_addon_enabled)
+
+    @patch('billing.views.stripe.Subscription.list')
+    def test_sync_endpoint_follows_pagination_until_active_addon_found(self, mock_list):
+        mock_list.side_effect = [
+            {
+                'data': [
+                    {
+                        'id': 'sub_page_1',
+                        'status': 'canceled',
+                        'metadata': {'purchase_type': 'other'},
+                    }
+                ],
+                'has_more': True,
+            },
+            {
+                'data': [
+                    {
+                        'id': 'sub_addon_page_2',
+                        'status': 'active',
+                        'metadata': {
+                            'purchase_type': 'custom_domain_addon',
+                            'organization_id': str(self.org.id),
+                        },
+                    }
+                ],
+                'has_more': False,
+            },
+        ]
+
+        url = reverse('billing:sync_custom_domain_addon_status', kwargs={'org_slug': self.org.slug})
+        r = self.client.post(url)
+        self.assertEqual(r.status_code, 200)
+
+        self.sub.refresh_from_db()
+        self.assertTrue(self.sub.custom_domain_addon_enabled)
+        self.assertEqual(mock_list.call_count, 2)
+        self.assertEqual(mock_list.call_args_list[1].kwargs.get('starting_after'), 'sub_page_1')

@@ -439,6 +439,72 @@ def _stripe_obj_get(obj, key, default=None):
         return default
 
 
+def _iter_customer_subscriptions(customer_id: str, *, status: str = 'all', page_limit: int = 100):
+    starting_after = None
+
+    while True:
+        params = {
+            'customer': customer_id,
+            'status': status,
+            'limit': page_limit,
+        }
+        if starting_after:
+            params['starting_after'] = starting_after
+
+        rows = stripe.Subscription.list(**params)
+        data = _stripe_obj_get(rows, 'data', []) or []
+        for row in data:
+            yield row
+
+        has_more = bool(_stripe_obj_get(rows, 'has_more', False))
+        if not has_more or not data:
+            break
+
+        last_id = (_stripe_obj_get(data[-1], 'id', '') or '').strip()
+        if not last_id:
+            break
+        starting_after = last_id
+
+
+def _subscription_matches_custom_domain_addon(row, addon_price_id: str) -> bool:
+    meta = _stripe_obj_get(row, 'metadata', {}) or {}
+    purchase_type = (meta.get('purchase_type') or '').strip().lower()
+    if purchase_type == 'custom_domain_addon':
+        return True
+
+    if not addon_price_id:
+        return False
+
+    try:
+        items_obj = _stripe_obj_get(row, 'items', {}) or {}
+        items = _stripe_obj_get(items_obj, 'data', []) or []
+        for item in items:
+            price = _stripe_obj_get(item, 'price', {}) or {}
+            pid = (_stripe_obj_get(price, 'id', '') or '').strip()
+            if pid and pid == addon_price_id:
+                return True
+    except Exception:
+        return False
+
+    return False
+
+
+def _find_custom_domain_addon_subscription(customer_id: str, addon_price_id: str):
+    candidate = None
+
+    for row in _iter_customer_subscriptions(customer_id, status='all', page_limit=100):
+        if not _subscription_matches_custom_domain_addon(row, addon_price_id):
+            continue
+
+        status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
+        if candidate is None:
+            candidate = row
+        if status in {'active', 'trialing'}:
+            return row
+
+    return candidate
+
+
 def _deny_in_app_billing(request):
     """CircleCal does not expose pricing/billing inside the native mobile app."""
 
@@ -681,29 +747,8 @@ def sync_custom_domain_addon_status(request, org_slug):
     addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
     enabled = False
     try:
-        rows = stripe.Subscription.list(customer=org.stripe_customer_id, status='all', limit=100)
-        data = _stripe_obj_get(rows, 'data', []) or []
-        for row in data:
-            meta = _stripe_obj_get(row, 'metadata', {}) or {}
-            purchase_type = (meta.get('purchase_type') or '').strip().lower()
-            status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
-            is_addon = purchase_type == 'custom_domain_addon'
-            if not is_addon and addon_price_id:
-                try:
-                    items_obj = _stripe_obj_get(row, 'items', {}) or {}
-                    items = _stripe_obj_get(items_obj, 'data', []) or []
-                    for item in items:
-                        price = _stripe_obj_get(item, 'price', {}) or {}
-                        pid = (_stripe_obj_get(price, 'id', '') or '').strip()
-                        if pid and pid == addon_price_id:
-                            is_addon = True
-                            break
-                except Exception:
-                    pass
-
-            if is_addon and status in {'active', 'trialing'}:
-                enabled = True
-                break
+        addon_sub = _find_custom_domain_addon_subscription(org.stripe_customer_id, addon_price_id)
+        enabled = (_stripe_obj_get(addon_sub, 'status', '') or '').strip().lower() in {'active', 'trialing'}
     except Exception:
         return JsonResponse({"error": "sync_failed"}, status=400)
 
@@ -742,29 +787,11 @@ def cancel_custom_domain_addon_subscription(request, org_slug):
 
     if org.stripe_customer_id:
         try:
-            rows = stripe.Subscription.list(customer=org.stripe_customer_id, status='all', limit=100)
-            data = _stripe_obj_get(rows, 'data', []) or []
-            for row in data:
-                meta = _stripe_obj_get(row, 'metadata', {}) or {}
-                purchase_type = (meta.get('purchase_type') or '').strip().lower()
-                status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
-
-                is_addon = purchase_type == 'custom_domain_addon'
-                if not is_addon and addon_price_id:
-                    try:
-                        items_obj = _stripe_obj_get(row, 'items', {}) or {}
-                        items = _stripe_obj_get(items_obj, 'data', []) or []
-                        for item in items:
-                            price = _stripe_obj_get(item, 'price', {}) or {}
-                            pid = (_stripe_obj_get(price, 'id', '') or '').strip()
-                            if pid and pid == addon_price_id:
-                                is_addon = True
-                                break
-                    except Exception:
-                        pass
-
-                if not is_addon:
+            for row in _iter_customer_subscriptions(org.stripe_customer_id, status='all', page_limit=100):
+                if not _subscription_matches_custom_domain_addon(row, addon_price_id):
                     continue
+
+                status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
 
                 # Cancel any non-fully-canceled add-on subscriptions.
                 if status in {'canceled', 'incomplete_expired'}:
@@ -2448,41 +2475,7 @@ def manage_billing(request, org_slug):
             addon_price_id = (os.getenv('STRIPE_PRICE_ID_CUSTOM_DOMAIN_ADDON') or '').strip()
 
             try:
-                rows = stripe.Subscription.list(customer=org.stripe_customer_id, status='all', limit=100)
-                data = _stripe_obj_get(rows, 'data', []) or []
-                # Prefer an active/trialing add-on subscription; otherwise fall back to the newest match.
-                candidate = None
-                for row in data:
-                    meta = _stripe_obj_get(row, 'metadata', {}) or {}
-                    purchase_type = (meta.get('purchase_type') or '').strip().lower()
-                    status = (_stripe_obj_get(row, 'status', '') or '').strip().lower()
-
-                    is_addon = purchase_type == 'custom_domain_addon'
-                    if not is_addon and addon_price_id:
-                        try:
-                            items_obj = _stripe_obj_get(row, 'items', {}) or {}
-                            items = _stripe_obj_get(items_obj, 'data', []) or []
-                            for item in items:
-                                price = _stripe_obj_get(item, 'price', {}) or {}
-                                pid = (_stripe_obj_get(price, 'id', '') or '').strip()
-                                if pid and pid == addon_price_id:
-                                    is_addon = True
-                                    break
-                        except Exception:
-                            pass
-
-                    if not is_addon:
-                        continue
-
-                    # Keep first match as fallback; prefer active/trialing.
-                    if candidate is None:
-                        candidate = row
-                    if status in {'active', 'trialing'}:
-                        addon_stripe_sub = row
-                        break
-
-                if addon_stripe_sub is None:
-                    addon_stripe_sub = candidate
+                addon_stripe_sub = _find_custom_domain_addon_subscription(org.stripe_customer_id, addon_price_id)
             except Exception:
                 addon_stripe_sub = None
 

@@ -81,3 +81,24 @@ class ProfileAvatarClearTests(TestCase):
         # If we're using filesystem-backed storage, ensure the file is gone.
         if old_fs_path is not None:
             self.assertFalse(os.path.exists(old_fs_path))
+
+    @override_settings(MAX_PROFILE_AVATAR_BYTES=32)
+    def test_api_avatar_upload_rejects_oversized_files(self):
+        user = User.objects.create_user(username="u_avatar_api", email="u_avatar_api@example.com", password="pass12345")
+        self.client.force_login(user)
+
+        oversized = SimpleUploadedFile("avatar.png", b"x" * 64, content_type="image/png")
+        resp = self.client.post(reverse("api_profile_avatar"), data={"avatar": oversized}, HTTP_HOST="127.0.0.1")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("avatar", resp.json())
+
+    def test_api_avatar_upload_rejects_non_images(self):
+        user = User.objects.create_user(username="u_avatar_bad", email="u_avatar_bad@example.com", password="pass12345")
+        self.client.force_login(user)
+
+        bad = SimpleUploadedFile("avatar.txt", b"not-an-image", content_type="text/plain")
+        resp = self.client.post(reverse("api_profile_avatar"), data={"avatar": bad}, HTTP_HOST="127.0.0.1")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("avatar", resp.json())

@@ -3,7 +3,8 @@ import uuid
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -95,3 +96,17 @@ class ApiCrossOrgSecurityTests(TestCase):
         profile_resp = self.client.get(f'/api/v1/profile/overview/?org={org.slug}')
         self.assertEqual(profile_resp.status_code, 200)
         self.assertEqual(profile_resp.json()['org_overview']['membership']['role'], 'owner')
+
+    def test_cross_org_lookup_by_numeric_id_is_rejected_before_org_fetch_leaks(self):
+        resp = self.client.get(f'/api/v1/billing/summary/?org={self.org_b.id}')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['detail'], 'You do not have access to this organization.')
+
+    @override_settings(REST_FRAMEWORK={'DEFAULT_THROTTLE_RATES': {'billing_read': '1/minute'}})
+    def test_billing_summary_is_throttled(self):
+        cache.clear()
+        resp1 = self.client.get(f'/api/v1/billing/summary/?org={self.org_a.slug}')
+        resp2 = self.client.get(f'/api/v1/billing/summary/?org={self.org_a.slug}')
+
+        self.assertEqual(resp1.status_code, 200)
+        self.assertEqual(resp2.status_code, 429)
